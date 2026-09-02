@@ -836,6 +836,8 @@ def api_knowledge_publish():
             subprocess.run(['git', 'remote', 'add', 'origin', remote_url],
                            capture_output=True, timeout=10)
 
+        subprocess.run(['git', 'checkout', '-B', 'main'], capture_output=True, timeout=10)
+
         subprocess.run(['git', 'add', 'knowledge/'], capture_output=True, timeout=10)
         r = subprocess.run(
             ['git', 'commit', '-m', 'chore: update knowledge via panel'],
