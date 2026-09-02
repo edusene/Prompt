@@ -436,18 +436,28 @@ async function deleteTemplate(id) {
 /* ── WhatsApp ─────────────────────────────────────────────────────────────── */
 async function loadWAStatus() {
     const data = await api('/api/instance/status');
+    if (!data) {
+        document.getElementById('wa-status').innerHTML = 'Status: <strong style="color:#ef4444">Erro ao conectar</strong>';
+        return;
+    }
+    const status = typeof data.status === 'string' ? data.status : 'desconhecido';
+    const colors = { open: '#22c55e', connecting: '#f59e0b', close: '#ef4444', qr: '#6366f1' };
     document.getElementById('wa-status').innerHTML = `
-        Status: <strong>${esc(data?.status || 'desconhecido')}</strong>
+        Status: <strong style="color:${colors[status] || '#999'}">${status}</strong>
     `;
 }
 
 async function loadQRCode() {
     const data = await api('/api/instance/qr');
     const container = document.getElementById('qr-container');
-    if (data?.qrcode) {
+    if (!data || data.error) {
+        container.innerHTML = `<p class="muted">${esc(data?.error || 'QR Code não disponível — verifique se a instância está conectada')}</p>`;
+        return;
+    }
+    if (data.qrcode) {
         container.innerHTML = `<img src="data:image/png;base64,${data.qrcode}" style="max-width:256px;border-radius:8px" alt="QR Code">`;
     } else {
-        container.innerHTML = '<p class="muted">QR Code não disponível</p>';
+        container.innerHTML = '<p class="muted">QR Code não disponível — instância pode já estar conectada</p>';
     }
 }
 

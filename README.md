@@ -74,7 +74,37 @@ curl -X PUT https://SEU-DOMINIO.uazapi.com/webhook \
 
 ---
 
-## 6. Painel CRM
+## 6. Deploy no Render
+
+### Variáveis de ambiente (Environment Variables)
+No painel do Render, adicione todas as variáveis do `.env`:
+
+| Variável | Valor |
+|---|---|
+| `UAZAPI_BASE_URL` | `https://free.uazapi.com` (ou seu domínio) |
+| `UAZAPI_INSTANCE_TOKEN` | Token da instância |
+| `WEBHOOK_URL` | `https://SEU-APP.onrender.com/webhook` |
+| `GEMINI_API_KEY` | Sua chave do Gemini |
+| `GEMINI_MODEL` | `gemini-2.5-flash` |
+| `SYSTEM_PROMPT` | Instrução base do agente |
+| `SYSTEM_PROMPT_DIR` | `knowledge` |
+| `PORT` | `5000` |
+| `ADMIN_USER` | `admin` |
+| `ADMIN_PASSWORD` | Senha do painel |
+| `SECRET_KEY` | Chave aleatória longa |
+
+### Build & Start
+- **Build Command:** `pip install -r requirements.txt`
+- **Start Command:** `python app.py`
+
+### Importante
+- O webhook é configurado **automaticamente** quando o app inicia (se `WEBHOOK_URL` estiver definido).
+- O banco SQLite é recriado a cada deploy (disco efémero). Para persistência, use PostgreSQL.
+- A pasta `knowledge/` precisa ser commitada no Git.
+
+---
+
+## 7. Painel CRM
 
 Acesse `http://localhost:5000/panel` e faça login com as credenciais do `.env`.
 

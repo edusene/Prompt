@@ -39,8 +39,9 @@ def _get(endpoint: str, params: dict | None = None) -> dict | None:
     try:
         r = requests.get(url, params=params, headers=_HEADERS, timeout=10)
         if r.ok:
-            return r.json()
-        print(f"[uazapi] GET {endpoint} erro {r.status_code}: {r.text[:120]}")
+            data = r.json()
+            return data
+        print(f"[uazapi] GET {endpoint} erro {r.status_code}: {r.text[:200]}")
     except Exception as e:
         print(f"[uazapi] GET {endpoint} exceção: {e}")
     return None
@@ -134,3 +135,18 @@ def get_contact_info(number: str) -> dict | None:
 def check_number(number: str) -> dict | None:
     """GET /chat/check-number?number=..."""
     return _get("/chat/check-number", params={"number": number})
+
+
+# ── Webhook ─────────────────────────────────────────────────────────────────
+
+
+def configure_webhook(webhook_url: str, events: list[str] | None = None) -> dict | None:
+    """PUT /webhook — configura a URL de webhook na UAZAPI."""
+    if events is None:
+        events = ["message"]
+    return _put("/webhook", {"webhookUrl": webhook_url, "events": events})
+
+
+def get_webhook() -> dict | None:
+    """GET /webhook — retorna o webhook configurado."""
+    return _get("/webhook")

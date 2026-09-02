@@ -149,6 +149,19 @@ buffer = MessageBuffer(wait_seconds=BUFFER_SECONDS, on_flush=handle_flush)
 
 database.init_db()
 
+# ── Auto-configurar webhook na UAZAPI ───────────────────────────────────────
+WEBHOOK_URL = os.getenv("WEBHOOK_URL", "")
+print(f"[config] UAZAPI: {os.getenv('UAZAPI_BASE_URL', '') or 'NÃO CONFIGURADO'}")
+print(f"[config] WEBHOOK: {WEBHOOK_URL or 'NÃO CONFIGURADO'}")
+
+if WEBHOOK_URL:
+    from uazapi import configure_webhook
+    result = configure_webhook(WEBHOOK_URL)
+    if result:
+        print(f"[webhook] configurado: {WEBHOOK_URL}")
+    else:
+        print(f"[webhook] falha ao configurar: {WEBHOOK_URL}")
+
 
 # ── Auth routes ───────────────────────────────────────────────────────────────
 
@@ -282,7 +295,10 @@ def api_dashboard():
 def api_instance_status():
     from uazapi import get_instance_status
     result = get_instance_status()
-    return jsonify(result or {"status": "unknown"})
+    if not result:
+        return jsonify({"status": "error", "detail": "não foi possível conectar à UAZAPI"})
+    status = result.get("status", "unknown") if isinstance(result, dict) else "unknown"
+    return jsonify({"status": status})
 
 
 @app.get("/api/instance/qr")
@@ -290,7 +306,9 @@ def api_instance_status():
 def api_instance_qr():
     from uazapi import get_qr_code
     result = get_qr_code()
-    return jsonify(result or {})
+    if not result:
+        return jsonify({"error": "não foi possível obter QR code"})
+    return jsonify(result)
 
 
 @app.post("/api/instance/disconnect")
