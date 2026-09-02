@@ -826,10 +826,15 @@ def api_knowledge_publish():
             return jsonify({"ok": False, "error": "GITHUB_TOKEN nao configurado no .env"}), 400
 
         remote_url = f"https://{token}@github.com/edusene/Prompt.git"
-        sr = subprocess.run(['git', 'remote', 'set-url', 'origin', remote_url],
-                           capture_output=True, text=True, timeout=10)
-        if sr.returncode != 0:
-            return jsonify({"ok": False, "error": f"Erro ao configurar remote: {sr.stderr[:200]}"}), 500
+
+        check = subprocess.run(['git', 'remote', 'get-url', 'origin'],
+                               capture_output=True, text=True, timeout=10)
+        if check.returncode == 0:
+            subprocess.run(['git', 'remote', 'set-url', 'origin', remote_url],
+                           capture_output=True, timeout=10)
+        else:
+            subprocess.run(['git', 'remote', 'add', 'origin', remote_url],
+                           capture_output=True, timeout=10)
 
         subprocess.run(['git', 'add', 'knowledge/'], capture_output=True, timeout=10)
         r = subprocess.run(
