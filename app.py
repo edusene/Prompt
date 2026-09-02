@@ -156,11 +156,11 @@ print(f"[config] WEBHOOK: {WEBHOOK_URL or 'NÃO CONFIGURADO'}")
 
 if WEBHOOK_URL:
     from uazapi import configure_webhook
-    result = configure_webhook(WEBHOOK_URL)
-    if result:
+    r = configure_webhook(WEBHOOK_URL)
+    if r["ok"]:
         print(f"[webhook] configurado: {WEBHOOK_URL}")
     else:
-        print(f"[webhook] falha ao configurar: {WEBHOOK_URL}")
+        print(f"[webhook] ERRO: {r['error']}")
 
 
 # ── Auth routes ───────────────────────────────────────────────────────────────
@@ -294,10 +294,11 @@ def api_dashboard():
 @login_required
 def api_instance_status():
     from uazapi import get_instance_status
-    result = get_instance_status()
-    if not result:
-        return jsonify({"status": "error", "detail": "não foi possível conectar à UAZAPI"})
-    status = result.get("status", "unknown") if isinstance(result, dict) else "unknown"
+    r = get_instance_status()
+    if not r["ok"]:
+        return jsonify({"status": "error", "error": r["error"]})
+    data = r["data"] or {}
+    status = data.get("status", "unknown") if isinstance(data, dict) else "unknown"
     return jsonify({"status": status})
 
 
@@ -305,25 +306,30 @@ def api_instance_status():
 @login_required
 def api_instance_qr():
     from uazapi import get_qr_code
-    result = get_qr_code()
-    if not result:
-        return jsonify({"error": "não foi possível obter QR code"})
-    return jsonify(result)
+    r = get_qr_code()
+    if not r["ok"]:
+        return jsonify({"error": r["error"]})
+    data = r["data"] or {}
+    return jsonify(data)
 
 
 @app.post("/api/instance/disconnect")
 @login_required
 def api_instance_disconnect():
     from uazapi import disconnect_instance
-    result = disconnect_instance()
-    return jsonify({"ok": True, "result": result})
+    r = disconnect_instance()
+    if not r["ok"]:
+        return jsonify({"ok": False, "error": r["error"]}), 400
+    return jsonify({"ok": True})
 
 
 @app.post("/api/instance/restart")
 @login_required
 def api_instance_restart():
     from uazapi import restart_instance
-    restart_instance()
+    r = restart_instance()
+    if not r["ok"]:
+        return jsonify({"ok": False, "error": r["error"]}), 400
     return jsonify({"ok": True})
 
 
