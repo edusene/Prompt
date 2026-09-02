@@ -87,12 +87,15 @@ def restart_instance() -> dict:
 
 
 def configure_webhook(webhook_url: str, events: list[str] | None = None) -> dict:
-    """Configura webhook — neste servidor (free.uazapi.com) usa POST."""
+    """Configura webhook — PUT /webhook (documentação oficial), com fallback POST."""
     if events is None:
         events = ["message"]
     body = {"webhookUrl": webhook_url, "events": events}
-    # free.uazapi.com aceita POST, não PUT
-    r = _request("POST", "/webhook", body)
+    # Documentação oficial: PUT /webhook
+    r = _request("PUT", "/webhook", body)
+    if not r["ok"]:
+        # Fallback para servidores que só aceitam POST
+        r = _request("POST", "/webhook", body)
     return r
 
 
@@ -100,12 +103,12 @@ def get_webhook() -> dict:
     return _request("GET", "/webhook")
 
 
-# ── Instância (endpoints corretos para free.uazapi.com) ──────────────────────
+# ── Instância (endpoints oficiais UAZAPI) ────────────────────────────────────
 
 
 def get_qr_code() -> dict:
-    """GET /instance/qr — retorna QR code no free.uazapi.com."""
-    return _request("GET", "/instance/qr")
+    """GET /instance/connect — retorna QR code (documentação oficial)."""
+    return _request("GET", "/instance/connect")
 
 
 def get_instance_status() -> dict:
@@ -114,10 +117,10 @@ def get_instance_status() -> dict:
 
 
 def disconnect_instance() -> dict:
-    """Desconecta instância."""
+    """Desconecta instância — DELETE /instance/logout (documentação oficial)."""
     return _request("DELETE", "/instance/logout")
 
 
 def restart_instance() -> dict:
-    """Reinicia instância."""
+    """Reinicia instância — POST /instance/restart (documentação oficial)."""
     return _request("POST", "/instance/restart", {})

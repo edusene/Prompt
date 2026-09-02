@@ -309,12 +309,13 @@ def api_instance_diagnose():
     from uazapi import _request
     results = {}
     tests = [
-        ("GET  /instance/status", "GET", "/instance/status", None),
-        ("GET  /instance/qr",     "GET", "/instance/qr",     None),
-        ("GET  /webhook",         "GET", "/webhook",         None),
-        ("POST /webhook",         "POST", "/webhook",         {"webhookUrl": "https://test.com/hook", "events": ["message"]}),
+        ("GET  /instance/status",  "GET",  "/instance/status",  None),
+        ("GET  /instance/connect", "GET",  "/instance/connect", None),
+        ("GET  /webhook",          "GET",  "/webhook",          None),
+        ("PUT  /webhook",          "PUT",  "/webhook",          {"webhookUrl": "https://test.com/hook", "events": ["message"]}),
+        ("POST /webhook",          "POST", "/webhook",          {"webhookUrl": "https://test.com/hook", "events": ["message"]}),
         ("DELETE /instance/logout", "DELETE", "/instance/logout", {}),
-        ("POST /instance/restart",  "POST", "/instance/restart",  {}),
+        ("POST /instance/restart",  "POST",  "/instance/restart",  {}),
     ]
     for label, method, endpoint, body in tests:
         r = _request(method, endpoint, body)
@@ -350,16 +351,16 @@ def api_instance_qr():
     if st == "open":
         return jsonify({"info": "WhatsApp já está conectado. Não é necessário escanear QR Code."})
 
-    # Tentar obter QR code — GET /instance/qr (free.uazapi.com)
+    # Tentar obter QR code — GET /instance/connect (documentação oficial)
     r = get_qr_code()
-    print(f"[qr] GET /instance/qr → ok={r['ok']} data={str(r.get('data', r.get('error', '')))[:500]}")
+    print(f"[qr] GET /instance/connect → ok={r['ok']} data={str(r.get('data', r.get('error', '')))[:500]}")
 
     if not r["ok"]:
         return jsonify({"error": r["error"]})
 
     qr_data = r["data"]
     if isinstance(qr_data, dict):
-        # free.uazapi.com retorna {qrcode: "data:image/png;base64,..."} ou {code: "..."}
+        # Documentação: {qrcode: "base64...", pairingCode: "XXXX-XXXX"}
         qr_value = qr_data.get("qrcode") or qr_data.get("code") or qr_data.get("qr")
         if qr_value:
             return jsonify({"qrcode": qr_value})
