@@ -305,17 +305,13 @@ def api_dashboard():
 @app.get("/api/instance/diagnose")
 @login_required
 def api_instance_diagnose():
-    """Testa endpoints da UAZAPI e retorna quais funcionam."""
     from uazapi import _request
     results = {}
     tests = [
         ("GET  /instance/status",  "GET",  "/instance/status",  None),
-        ("GET  /instance/connect", "GET",  "/instance/connect", None),
+        ("POST /instance/connect", "POST", "/instance/connect", {}),
         ("GET  /webhook",          "GET",  "/webhook",          None),
-        ("PUT  /webhook",          "PUT",  "/webhook",          {"webhookUrl": "https://test.com/hook", "events": ["message"]}),
-        ("POST /webhook",          "POST", "/webhook",          {"webhookUrl": "https://test.com/hook", "events": ["message"]}),
-        ("DELETE /instance/logout", "DELETE", "/instance/logout", {}),
-        ("POST /instance/restart",  "POST",  "/instance/restart",  {}),
+        ("POST /webhook",          "POST", "/webhook",          {"url": "https://test.com/hook", "events": ["message"], "enabled": True}),
     ]
     for label, method, endpoint, body in tests:
         r = _request(method, endpoint, body)
@@ -328,45 +324,44 @@ def api_instance_diagnose():
 def api_instance_status():
     from uazapi import get_instance_status
     r = get_instance_status()
-    print(f"[status] get_instance_status → ok={r['ok']} data={str(r.get('data', r.get('error', '')))[:300]}")
     if not r["ok"]:
         return jsonify({"status": "error", "error": r["error"]})
     data = r["data"] or {}
-    status = data.get("status", "unknown") if isinstance(data, dict) else "unknown"
+    inst = data.get("instance", data) if isinstance(data, dict) else {}
+    status = inst.get("status", "unknown")
     return jsonify({"status": status})
 
 
 @app.get("/api/instance/qr")
 @login_required
 def api_instance_qr():
-    from uazapi import get_qr_code, get_instance_status, _request
-    # Verificar status
+    from uazapi import get_qr_code, get_instance_status
+
     status_r = get_instance_status()
     st = ""
     if status_r["ok"]:
         data = status_r["data"] or {}
-        st = data.get("status", "") if isinstance(data, dict) else ""
-    print(f"[qr] status da instância: {st}")
+        inst = data.get("instance", data) if isinstance(data, dict) else {}
+        st = inst.get("status", "")
+    print(f"[qr] status: {st}")
 
     if st == "open":
-        return jsonify({"info": "WhatsApp já está conectado. Não é necessário escanear QR Code."})
+        return jsonify({"info": "WhatsApp ja esta conectado."})
 
-    # Tentar obter QR code — GET /instance/connect (documentação oficial)
     r = get_qr_code()
-    print(f"[qr] GET /instance/connect → ok={r['ok']} data={str(r.get('data', r.get('error', '')))[:500]}")
+    print(f"[qr] POST /instance/connect -> ok={r['ok']} data={str(r.get('data', r.get('error', '')))[:500]}")
 
     if not r["ok"]:
         return jsonify({"error": r["error"]})
 
-    qr_data = r["data"]
+    qr_data = r["data"] or {}
     if isinstance(qr_data, dict):
-        # Documentação: {qrcode: "base64...", pairingCode: "XXXX-XXXX"}
-        qr_value = qr_data.get("qrcode") or qr_data.get("code") or qr_data.get("qr")
+        inst = qr_data.get("instance", qr_data)
+        qr_value = inst.get("qrcode") or qr_data.get("qrcode") or inst.get("paircode") or ""
         if qr_value:
-            return jsonify({"qrcode": qr_value})
-        # A resposta pode ter outro formato
-        return jsonify({"raw": qr_data, "error": "Resposta sem campo 'qrcode'/'code'. Verifique os logs no Render."})
-    return jsonify({"raw": str(qr_data), "error": "Formato de resposta inesperado. Verifique os logs no Render."})
+            return jsonify({"qrcode": qr_value, "pairingCode": inst.get("paircode", "")})
+        return jsonify({"raw": qr_data, "error": "Resposta sem campo 'qrcode'."})
+    return jsonify({"raw": str(qr_data), "error": "Formato de resposta inesperado."})
 
 
 @app.post("/api/instance/disconnect")

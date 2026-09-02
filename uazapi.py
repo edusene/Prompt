@@ -1,6 +1,6 @@
 """
-uazapi.py — Cliente UAZAPI.
-Referência completa dos endpoints: LLMs-uazapi.txt.
+uazapi.py — Cliente UAZAPI (free.uazapi.com).
+Endpoints testados e confirmados: POST /instance/connect, POST /webhook, GET /instance/status.
 """
 
 import os
@@ -11,11 +11,7 @@ _TOKEN = os.getenv("UAZAPI_INSTANCE_TOKEN", "")
 _HEADERS = {"token": _TOKEN, "Content-Type": "application/json"}
 
 
-# ── HTTP helper ──────────────────────────────────────────────────────────────
-
-
 def _request(method: str, endpoint: str, body: dict | None = None, params: dict | None = None) -> dict:
-    """Retorna sempre {ok, status, data, error}."""
     url = f"{_BASE_URL}{endpoint}"
     try:
         r = requests.request(method, url, json=body, params=params, headers=_HEADERS, timeout=15)
@@ -24,19 +20,16 @@ def _request(method: str, endpoint: str, body: dict | None = None, params: dict 
             data = r.json()
         except Exception:
             data = r.text
-        print(f"[uazapi] {method} {endpoint} → {r.status_code} | {str(data)[:300]}")
+        print(f"[uazapi] {method} {endpoint} -> {r.status_code} | {str(data)[:300]}")
         if r.ok:
             return {"ok": True, "status": r.status_code, "data": data}
         return {"ok": False, "status": r.status_code, "error": f"HTTP {r.status_code}: {str(data)[:200]}"}
     except requests.exceptions.ConnectionError:
-        return {"ok": False, "status": 0, "error": f"Não foi possível conectar em {url}"}
+        return {"ok": False, "status": 0, "error": f"Connection error: {url}"}
     except requests.exceptions.Timeout:
-        return {"ok": False, "status": 0, "error": f"Timeout ao conectar em {url}"}
+        return {"ok": False, "status": 0, "error": f"Timeout: {url}"}
     except Exception as e:
         return {"ok": False, "status": 0, "error": str(e)}
-
-
-# ── Mensagens ────────────────────────────────────────────────────────────────
 
 
 def send_text(number: str, text: str) -> dict:
@@ -51,76 +44,41 @@ def mark_read(number: str, message_id: str) -> dict:
     return _request("PUT", "/send/read", {"number": number, "messageId": message_id})
 
 
-# ── Instância ────────────────────────────────────────────────────────────────
-
-
 def get_qr_code() -> dict:
-    """POST /instance/connect — retorna QR code."""
+    """POST /instance/connect — retorna QR code base64."""
     return _request("POST", "/instance/connect", {})
 
 
 def get_instance_status() -> dict:
-    """GET /instance/status — retorna status da conexão."""
+    """GET /instance/status — retorna {instance: {status, qrcode, ...}}."""
     return _request("GET", "/instance/status")
 
 
 def disconnect_instance() -> dict:
-    """Tenta desconectar — endpoints variam por servidor."""
-    r = _request("DELETE", "/instance/logout")
+    """Desconecta instância (free tier: PUT /instance/logout)."""
+    r = _request("PUT", "/instance/logout", {})
     if not r["ok"]:
         r = _request("POST", "/instance/logout", {})
     if not r["ok"]:
-        r = _request("POST", "/instance/disconnect", {})
+        r = _request("DELETE", "/instance/logout")
     return r
 
 
 def restart_instance() -> dict:
-    """Tenta reiniciar — endpoints variam por servidor."""
-    for method, path in [("POST", "/instance/restart"), ("PUT", "/instance/restart"), ("GET", "/instance/restart"), ("POST", "/instance/reconnect"), ("PUT", "/instance/reconnect")]:
-        r = _request(method, path, {} if method != "GET" else None)
-        if r["ok"]:
-            return r
-    return {"ok": False, "status": 0, "error": "Endpoint de reinício não encontrado neste servidor"}
-
-
-# ── Webhook ──────────────────────────────────────────────────────────────────
+    """Reinicia instância (free tier: PUT /instance/restart)."""
+    r = _request("PUT", "/instance/restart", {})
+    if not r["ok"]:
+        r = _request("POST", "/instance/restart", {})
+    return r
 
 
 def configure_webhook(webhook_url: str, events: list[str] | None = None) -> dict:
-    """Configura webhook — PUT /webhook (documentação oficial), com fallback POST."""
+    """Configura webhook — POST /webhook com campo 'url' (free.uazapi.com)."""
     if events is None:
         events = ["message"]
-    body = {"webhookUrl": webhook_url, "events": events}
-    # Documentação oficial: PUT /webhook
-    r = _request("PUT", "/webhook", body)
-    if not r["ok"]:
-        # Fallback para servidores que só aceitam POST
-        r = _request("POST", "/webhook", body)
-    return r
+    body = {"url": webhook_url, "events": events, "enabled": True}
+    return _request("POST", "/webhook", body)
 
 
 def get_webhook() -> dict:
     return _request("GET", "/webhook")
-
-
-# ── Instância (endpoints oficiais UAZAPI) ────────────────────────────────────
-
-
-def get_qr_code() -> dict:
-    """GET /instance/connect — retorna QR code (documentação oficial)."""
-    return _request("GET", "/instance/connect")
-
-
-def get_instance_status() -> dict:
-    """GET /instance/status — retorna status da conexão."""
-    return _request("GET", "/instance/status")
-
-
-def disconnect_instance() -> dict:
-    """Desconecta instância — DELETE /instance/logout (documentação oficial)."""
-    return _request("DELETE", "/instance/logout")
-
-
-def restart_instance() -> dict:
-    """Reinicia instância — POST /instance/restart (documentação oficial)."""
-    return _request("POST", "/instance/restart", {})
