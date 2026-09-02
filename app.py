@@ -325,7 +325,10 @@ def api_instance_status():
     from uazapi import get_instance_status
     r = get_instance_status()
     if not r["ok"]:
-        return jsonify({"status": "error", "error": r["error"]})
+        err = r["error"]
+        if "401" in err:
+            err = "Token invalido. Verifique as configuracoes."
+        return jsonify({"status": "error", "error": err})
     data = r["data"] or {}
     inst = data.get("instance", data) if isinstance(data, dict) else {}
     status = inst.get("status", "unknown")
@@ -352,7 +355,10 @@ def api_instance_qr():
     print(f"[qr] POST /instance/connect -> ok={r['ok']} data={str(r.get('data', r.get('error', '')))[:500]}")
 
     if not r["ok"]:
-        return jsonify({"error": r["error"]})
+        err = r["error"]
+        if "401" in err:
+            err = "Token invalido. Verifique as configuracoes."
+        return jsonify({"error": err})
 
     qr_data = r["data"] or {}
     if isinstance(qr_data, dict):
@@ -370,7 +376,10 @@ def api_instance_disconnect():
     from uazapi import disconnect_instance
     r = disconnect_instance()
     if not r["ok"]:
-        return jsonify({"ok": False, "error": r["error"]}), 400
+        err = r["error"]
+        if "401" in err:
+            err = "Token invalido. Verifique as configuracoes."
+        return jsonify({"ok": False, "error": err}), 400
     return jsonify({"ok": True})
 
 
@@ -380,7 +389,10 @@ def api_instance_restart():
     from uazapi import restart_instance
     r = restart_instance()
     if not r["ok"]:
-        return jsonify({"ok": False, "error": r["error"]}), 400
+        err = r["error"]
+        if "401" in err:
+            err = "Token invalido. Verifique as configuracoes."
+        return jsonify({"ok": False, "error": err}), 400
     return jsonify({"ok": True})
 
 

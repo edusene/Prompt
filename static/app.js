@@ -15,7 +15,7 @@ function toast(message, type = 'info') {
         error: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#ef4444" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>',
         info: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#6366f1" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>',
     };
-    el.innerHTML = `${icons[type] || icons.info}<span>${message}</span>`;
+    el.innerHTML = `${icons[type] || icons.info}<span>${message}</span><button class="toast-close" onclick="this.parentElement.remove()">&times;</button>`;
     container.appendChild(el);
     setTimeout(() => { el.classList.add('toast-exit'); }, 3000);
     setTimeout(() => { el.remove(); }, 3400);
@@ -476,7 +476,7 @@ async function loadWAStatus() {
         return;
     }
     if (data.error) {
-        document.getElementById('wa-status').innerHTML = `<span style="color:#ef4444">${esc(data.error)}</span>`;
+        document.getElementById('wa-status').innerHTML = `<span style="color:#ef4444">${esc(friendlyError(data.error))}</span>`;
         return;
     }
     const status = typeof data.status === 'string' ? data.status : 'desconhecido';
@@ -496,17 +496,33 @@ async function loadQRCode() {
         return;
     }
     if (data.info) {
-        container.innerHTML = `<p style="color:#22c55e;font-weight:600">${esc(data.info)}</p>`;
+        container.innerHTML = `
+            <div style="display:flex;justify-content:flex-end;margin-bottom:8px">
+                <button class="btn-sm btn-secondary" onclick="closeQR()" style="font-size:12px;padding:4px 10px">&times; Fechar</button>
+            </div>
+            <p style="color:#22c55e;font-weight:600">${esc(data.info)}</p>`;
         return;
     }
     if (data.error) {
-        container.innerHTML = `<p style="color:#ef4444">${esc(data.error)}</p>`;
+        container.innerHTML = `
+            <div style="display:flex;justify-content:flex-end;margin-bottom:8px">
+                <button class="btn-sm btn-secondary" onclick="closeQR()" style="font-size:12px;padding:4px 10px">&times; Fechar</button>
+            </div>
+            <p style="color:#ef4444">${esc(friendlyError(data.error))}</p>`;
         return;
     }
     if (data.qrcode) {
-        container.innerHTML = `<img src="${data.qrcode}" style="max-width:256px;border-radius:8px" alt="QR Code">`;
+        container.innerHTML = `
+            <div style="display:flex;justify-content:flex-end;margin-bottom:8px">
+                <button class="btn-sm btn-secondary" onclick="closeQR()" style="font-size:12px;padding:4px 10px">&times; Fechar</button>
+            </div>
+            <img src="${data.qrcode}" style="max-width:256px;border-radius:8px" alt="QR Code">`;
     } else {
-        container.innerHTML = '<p class="muted">QR Code não disponível</p>';
+        container.innerHTML = `
+            <div style="display:flex;justify-content:flex-end;margin-bottom:8px">
+                <button class="btn-sm btn-secondary" onclick="closeQR()" style="font-size:12px;padding:4px 10px">&times; Fechar</button>
+            </div>
+            <p class="muted">QR Code nao disponivel</p>`;
     }
 }
 
@@ -517,7 +533,7 @@ async function restartWA() {
     const data = await api('/api/instance/restart', { method: 'POST' });
     setBtnLoading(btn, false);
     if (data?.error) {
-        toast(`Erro: ${data.error}`, 'error');
+        toast(friendlyError(data.error), 'error');
     } else {
         toast('Instancia reiniciada', 'success');
     }
@@ -531,7 +547,7 @@ async function disconnectWA() {
     const data = await api('/api/instance/disconnect', { method: 'POST' });
     setBtnLoading(btn, false);
     if (data?.error) {
-        toast(`Erro: ${data.error}`, 'error');
+        toast(friendlyError(data.error), 'error');
     } else {
         toast('WhatsApp desconectado', 'info');
     }
@@ -549,12 +565,13 @@ async function runDiagnose() {
         container.innerHTML = '<p style="color:#ef4444">Erro ao conectar com o servidor</p>';
         return;
     }
-    let html = '<table style="width:100%;font-size:13px;border-collapse:collapse">';
+    let html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><strong style="font-size:13px">Resultados do Diagnostico</strong><button class="btn-sm btn-secondary" onclick="closeDiagnose()" style="font-size:12px;padding:4px 10px">&times; Fechar</button></div>';
+    html += '<table style="width:100%;font-size:13px;border-collapse:collapse">';
     html += '<thead><tr style="border-bottom:1px solid #333"><th style="text-align:left;padding:6px">Endpoint</th><th style="text-align:center;padding:6px">Status</th><th style="text-align:left;padding:6px">Detalhe</th></tr></thead><tbody>';
     for (const [endpoint, result] of Object.entries(data)) {
         const icon = result.ok ? '<span style="color:#22c55e">OK</span>' : `<span style="color:#ef4444">ERRO ${result.status}</span>`;
-        const detail = result.ok ? '' : esc(result.error);
-        html += `<tr style="border-bottom:1px solid #222"><td style="padding:6px;font-family:monospace">${esc(endpoint)}</td><td style="text-align:center;padding:6px">${icon}</td><td style="padding:6px;color:#999">${detail}</td></tr>`;
+        const detail = result.ok ? '' : friendlyError(result.error);
+        html += `<tr style="border-bottom:1px solid #222"><td style="padding:6px;font-family:monospace">${esc(endpoint)}</td><td style="text-align:center;padding:6px">${icon}</td><td style="padding:6px;color:#999">${esc(detail)}</td></tr>`;
     }
     html += '</tbody></table>';
     container.innerHTML = html;
@@ -642,6 +659,23 @@ function skeletonMsgs() {
     return '<div class="skeleton-msg in"><div class="skeleton" style="height:36px;border-radius:12px"></div></div>'
          + '<div class="skeleton-msg out"><div class="skeleton" style="height:36px;border-radius:12px"></div></div>'
          + '<div class="skeleton-msg in"><div class="skeleton" style="height:28px;border-radius:12px"></div></div>';
+}
+
+function friendlyError(err) {
+    if (!err) return 'Erro desconhecido';
+    if (err.includes('401')) return 'Token invalido. Verifique as configuracoes.';
+    if (err.includes('405')) return 'Operacao nao suportada neste plano.';
+    if (err.includes('404')) return 'Recurso nao encontrado.';
+    if (err.includes('Connection error') || err.includes('Timeout')) return 'Servidor indisponivel.';
+    return err;
+}
+
+function closeDiagnose() {
+    document.getElementById('diagnose-container').innerHTML = '';
+}
+
+function closeQR() {
+    document.getElementById('qr-container').innerHTML = '';
 }
 
 /* ── Init ─────────────────────────────────────────────────────────────────── */
