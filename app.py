@@ -846,7 +846,8 @@ def api_knowledge_publish():
         if 'nothing to commit' in (r.stdout + r.stderr):
             return jsonify({"ok": True, "message": "Nada para publicar"})
 
-        push = subprocess.run(['git', 'push'], capture_output=True, text=True, timeout=30)
+        push = subprocess.run(['git', 'push', '--set-upstream', 'origin', 'main'],
+                              capture_output=True, text=True, timeout=30)
         if push.returncode != 0:
             err = push.stderr.strip() or push.stdout.strip()
             print(f"[knowledge] push ERRO: {err}")
