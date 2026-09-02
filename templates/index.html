@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Painel WhatsApp</title>
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div id="app">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <div class="logo-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.362 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>
+                            <path d="M14.5 2c.5 2.5 2 4 4.5 4.5"/>
+                        </svg>
+                    </div>
+                    <h2>WA Panel</h2>
+                </div>
+            </div>
+            <nav class="sidebar-nav">
+                <a href="#" class="nav-item active" data-view="dashboard">
+                    <span class="icon"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></span>
+                    <span>Dashboard</span>
+                </a>
+                <a href="#" class="nav-item" data-view="conversations">
+                    <span class="icon"><svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span>
+                    <span>Atendimento</span>
+                    <span class="badge" id="unread-badge" style="display:none">0</span>
+                </a>
+                <a href="#" class="nav-item" data-view="contacts">
+                    <span class="icon"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
+                    <span>Contatos</span>
+                </a>
+                <a href="#" class="nav-item" data-view="tags">
+                    <span class="icon"><svg viewBox="0 0 24 24"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg></span>
+                    <span>Tags</span>
+                </a>
+                <a href="#" class="nav-item" data-view="templates">
+                    <span class="icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg></span>
+                    <span>Templates</span>
+                </a>
+                <a href="#" class="nav-item" data-view="whatsapp">
+                    <span class="icon"><svg viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg></span>
+                    <span>WhatsApp</span>
+                </a>
+            </nav>
+            <div class="sidebar-footer">
+                <a href="/logout" class="nav-item">
+                    <span class="icon"><svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></span>
+                    <span>Sair</span>
+                </a>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <!-- Dashboard -->
+            <div id="view-dashboard" class="view active">
+                <h1>Dashboard</h1>
+                <div class="stats-grid" id="stats-grid"></div>
+            </div>
+
+            <!-- Conversations -->
+            <div id="view-conversations" class="view">
+                <div class="conv-layout">
+                    <div class="conv-list-panel">
+                        <div class="panel-header">
+                            <h2>Conversas</h2>
+                            <select id="conv-filter" class="select-sm">
+                                <option value="">Todas</option>
+                                <option value="new">Novas</option>
+                                <option value="open">Abertas</option>
+                                <option value="waiting">Aguardando</option>
+                                <option value="resolved">Resolvidas</option>
+                                <option value="closed">Fechadas</option>
+                            </select>
+                        </div>
+                        <div id="conv-list" class="conv-list"></div>
+                    </div>
+                    <div class="conv-chat-panel">
+                        <div id="chat-header" class="chat-header">
+                            <span>Selecione uma conversa</span>
+                        </div>
+                        <div id="chat-messages" class="chat-messages"></div>
+                        <div id="chat-input-area" class="chat-input-area" style="display:none">
+                            <textarea id="chat-input" placeholder="Digite sua mensagem..." rows="2"></textarea>
+                            <button id="chat-send" class="btn-primary" data-tooltip="Enviar mensagem (Enter)">
+                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="conv-info-panel">
+                        <div id="info-panel">
+                            <p class="muted">Selecione uma conversa para ver detalhes</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Contacts -->
+            <div id="view-contacts" class="view">
+                <div class="panel-header" style="padding:0;border:none;margin-bottom:20px">
+                    <h1 style="margin-bottom:0">Contatos</h1>
+                    <button class="btn-primary" onclick="showContactForm()">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" style="margin-right:4px;vertical-align:-2px"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                        Novo Contato
+                    </button>
+                </div>
+                <div id="contacts-list" class="table-container"></div>
+            </div>
+
+            <!-- Tags -->
+            <div id="view-tags" class="view">
+                <div class="panel-header" style="padding:0;border:none;margin-bottom:20px">
+                    <h1 style="margin-bottom:0">Tags</h1>
+                    <button class="btn-primary" onclick="showTagForm()">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" style="margin-right:4px;vertical-align:-2px"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                        Nova Tag
+                    </button>
+                </div>
+                <div id="tags-list" class="table-container"></div>
+            </div>
+
+            <!-- Templates -->
+            <div id="view-templates" class="view">
+                <div class="panel-header" style="padding:0;border:none;margin-bottom:20px">
+                    <h1 style="margin-bottom:0">Templates</h1>
+                    <button class="btn-primary" onclick="showTemplateForm()">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" style="margin-right:4px;vertical-align:-2px"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                        Novo Template
+                    </button>
+                </div>
+                <div id="templates-list" class="table-container"></div>
+            </div>
+
+            <!-- WhatsApp Connection -->
+            <div id="view-whatsapp" class="view">
+                <h1>WhatsApp</h1>
+                <div class="card">
+                    <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px">
+                        <div class="stat-icon">
+                            <svg viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+                        </div>
+                        <div>
+                            <h3 style="margin-bottom:2px">Status da Conexão</h3>
+                            <div id="wa-status" class="muted">Carregando...</div>
+                        </div>
+                    </div>
+                    <div class="btn-group">
+                        <button class="btn-secondary" onclick="loadQRCode()">
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px;vertical-align:-2px"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="3" height="3"/><line x1="21" y1="14" x2="21" y2="14.01"/><line x1="14" y1="21" x2="14" y2="21.01"/><line x1="21" y1="21" x2="21" y2="21.01"/></svg>
+                            QR Code
+                        </button>
+                        <button class="btn-secondary" onclick="restartWA()">
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px;vertical-align:-2px"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                            Reiniciar
+                        </button>
+                        <button class="btn-danger" onclick="disconnectWA()">
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px;vertical-align:-2px"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                            Desconectar
+                        </button>
+                    </div>
+                    <div id="qr-container" style="margin-top:20px;text-align:center"></div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <!-- Modals -->
+    <div id="modal-overlay" class="modal-overlay" style="display:none" onclick="closeModal()">
+        <div class="modal" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h3 id="modal-title"></h3>
+                <button class="modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div id="modal-body" class="modal-body"></div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
