@@ -290,6 +290,29 @@ def api_dashboard():
 
 # ── Instance ──────────────────────────────────────────────────────────────────
 
+@app.get("/api/instance/diagnose")
+@login_required
+def api_instance_diagnose():
+    """Testa todos os endpoints da UAZAPI e retorna quais funcionam."""
+    from uazapi import _request
+    results = {}
+    tests = [
+        ("GET  /instance/status",    "GET",  "/instance/status",    None),
+        ("GET  /instance/connect",   "GET",  "/instance/connect",   None),
+        ("POST /instance/connect",   "POST", "/instance/connect",   {}),
+        ("POST /instance/restart",   "POST", "/instance/restart",   {}),
+        ("POST /instance/logout",    "POST", "/instance/logout",    {}),
+        ("DELETE /instance/logout",  "DELETE", "/instance/logout",  None),
+        ("GET  /instance/profile",   "GET",  "/instance/profile",   None),
+        ("PUT  /webhook",            "PUT",  "/webhook",            {"webhookUrl": "https://test.com/hook", "events": ["message"]}),
+        ("GET  /webhook",            "GET",  "/webhook",            None),
+    ]
+    for label, method, endpoint, body in tests:
+        r = _request(method, endpoint, body)
+        results[label] = {"ok": r["ok"], "status": r["status"], "error": r.get("error", "")}
+    return jsonify(results)
+
+
 @app.get("/api/instance/status")
 @login_required
 def api_instance_status():

@@ -492,6 +492,25 @@ async function disconnectWA() {
     loadWAStatus();
 }
 
+async function runDiagnose() {
+    const container = document.getElementById('diagnose-container');
+    container.innerHTML = '<p class="muted">Testando endpoints da UAZAPI...</p>';
+    const data = await api('/api/instance/diagnose');
+    if (!data) {
+        container.innerHTML = '<p style="color:#ef4444">Erro ao conectar com o servidor</p>';
+        return;
+    }
+    let html = '<table style="width:100%;font-size:13px;border-collapse:collapse">';
+    html += '<thead><tr style="border-bottom:1px solid #333"><th style="text-align:left;padding:6px">Endpoint</th><th style="text-align:center;padding:6px">Status</th><th style="text-align:left;padding:6px">Detalhe</th></tr></thead><tbody>';
+    for (const [endpoint, result] of Object.entries(data)) {
+        const icon = result.ok ? '<span style="color:#22c55e">OK</span>' : `<span style="color:#ef4444">ERRO ${result.status}</span>`;
+        const detail = result.ok ? '' : esc(result.error);
+        html += `<tr style="border-bottom:1px solid #222"><td style="padding:6px;font-family:monospace">${esc(endpoint)}</td><td style="text-align:center;padding:6px">${icon}</td><td style="padding:6px;color:#999">${detail}</td></tr>`;
+    }
+    html += '</tbody></table>';
+    container.innerHTML = html;
+}
+
 /* ── Modal ────────────────────────────────────────────────────────────────── */
 function closeModal() {
     document.getElementById('modal-overlay').style.display = 'none';
