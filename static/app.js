@@ -60,6 +60,10 @@ function loadView(view) {
         case 'contacts': loadContacts(); break;
         case 'tags': loadTags(); break;
         case 'templates': loadTemplates(); break;
+        case 'knowledge':
+            loadKnowledge();
+            updateKnowledgeBadge();
+            break;
         case 'whatsapp':
             loadWAStatus();
             pollTimers.push(setInterval(loadWAStatus, 5000));
@@ -467,6 +471,114 @@ async function deleteTemplate(id) {
     loadTemplates();
 }
 
+/* ── Knowledge ────────────────────────────────────────────────────────────── */
+let currentKnowledgeFile = null;
+
+async function loadKnowledge() {
+    document.getElementById('knowledge-list').innerHTML = skeletonRows(4);
+    const files = await api('/api/knowledge');
+    if (!files) return;
+    const list = document.getElementById('knowledge-list');
+    if (files.length === 0) {
+        list.innerHTML = '<div class="empty-state">Nenhum arquivo</div>';
+        return;
+    }
+    list.innerHTML = files.map(f => `
+        <div class="knowledge-file ${f.name === currentKnowledgeFile ? 'active' : ''}" onclick="selectKnowledgeFile('${esc(f.name)}')">
+            <div class="knowledge-file-name">${esc(f.name)}</div>
+            <div class="knowledge-file-size">${f.size} bytes</div>
+        </div>
+    `).join('');
+}
+
+async function selectKnowledgeFile(filename) {
+    currentKnowledgeFile = filename;
+    document.querySelectorAll('.knowledge-file').forEach(el => el.classList.remove('active'));
+    event.currentTarget?.classList.add('active');
+
+    document.getElementById('knowledge-editor-header').innerHTML = `<span>${esc(filename)}</span>`;
+    document.getElementById('knowledge-editor').value = 'Carregando...';
+    document.getElementById('knowledge-actions').style.display = 'flex';
+
+    const data = await api(`/api/knowledge/${encodeURIComponent(filename)}`);
+    if (!data || data.error) {
+        document.getElementById('knowledge-editor').value = '';
+        toast(data?.error || 'Erro ao carregar', 'error');
+        return;
+    }
+    document.getElementById('knowledge-editor').value = data.content;
+}
+
+async function saveKnowledge() {
+    if (!currentKnowledgeFile) return;
+    const content = document.getElementById('knowledge-editor').value;
+    const data = await api(`/api/knowledge/${encodeURIComponent(currentKnowledgeFile)}`, {
+        method: 'PUT',
+        body: JSON.stringify({ content })
+    });
+    if (data?.error) {
+        toast(friendlyError(data.error), 'error');
+    } else {
+        toast('Knowledge salvo', 'success');
+        updateKnowledgeBadge();
+    }
+}
+
+async function publishKnowledge() {
+    const btn = event.currentTarget;
+    setBtnLoading(btn, true, 'Publicando...');
+    const data = await api('/api/knowledge/publish', { method: 'POST' });
+    setBtnLoading(btn, false);
+    if (data?.error) {
+        toast(friendlyError(data.error), 'error');
+    } else {
+        toast(data?.message || 'Publicado no GitHub', 'success');
+        updateKnowledgeBadge();
+    }
+}
+
+function showKnowledgeForm() {
+    document.getElementById('modal-title').textContent = 'Novo Arquivo Knowledge';
+    document.getElementById('modal-body').innerHTML = `
+        <form onsubmit="createKnowledge(event)">
+            <div class="form-group"><label>Nome do arquivo</label><input name="filename" placeholder="ex: 04-horarios.md" required></div>
+            <div class="form-group"><label>Conteudo</label><textarea name="content" rows="10" required></textarea></div>
+            <button type="submit" class="btn-primary">Criar</button>
+        </form>`;
+    document.getElementById('modal-overlay').style.display = 'flex';
+}
+
+async function createKnowledge(e) {
+    e.preventDefault();
+    const form = e.target;
+    const btn = form.querySelector('button[type="submit"]');
+    const data = Object.fromEntries(new FormData(form));
+    setBtnLoading(btn, true, 'Criando...');
+    const res = await api('/api/knowledge', { method: 'POST', body: JSON.stringify(data) });
+    setBtnLoading(btn, false);
+    if (res?.error) {
+        toast(friendlyError(res.error), 'error');
+    } else {
+        toast('Arquivo criado', 'success');
+        closeModal();
+        currentKnowledgeFile = data.filename;
+        loadKnowledge();
+        selectKnowledgeFile(data.filename);
+    }
+}
+
+async function updateKnowledgeBadge() {
+    const status = await api('/api/knowledge/status');
+    if (!status) return;
+    const badge = document.getElementById('knowledge-badge');
+    if (status.dirty) {
+        badge.textContent = status.count;
+        badge.style.display = 'inline';
+    } else {
+        badge.style.display = 'none';
+    }
+}
+
 /* ── WhatsApp ─────────────────────────────────────────────────────────────── */
 async function loadWAStatus() {
     document.getElementById('wa-status').innerHTML = spinHTML('Verificando...');
@@ -682,4 +794,6 @@ function closeQR() {
 loadDashboard();
 connectSSE();
 updateUnreadBadge();
+updateKnowledgeBadge();
 setInterval(updateUnreadBadge, 30000);
+setInterval(updateKnowledgeBadge, 30000);

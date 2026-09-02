@@ -45,6 +45,11 @@
                     <span class="icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg></span>
                     <span>Templates</span>
                 </a>
+                <a href="#" class="nav-item" data-view="knowledge">
+                    <span class="icon"><svg viewBox="0 0 24 24"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></span>
+                    <span>Knowledge</span>
+                    <span class="badge" id="knowledge-badge" style="display:none">0</span>
+                </a>
                 <a href="#" class="nav-item" data-view="whatsapp">
                     <span class="icon"><svg viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg></span>
                     <span>WhatsApp</span>
@@ -136,6 +141,32 @@
                     </button>
                 </div>
                 <div id="templates-list" class="table-container"></div>
+            </div>
+
+            <!-- Knowledge -->
+            <div id="view-knowledge" class="view">
+                <div class="knowledge-layout">
+                    <div class="knowledge-list-panel">
+                        <div class="panel-header">
+                            <h2>Knowledge</h2>
+                            <button class="btn-primary" onclick="showKnowledgeForm()">
+                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" style="margin-right:4px;vertical-align:-2px"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                Novo
+                            </button>
+                        </div>
+                        <div id="knowledge-list"></div>
+                    </div>
+                    <div class="knowledge-editor-panel">
+                        <div id="knowledge-editor-header" class="chat-header">
+                            <span>Selecione um arquivo</span>
+                        </div>
+                        <textarea id="knowledge-editor" class="knowledge-editor" placeholder="Selecione um arquivo para editar..."></textarea>
+                        <div class="knowledge-actions" id="knowledge-actions" style="display:none">
+                            <button class="btn-primary" onclick="saveKnowledge()">Salvar</button>
+                            <button class="btn-secondary" onclick="publishKnowledge()">Publicar no Git</button>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- WhatsApp Connection -->

@@ -6,6 +6,7 @@ app.py — Flask webhook + pipeline de flush do agente WhatsApp + Gemini.
 import os
 import json
 import time
+import subprocess
 
 from dotenv import load_dotenv
 
@@ -60,6 +61,47 @@ FULL_SYSTEM_PROMPT = f"{_BASE_PROMPT}\n\n---\n\n{_KNOWLEDGE}" if _KNOWLEDGE else
 
 if _KNOWLEDGE:
     print(f"[knowledge] {len(_KNOWLEDGE)} chars carregados de {SYSTEM_PROMPT_DIR}/")
+
+
+def _knowledge_dir() -> str:
+    return os.path.join(os.path.dirname(__file__), SYSTEM_PROMPT_DIR)
+
+
+def _list_knowledge_files() -> list[dict]:
+    path = _knowledge_dir()
+    if not os.path.isdir(path):
+        return []
+    files = sorted([f for f in os.listdir(path)
+                    if f.endswith(('.md', '.txt')) and f != 'README.md'])
+    result = []
+    for f in files:
+        fp = os.path.join(path, f)
+        result.append({"name": f, "size": os.path.getsize(fp)})
+    return result
+
+
+def _knowledge_path(filename: str) -> str:
+    safe = os.path.basename(filename)
+    return os.path.join(_knowledge_dir(), safe)
+
+
+def _knowledge_git_status() -> dict:
+    try:
+        r = subprocess.run(
+            ['git', 'status', '--porcelain', 'knowledge/'],
+            capture_output=True, text=True, timeout=10
+        )
+        changed = [l for l in r.stdout.strip().split('\n') if l.strip()]
+        return {"dirty": len(changed) > 0, "count": len(changed)}
+    except Exception:
+        return {"dirty": False, "count": 0}
+
+
+def reload_knowledge():
+    global _KNOWLEDGE, FULL_SYSTEM_PROMPT
+    _KNOWLEDGE = _load_knowledge()
+    FULL_SYSTEM_PROMPT = f"{_BASE_PROMPT}\n\n---\n\n{_KNOWLEDGE}" if _KNOWLEDGE else _BASE_PROMPT
+    print(f"[knowledge] recarregado: {len(_KNOWLEDGE)} chars")
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -699,6 +741,98 @@ def api_search():
     if not q:
         return jsonify([])
     return jsonify(database.search_messages(q))
+
+
+# ── Knowledge ────────────────────────────────────────────────────────────────
+
+@app.get("/api/knowledge")
+@login_required
+def api_knowledge_list():
+    return jsonify(_list_knowledge_files())
+
+
+@app.get("/api/knowledge/<filename>")
+@login_required
+def api_knowledge_get(filename):
+    path = _knowledge_path(filename)
+    if not os.path.isfile(path):
+        return jsonify({"error": "Arquivo nao encontrado"}), 404
+    with open(path, encoding="utf-8") as f:
+        content = f.read()
+    return jsonify({"filename": filename, "content": content})
+
+
+@app.post("/api/knowledge")
+@login_required
+def api_knowledge_create():
+    data = request.get_json(silent=True) or {}
+    filename = data.get("filename", "").strip()
+    content = data.get("content", "")
+    if not filename:
+        return jsonify({"error": "filename obrigatorio"}), 400
+    if not filename.endswith(('.md', '.txt')):
+        return jsonify({"error": "Extensao invalida (.md ou .txt)"}), 400
+    path = _knowledge_path(filename)
+    if os.path.isfile(path):
+        return jsonify({"error": "Arquivo ja existe"}), 409
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(content)
+    reload_knowledge()
+    print(f"[knowledge] criado: {filename}")
+    return jsonify({"ok": True, "filename": filename})
+
+
+@app.put("/api/knowledge/<filename>")
+@login_required
+def api_knowledge_update(filename):
+    data = request.get_json(silent=True) or {}
+    content = data.get("content", "")
+    path = _knowledge_path(filename)
+    if not os.path.isfile(path):
+        return jsonify({"error": "Arquivo nao encontrado"}), 404
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(content)
+    reload_knowledge()
+    print(f"[knowledge] salvo: {filename}")
+    return jsonify({"ok": True})
+
+
+@app.delete("/api/knowledge/<filename>")
+@login_required
+def api_knowledge_delete(filename):
+    if filename == "README.md":
+        return jsonify({"error": "Nao e possivel deletar README.md"}), 400
+    path = _knowledge_path(filename)
+    if not os.path.isfile(path):
+        return jsonify({"error": "Arquivo nao encontrado"}), 404
+    os.remove(path)
+    reload_knowledge()
+    print(f"[knowledge] deletado: {filename}")
+    return jsonify({"ok": True})
+
+
+@app.get("/api/knowledge/status")
+@login_required
+def api_knowledge_status():
+    return jsonify(_knowledge_git_status())
+
+
+@app.post("/api/knowledge/publish")
+@login_required
+def api_knowledge_publish():
+    try:
+        subprocess.run(['git', 'add', 'knowledge/'], capture_output=True, timeout=10)
+        r = subprocess.run(
+            ['git', 'commit', '-m', 'chore: update knowledge via panel'],
+            capture_output=True, text=True, timeout=10
+        )
+        if 'nothing to commit' in r.stdout or 'nothing to commit' in r.stderr:
+            return jsonify({"ok": True, "message": "Nada para publicar"})
+        subprocess.run(['git', 'push'], capture_output=True, timeout=30)
+        print("[knowledge] publicado no git")
+        return jsonify({"ok": True, "message": "Publicado no GitHub"})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

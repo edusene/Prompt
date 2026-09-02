@@ -916,6 +916,47 @@ h3 { font-size: 14px; font-weight: 600; }
     transform: translateX(-50%) scale(1);
 }
 
+/* ── Knowledge ───────────────────────────────────────────────────────────── */
+.knowledge-layout { display: flex; height: calc(100vh - 120px); }
+.knowledge-list-panel {
+    width: 260px;
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+}
+.knowledge-list-panel .panel-header {
+    padding: 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.knowledge-list-panel .panel-header h2 { margin: 0; font-size: 16px; }
+.knowledge-editor-panel { flex: 1; display: flex; flex-direction: column; }
+.knowledge-editor {
+    flex: 1; width: 100%; padding: 16px; resize: none;
+    background: var(--bg-input); color: var(--text);
+    border: none; font-family: 'Fira Code', 'Consolas', monospace;
+    font-size: 13px; line-height: 1.6; outline: none;
+}
+.knowledge-editor::placeholder { color: var(--text-dim); }
+.knowledge-actions {
+    padding: 12px 16px;
+    border-top: 1px solid var(--border);
+    display: flex; gap: 8px;
+}
+.knowledge-file {
+    padding: 10px 16px;
+    cursor: pointer;
+    border-bottom: 1px solid var(--border);
+    transition: background var(--transition-fast);
+}
+.knowledge-file:hover { background: var(--bg-card-hover); }
+.knowledge-file.active { background: var(--bg-card); border-left: 3px solid var(--accent); }
+.knowledge-file-name { font-size: 13px; font-weight: 500; color: var(--text); }
+.knowledge-file-size { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
 /* ── Loading Spinner ────────────────────────────────────────────────────── */
 .spinner {
     display: inline-block;
