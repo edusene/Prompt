@@ -4,7 +4,7 @@
 [Sua empresa aqui]
 
 ## Contato
-- WhatsApp: [seu-whatsapp]
+- WhatsApp: [seu-whatsapp] | 69999963376
 - Email: [seu-email]
 - Site: [seu-site]
 
