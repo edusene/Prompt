@@ -82,8 +82,12 @@ async function api(url, opts = {}) {
 
 /* ── Dashboard ────────────────────────────────────────────────────────────── */
 async function loadDashboard() {
+    document.getElementById('stats-grid').innerHTML = skeletonCards(5);
     const stats = await api('/api/dashboard');
-    if (!stats) return;
+    if (!stats) {
+        document.getElementById('stats-grid').innerHTML = '<p class="muted">Erro ao carregar</p>';
+        return;
+    }
     document.getElementById('stats-grid').innerHTML = `
         <div class="stat-card">
             <div class="stat-icon"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></div>
@@ -118,9 +122,11 @@ document.getElementById('conv-filter').addEventListener('change', loadConversati
 
 async function loadConversations() {
     const status = document.getElementById('conv-filter').value;
+    const list = document.getElementById('conv-list');
+    if (!list.dataset.loaded) list.innerHTML = skeletonRows(5);
     conversations = await api(`/api/conversations?status=${status}`);
     if (!conversations) return;
-    const list = document.getElementById('conv-list');
+    list.dataset.loaded = '1';
     if (conversations.length === 0) {
         list.innerHTML = '<div class="empty-state">Nenhuma conversa</div>';
         return;
@@ -149,6 +155,9 @@ async function selectConversation(convId) {
     document.querySelectorAll('.conv-item').forEach(el => el.classList.remove('active'));
     event.currentTarget?.classList.add('active');
 
+    // Messages
+    const msgDiv = document.getElementById('chat-messages');
+    msgDiv.innerHTML = skeletonMsgs();
     const data = await api(`/api/conversations/${convId}`);
     if (!data) return;
 
@@ -164,7 +173,6 @@ async function selectConversation(convId) {
     `;
 
     // Messages
-    const msgDiv = document.getElementById('chat-messages');
     msgDiv.innerHTML = messages.map(m => `
         <div class="msg msg-${m.direction === 'in' ? 'in' : 'out'}">
             <div>${esc(m.body)}</div>
@@ -231,16 +239,19 @@ document.getElementById('chat-input').addEventListener('keydown', e => {
 
 async function sendMessage() {
     const input = document.getElementById('chat-input');
+    const btn = document.getElementById('chat-send');
     const text = input.value.trim();
     if (!text || !currentConvId) return;
 
     const conv = conversations.find(c => c.id === currentConvId);
     if (!conv) return;
 
+    setBtnLoading(btn, true);
     await api('/api/messages/send', {
         method: 'POST',
         body: JSON.stringify({ phone: conv.contact_phone, body: text }),
     });
+    setBtnLoading(btn, false);
     input.value = '';
     toast('Mensagem enviada', 'success');
     selectConversation(currentConvId);
@@ -248,6 +259,7 @@ async function sendMessage() {
 
 /* ── Contacts ─────────────────────────────────────────────────────────────── */
 async function loadContacts() {
+    document.getElementById('contacts-list').innerHTML = skeletonRows(5);
     const contacts = await api('/api/contacts');
     if (!contacts) return;
     if (contacts.length === 0) {
@@ -292,7 +304,9 @@ function showContactForm(contact = null) {
 async function saveContact(e, id) {
     e.preventDefault();
     const form = e.target;
+    const btn = form.querySelector('button[type="submit"]');
     const data = Object.fromEntries(new FormData(form));
+    setBtnLoading(btn, true, 'Salvando...');
     if (id) {
         await api(`/api/contacts/${id}`, { method: 'PUT', body: JSON.stringify(data) });
         toast('Contato atualizado', 'success');
@@ -300,6 +314,7 @@ async function saveContact(e, id) {
         await api('/api/contacts', { method: 'POST', body: JSON.stringify(data) });
         toast('Contato criado', 'success');
     }
+    setBtnLoading(btn, false);
     closeModal();
     loadContacts();
 }
@@ -318,6 +333,7 @@ async function deleteContact(id) {
 
 /* ── Tags ─────────────────────────────────────────────────────────────────── */
 async function loadTags() {
+    document.getElementById('tags-list').innerHTML = skeletonRows(4);
     const tags = await api('/api/tags');
     if (!tags) return;
     if (tags.length === 0) {
@@ -356,7 +372,10 @@ function showTagForm(tag = null) {
 
 async function saveTag(e, id) {
     e.preventDefault();
-    const data = Object.fromEntries(new FormData(e.target));
+    const form = e.target;
+    const btn = form.querySelector('button[type="submit"]');
+    const data = Object.fromEntries(new FormData(form));
+    setBtnLoading(btn, true, 'Salvando...');
     if (id) {
         await api(`/api/tags/${id}`, { method: 'PUT', body: JSON.stringify(data) });
         toast('Tag atualizada', 'success');
@@ -364,6 +383,7 @@ async function saveTag(e, id) {
         await api('/api/tags', { method: 'POST', body: JSON.stringify(data) });
         toast('Tag criada', 'success');
     }
+    setBtnLoading(btn, false);
     closeModal();
     loadTags();
 }
@@ -379,6 +399,7 @@ async function deleteTag(id) {
 
 /* ── Templates ────────────────────────────────────────────────────────────── */
 async function loadTemplates() {
+    document.getElementById('templates-list').innerHTML = skeletonRows(4);
     const tpls = await api('/api/templates');
     if (!tpls) return;
     if (tpls.length === 0) {
@@ -417,7 +438,10 @@ function showTemplateForm(tpl = null) {
 
 async function saveTemplate(e, id) {
     e.preventDefault();
-    const data = Object.fromEntries(new FormData(e.target));
+    const form = e.target;
+    const btn = form.querySelector('button[type="submit"]');
+    const data = Object.fromEntries(new FormData(form));
+    setBtnLoading(btn, true, 'Salvando...');
     if (id) {
         await api(`/api/templates/${id}`, { method: 'PUT', body: JSON.stringify(data) });
         toast('Template atualizado', 'success');
@@ -425,6 +449,7 @@ async function saveTemplate(e, id) {
         await api('/api/templates', { method: 'POST', body: JSON.stringify(data) });
         toast('Template criado', 'success');
     }
+    setBtnLoading(btn, false);
     closeModal();
     loadTemplates();
 }
@@ -444,9 +469,10 @@ async function deleteTemplate(id) {
 
 /* ── WhatsApp ─────────────────────────────────────────────────────────────── */
 async function loadWAStatus() {
+    document.getElementById('wa-status').innerHTML = spinHTML('Verificando...');
     const data = await api('/api/instance/status');
     if (!data) {
-        document.getElementById('wa-status').innerHTML = '<span style="color:#ef4444">Erro de conexão com o servidor</span>';
+        document.getElementById('wa-status').innerHTML = '<span style="color:#ef4444">Erro de conexao</span>';
         return;
     }
     if (data.error) {
@@ -462,8 +488,9 @@ async function loadWAStatus() {
 }
 
 async function loadQRCode() {
-    const data = await api('/api/instance/qr');
     const container = document.getElementById('qr-container');
+    container.innerHTML = `<p class="muted">${spinHTML('Gerando QR Code...')}</p>`;
+    const data = await api('/api/instance/qr');
     if (!data) {
         container.innerHTML = '<p style="color:#ef4444">Erro de conexão com o servidor</p>';
         return;
@@ -484,19 +511,25 @@ async function loadQRCode() {
 }
 
 async function restartWA() {
-    if (!confirm('Reiniciar instância WhatsApp?')) return;
+    if (!confirm('Reiniciar instancia WhatsApp?')) return;
+    const btn = event.currentTarget;
+    setBtnLoading(btn, true);
     const data = await api('/api/instance/restart', { method: 'POST' });
+    setBtnLoading(btn, false);
     if (data?.error) {
         toast(`Erro: ${data.error}`, 'error');
     } else {
-        toast('Instância reiniciada', 'success');
+        toast('Instancia reiniciada', 'success');
     }
     loadWAStatus();
 }
 
 async function disconnectWA() {
     if (!confirm('Desconectar WhatsApp?')) return;
+    const btn = event.currentTarget;
+    setBtnLoading(btn, true);
     const data = await api('/api/instance/disconnect', { method: 'POST' });
+    setBtnLoading(btn, false);
     if (data?.error) {
         toast(`Erro: ${data.error}`, 'error');
     } else {
@@ -507,8 +540,11 @@ async function disconnectWA() {
 
 async function runDiagnose() {
     const container = document.getElementById('diagnose-container');
-    container.innerHTML = '<p class="muted">Testando endpoints da UAZAPI...</p>';
+    const btn = event.currentTarget;
+    setBtnLoading(btn, true, 'Testando...');
+    container.innerHTML = '';
     const data = await api('/api/instance/diagnose');
+    setBtnLoading(btn, false);
     if (!data) {
         container.innerHTML = '<p style="color:#ef4444">Erro ao conectar com o servidor</p>';
         return;
@@ -572,6 +608,40 @@ async function updateUnreadBadge() {
 function esc(s) {
     if (!s) return '';
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function spinHTML(label) {
+    return `<span class="spinner"></span>${label ? ' ' + esc(label) : ''}`;
+}
+
+function setBtnLoading(btn, loading, label) {
+    if (!btn) return;
+    if (loading) {
+        btn.dataset.originalHtml = btn.innerHTML;
+        btn.classList.add('btn-loading');
+        btn.innerHTML = spinHTML(label || 'Carregando...');
+    } else {
+        btn.classList.remove('btn-loading');
+        btn.innerHTML = btn.dataset.originalHtml || '';
+    }
+}
+
+function skeletonCards(n) {
+    return Array.from({length: n}, () =>
+        '<div class="skeleton skeleton-card"></div>'
+    ).join('');
+}
+
+function skeletonRows(n) {
+    return Array.from({length: n}, () =>
+        '<div class="skeleton-row"><div class="skeleton skeleton-avatar"></div><div class="skeleton" style="flex:1;height:14px"></div><div class="skeleton" style="width:60px;height:14px"></div></div>'
+    ).join('');
+}
+
+function skeletonMsgs() {
+    return '<div class="skeleton-msg in"><div class="skeleton" style="height:36px;border-radius:12px"></div></div>'
+         + '<div class="skeleton-msg out"><div class="skeleton" style="height:36px;border-radius:12px"></div></div>'
+         + '<div class="skeleton-msg in"><div class="skeleton" style="height:28px;border-radius:12px"></div></div>';
 }
 
 /* ── Init ─────────────────────────────────────────────────────────────────── */

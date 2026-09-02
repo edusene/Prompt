@@ -904,6 +904,29 @@ h3 { font-size: 14px; font-weight: 600; }
     transform: translateX(-50%) scale(1);
 }
 
+/* ── Loading Spinner ────────────────────────────────────────────────────── */
+.spinner {
+    display: inline-block;
+    width: 16px; height: 16px;
+    border: 2px solid rgba(255,255,255,0.3);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin .6s linear infinite;
+    vertical-align: middle;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.btn-loading { opacity: .6; pointer-events: none; }
+.btn-loading .spinner { width: 14px; height: 14px; border-width: 2px; }
+
+/* ── Skeleton Variants ─────────────────────────────────────────────────── */
+.skeleton-row { display: flex; gap: 12px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.skeleton-row .skeleton { flex: 1; height: 14px; }
+.skeleton-row .skeleton-avatar { flex: none; }
+.skeleton-msg { margin: 8px 0; }
+.skeleton-msg.in .skeleton { width: 60%; }
+.skeleton-msg.out .skeleton { width: 45%; margin-left: auto; }
+
 /* ── Responsive ──────────────────────────────────────────────────────────── */
 @media (max-width: 1200px) {
     .conv-info-panel { width: 220px; }

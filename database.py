@@ -493,7 +493,7 @@ def create_template(title: str, body: str) -> dict:
         now = datetime.utcnow().isoformat()
         conn.execute("INSERT INTO templates (title, body, created_at) VALUES (?,?,?)", (title, body, now))
         conn.commit()
-        tpl = conn.execute("SELECT * FROM templates WHERE title=? AND body=?", (title, body)).fetchone()
+        tpl = conn.execute("SELECT * FROM templates WHERE id=last_insert_rowid()").fetchone()
         conn.close()
         return dict(tpl)
 
