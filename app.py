@@ -836,15 +836,31 @@ def api_knowledge_publish():
             subprocess.run(['git', 'remote', 'add', 'origin', remote_url],
                            capture_output=True, timeout=10)
 
+        subprocess.run(['git', 'config', 'user.email', 'bot@prompt.app'],
+                       capture_output=True, timeout=10)
+        subprocess.run(['git', 'config', 'user.name', 'Knowledge Bot'],
+                       capture_output=True, timeout=10)
+
         subprocess.run(['git', 'checkout', '-B', 'main'], capture_output=True, timeout=10)
 
         subprocess.run(['git', 'add', 'knowledge/'], capture_output=True, timeout=10)
+
+        has_staged = subprocess.run(['git', 'diff', '--cached', '--quiet'],
+                                    capture_output=True, timeout=10)
+        if has_staged.returncode == 0:
+            print("[knowledge] nada para publicar (diff vazio)")
+            return jsonify({"ok": True, "message": "Nada para publicar"})
+
         r = subprocess.run(
             ['git', 'commit', '-m', 'chore: update knowledge via panel'],
             capture_output=True, text=True, timeout=10
         )
-        if 'nothing to commit' in (r.stdout + r.stderr):
-            return jsonify({"ok": True, "message": "Nada para publicar"})
+        if r.returncode != 0:
+            err = (r.stdout + r.stderr).strip()
+            if 'nothing to commit' in err:
+                return jsonify({"ok": True, "message": "Nada para publicar"})
+            print(f"[knowledge] commit ERRO: {err}")
+            return jsonify({"ok": False, "error": f"Commit falhou: {err[:200]}"}), 500
 
         push = subprocess.run(['git', 'push', '--set-upstream', 'origin', 'main'],
                               capture_output=True, text=True, timeout=30)
