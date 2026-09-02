@@ -75,12 +75,11 @@ def disconnect_instance() -> dict:
 
 def restart_instance() -> dict:
     """Tenta reiniciar — endpoints variam por servidor."""
-    r = _request("POST", "/instance/restart", {})
-    if not r["ok"]:
-        r = _request("PUT", "/instance/restart", {})
-    if not r["ok"]:
-        r = _request("GET", "/instance/restart")
-    return r
+    for method, path in [("POST", "/instance/restart"), ("PUT", "/instance/restart"), ("GET", "/instance/restart"), ("POST", "/instance/reconnect"), ("PUT", "/instance/reconnect")]:
+        r = _request(method, path, {} if method != "GET" else None)
+        if r["ok"]:
+            return r
+    return {"ok": False, "status": 0, "error": "Endpoint de reinício não encontrado neste servidor"}
 
 
 # ── Webhook ──────────────────────────────────────────────────────────────────

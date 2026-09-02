@@ -324,12 +324,21 @@ def api_instance_status():
 @app.get("/api/instance/qr")
 @login_required
 def api_instance_qr():
-    from uazapi import get_qr_code
+    from uazapi import get_qr_code, get_instance_status
+    # Verificar status antes de pedir QR
+    status_r = get_instance_status()
+    if status_r["ok"]:
+        data = status_r["data"] or {}
+        st = data.get("status", "") if isinstance(data, dict) else ""
+        if st == "open":
+            return jsonify({"info": "WhatsApp já está conectado. Não é necessário escanear QR Code."})
     r = get_qr_code()
     if not r["ok"]:
         return jsonify({"error": r["error"]})
-    data = r["data"] or {}
-    return jsonify(data)
+    qr_data = r["data"] or {}
+    if isinstance(qr_data, dict) and qr_data.get("qrcode"):
+        return jsonify(qr_data)
+    return jsonify({"error": "Não foi possível gerar QR Code. A instância pode estar conectada."})
 
 
 @app.post("/api/instance/disconnect")

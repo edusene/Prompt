@@ -459,6 +459,10 @@ async function loadQRCode() {
         container.innerHTML = '<p style="color:#ef4444">Erro de conexão com o servidor</p>';
         return;
     }
+    if (data.info) {
+        container.innerHTML = `<p style="color:#22c55e;font-weight:600">${esc(data.info)}</p>`;
+        return;
+    }
     if (data.error) {
         container.innerHTML = `<p style="color:#ef4444">${esc(data.error)}</p>`;
         return;
@@ -466,7 +470,7 @@ async function loadQRCode() {
     if (data.qrcode) {
         container.innerHTML = `<img src="data:image/png;base64,${data.qrcode}" style="max-width:256px;border-radius:8px" alt="QR Code">`;
     } else {
-        container.innerHTML = '<p class="muted">QR Code não disponível — a instância pode já estar conectada</p>';
+        container.innerHTML = '<p class="muted">QR Code não disponível</p>';
     }
 }
 
