@@ -314,6 +314,7 @@ def api_instance_diagnose():
 def api_instance_status():
     from uazapi import get_instance_status
     r = get_instance_status()
+    print(f"[status] get_instance_status → ok={r['ok']} data={str(r.get('data', r.get('error', '')))[:300]}")
     if not r["ok"]:
         return jsonify({"status": "error", "error": r["error"]})
     data = r["data"] or {}
@@ -324,21 +325,32 @@ def api_instance_status():
 @app.get("/api/instance/qr")
 @login_required
 def api_instance_qr():
-    from uazapi import get_qr_code, get_instance_status
-    # Verificar status antes de pedir QR
+    from uazapi import get_qr_code, get_instance_status, _request
+    # Verificar status
     status_r = get_instance_status()
+    st = ""
     if status_r["ok"]:
         data = status_r["data"] or {}
         st = data.get("status", "") if isinstance(data, dict) else ""
-        if st == "open":
-            return jsonify({"info": "WhatsApp já está conectado. Não é necessário escanear QR Code."})
+    print(f"[qr] status da instância: {st}")
+
+    if st == "open":
+        return jsonify({"info": "WhatsApp já está conectado. Não é necessário escanear QR Code."})
+
+    # Tentar obter QR code — POST /instance/connect
     r = get_qr_code()
+    print(f"[qr] POST /instance/connect → ok={r['ok']} data={str(r.get('data', r.get('error', '')))[:500]}")
+
     if not r["ok"]:
         return jsonify({"error": r["error"]})
-    qr_data = r["data"] or {}
-    if isinstance(qr_data, dict) and qr_data.get("qrcode"):
-        return jsonify(qr_data)
-    return jsonify({"error": "Não foi possível gerar QR Code. A instância pode estar conectada."})
+
+    qr_data = r["data"]
+    if isinstance(qr_data, dict):
+        if qr_data.get("qrcode"):
+            return jsonify(qr_data)
+        # A resposta pode ter outro formato
+        return jsonify({"raw": qr_data, "error": "Resposta sem campo 'qrcode'. Verifique os logs no Render."})
+    return jsonify({"raw": str(qr_data), "error": "Formato de resposta inesperado. Verifique os logs no Render."})
 
 
 @app.post("/api/instance/disconnect")

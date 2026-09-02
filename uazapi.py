@@ -24,6 +24,7 @@ def _request(method: str, endpoint: str, body: dict | None = None, params: dict 
             data = r.json()
         except Exception:
             data = r.text
+        print(f"[uazapi] {method} {endpoint} → {r.status_code} | {str(data)[:300]}")
         if r.ok:
             return {"ok": True, "status": r.status_code, "data": data}
         return {"ok": False, "status": r.status_code, "error": f"HTTP {r.status_code}: {str(data)[:200]}"}
