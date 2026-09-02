@@ -511,11 +511,14 @@ async function selectKnowledgeFile(filename) {
 
 async function saveKnowledge() {
     if (!currentKnowledgeFile) return;
+    const btn = event.currentTarget;
     const content = document.getElementById('knowledge-editor').value;
+    setBtnLoading(btn, true, 'Salvando...');
     const data = await api(`/api/knowledge/${encodeURIComponent(currentKnowledgeFile)}`, {
         method: 'PUT',
         body: JSON.stringify({ content })
     });
+    setBtnLoading(btn, false);
     if (data?.error) {
         toast(friendlyError(data.error), 'error');
     } else {

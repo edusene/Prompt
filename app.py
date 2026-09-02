@@ -821,14 +821,30 @@ def api_knowledge_status():
 @login_required
 def api_knowledge_publish():
     try:
+        token = os.getenv("GITHUB_TOKEN", "")
+        if not token:
+            return jsonify({"ok": False, "error": "GITHUB_TOKEN nao configurado no .env"}), 400
+
+        remote_url = f"https://{token}@github.com/edusene/Prompt.git"
+        sr = subprocess.run(['git', 'remote', 'set-url', 'origin', remote_url],
+                           capture_output=True, text=True, timeout=10)
+        if sr.returncode != 0:
+            return jsonify({"ok": False, "error": f"Erro ao configurar remote: {sr.stderr[:200]}"}), 500
+
         subprocess.run(['git', 'add', 'knowledge/'], capture_output=True, timeout=10)
         r = subprocess.run(
             ['git', 'commit', '-m', 'chore: update knowledge via panel'],
             capture_output=True, text=True, timeout=10
         )
-        if 'nothing to commit' in r.stdout or 'nothing to commit' in r.stderr:
+        if 'nothing to commit' in (r.stdout + r.stderr):
             return jsonify({"ok": True, "message": "Nada para publicar"})
-        subprocess.run(['git', 'push'], capture_output=True, timeout=30)
+
+        push = subprocess.run(['git', 'push'], capture_output=True, text=True, timeout=30)
+        if push.returncode != 0:
+            err = push.stderr.strip() or push.stdout.strip()
+            print(f"[knowledge] push ERRO: {err}")
+            return jsonify({"ok": False, "error": f"Falha ao push: {err[:200]}"}), 500
+
         print("[knowledge] publicado no git")
         return jsonify({"ok": True, "message": "Publicado no GitHub"})
     except Exception as e:
