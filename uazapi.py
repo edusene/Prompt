@@ -11,7 +11,7 @@ _TOKEN = os.getenv("UAZAPI_INSTANCE_TOKEN", "")
 _HEADERS = {"token": _TOKEN, "Content-Type": "application/json"}
 
 
-# ── HTTP helpers ─────────────────────────────────────────────────────────────
+# ── HTTP helper ──────────────────────────────────────────────────────────────
 
 
 def _request(method: str, endpoint: str, body: dict | None = None, params: dict | None = None) -> dict:
@@ -54,32 +54,47 @@ def mark_read(number: str, message_id: str) -> dict:
 
 
 def get_qr_code() -> dict:
-    return _request("GET", "/instance/connect")
+    """POST /instance/connect — retorna QR code."""
+    return _request("POST", "/instance/connect", {})
 
 
 def get_instance_status() -> dict:
+    """GET /instance/status — retorna status da conexão."""
     return _request("GET", "/instance/status")
 
 
-def get_instance_profile() -> dict:
-    return _request("GET", "/instance/profile")
-
-
 def disconnect_instance() -> dict:
-    return _request("DELETE", "/instance/logout")
+    """Tenta desconectar — endpoints variam por servidor."""
+    r = _request("DELETE", "/instance/logout")
+    if not r["ok"]:
+        r = _request("POST", "/instance/logout", {})
+    if not r["ok"]:
+        r = _request("POST", "/instance/disconnect", {})
+    return r
 
 
 def restart_instance() -> dict:
-    return _request("POST", "/instance/restart", {})
+    """Tenta reiniciar — endpoints variam por servidor."""
+    r = _request("POST", "/instance/restart", {})
+    if not r["ok"]:
+        r = _request("PUT", "/instance/restart", {})
+    if not r["ok"]:
+        r = _request("GET", "/instance/restart")
+    return r
 
 
 # ── Webhook ──────────────────────────────────────────────────────────────────
 
 
 def configure_webhook(webhook_url: str, events: list[str] | None = None) -> dict:
+    """Configura webhook — tenta PUT e POST."""
     if events is None:
         events = ["message"]
-    return _request("PUT", "/webhook", {"webhookUrl": webhook_url, "events": events})
+    body = {"webhookUrl": webhook_url, "events": events}
+    r = _request("PUT", "/webhook", body)
+    if not r["ok"]:
+        r = _request("POST", "/webhook", body)
+    return r
 
 
 def get_webhook() -> dict:

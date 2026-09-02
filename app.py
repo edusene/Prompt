@@ -293,19 +293,15 @@ def api_dashboard():
 @app.get("/api/instance/diagnose")
 @login_required
 def api_instance_diagnose():
-    """Testa todos os endpoints da UAZAPI e retorna quais funcionam."""
+    """Testa endpoints da UAZAPI e retorna quais funcionam."""
     from uazapi import _request
     results = {}
     tests = [
-        ("GET  /instance/status",    "GET",  "/instance/status",    None),
-        ("GET  /instance/connect",   "GET",  "/instance/connect",   None),
-        ("POST /instance/connect",   "POST", "/instance/connect",   {}),
-        ("POST /instance/restart",   "POST", "/instance/restart",   {}),
-        ("POST /instance/logout",    "POST", "/instance/logout",    {}),
-        ("DELETE /instance/logout",  "DELETE", "/instance/logout",  None),
-        ("GET  /instance/profile",   "GET",  "/instance/profile",   None),
-        ("PUT  /webhook",            "PUT",  "/webhook",            {"webhookUrl": "https://test.com/hook", "events": ["message"]}),
-        ("GET  /webhook",            "GET",  "/webhook",            None),
+        ("GET  /instance/status",     "GET",    "/instance/status",    None),
+        ("POST /instance/connect",    "POST",   "/instance/connect",   {}),
+        ("GET  /webhook",             "GET",    "/webhook",            None),
+        ("PUT  /webhook",             "PUT",    "/webhook",            {"webhookUrl": "https://test.com/hook", "events": ["message"]}),
+        ("POST /webhook",             "POST",   "/webhook",            {"webhookUrl": "https://test.com/hook", "events": ["message"]}),
     ]
     for label, method, endpoint, body in tests:
         r = _request(method, endpoint, body)
