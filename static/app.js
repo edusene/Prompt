@@ -468,7 +468,7 @@ async function loadQRCode() {
         return;
     }
     if (data.qrcode) {
-        container.innerHTML = `<img src="data:image/png;base64,${data.qrcode}" style="max-width:256px;border-radius:8px" alt="QR Code">`;
+        container.innerHTML = `<img src="${data.qrcode}" style="max-width:256px;border-radius:8px" alt="QR Code">`;
     } else {
         container.innerHTML = '<p class="muted">QR Code não disponível</p>';
     }
