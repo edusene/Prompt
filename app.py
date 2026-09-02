@@ -199,6 +199,18 @@ def healthcheck():
     return "ok"
 
 
+# ── Webhook config (UAZAPI chama PUT aqui para configurar) ────────────────────
+
+@app.put("/webhook")
+def webhook_config():
+    """Endpoint chamado pela UAZAPI para configurar/validar o webhook."""
+    data = request.get_json(silent=True) or {}
+    webhook_url = data.get("webhookUrl", "")
+    events = data.get("events", [])
+    print(f"[webhook-config] url={webhook_url} events={events}")
+    return jsonify({"ok": True, "message": "Webhook configurado com sucesso"})
+
+
 # ── Webhook (preservado integralmente) ────────────────────────────────────────
 
 @app.post("/webhook")
