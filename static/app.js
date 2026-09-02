@@ -3,6 +3,7 @@ let currentView = 'dashboard';
 let currentConvId = null;
 let conversations = [];
 let selectedTags = [];
+let pollTimers = [];
 
 /* ── Toast Notifications ─────────────────────────────────────────────────── */
 function toast(message, type = 'info') {
@@ -48,13 +49,21 @@ function switchView(view) {
 }
 
 function loadView(view) {
+    pollTimers.forEach(clearInterval);
+    pollTimers = [];
     switch (view) {
         case 'dashboard': loadDashboard(); break;
-        case 'conversations': loadConversations(); break;
+        case 'conversations':
+            loadConversations();
+            pollTimers.push(setInterval(loadConversations, 10000));
+            break;
         case 'contacts': loadContacts(); break;
         case 'tags': loadTags(); break;
         case 'templates': loadTemplates(); break;
-        case 'whatsapp': loadWAStatus(); break;
+        case 'whatsapp':
+            loadWAStatus();
+            pollTimers.push(setInterval(loadWAStatus, 5000));
+            break;
     }
 }
 
