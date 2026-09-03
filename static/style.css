@@ -355,15 +355,16 @@ h3 { font-size: 14px; font-weight: 600; }
 }
 
 /* ── Conversation Layout ─────────────────────────────────────────────────── */
-.conv-layout { display: flex; gap: 0; height: calc(100vh - 56px); }
+.conv-layout { display: flex; gap: 0; height: calc(100vh - 56px); min-height: 400px; }
 
 .conv-list-panel {
-    width: 300px;
+    width: 320px;
     border-right: 1px solid var(--border);
     display: flex;
     flex-direction: column;
     flex-shrink: 0;
     background: var(--bg-sidebar);
+    min-height: 0;
 }
 
 .conv-chat-panel {
@@ -371,23 +372,34 @@ h3 { font-size: 14px; font-weight: 600; }
     display: flex;
     flex-direction: column;
     background: var(--bg-body);
+    min-width: 0;
+    min-height: 0;
 }
 
 .conv-info-panel {
-    width: 270px;
+    width: 300px;
     border-left: 1px solid var(--border);
-    padding: 18px;
-    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
     flex-shrink: 0;
     background: var(--bg-sidebar);
+    min-height: 0;
+}
+.conv-info-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    min-height: 0;
 }
 
 .panel-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 14px 18px;
+    padding: 0 18px;
+    min-height: 56px;
     border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
 }
 .panel-header h2 { font-size: 15px; font-weight: 600; }
 
@@ -475,14 +487,17 @@ h3 { font-size: 14px; font-weight: 600; }
 
 /* ── Chat ────────────────────────────────────────────────────────────────── */
 .chat-header {
-    padding: 14px 20px;
+    padding: 0 20px;
+    min-height: 56px;
     border-bottom: 1px solid var(--border);
     font-weight: 600;
     font-size: 14px;
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 12px;
     background: var(--bg-sidebar);
+    flex-shrink: 0;
 }
 
 .chat-messages {
@@ -493,6 +508,7 @@ h3 { font-size: 14px; font-weight: 600; }
     flex-direction: column;
     gap: 10px;
     scroll-behavior: smooth;
+    min-height: 0;
 }
 
 .chat-input-area {
@@ -523,34 +539,45 @@ h3 { font-size: 14px; font-weight: 600; }
 
 /* ── Messages ────────────────────────────────────────────────────────────── */
 .msg {
-    max-width: 70%;
+    max-width: 72%;
+    min-width: 60px;
     padding: 10px 14px;
     border-radius: var(--radius-lg);
     font-size: 13px;
     line-height: 1.55;
     white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
     animation: msgIn 0.3s ease backwards;
     position: relative;
+    box-sizing: border-box;
 }
 .msg-in {
     background: var(--bg-card);
     border: 1px solid var(--border);
     align-self: flex-start;
-    border-bottom-left-radius: 4px;
+    border-top-left-radius: 4px;
+    border-bottom-left-radius: var(--radius-lg);
+    margin-right: auto;
 }
 .msg-out {
     background: var(--accent);
     align-self: flex-end;
-    border-bottom-right-radius: 4px;
+    border-top-right-radius: 4px;
+    border-bottom-right-radius: var(--radius-lg);
     color: #fff;
+    margin-left: auto;
 }
 .msg-time {
+    display: block;
     font-size: 10px;
-    margin-top: 5px;
-    opacity: 0.6;
+    margin-top: 6px;
+    opacity: 0.65;
+    text-align: right;
+    white-space: nowrap;
 }
 .msg-in .msg-time { color: var(--text-muted); }
-.msg-out .msg-time { color: rgba(255,255,255,0.7); }
+.msg-out .msg-time { color: rgba(255,255,255,0.75); }
 
 /* ── Tables ──────────────────────────────────────────────────────────────── */
 .table-container {
@@ -982,7 +1009,8 @@ h3 { font-size: 14px; font-weight: 600; }
 
 /* ── Responsive ──────────────────────────────────────────────────────────── */
 @media (max-width: 1200px) {
-    .conv-info-panel { width: 220px; }
+    .conv-info-panel { width: 240px; }
+    .conv-list-panel { width: 280px; }
 }
 @media (max-width: 1024px) {
     .conv-info-panel { display: none; }

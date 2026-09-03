@@ -140,7 +140,7 @@ async function loadConversations() {
         const initials = name.slice(0, 2).toUpperCase();
         const lastMsg = c.last_message_at ? new Date(c.last_message_at + 'Z').toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'}) : '';
         return `
-            <div class="conv-item ${c.id === currentConvId ? 'active' : ''}" onclick="selectConversation(${c.id})">
+            <div class="conv-item ${c.id === currentConvId ? 'active' : ''}" data-conv-id="${c.id}" onclick="selectConversation(${c.id})">
                 <div class="conv-avatar">${initials}</div>
                 <div class="conv-meta">
                     <div class="conv-name">${esc(name)}</div>
@@ -156,8 +156,10 @@ async function loadConversations() {
 
 async function selectConversation(convId) {
     currentConvId = convId;
-    document.querySelectorAll('.conv-item').forEach(el => el.classList.remove('active'));
-    event.currentTarget?.classList.add('active');
+    // Marca o item ativo pela conversa selecionada (não depende do elemento clicado)
+    document.querySelectorAll('.conv-item').forEach(el => {
+        el.classList.toggle('active', Number(el.dataset.convId) === convId);
+    });
 
     // Messages
     const msgDiv = document.getElementById('chat-messages');
@@ -198,8 +200,7 @@ async function selectConversation(convId) {
 function renderInfoPanel(conv, contact, tags) {
     const tagsHtml = tags.map(t => `<span class="tag-badge" style="background:${t.color}">${esc(t.name)}</span>`).join(' ');
     document.getElementById('info-panel').innerHTML = `
-        <h3>Informações</h3>
-        <div style="margin-top:12px;font-size:13px">
+        <div style="font-size:13px">
             <div><strong>Nome:</strong> ${esc(contact?.name || '-')}</div>
             <div><strong>Telefone:</strong> ${esc(contact?.phone || '-')}</div>
             <div><strong>Email:</strong> ${esc(contact?.email || '-')}</div>
@@ -217,6 +218,7 @@ function renderInfoPanel(conv, contact, tags) {
             <div style="margin-top:8px">
                 <strong>Modo:</strong>
                 <button class="btn-sm ${contact?.auto_mode ? 'btn-primary' : 'btn-secondary'}"
+                        data-mode-toggle
                         onclick="toggleMode(${conv.id})">
                     ${contact?.auto_mode ? 'Agente Auto' : 'Humano'}
                 </button>
@@ -231,8 +233,28 @@ async function updateConvStatus(convId, status) {
 }
 
 async function toggleMode(convId) {
-    await api(`/api/conversations/${convId}/mode`, { method: 'PUT' });
-    selectConversation(convId);
+    const res = await api(`/api/conversations/${convId}/mode`, { method: 'PUT' });
+    if (!res || res.error) return;
+
+    // Atualiza imediatamente o badge do cabeçalho do chat e o botão do painel
+    const autoMode = res.auto_mode ? 'Auto' : 'Humano';
+    const autoClass = res.auto_mode ? 'auto-on' : 'auto-off';
+
+    const headerBadge = document.querySelector('#chat-header .auto-badge');
+    if (headerBadge) {
+        headerBadge.textContent = autoMode;
+        headerBadge.className = `auto-badge ${autoClass}`;
+    }
+
+    // Troca o rótulo/estilo do botão no painel de informações sem refazer tudo
+    const modeBtn = document.querySelector('#info-panel [data-mode-toggle]');
+    if (modeBtn) {
+        modeBtn.className = `btn-sm ${res.auto_mode ? 'btn-primary' : 'btn-secondary'}`;
+        modeBtn.lastChild.textContent = res.auto_mode ? 'Agente Auto' : 'Humano';
+    }
+
+    // Sincroniza a lista de conversas
+    loadConversations();
 }
 
 /* ── Chat send ────────────────────────────────────────────────────────────── */
