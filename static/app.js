@@ -331,6 +331,7 @@ async function addConvTag(convId, tagId) {
     const res = await api(`/api/conversations/${convId}/tags`, { method: 'POST', body: JSON.stringify({ tag_id: Number(tagId) }) });
     if (res && !res.error) {
         toast('Tag adicionada', 'success');
+        loadConversations();
         if (currentConvId === convId) refreshConversationPanel(convId);
     }
 }
@@ -339,6 +340,7 @@ async function removeConvTag(convId, tagId) {
     const res = await api(`/api/conversations/${convId}/tags/${tagId}`, { method: 'DELETE' });
     if (res && !res.error) {
         toast('Tag removida', 'success');
+        loadConversations();
         if (currentConvId === convId) refreshConversationPanel(convId);
     }
 }
@@ -479,6 +481,13 @@ async function deleteContact(id) {
 }
 
 /* ── Tags ─────────────────────────────────────────────────────────────────── */
+// Reaplica as tags em toda a interface (lista de conversas + painel aberto),
+// usado ao criar/atualizar/excluir tags ou receber atualização via SSE.
+function refreshTagsUI() {
+    loadConversations();
+    if (currentConvId) refreshConversationPanel(currentConvId);
+}
+
 async function loadTags() {
     document.getElementById('tags-list').innerHTML = skeletonRows(4);
     const tags = await api('/api/tags');
@@ -533,6 +542,7 @@ async function saveTag(e, id) {
     setBtnLoading(btn, false);
     closeModal();
     loadTags();
+    refreshTagsUI();
 }
 
 function editTag(id, name, color) { showTagForm({ id, name, color }); }
@@ -542,6 +552,7 @@ async function deleteTag(id) {
     await api(`/api/tags/${id}`, { method: 'DELETE' });
     toast('Tag excluída', 'success');
     loadTags();
+    refreshTagsUI();
 }
 
 /* ── Templates ────────────────────────────────────────────────────────────── */
@@ -870,6 +881,9 @@ function connectSSE() {
             }
         } else if (event === 'conversation_updated') {
             loadConversations();
+        } else if (event === 'tags_updated') {
+            // Atualiza badges/chips de tags na lista (Atendimento) e no painel da conversa aberta
+            refreshTagsUI();
         }
     };
     source.onerror = () => {

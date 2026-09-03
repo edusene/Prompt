@@ -514,6 +514,7 @@ def api_conversations_add_tag(conv_id):
     if not tag_id:
         return jsonify({"error": "tag_id required"}), 400
     database.add_tag_to_conversation(conv_id, tag_id)
+    events.emit("tags_updated", {"conversation_id": conv_id, "tag_id": tag_id, "action": "add"})
     return jsonify({"ok": True})
 
 
@@ -525,6 +526,7 @@ def api_conversations_remove_tag(conv_id, tag_id):
         conn.execute("DELETE FROM conversation_tags WHERE conversation_id=? AND tag_id=?", (conv_id, tag_id))
         conn.commit()
         conn.close()
+    events.emit("tags_updated", {"conversation_id": conv_id, "tag_id": tag_id, "action": "remove"})
     return jsonify({"ok": True})
 
 
@@ -617,6 +619,7 @@ def api_contacts_add_tag(contact_id):
     if not tag_id:
         return jsonify({"error": "tag_id required"}), 400
     database.add_tag_to_contact(contact_id, tag_id)
+    events.emit("tags_updated", {"contact_id": contact_id, "tag_id": tag_id, "action": "add"})
     return jsonify({"ok": True})
 
 
@@ -624,6 +627,7 @@ def api_contacts_add_tag(contact_id):
 @login_required
 def api_contacts_remove_tag(contact_id, tag_id):
     database.remove_tag_from_contact(contact_id, tag_id)
+    events.emit("tags_updated", {"contact_id": contact_id, "tag_id": tag_id, "action": "remove"})
     return jsonify({"ok": True})
 
 
@@ -643,6 +647,7 @@ def api_tags_create():
     if not name:
         return jsonify({"error": "name required"}), 400
     tag = database.create_tag(name, color=data.get("color", "#6366f1"))
+    events.emit("tags_updated", {"tag": tag, "action": "create"})
     return jsonify(tag)
 
 
@@ -651,6 +656,7 @@ def api_tags_create():
 def api_tags_update(tag_id):
     data = request.get_json(silent=True) or {}
     database.update_tag(tag_id, name=data.get("name", ""), color=data.get("color", ""))
+    events.emit("tags_updated", {"tag_id": tag_id, "action": "update"})
     return jsonify({"ok": True})
 
 
@@ -658,6 +664,7 @@ def api_tags_update(tag_id):
 @login_required
 def api_tags_delete(tag_id):
     database.delete_tag(tag_id)
+    events.emit("tags_updated", {"tag_id": tag_id, "action": "delete"})
     return jsonify({"ok": True})
 
 
