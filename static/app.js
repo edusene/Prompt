@@ -55,6 +55,8 @@ function loadView(view) {
         case 'dashboard': loadDashboard(); break;
         case 'conversations':
             loadConversations();
+            // Atualiza o painel da conversa aberta sem reconstruir o chat (evita animação de reabrir)
+            if (currentConvId) refreshConversationPanel(currentConvId);
             pollTimers.push(setInterval(loadConversations, 10000));
             break;
         case 'contacts': loadContacts(); break;
@@ -139,12 +141,16 @@ async function loadConversations() {
         const name = c.contact_name || c.contact_phone;
         const initials = name.slice(0, 2).toUpperCase();
         const lastMsg = c.last_message_at ? new Date(c.last_message_at + 'Z').toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'}) : '';
+        const tagChips = (c.tags || []).map(t =>
+            `<span class="conv-tag-chip" style="background:${t.color}" title="${esc(t.name)}">${esc(t.name)}</span>`
+        ).join('');
         return `
             <div class="conv-item ${c.id === currentConvId ? 'active' : ''}" data-conv-id="${c.id}" onclick="selectConversation(${c.id})">
                 <div class="conv-avatar">${initials}</div>
                 <div class="conv-meta">
                     <div class="conv-name">${esc(name)}</div>
                     <div class="conv-preview"><span class="status-dot status-${c.status}"></span>${c.status}</div>
+                    ${tagChips ? `<div class="conv-tags">${tagChips}</div>` : ''}
                 </div>
                 <div style="text-align:right">
                     <div class="conv-time">${lastMsg}</div>
@@ -155,13 +161,13 @@ async function loadConversations() {
 }
 
 async function selectConversation(convId) {
+    // Render completo (header + mensagens + painel) — usado ao abrir uma conversa
     currentConvId = convId;
     // Marca o item ativo pela conversa selecionada (não depende do elemento clicado)
     document.querySelectorAll('.conv-item').forEach(el => {
         el.classList.toggle('active', Number(el.dataset.convId) === convId);
     });
 
-    // Messages
     const msgDiv = document.getElementById('chat-messages');
     msgDiv.innerHTML = skeletonMsgs();
     const data = await api(`/api/conversations/${convId}`);
@@ -169,7 +175,34 @@ async function selectConversation(convId) {
 
     const { conversation: conv, contact, messages, tags } = data;
 
-    // Header
+    renderChatHeader(conv, contact);
+    msgDiv.innerHTML = messages.map(m => msgHTML(m, false)).join('');
+    scrollChatBottom();
+
+    document.getElementById('chat-input-area').style.display = 'flex';
+
+    // Info panel
+    const allTags = await api('/api/tags');
+    renderInfoPanel(conv, contact, tags, allTags || []);
+
+    // Mark as read
+    await api(`/api/conversations/${convId}/read`, { method: 'PUT' });
+    loadConversations();
+}
+
+// Atualiza header + painel de detalhes sem reconstruir as mensagens (sem animação de "reabrir")
+async function refreshConversationPanel(convId) {
+    if (!convId) return;
+    const data = await api(`/api/conversations/${convId}`);
+    if (!data) return;
+    const { conversation: conv, contact, tags } = data;
+    renderChatHeader(conv, contact);
+    document.getElementById('chat-input-area').style.display = 'flex';
+    const allTags = await api('/api/tags');
+    renderInfoPanel(conv, contact, tags, allTags || []);
+}
+
+function renderChatHeader(conv, contact) {
     const name = contact?.name || contact?.phone || 'Desconhecido';
     const autoMode = contact?.auto_mode ? 'Auto' : 'Humano';
     const autoClass = contact?.auto_mode ? 'auto-on' : 'auto-off';
@@ -177,35 +210,55 @@ async function selectConversation(convId) {
         <span>${esc(name)} (${esc(conv.status)})</span>
         <span class="auto-badge ${autoClass}">${autoMode}</span>
     `;
+}
 
-    // Messages
-    msgDiv.innerHTML = messages.map(m => `
-        <div class="msg msg-${m.direction === 'in' ? 'in' : 'out'}">
+function msgHTML(m, isNew) {
+    return `
+        <div class="msg msg-${m.direction === 'in' ? 'in' : 'out'}${isNew ? ' msg-new' : ''}">
             <div>${esc(m.body)}</div>
             <div class="msg-time">${m.sender || m.direction} · ${new Date(m.created_at + 'Z').toLocaleTimeString('pt-BR')}</div>
         </div>
-    `).join('');
-    msgDiv.scrollTop = msgDiv.scrollHeight;
-
-    document.getElementById('chat-input-area').style.display = 'flex';
-
-    // Info panel
-    renderInfoPanel(conv, contact, tags);
-
-    // Mark as read
-    await api(`/api/conversations/${convId}/read`, { method: 'PUT' });
-    loadConversations();
+    `;
 }
 
-function renderInfoPanel(conv, contact, tags) {
-    const tagsHtml = tags.map(t => `<span class="tag-badge" style="background:${t.color}">${esc(t.name)}</span>`).join(' ');
+function appendMessage(msg) {
+    const msgDiv = document.getElementById('chat-messages');
+    msgDiv.insertAdjacentHTML('beforeend', msgHTML(msg, true));
+    scrollChatBottom();
+}
+
+function scrollChatBottom() {
+    const msgDiv = document.getElementById('chat-messages');
+    if (msgDiv) msgDiv.scrollTop = msgDiv.scrollHeight;
+}
+
+function renderInfoPanel(conv, contact, tags, allTags) {
     document.getElementById('info-panel').innerHTML = `
         <div style="font-size:13px">
             <div><strong>Nome:</strong> ${esc(contact?.name || '-')}</div>
             <div><strong>Telefone:</strong> ${esc(contact?.phone || '-')}</div>
             <div><strong>Email:</strong> ${esc(contact?.email || '-')}</div>
             <div><strong>Empresa:</strong> ${esc(contact?.company || '-')}</div>
-            <div style="margin-top:12px"><strong>Tags:</strong> ${tagsHtml || '<span class="muted">nenhuma</span>'}</div>
+            <div style="margin-top:12px">
+                <strong>Tags:</strong>
+                <div class="tag-chips">
+                    ${tags.length ? tags.map(t => `
+                        <span class="tag-chip" style="background:${t.color}">
+                            ${esc(t.name)}
+                            <button class="tag-chip-remove" onclick="removeConvTag(${conv.id}, ${t.id})" title="Remover tag">&times;</button>
+                        </span>
+                    `).join('') : '<span class="muted">nenhuma</span>'}
+                </div>
+                ${allTags?.length ? `
+                <div style="display:flex;gap:6px;margin-top:8px">
+                    <select class="select-sm" id="conv-tag-select">
+                        ${allTags.filter(t => !tags.some(tg => tg.id === t.id)).map(t =>
+                            `<option value="${t.id}">${esc(t.name)}</option>`
+                        ).join('') || '<option value="">Sem tags disponíveis</option>'}
+                    </select>
+                    <button class="btn-sm btn-secondary" onclick="addConvTag(${conv.id}, document.getElementById('conv-tag-select').value)">+</button>
+                </div>` : ''}
+            </div>
             <div><strong>Notas:</strong> <span class="muted">${esc(contact?.notes || '-')}</span></div>
             <div style="margin-top:16px">
                 <strong>Status:</strong>
@@ -228,8 +281,24 @@ function renderInfoPanel(conv, contact, tags) {
 }
 
 async function updateConvStatus(convId, status) {
-    await api(`/api/conversations/${convId}/status`, { method: 'PUT', body: JSON.stringify({ status }) });
-    selectConversation(convId);
+    const res = await api(`/api/conversations/${convId}/status`, { method: 'PUT', body: JSON.stringify({ status }) });
+    if (!res || res.error) return;
+
+    // Aplica localmente na lista
+    const found = conversations.find(c => c.id === convId);
+    if (found) found.status = status;
+
+    // Atualiza o cabeçalho do chat imediatamente
+    if (currentConvId === convId) {
+        const header = document.querySelector('#chat-header span');
+        if (header) {
+            const name = header.textContent.replace(/\s*\([^)]*\)\s*$/, '');
+            header.textContent = `${name} (${status})`;
+        }
+        // Atualiza painel de detalhes + lista sem reconstruir as mensagens (sem animação)
+        refreshConversationPanel(convId);
+    }
+    loadConversations();
 }
 
 async function toggleMode(convId) {
@@ -257,6 +326,53 @@ async function toggleMode(convId) {
     loadConversations();
 }
 
+async function addConvTag(convId, tagId) {
+    if (!tagId) return;
+    const res = await api(`/api/conversations/${convId}/tags`, { method: 'POST', body: JSON.stringify({ tag_id: Number(tagId) }) });
+    if (res && !res.error) {
+        toast('Tag adicionada', 'success');
+        if (currentConvId === convId) refreshConversationPanel(convId);
+    }
+}
+
+async function removeConvTag(convId, tagId) {
+    const res = await api(`/api/conversations/${convId}/tags/${tagId}`, { method: 'DELETE' });
+    if (res && !res.error) {
+        toast('Tag removida', 'success');
+        if (currentConvId === convId) refreshConversationPanel(convId);
+    }
+}
+
+/* ── Templates quick ─────────────────────────────────────────────────── */
+let templatesCache = [];
+
+async function toggleTemplateMenu() {
+    const menu = document.getElementById('template-menu');
+    if (!menu) return;
+    const willOpen = menu.style.display !== 'flex';
+    menu.style.display = 'none';
+    if (!willOpen) return;
+
+    templatesCache = await api('/api/templates') || [];
+    if (templatesCache.length === 0) { toast('Nenhum template cadastrado', 'info'); return; }
+    menu.innerHTML = templatesCache.map((t, i) =>
+        `<div class="template-item" onclick="useTemplate(${i})">
+            <div class="template-item-title">${esc(t.title)}</div>
+            <div class="template-item-body">${esc(t.body)}</div>
+        </div>`
+    ).join('');
+    menu.style.display = 'flex';
+}
+
+function useTemplate(index) {
+    const t = templatesCache[index];
+    if (!t) return;
+    const input = document.getElementById('chat-input');
+    if (input) { input.value = t.body; input.focus(); }
+    document.getElementById('template-menu').style.display = 'none';
+    toast('Template aplicado ao campo', 'info');
+}
+
 /* ── Chat send ────────────────────────────────────────────────────────────── */
 document.getElementById('chat-send').addEventListener('click', sendMessage);
 document.getElementById('chat-input').addEventListener('keydown', e => {
@@ -280,7 +396,10 @@ async function sendMessage() {
     setBtnLoading(btn, false);
     input.value = '';
     toast('Mensagem enviada', 'success');
-    selectConversation(currentConvId);
+    // Anexa a mensagem enviada sem reconstruir o histórico (só a nova anima)
+    const sent = await api(`/api/conversations/${currentConvId}`);
+    if (sent?.messages?.length) appendMessage(sent.messages[sent.messages.length - 1]);
+    refreshConversationPanel(currentConvId);
 }
 
 /* ── Contacts ─────────────────────────────────────────────────────────────── */
@@ -343,6 +462,8 @@ async function saveContact(e, id) {
     setBtnLoading(btn, false);
     closeModal();
     loadContacts();
+    // Atualiza o painel da conversa aberta com os dados novos do contato (sem reconstruir o chat)
+    if (currentConvId) refreshConversationPanel(currentConvId);
 }
 
 async function editContact(id) {
@@ -722,12 +843,22 @@ function closeModal() {
 /* ── SSE ──────────────────────────────────────────────────────────────────── */
 function connectSSE() {
     const source = new EventSource('/api/events');
-    source.onmessage = e => {
+    source.onmessage = async e => {
         const { event, data } = JSON.parse(e.data);
         if (event === 'new_message') {
             if (currentView === 'conversations') {
                 if (currentConvId === data.conversation_id) {
-                    selectConversation(data.conversation_id);
+                    // Anexa apenas a mensagem nova (anima só ela)
+                    refreshConversationPanel(data.conversation_id);
+                    const d = await api(`/api/conversations/${data.conversation_id}`);
+                    if (d?.messages?.length) {
+                        const last = d.messages[d.messages.length - 1];
+                        // Evita duplicar se já for a mesma da última renderização
+                        const lastEl = document.querySelector('#chat-messages .msg:last-child');
+                        if (!lastEl || !lastEl.textContent.includes(esc(last.body).slice(0, 30))) {
+                            appendMessage(last);
+                        }
+                    }
                 } else {
                     loadConversations();
                 }
@@ -735,7 +866,7 @@ function connectSSE() {
             updateUnreadBadge();
         } else if (event === 'message_sent') {
             if (currentView === 'conversations' && currentConvId === data.conversation_id) {
-                selectConversation(data.conversation_id);
+                refreshConversationPanel(data.conversation_id);
             }
         } else if (event === 'conversation_updated') {
             loadConversations();

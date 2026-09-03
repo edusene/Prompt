@@ -265,8 +265,32 @@ def list_conversations(status: str = "", limit: int = 100, offset: int = 0) -> l
                 "ORDER BY c.last_message_at DESC LIMIT ? OFFSET ?",
                 (limit, offset),
             ).fetchall()
-        conn.close()
-        return [dict(r) for r in rows]
+
+        # Agrega as tags de cada conversa para exibição direta na lista
+        conv_ids = [r["id"] for r in rows]
+        tags_by_conv: dict[int, list[dict]] = {}
+        if conv_ids:
+            placeholders = ",".join("?" * len(conv_ids))
+            tag_rows = conn.execute(
+                f"SELECT ct.conversation_id AS conv_id, t.id, t.name, t.color "
+                f"FROM conversation_tags ct JOIN tags t ON t.id=ct.tag_id "
+                f"WHERE ct.conversation_id IN ({placeholders}) ORDER BY t.name",
+                conv_ids,
+            ).fetchall()
+            for tr in tag_rows:
+                tags_by_conv.setdefault(tr["conv_id"], []).append(
+                    {"id": tr["id"], "name": tr["name"], "color": tr["color"]}
+                )
+            conn.close()
+        else:
+            conn.close()
+
+        result = []
+        for r in rows:
+            item = dict(r)
+            item["tags"] = tags_by_conv.get(item["id"], [])
+            result.append(item)
+        return result
 
 
 def update_conversation(conv_id: int, **fields: Any) -> None:
