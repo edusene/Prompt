@@ -102,3 +102,17 @@ def configure_webhook(webhook_url: str, events: list[str] | None = None) -> dict
 
 def get_webhook() -> dict:
     return _request("GET", "/webhook")
+
+
+def config_problem() -> str | None:
+    """Retorna mensagem de erro se a UAZAPI não estiver configurada, ou None se OK."""
+    base = _BASE_URL or ""
+    token = _TOKEN or ""
+    if not token or "cole_o_token" in token:
+        return "UAZAPI_INSTANCE_TOKEN nao configurado no .env"
+    if (not base
+            or "seudominio" in base.lower()
+            or "placeholder" in base.lower()
+            or not base.startswith("http")):
+        return "UAZAPI_BASE_URL nao configurado no .env"
+    return None

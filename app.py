@@ -161,7 +161,10 @@ def handle_flush(user: str, texts: list[str]) -> None:
     for chunk in chunks:
         send_presence(user, "composing")
         time.sleep(1 + len(chunk) / 200)
-        send_text(user, chunk)
+        res = send_text(user, chunk)
+        if not res.get("ok"):
+            print(f"[flush] ERRO ao enviar p/ {user}: {res.get('error')}")
+            continue
         send_msg_out_to_panel(user, chunk)
 
     send_presence(user, "paused")
@@ -359,6 +362,11 @@ def webhook():
     return jsonify({"ok": True})
 
 
+@app.get("/")
+def index():
+    return redirect(url_for("panel_page"))
+
+
 # ── Panel page ────────────────────────────────────────────────────────────────
 
 @app.get("/panel")
@@ -440,6 +448,11 @@ def api_instance_diagnose():
 @app.get("/api/instance/status")
 @login_required
 def api_instance_status():
+    from uazapi import config_problem
+    problem = config_problem()
+    if problem:
+        return jsonify({"status": "error", "error": problem})
+
     cached = _get_cached_status()
     if cached is not None:
         return jsonify(cached)
@@ -709,7 +722,11 @@ def api_messages_send():
     if not phone or not body:
         return jsonify({"error": "phone and body required"}), 400
 
-    send_text(phone, body)
+    res = send_text(phone, body)
+    if not res.get("ok"):
+        err = res.get("error") or "Falha ao enviar mensagem pelo WhatsApp."
+        print(f"[api] ERRO ao enviar p/ {phone}: {err}")
+        return jsonify({"error": err}), (res.get("status") or 500)
 
     contact = database.upsert_contact(phone)
     conv = database.get_or_create_conversation(phone)

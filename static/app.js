@@ -606,11 +606,15 @@ async function sendMessage() {
     if (!conv) return;
 
     setBtnLoading(btn, true);
-    await api('/api/messages/send', {
+    const res = await api('/api/messages/send', {
         method: 'POST',
         body: JSON.stringify({ phone: conv.contact_phone, body: text }),
     });
     setBtnLoading(btn, false);
+    if (res?.error) {
+        toast(friendlyError(res.error), 'error');
+        return;
+    }
     input.value = '';
     autoResizeChatInput();
     toast('Mensagem enviada', 'success');
