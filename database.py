@@ -414,6 +414,9 @@ def save_message(
     status: str = "sent",
 ) -> dict | None:
     """Salva mensagem com idempotência via uazapi_id. Retorna a mensagem ou None se duplicata."""
+    # uazapi_id vazio deve virar NULL para não violar a constraint UNIQUE.
+    if not uazapi_id:
+        uazapi_id = None
     with _lock:
         conn = _get_conn()
         if uazapi_id:

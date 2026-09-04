@@ -268,11 +268,15 @@ def webhook():
     if msg.get("fromMe") or msg.get("isGroup") or msg.get("participant"):
         return jsonify({"ok": True})
 
-    # Extrai e limpa o número de telefone do remetente
+    # Extrai e limpa o número de telefone do remetente.
+    # A UAZAPI v3 fornece sender_pn (número real) e sender_lid (LID) quando disponíveis.
+    # Preferimos o PN (número real) para exibição e envio; LID fica como fallback.
     raw_from = (
-        msg.get("from", "")
+        msg.get("sender_pn") or msg.get("sender_lid")
+        or msg.get("from", "")
         or msg.get("remoteJid", "")
         or msg.get("chatId", "")
+        or msg.get("chatid", "")
         or msg.get("sender", "")
     )
     if not raw_from:
@@ -284,12 +288,12 @@ def webhook():
         return jsonify({"ok": True})
 
     push_name = msg.get("pushName") or msg.get("notifyName") or msg.get("senderName") or msg.get("name") or ""
-    message_id = msg.get("id", "")
+    message_id = msg.get("id", "") or msg.get("messageid", "")
     if not message_id and isinstance(msg.get("key"), dict):
         message_id = msg.get("key", {}).get("id", "")
 
     # Determina o texto / corpo da mensagem (atendendo a mídias, botões e variados tipos)
-    msg_type = msg.get("type", "text")
+    msg_type = msg.get("type") or msg.get("messageType", "text")
     body = (
         msg.get("body")
         or msg.get("text")
@@ -445,6 +449,20 @@ def api_instance_diagnose():
     return jsonify(results)
 
 
+def _normalize_wa_status(raw: str) -> str:
+    """Normaliza o status retornado pela UAZAPI para um valor conhecido pelo painel."""
+    s = (raw or "").strip().lower()
+    if s in ("connected", "open", "online", "connection",
+             "connection.open", "connection.connected"):
+        return "open"
+    if s in ("disconnected", "close", "closed", "offline", "logout",
+             "connection.close", "connection.disconnected", "login"):
+        return "close"
+    if s in ("connecting", "connection.connecting", "qr", "scanning"):
+        return "connecting" if "connecting" in s else "qr"
+    return s if s in ("open", "close", "connecting", "qr", "error") else "error"
+
+
 @app.get("/api/instance/status")
 @login_required
 def api_instance_status():
@@ -466,9 +484,15 @@ def api_instance_status():
         return jsonify({"status": "error", "error": err})
     data = r["data"] or {}
     inst = data.get("instance", data) if isinstance(data, dict) else {}
-    status = inst.get("status", "unknown")
-    if status in ("closed", "disconnected", "logout"):
-        status = "close"
+    # A UAZAPI v3 também expõe status.connected (booleano) separado do instance.status.
+    status_obj = data.get("status", {}) if isinstance(data, dict) else {}
+    connected = bool(status_obj.get("connected")) if isinstance(status_obj, dict) else None
+    raw_status = str(inst.get("status", "") or "")
+    if not raw_status and connected is not None:
+        raw_status = "connected" if connected else "disconnected"
+    status = _normalize_wa_status(raw_status)
+    if status == "connecting":
+        status = "qr" if not raw_status or "qr" in raw_status else "connecting"
     payload = {"status": status}
     _set_cached_status(payload)
     return jsonify(payload)
@@ -728,19 +752,22 @@ def api_messages_send():
         print(f"[api] ERRO ao enviar p/ {phone}: {err}")
         return jsonify({"error": err}), (res.get("status") or 500)
 
-    contact = database.upsert_contact(phone)
-    conv = database.get_or_create_conversation(phone)
+    # Se o envio via LID resolveu o número real (PN), usa/grava essa identidade.
+    resolved = res.get("resolved") or ""
+    contact_phone = resolved if resolved else phone
+    contact = database.upsert_contact(contact_phone)
+    conv = database.get_or_create_conversation(contact_phone)
     database.save_message(
         conversation_id=conv["id"],
-        phone=phone,
+        phone=contact_phone,
         direction="out",
         body=body,
         sender="human",
         msg_type="text",
     )
     database.update_conversation(conv["id"], last_message_at=time.strftime("%Y-%m-%dT%H:%M:%S"))
-    events.emit("message_sent", {"conversation_id": conv["id"], "phone": phone, "body": body})
-    return jsonify({"ok": True})
+    events.emit("message_sent", {"conversation_id": conv["id"], "phone": contact_phone, "body": body})
+    return jsonify({"ok": True, "phone": contact_phone, "resolved": resolved})
 
 
 # ── Contacts ──────────────────────────────────────────────────────────────────

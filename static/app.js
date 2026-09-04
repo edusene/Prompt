@@ -971,9 +971,15 @@ async function loadWAStatus(pushedStatus) {
         el.innerHTML = `<span class="wa-status-pill error" title="${esc(data.error)}"><span class="pulse-dot red"></span>${esc(friendlyError(data.error))}</span>`;
         return;
     }
-    const status = typeof data.status === 'string' ? data.status : 'desconhecido';
+    let status = typeof data.status === 'string' ? data.status.toLowerCase() : 'desconhecido';
+    // Normaliza valores possíveis que a UAZAPI pode enviar para estados do painel.
+    if (['connected', 'open', 'online'].includes(status)) status = 'open';
+    else if (['close', 'closed', 'disconnected', 'offline', 'logout'].includes(status)) status = 'close';
+    else if (['connecting', 'scanning'].includes(status)) status = 'connecting';
+    else if (status !== 'open' && status !== 'close' && status !== 'connecting'
+             && status !== 'qr' && status !== 'error') status = 'close';
     const labels = { open: 'Conectado', connecting: 'Conectando...', close: 'Desconectado', qr: 'Aguardando QR Code', error: 'Erro' };
-    const pillClass = status === 'open' ? 'open' : (status === 'error' ? 'error' : 'close');
+    const pillClass = status === 'open' ? 'open' : (status === 'error' ? 'error' : (status === 'connecting' || status === 'qr' ? 'connecting' : 'close'));
     const dotColor = status === 'open' ? 'green' : (status === 'error' ? 'red' : 'yellow');
     el.innerHTML = `
         <span class="wa-status-pill ${pillClass}">
