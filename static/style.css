@@ -529,6 +529,44 @@ h3 { font-size: 14px; font-weight: 600; }
     box-shadow: 0 0 8px var(--accent-glow);
 }
 
+.conv-badge {
+    font-size: 11px;
+    margin-left: 2px;
+    flex-shrink: 0;
+}
+
+/* ── Context Menu (clique direito em conversa) ───────────────────────────── */
+.ctx-menu {
+    position: fixed;
+    z-index: 1000;
+    min-width: 210px;
+    padding: 8px 4px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+    user-select: none;
+}
+.ctx-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    font-size: 13px;
+    color: var(--text);
+    cursor: pointer;
+    border-radius: 6px;
+    transition: background var(--transition-fast);
+}
+.ctx-menu-item:hover { background: rgba(99, 102, 241, 0.12); }
+.ctx-menu-item.danger { color: #ef4444; }
+.ctx-menu-item.danger:hover { background: rgba(239, 68, 68, 0.12); }
+.ctx-menu-sep {
+    height: 1px;
+    margin: 6px 10px;
+    background: var(--border);
+}
+
 /* ── Chat ────────────────────────────────────────────────────────────────── */
 .chat-header {
     padding: 0 20px;

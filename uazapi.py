@@ -44,6 +44,26 @@ def mark_read(number: str, message_id: str) -> dict:
     return _request("PUT", "/send/read", {"number": number, "messageId": message_id})
 
 
+def chat_archive(number: str, archive: bool) -> dict:
+    """Arquiva/desarquiva o chat no WhatsApp (best-effort)."""
+    return _request("PUT", "/chat/archive", {"number": number, "archive": archive})
+
+
+def chat_pin(number: str, pin: bool) -> dict:
+    """Fixap/desafixa o chat no WhatsApp (best-effort)."""
+    return _request("PUT", "/chat/pin", {"number": number, "pin": pin})
+
+
+def chat_mute(number: str, mute: bool, mute_expiration: int = 0) -> dict:
+    """Silencia/ativa o som do chat no WhatsApp. mute_expiration 0 = para sempre."""
+    return _request("PUT", "/chat/mute", {"number": number, "mute": mute, "muteExpiration": mute_expiration})
+
+
+def chat_delete(number: str) -> dict:
+    """Apaga o chat no WhatsApp (best-effort)."""
+    return _request("DELETE", "/chat", {"number": number})
+
+
 def get_qr_code() -> dict:
     """POST /instance/connect — retorna QR code base64."""
     return _request("POST", "/instance/connect", {})

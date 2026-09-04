@@ -23,9 +23,22 @@ def _get_conn() -> sqlite3.Connection:
 
 
 def init_db() -> None:
-    """Cria todas as tabelas se não existirem."""
+    """Cria todas as tabelas se não existirem (e aplica migrações idempotentes)."""
     conn = _get_conn()
     conn.executescript(SCHEMA)
+
+    # Migração idempotente: adiciona colunas de gerenciamento de conversa
+    # (arquivada, silenciada, fixada, favorita) se não existirem ainda.
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(conversations)").fetchall()}
+    for col, ddl in (
+        ("archived", "ALTER TABLE conversations ADD COLUMN archived INTEGER DEFAULT 0"),
+        ("muted", "ALTER TABLE conversations ADD COLUMN muted INTEGER DEFAULT 0"),
+        ("pinned", "ALTER TABLE conversations ADD COLUMN pinned INTEGER DEFAULT 0"),
+        ("favorite", "ALTER TABLE conversations ADD COLUMN favorite INTEGER DEFAULT 0"),
+    ):
+        if col not in cols:
+            conn.execute(ddl)
+    conn.commit()
     conn.close()
 
 
@@ -52,6 +65,10 @@ CREATE TABLE IF NOT EXISTS conversations (
     priority TEXT DEFAULT 'normal',
     unread_count INTEGER DEFAULT 0,
     last_message_at TEXT,
+    archived INTEGER DEFAULT 0,
+    muted INTEGER DEFAULT 0,
+    pinned INTEGER DEFAULT 0,
+    favorite INTEGER DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
 );
@@ -248,23 +265,31 @@ def get_conversation(conv_id: int) -> dict | None:
         return dict(row) if row else None
 
 
-def list_conversations(status: str = "", limit: int = 100, offset: int = 0) -> list[dict]:
+def list_conversations(status: str = "", archived: bool | None = None,
+                       limit: int = 100, offset: int = 0) -> list[dict]:
+    """Lista conversas. Por padrão esconde arquivadas; `archived=True` mostra só arquivadas.
+
+    Fixadas (pinned=1) sobem para o topo mantendo a ordenação por última mensagem.
+    """
     with _lock:
         conn = _get_conn()
+        where = []
+        params: list[Any] = []
         if status:
-            rows = conn.execute(
-                "SELECT c.*, ct.name as contact_name, ct.phone as contact_phone "
-                "FROM conversations c LEFT JOIN contacts ct ON c.contact_id=ct.id "
-                "WHERE c.status=? ORDER BY c.last_message_at DESC LIMIT ? OFFSET ?",
-                (status, limit, offset),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT c.*, ct.name as contact_name, ct.phone as contact_phone "
-                "FROM conversations c LEFT JOIN contacts ct ON c.contact_id=ct.id "
-                "ORDER BY c.last_message_at DESC LIMIT ? OFFSET ?",
-                (limit, offset),
-            ).fetchall()
+            where.append("c.status=?")
+            params.append(status)
+        if archived is None:
+            where.append("c.archived=0")
+        elif archived is True:
+            where.append("c.archived=1")
+        where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+        rows = conn.execute(
+            "SELECT c.*, ct.name as contact_name, ct.phone as contact_phone "
+            "FROM conversations c LEFT JOIN contacts ct ON c.contact_id=ct.id "
+            f"{where_sql} ORDER BY c.pinned DESC, c.last_message_at DESC, c.id DESC "
+            "LIMIT ? OFFSET ?",
+            (*params, limit, offset),
+        ).fetchall()
 
         # Agrega as tags de cada conversa para exibição direta na lista
         conv_ids = [r["id"] for r in rows]
@@ -296,7 +321,8 @@ def list_conversations(status: str = "", limit: int = 100, offset: int = 0) -> l
 def update_conversation(conv_id: int, **fields: Any) -> None:
     with _lock:
         conn = _get_conn()
-        allowed = ("status", "assigned_to", "priority", "unread_count", "last_message_at")
+        allowed = ("status", "assigned_to", "priority", "unread_count", "last_message_at",
+                   "archived", "muted", "pinned", "favorite")
         sets = []
         vals = []
         for k, v in fields.items():
@@ -330,6 +356,42 @@ def reset_unread(conv_id: int) -> None:
             "UPDATE conversations SET unread_count=0, updated_at=? WHERE id=?",
             (datetime.utcnow().isoformat(), conv_id),
         )
+        conn.commit()
+        conn.close()
+
+
+def mark_unread(conv_id: int) -> None:
+    """Marca como não lida (garante unread_count >= 1)."""
+    with _lock:
+        conn = _get_conn()
+        conn.execute(
+            "UPDATE conversations SET unread_count=MAX(unread_count,1), updated_at=? WHERE id=?",
+            (datetime.utcnow().isoformat(), conv_id),
+        )
+        conn.commit()
+        conn.close()
+
+
+def clear_conversation(conv_id: int) -> None:
+    """Remove todas as mensagens da conversa (mantém o chat/contato)."""
+    with _lock:
+        conn = _get_conn()
+        conn.execute("DELETE FROM messages WHERE conversation_id=?", (conv_id,))
+        conn.execute(
+            "UPDATE conversations SET unread_count=0, last_message_at=NULL, updated_at=? WHERE id=?",
+            (datetime.utcnow().isoformat(), conv_id),
+        )
+        conn.commit()
+        conn.close()
+
+
+def delete_conversation(conv_id: int) -> None:
+    """Remove mensagens, vínculo de tags e a própria conversa."""
+    with _lock:
+        conn = _get_conn()
+        conn.execute("DELETE FROM messages WHERE conversation_id=?", (conv_id,))
+        conn.execute("DELETE FROM conversation_tags WHERE conversation_id=?", (conv_id,))
+        conn.execute("DELETE FROM conversations WHERE id=?", (conv_id,))
         conn.commit()
         conn.close()
 

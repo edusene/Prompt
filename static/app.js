@@ -7,6 +7,11 @@ let pollTimers = [];
 let lastWAStatus = '';
 let waStatusTimer = null;
 
+/* ── Estado de conversas (portugués) ─────────────────────────────────────── */
+const CONV_STATUS = { new: 'Novo', open: 'Aberto', waiting: 'Aguardando', resolved: 'Resolvido', closed: 'Fechado' };
+function statusLabel(s) { return CONV_STATUS[s] || s || ''; }
+let contextMenuConvId = null;
+
 /* ── Toast Notifications ─────────────────────────────────────────────────── */
 function toast(message, type = 'info') {
     const container = document.getElementById('toast-container');
@@ -132,8 +137,9 @@ document.getElementById('conv-filter').addEventListener('change', loadConversati
 async function loadConversations() {
     const status = document.getElementById('conv-filter').value;
     const list = document.getElementById('conv-list');
+    const archivedParam = status === 'archived' ? '&archived=1' : '';
     if (!list.dataset.loaded) list.innerHTML = skeletonRows(5);
-    conversations = await api(`/api/conversations?status=${status}`);
+    conversations = await api(`/api/conversations?status=${status}${archivedParam}`);
     if (!conversations) return;
     list.dataset.loaded = '1';
     if (conversations.length === 0) {
@@ -147,12 +153,16 @@ async function loadConversations() {
         const tagChips = (c.tags || []).map(t =>
             `<span class="conv-tag-chip" style="background:${t.color}" title="${esc(t.name)}">${esc(t.name)}</span>`
         ).join('');
+        const badges = [];
+        if (c.pinned) badges.push('<span class="conv-badge" title="Fixada">📌</span>');
+        if (c.muted) badges.push('<span class="conv-badge" title="Silenciado">🔇</span>');
+        if (c.favorite) badges.push('<span class="conv-badge" title="Favorita">⭐</span>');
         return `
-            <div class="conv-item ${c.id === currentConvId ? 'active' : ''}" data-conv-id="${c.id}" onclick="selectConversation(${c.id})">
+            <div class="conv-item ${c.id === currentConvId ? 'active' : ''}" data-conv-id="${c.id}" onclick="selectConversation(${c.id})" oncontextmenu="openContextMenu(event, ${c.id})">
                 <div class="conv-avatar">${initials}</div>
                 <div class="conv-meta">
-                    <div class="conv-name">${esc(name)}</div>
-                    <div class="conv-preview"><span class="status-dot status-${c.status}"></span>${c.status}</div>
+                    <div class="conv-name">${esc(name)} ${badges.join('')}</div>
+                    <div class="conv-preview"><span class="status-dot status-${c.status}"></span>${esc(statusLabel(c.status))}</div>
                     ${tagChips ? `<div class="conv-tags">${tagChips}</div>` : ''}
                 </div>
                 <div style="text-align:right">
@@ -194,6 +204,109 @@ async function selectConversation(convId) {
     loadConversations();
 }
 
+function deselectConversation() {
+    currentConvId = null;
+    document.querySelectorAll('.conv-item').forEach(el => el.classList.remove('active'));
+    const header = document.getElementById('chat-header');
+    if (header) header.innerHTML = '<span>Selecione uma conversa</span>';
+    const msgDiv = document.getElementById('chat-messages');
+    if (msgDiv) msgDiv.innerHTML = '';
+    const inputArea = document.getElementById('chat-input-area');
+    if (inputArea) inputArea.style.display = 'none';
+    const info = document.getElementById('info-panel');
+    if (info) info.innerHTML = '<p class="muted">Selecione uma conversa para ver detalhes</p>';
+}
+
+/* ── Context menu (clique direito en contacto) ────────────────────────────── */
+function openContextMenu(event, convId) {
+    event.preventDefault();
+    event.stopPropagation();
+    selectConversation(convId);
+    contextMenuConvId = convId;
+    closeContextMenu();
+
+    const found = conversations.find(c => c.id === convId);
+    const c = found || {};
+    const archLabel = c.archived ? 'Desarquivar' : 'Arquivar';
+    const muteLabel = c.muted ? 'Ativar som' : 'Silenciar';
+    const pinLabel = c.pinned ? 'Desafixar' : 'Fixar';
+    const favLabel = c.favorite ? 'Remover dos favoritos' : 'Adicionar aos favoritos';
+
+    const menu = document.createElement('div');
+    menu.className = 'ctx-menu';
+    menu.style.position = 'fixed';
+    menu.style.left = `${Math.min(event.clientX, window.innerWidth - 220)}px`;
+    menu.style.top = `${Math.min(event.clientY, window.innerHeight - 260)}px`;
+    menu.innerHTML = `
+        <div class="ctx-menu-item" onclick="setConvFlag(${convId}, 'archived', ${c.archived ? 0 : 1})">${archLabel}</div>
+        <div class="ctx-menu-item" onclick="setConvFlag(${convId}, 'muted', ${c.muted ? 0 : 1})">${muteLabel}</div>
+        <div class="ctx-menu-item" onclick="setConvFlag(${convId}, 'pinned', ${c.pinned ? 0 : 1})">${pinLabel}</div>
+        <div class="ctx-menu-item" onclick="setConvFlag(${convId}, 'favorite', ${c.favorite ? 0 : 1})">${favLabel}</div>
+        <div class="ctx-menu-sep"></div>
+        <div class="ctx-menu-item" onclick="markUnreadConv(${convId})">Marcar como não lida</div>
+        <div class="ctx-menu-item" onclick="clearConv(${convId})">Limpar conversa</div>
+        <div class="ctx-menu-item danger" onclick="deleteConv(${convId})">Apagar conversa</div>
+    `;
+    document.body.appendChild(menu);
+}
+
+function closeContextMenu() {
+    const existing = document.querySelector('.ctx-menu');
+    if (existing) existing.remove();
+}
+
+async function setConvFlag(convId, flag, value) {
+    closeContextMenu();
+    const res = await api(`/api/conversations/${convId}/flags`, {
+        method: 'PUT',
+        body: JSON.stringify({ [flag]: !!value }),
+    });
+    if (res && !res.error) {
+        toast(`Conversa ${res[flag] ? 'marcada' : 'atualizada'}`, 'success');
+    } else {
+        toast('Erro ao atualizar', 'error');
+    }
+    if (currentConvId === convId) refreshConversationPanel(convId);
+    loadConversations();
+}
+
+async function markUnreadConv(convId) {
+    closeContextMenu();
+    const res = await api(`/api/conversations/${convId}/unread`, { method: 'PUT' });
+    if (res && !res.error) toast('Mensagens marcadas como não lidas', 'success');
+    else toast('Erro ao marcar', 'error');
+    loadConversations();
+    updateUnreadBadge();
+}
+
+async function clearConv(convId) {
+    closeContextMenu();
+    if (!confirm('Limpar esta conversa?')) return;
+    const res = await api(`/api/conversations/${convId}/clear`, { method: 'POST' });
+    if (res && !res.error) {
+        toast('Conversa limpa', 'success');
+        if (currentConvId === convId) {
+            document.getElementById('chat-messages').innerHTML = '';
+        }
+        loadConversations();
+    } else {
+        toast('Erro ao limpar', 'error');
+    }
+}
+
+async function deleteConv(convId) {
+    closeContextMenu();
+    if (!confirm('Apagar esta conversa?')) return;
+    const res = await api(`/api/conversations/${convId}`, { method: 'DELETE' });
+    if (res && !res.error) {
+        toast('Conversa apagada', 'success');
+        if (currentConvId === convId) deselectConversation();
+        loadConversations();
+    } else {
+        toast('Erro ao apagar', 'error');
+    }
+}
+
 // Atualiza header + painel de detalhes sem reconstruir as mensagens (sem animação de "reabrir")
 async function refreshConversationPanel(convId) {
     if (!convId) return;
@@ -212,7 +325,7 @@ function renderChatHeader(conv, contact) {
     const autoMode = contact?.auto_mode ? 'Auto' : 'Humano';
     const autoClass = contact?.auto_mode ? 'auto-on' : 'auto-off';
     document.getElementById('chat-header').innerHTML = `
-        <span>${esc(name)} (${esc(conv.status)})</span>
+        <span>${esc(name)} (${esc(statusLabel(conv.status))})</span>
         <span class="auto-badge ${autoClass}">${autoMode}</span>
     `;
 }
@@ -266,7 +379,7 @@ function renderInfoPanel(conv, contact, tags, allTags) {
                 <strong>Status:</strong>
                 <select class="select-sm" onchange="updateConvStatus(${conv.id}, this.value)">
                     ${['new','open','waiting','resolved','closed'].map(s =>
-                        `<option value="${s}" ${conv.status===s?'selected':''}>${s}</option>`
+                        `<option value="${s}" ${conv.status===s?'selected':''}>${esc(statusLabel(s))}</option>`
                     ).join('')}
                 </select>
             </div>
@@ -295,7 +408,7 @@ async function updateConvStatus(convId, status) {
         const header = document.querySelector('#chat-header span');
         if (header) {
             const name = header.textContent.replace(/\s*\([^)]*\)\s*$/, '');
-            header.textContent = `${name} (${status})`;
+            header.textContent = `${name} (${esc(statusLabel(status))})`;
         }
         // Atualiza painel de detalhes + lista sem reconstruir as mensagens (sem animação)
         refreshConversationPanel(convId);
@@ -1087,3 +1200,13 @@ document.addEventListener('visibilitychange', () => {
 });
 setInterval(updateUnreadBadge, 30000);
 setInterval(updateKnowledgeBadge, 30000);
+
+/* ── Deseleccionar conversa al clicar fuera (como WhatsApp Web) ─────────── */
+document.addEventListener('click', (e) => {
+    // Cierra el menú de contexto en cualquier clic
+    if (!e.target.closest('.ctx-menu')) closeContextMenu();
+    // Não deseleciona ao clicar dentro do layout de conversação (lista, chat o detalhes)
+    // nem dentro do menú de contexto
+    if (e.target.closest('.conv-layout') || e.target.closest('.ctx-menu')) return;
+    if (currentConvId != null) deselectConversation();
+});

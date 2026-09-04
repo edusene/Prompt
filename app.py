@@ -19,7 +19,7 @@ import memory
 import llm
 import database
 import events
-from uazapi import send_text, send_presence, mark_read
+from uazapi import send_text, send_presence, mark_read, chat_archive, chat_pin, chat_mute, chat_delete
 from buffer import MessageBuffer
 from auth import login_required, do_login, do_logout
 
@@ -490,7 +490,9 @@ def api_conversations_list():
     status = request.args.get("status", "")
     limit = int(request.args.get("limit", "100"))
     offset = int(request.args.get("offset", "0"))
-    convs = database.list_conversations(status=status, limit=limit, offset=offset)
+    arch = request.args.get("archived", "")
+    archived = None if arch == "" else (arch == "1" or arch.lower() == "true")
+    convs = database.list_conversations(status=status, archived=archived, limit=limit, offset=offset)
     return jsonify(convs)
 
 
@@ -547,6 +549,71 @@ def api_conversations_toggle_mode(conv_id):
 @login_required
 def api_conversations_mark_read(conv_id):
     database.reset_unread(conv_id)
+    return jsonify({"ok": True})
+
+
+@app.put("/api/conversations/<int:conv_id>/unread")
+@login_required
+def api_conversations_mark_unread(conv_id):
+    """Marca como não lida (painel-only; UAZAPI não expone endpoint)."""
+    database.mark_unread(conv_id)
+    events.emit("conversation_updated", {"conversation_id": conv_id, "unread_count": 1})
+    return jsonify({"ok": True})
+
+
+@app.put("/api/conversations/<int:conv_id>/flags")
+@login_required
+def api_conversations_update_flags(conv_id):
+    """Atualiza flags (archived/muted/pinned/favorite). Sincroniza UAZAPI quando aplicable."""
+    data = request.get_json(silent=True) or {}
+    fields = {}
+    for key in ("archived", "muted", "pinned", "favorite"):
+        if key in data:
+            fields[key] = 1 if data[key] else 0
+
+    conv = database.get_conversation(conv_id)
+    if not conv:
+        return jsonify({"error": "not found"}), 404
+
+    if fields:
+        database.update_conversation(conv_id, **fields)
+        events.emit("conversation_updated", {"conversation_id": conv_id, **fields})
+
+    # Sincronización con WhatsApp real (best-effort, solo quando conectado/configurado)
+    contact = database.get_contact_by_id(conv["contact_id"]) if conv else None
+    phone = (contact or {}).get("phone", "")
+    if fields and phone:
+        number = str(phone).replace("@s.whatsapp.net", "")
+        if "archived" in fields:
+            chat_archive(number, bool(fields["archived"]))
+        if "pinned" in fields:
+            chat_pin(number, bool(fields["pinned"]))
+        if "muted" in fields:
+            chat_mute(number, bool(fields["muted"]))
+
+    return jsonify({"ok": True, **fields})
+
+
+@app.post("/api/conversations/<int:conv_id>/clear")
+@login_required
+def api_conversations_clear(conv_id):
+    """Elimina todas as mensagens da conversa (painel-only)."""
+    database.clear_conversation(conv_id)
+    events.emit("conversation_updated", {"conversation_id": conv_id, "cleared": True})
+    return jsonify({"ok": True})
+
+
+@app.delete("/api/conversations/<int:conv_id>")
+@login_required
+def api_conversations_delete(conv_id):
+    """Apaga a conversa (mensagens + conversa). Sincroniza UAZAPI (DELETE /chat) best-effort."""
+    conv = database.get_conversation(conv_id)
+    contact = database.get_contact_by_id(conv["contact_id"]) if conv else None
+    phone = (contact or {}).get("phone", "")
+    database.delete_conversation(conv_id)
+    if phone:
+        chat_delete(str(phone).replace("@s.whatsapp.net", ""))
+    events.emit("conversation_updated", {"conversation_id": conv_id, "deleted": True})
     return jsonify({"ok": True})
 
 
