@@ -1149,6 +1149,14 @@ function connectSSE() {
             // Atualização de status da instância vinda do servidor (sem requisição)
             if (currentView === 'whatsapp') {
                 loadWAStatus(data.status);
+                // Auto-fechar QR popup quando conectar (escaneou com sucesso)
+                if (data.status === 'open') {
+                    const qrEl = document.getElementById('qr-container');
+                    if (qrEl && qrEl.innerHTML.trim()) {
+                        closeQR();
+                        toast('WhatsApp conectado com sucesso!', 'success');
+                    }
+                }
             }
         }
     };

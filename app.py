@@ -545,14 +545,20 @@ def api_instance_qr():
     if status_r["ok"]:
         data = status_r["data"] or {}
         inst = data.get("instance", data) if isinstance(data, dict) else {}
-        st = inst.get("status", "")
+        # UAZAPI v3 pode retornar status aninhado: {"status": {"connected": true}}
+        status_obj = data.get("status", {}) if isinstance(data, dict) else {}
+        connected = bool(status_obj.get("connected")) if isinstance(status_obj, dict) else None
+        raw_status = str(inst.get("status", "") or "")
+        if not raw_status and connected is not None:
+            raw_status = "connected" if connected else "disconnected"
+        st = _normalize_wa_status(raw_status)
     print(f"[qr] status: {st}")
 
     if st == "open":
         return jsonify({"info": "WhatsApp ja esta conectado."})
 
     r = get_qr_code()
-    print(f"[qr] POST /instance/connect -> ok={r['ok']} data={str(r.get('data', r.get('error', '')))[:500]}")
+    print(f"[qr] GET /instance/connect -> ok={r['ok']} data={str(r.get('data', r.get('error', '')))[:500]}")
 
     if not r["ok"]:
         err = r["error"]
@@ -574,14 +580,14 @@ def api_instance_qr():
 @login_required
 def api_instance_disconnect():
     from uazapi import disconnect_instance
-    _invalidate_status_cache()
-    events.emit("wa_status", {"status": "close"})
     r = disconnect_instance()
     if not r["ok"]:
         err = r["error"]
         if "401" in err:
             err = "Token invalido. Verifique as configuracoes."
         return jsonify({"ok": False, "error": err}), 400
+    _invalidate_status_cache()
+    events.emit("wa_status", {"status": "close"})
     return jsonify({"ok": True})
 
 
@@ -589,14 +595,14 @@ def api_instance_disconnect():
 @login_required
 def api_instance_restart():
     from uazapi import restart_instance
-    _invalidate_status_cache()
-    events.emit("wa_status", {"status": "connecting"})
     r = restart_instance()
     if not r["ok"]:
         err = r["error"]
         if "401" in err:
             err = "Token invalido. Verifique as configuracoes."
         return jsonify({"ok": False, "error": err}), 400
+    _invalidate_status_cache()
+    events.emit("wa_status", {"status": "connecting"})
     return jsonify({"ok": True})
 
 

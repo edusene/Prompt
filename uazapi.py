@@ -205,8 +205,8 @@ def chat_delete(number: str) -> dict:
 
 
 def get_qr_code() -> dict:
-    """POST /instance/connect — retorna QR code base64."""
-    return _request("POST", "/instance/connect", {})
+    """GET /instance/connect — retorna QR code base64 (conforme docs uazapi)."""
+    return _request("GET", "/instance/connect")
 
 
 def get_instance_status() -> dict:
@@ -215,20 +215,32 @@ def get_instance_status() -> dict:
 
 
 def disconnect_instance() -> dict:
-    """Desconecta instância (UAZAPI v2 / paid: DELETE /instance/logout, fallback POST/PUT)."""
+    """Desconecta instância (DELETE /instance/logout conforme docs uazapi)."""
     r = _request("DELETE", "/instance/logout")
     if not r["ok"]:
+        # Fallback: POST /instance/logout (algumas instâncias usam POST)
         r = _request("POST", "/instance/logout", {})
     if not r["ok"]:
-        r = _request("PUT", "/instance/logout", {})
+        status = r.get("status", 0)
+        if status == 405:
+            return {"ok": False, "status": 405,
+                    "error": "Operacao dedesconexao nao suportada por esta instancia. "
+                             "Use o painel da UAZAPI para desconectar."}
     return r
 
 
 def restart_instance() -> dict:
-    """Reinicia instância (UAZAPI v2 / paid: POST /instance/restart, fallback PUT)."""
+    """Reinicia instância (POST /instance/restart conforme docs uazapi)."""
     r = _request("POST", "/instance/restart", {})
     if not r["ok"]:
+        # Fallback: PUT /instance/restart
         r = _request("PUT", "/instance/restart", {})
+    if not r["ok"]:
+        status = r.get("status", 0)
+        if status == 405:
+            return {"ok": False, "status": 405,
+                    "error": "Operacao dereinicio nao suportada por esta instancia. "
+                             "Use o painel da UAZAPI para reiniciar."}
     return r
 
 
