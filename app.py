@@ -6,6 +6,7 @@ app.py — Flask webhook + pipeline de flush do agente WhatsApp + Gemini.
 import os
 import json
 import time
+import threading
 import subprocess
 
 from dotenv import load_dotenv
@@ -258,8 +259,19 @@ def webhook_config():
 @app.post("/webhook")
 def webhook():
     data = request.get_json(silent=True) or {}
+    event = data.get("event")
 
-    if data.get("event") != "message":
+    # Evento de conexão (connection.open / connection.close / ...) → atualiza
+    # o status no painel em tempo real e invalida o cache de status.
+    if event == "connection":
+        status_raw = str(data.get("data", {}).get("status", ""))
+        status = status_raw.replace("connection.", "", 1) if status_raw else "unknown"
+        if status in ("open", "close", "connecting", "qr", "error"):
+            _invalidate_status_cache()
+            events.emit("wa_status", {"status": status})
+        return jsonify({"ok": True})
+
+    if event != "message":
         return jsonify({"ok": True})
 
     msg = data.get("data", {})
@@ -342,6 +354,30 @@ def api_dashboard():
     return jsonify(database.get_dashboard_stats())
 
 
+# ── Cache de status da instância ─────────────────────────────────────────────
+# Evita martelar a UAZAPI: múltiplas abas/polls compartilham o mesmo resultado.
+_status_lock = threading.Lock()
+_status_cache: dict = {"payload": None, "expires": 0.0}
+_STATUS_TTL = 15  # segundos
+
+
+def _get_cached_status() -> dict | None:
+    with _status_lock:
+        if _status_cache["payload"] is not None and time.time() < _status_cache["expires"]:
+            return dict(_status_cache["payload"])
+    return None
+
+
+def _set_cached_status(payload: dict) -> None:
+    with _status_lock:
+        _status_cache["payload"] = dict(payload)
+        _status_cache["expires"] = time.time() + _STATUS_TTL
+
+
+def _invalidate_status_cache() -> None:
+    with _status_lock:
+        _status_cache["payload"] = None
+        _status_cache["expires"] = 0.0
 # ── Instance ──────────────────────────────────────────────────────────────────
 
 @app.get("/api/instance/diagnose")
@@ -364,6 +400,10 @@ def api_instance_diagnose():
 @app.get("/api/instance/status")
 @login_required
 def api_instance_status():
+    cached = _get_cached_status()
+    if cached is not None:
+        return jsonify(cached)
+
     from uazapi import get_instance_status
     r = get_instance_status()
     if not r["ok"]:
@@ -374,7 +414,9 @@ def api_instance_status():
     data = r["data"] or {}
     inst = data.get("instance", data) if isinstance(data, dict) else {}
     status = inst.get("status", "unknown")
-    return jsonify({"status": status})
+    payload = {"status": status}
+    _set_cached_status(payload)
+    return jsonify(payload)
 
 
 @app.get("/api/instance/qr")
@@ -422,6 +464,7 @@ def api_instance_disconnect():
         if "401" in err:
             err = "Token invalido. Verifique as configuracoes."
         return jsonify({"ok": False, "error": err}), 400
+    _invalidate_status_cache()
     return jsonify({"ok": True})
 
 
@@ -435,6 +478,7 @@ def api_instance_restart():
         if "401" in err:
             err = "Token invalido. Verifique as configuracoes."
         return jsonify({"ok": False, "error": err}), 400
+    _invalidate_status_cache()
     return jsonify({"ok": True})
 
 

@@ -75,7 +75,7 @@ def restart_instance() -> dict:
 def configure_webhook(webhook_url: str, events: list[str] | None = None) -> dict:
     """Configura webhook — POST /webhook com campo 'url' (free.uazapi.com)."""
     if events is None:
-        events = ["message"]
+        events = ["message", "connection"]
     body = {"url": webhook_url, "events": events, "enabled": True}
     return _request("POST", "/webhook", body)
 

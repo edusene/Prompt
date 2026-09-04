@@ -4,6 +4,8 @@ let currentConvId = null;
 let conversations = [];
 let selectedTags = [];
 let pollTimers = [];
+let lastWAStatus = '';
+let waStatusTimer = null;
 
 /* ── Toast Notifications ─────────────────────────────────────────────────── */
 function toast(message, type = 'info') {
@@ -51,6 +53,7 @@ function switchView(view) {
 function loadView(view) {
     pollTimers.forEach(clearInterval);
     pollTimers = [];
+    if (waStatusTimer) { clearInterval(waStatusTimer); waStatusTimer = null; }
     switch (view) {
         case 'dashboard': loadDashboard(); break;
         case 'conversations':
@@ -68,7 +71,7 @@ function loadView(view) {
             break;
         case 'whatsapp':
             loadWAStatus();
-            pollTimers.push(setInterval(loadWAStatus, 5000));
+            startWAStatusPolling();
             break;
     }
 }
@@ -180,6 +183,7 @@ async function selectConversation(convId) {
     scrollChatBottom();
 
     document.getElementById('chat-input-area').style.display = 'flex';
+    autoResizeChatInput();
 
     // Info panel
     const allTags = await api('/api/tags');
@@ -198,6 +202,7 @@ async function refreshConversationPanel(convId) {
     const { conversation: conv, contact, tags } = data;
     renderChatHeader(conv, contact);
     document.getElementById('chat-input-area').style.display = 'flex';
+    autoResizeChatInput();
     const allTags = await api('/api/tags');
     renderInfoPanel(conv, contact, tags, allTags || []);
 }
@@ -213,12 +218,9 @@ function renderChatHeader(conv, contact) {
 }
 
 function msgHTML(m, isNew) {
-    return `
-        <div class="msg msg-${m.direction === 'in' ? 'in' : 'out'}${isNew ? ' msg-new' : ''}">
-            <div>${esc(m.body)}</div>
-            <div class="msg-time">${m.sender || m.direction} · ${new Date(m.created_at + 'Z').toLocaleTimeString('pt-BR')}</div>
-        </div>
-    `;
+    const timeStr = m.created_at ? new Date(m.created_at.endsWith('Z') ? m.created_at : m.created_at + 'Z').toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
+    const senderName = m.sender || (m.direction === 'in' ? 'Contato' : 'Atendente');
+    return `<div class="msg msg-${m.direction === 'in' ? 'in' : 'out'}${isNew ? ' msg-new' : ''}"><div class="msg-body">${esc(m.body)}</div><div class="msg-time"><span>${esc(senderName)}</span> · ${timeStr}</div></div>`;
 }
 
 function appendMessage(msg) {
@@ -348,34 +350,107 @@ async function removeConvTag(convId, tagId) {
 /* ── Templates quick ─────────────────────────────────────────────────── */
 let templatesCache = [];
 
-async function toggleTemplateMenu() {
+async function toggleTemplateMenu(e) {
+    if (e) e.stopPropagation();
     const menu = document.getElementById('template-menu');
     if (!menu) return;
     const willOpen = menu.style.display !== 'flex';
-    menu.style.display = 'none';
-    if (!willOpen) return;
+    if (!willOpen) {
+        menu.style.display = 'none';
+        return;
+    }
 
     templatesCache = await api('/api/templates') || [];
-    if (templatesCache.length === 0) { toast('Nenhum template cadastrado', 'info'); return; }
-    menu.innerHTML = templatesCache.map((t, i) =>
-        `<div class="template-item" onclick="useTemplate(${i})">
-            <div class="template-item-title">${esc(t.title)}</div>
-            <div class="template-item-body">${esc(t.body)}</div>
-        </div>`
-    ).join('');
+    if (templatesCache.length === 0) {
+        toast('Nenhum template cadastrado. Crie em "Templates" no menu.', 'info');
+        return;
+    }
+
+    menu.innerHTML = `
+        <div class="template-menu-header">
+            <span>Modelos de Resposta</span>
+            <button type="button" class="template-menu-close" onclick="closeTemplateMenu(event)" title="Fechar">&times;</button>
+        </div>
+        <div class="template-menu-list">
+            ${templatesCache.map((t, i) => `
+                <div class="template-item" onclick="useTemplate(${i}, false)">
+                    <div class="template-item-main">
+                        <div class="template-item-title">${esc(t.title)}</div>
+                        <div class="template-item-body">${esc(t.body)}</div>
+                    </div>
+                    <div class="template-item-actions">
+                        <button type="button" class="template-send-btn" onclick="event.stopPropagation(); useTemplate(${i}, true)" title="Enviar mensagem agora">
+                            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                            Enviar
+                        </button>
+                    </div>
+                </div>
+            `).join('')}
+        </div>
+    `;
     menu.style.display = 'flex';
 }
 
-function useTemplate(index) {
+function closeTemplateMenu(e) {
+    if (e) e.stopPropagation();
+    const menu = document.getElementById('template-menu');
+    if (menu) menu.style.display = 'none';
+}
+
+// Fechar menu de templates ao clicar fora
+document.addEventListener('click', e => {
+    const menu = document.getElementById('template-menu');
+    const btn = document.getElementById('chat-template-btn');
+    if (menu && menu.style.display === 'flex') {
+        if (!menu.contains(e.target) && !btn?.contains(e.target)) {
+            menu.style.display = 'none';
+        }
+    }
+});
+
+async function useTemplate(index, andSend = false) {
     const t = templatesCache[index];
     if (!t) return;
     const input = document.getElementById('chat-input');
-    if (input) { input.value = t.body; input.focus(); }
-    document.getElementById('template-menu').style.display = 'none';
-    toast('Template aplicado ao campo', 'info');
+    if (input) {
+        input.value = t.body;
+        autoResizeChatInput();
+        input.focus();
+        input.scrollTop = input.scrollHeight;
+    }
+    const menu = document.getElementById('template-menu');
+    if (menu) menu.style.display = 'none';
+
+    if (andSend) {
+        toast(`Enviando modelo: "${t.title}"...`, 'info');
+        await sendMessage();
+    } else {
+        toast(`Modelo "${t.title}" aplicado`, 'success');
+    }
 }
 
-/* ── Chat send ────────────────────────────────────────────────────────────── */
+/* ── Chat input auto-resize & send ─────────────────────────────────────────── */
+const chatInput = document.getElementById('chat-input');
+if (chatInput) {
+    chatInput.addEventListener('input', autoResizeChatInput);
+}
+
+function autoResizeChatInput() {
+    const input = document.getElementById('chat-input');
+    if (!input) return;
+    input.style.height = 'auto';
+    const minHeight = 42;
+    const maxHeight = 140; // Limite estilo WhatsApp Web (~6 linhas)
+    if (!input.value || input.value.trim() === '') {
+        input.style.height = minHeight + 'px';
+        input.style.overflowY = 'hidden';
+    } else {
+        const targetHeight = Math.min(input.scrollHeight, maxHeight);
+        input.style.height = Math.max(minHeight, targetHeight) + 'px';
+        input.style.overflowY = input.scrollHeight > maxHeight ? 'auto' : 'hidden';
+    }
+}
+
 document.getElementById('chat-send').addEventListener('click', sendMessage);
 document.getElementById('chat-input').addEventListener('keydown', e => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
@@ -397,6 +472,7 @@ async function sendMessage() {
     });
     setBtnLoading(btn, false);
     input.value = '';
+    autoResizeChatInput();
     toast('Mensagem enviada', 'success');
     // Anexa a mensagem enviada sem reconstruir o histórico (só a nova anima)
     const sent = await api(`/api/conversations/${currentConvId}`);
@@ -737,61 +813,88 @@ async function updateKnowledgeBadge() {
 }
 
 /* ── WhatsApp ─────────────────────────────────────────────────────────────── */
-async function loadWAStatus() {
-    document.getElementById('wa-status').innerHTML = spinHTML('Verificando...');
-    const data = await api('/api/instance/status');
+async function loadWAStatus(pushedStatus) {
+    const el = document.getElementById('wa-status');
+    if (!el) return;
+    // Se vier por push (SSE), atualiza direto sem recarregar o spinner e sem requisição
+    const data = pushedStatus ? { status: pushedStatus }
+        : await api('/api/instance/status');
     if (!data) {
-        document.getElementById('wa-status').innerHTML = '<span style="color:#ef4444">Erro de conexao</span>';
+        el.innerHTML = '<span class="wa-status-pill error"><span class="pulse-dot red"></span>Erro de conexão</span>';
         return;
     }
     if (data.error) {
-        document.getElementById('wa-status').innerHTML = `<span style="color:#ef4444">${esc(friendlyError(data.error))}</span>`;
+        el.innerHTML = `<span class="wa-status-pill error" title="${esc(data.error)}"><span class="pulse-dot red"></span>${esc(friendlyError(data.error))}</span>`;
         return;
     }
     const status = typeof data.status === 'string' ? data.status : 'desconhecido';
     const labels = { open: 'Conectado', connecting: 'Conectando...', close: 'Desconectado', qr: 'Aguardando QR Code', error: 'Erro' };
-    const colors = { open: '#22c55e', connecting: '#f59e0b', close: '#ef4444', qr: '#6366f1', error: '#ef4444' };
-    document.getElementById('wa-status').innerHTML = `
-        Status: <strong style="color:${colors[status] || '#999'}">${labels[status] || status}</strong>
+    const pillClass = status === 'open' ? 'open' : (status === 'connecting' || status === 'qr' ? 'connecting' : 'close');
+    const dotColor = status === 'open' ? 'green' : (status === 'connecting' || status === 'qr' ? 'yellow' : 'red');
+    el.innerHTML = `
+        <span class="wa-status-pill ${pillClass}">
+            <span class="pulse-dot ${dotColor}"></span>
+            ${labels[status] || status}
+        </span>
     `;
+    lastWAStatus = status === 'desconhecido' ? '' : status;
+    startWAStatusPolling();
+}
+
+/* Polling adaptativo do status: rápido durante pareamento (QR), lento quando
+   estável, e pausado quando a aba do navegador está oculta. */
+function startWAStatusPolling() {
+    if (waStatusTimer) { clearInterval(waStatusTimer); waStatusTimer = null; }
+    if (document.hidden) return; // aba oculta → não gera requisições
+    const fast = (lastWAStatus === 'connecting' || lastWAStatus === 'qr');
+    waStatusTimer = setInterval(() => loadWAStatus(), fast ? 5000 : 60000);
 }
 
 async function loadQRCode() {
     const container = document.getElementById('qr-container');
-    container.innerHTML = `<p class="muted">${spinHTML('Gerando QR Code...')}</p>`;
+    container.innerHTML = `<p class="muted" style="text-align:center;padding:12px 0">${spinHTML('Gerando QR Code...')}</p>`;
     const data = await api('/api/instance/qr');
     if (!data) {
-        container.innerHTML = '<p style="color:#ef4444">Erro de conexão com o servidor</p>';
+        container.innerHTML = '<p style="color:#ef4444;text-align:center">Erro de conexão com o servidor</p>';
         return;
     }
     if (data.info) {
         container.innerHTML = `
-            <div style="display:flex;justify-content:flex-end;margin-bottom:8px">
-                <button class="btn-sm btn-secondary" onclick="closeQR()" style="font-size:12px;padding:4px 10px">&times; Fechar</button>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+                <strong style="font-size:13px;color:#22c55e">WhatsApp Conectado</strong>
+                <button class="btn-sm btn-secondary" onclick="closeQR()">&times; Fechar</button>
             </div>
-            <p style="color:#22c55e;font-weight:600">${esc(data.info)}</p>`;
+            <p style="color:#22c55e;font-size:13px">${esc(data.info)}</p>`;
         return;
     }
     if (data.error) {
         container.innerHTML = `
-            <div style="display:flex;justify-content:flex-end;margin-bottom:8px">
-                <button class="btn-sm btn-secondary" onclick="closeQR()" style="font-size:12px;padding:4px 10px">&times; Fechar</button>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+                <strong style="font-size:13px;color:#ef4444">Falha ao Obter QR Code</strong>
+                <button class="btn-sm btn-secondary" onclick="closeQR()">&times; Fechar</button>
             </div>
-            <p style="color:#ef4444">${esc(friendlyError(data.error))}</p>`;
+            <p style="color:#ef4444;font-size:13px">${esc(friendlyError(data.error))}</p>`;
         return;
     }
     if (data.qrcode) {
         container.innerHTML = `
-            <div style="display:flex;justify-content:flex-end;margin-bottom:8px">
-                <button class="btn-sm btn-secondary" onclick="closeQR()" style="font-size:12px;padding:4px 10px">&times; Fechar</button>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+                <strong style="font-size:13px">Escaneie o QR Code abaixo</strong>
+                <button class="btn-sm btn-secondary" onclick="closeQR()">&times; Fechar</button>
             </div>
-            <img src="${data.qrcode}" style="max-width:256px;border-radius:8px" alt="QR Code">`;
+            <div class="wa-qr-wrapper">
+                <div class="wa-qr-frame">
+                    <img src="${data.qrcode}" alt="QR Code WhatsApp">
+                </div>
+                <p class="muted" style="font-size:12px;margin:0">O código atualiza automaticamente a cada tentativa.</p>
+            </div>`;
     } else {
         container.innerHTML = `
-            <div style="display:flex;justify-content:flex-end;margin-bottom:8px">
-                <button class="btn-sm btn-secondary" onclick="closeQR()" style="font-size:12px;padding:4px 10px">&times; Fechar</button>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+                <strong style="font-size:13px">QR Code</strong>
+                <button class="btn-sm btn-secondary" onclick="closeQR()">&times; Fechar</button>
             </div>
-            <p class="muted">QR Code nao disponivel</p>`;
+            <p class="muted">QR Code não disponível no momento.</p>`;
     }
 }
 
@@ -834,13 +937,13 @@ async function runDiagnose() {
         container.innerHTML = '<p style="color:#ef4444">Erro ao conectar com o servidor</p>';
         return;
     }
-    let html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><strong style="font-size:13px">Resultados do Diagnostico</strong><button class="btn-sm btn-secondary" onclick="closeDiagnose()" style="font-size:12px;padding:4px 10px">&times; Fechar</button></div>';
+    let html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><strong style="font-size:13px">Resultados do Diagnóstico</strong><button class="btn-sm btn-secondary" onclick="closeDiagnose()">&times; Fechar</button></div>';
     html += '<table style="width:100%;font-size:13px;border-collapse:collapse">';
-    html += '<thead><tr style="border-bottom:1px solid #333"><th style="text-align:left;padding:6px">Endpoint</th><th style="text-align:center;padding:6px">Status</th><th style="text-align:left;padding:6px">Detalhe</th></tr></thead><tbody>';
+    html += '<thead><tr style="border-bottom:1px solid rgba(255,255,255,0.1)"><th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase">Endpoint</th><th style="text-align:center;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase">Status</th><th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase">Detalhe</th></tr></thead><tbody>';
     for (const [endpoint, result] of Object.entries(data)) {
-        const icon = result.ok ? '<span style="color:#22c55e">OK</span>' : `<span style="color:#ef4444">ERRO ${result.status}</span>`;
-        const detail = result.ok ? '' : friendlyError(result.error);
-        html += `<tr style="border-bottom:1px solid #222"><td style="padding:6px;font-family:monospace">${esc(endpoint)}</td><td style="text-align:center;padding:6px">${icon}</td><td style="padding:6px;color:#999">${esc(detail)}</td></tr>`;
+        const icon = result.ok ? '<span style="color:#22c55e;font-weight:700">OK (200)</span>' : `<span style="color:#ef4444;font-weight:700">ERRO ${result.status}</span>`;
+        const detail = result.ok ? '<span style="color:#22c55e">Disponível</span>' : friendlyError(result.error);
+        html += `<tr style="border-bottom:1px solid rgba(255,255,255,0.05)"><td style="padding:8px 10px;font-family:monospace;font-size:12px">${esc(endpoint)}</td><td style="text-align:center;padding:8px 10px">${icon}</td><td style="padding:8px 10px;color:#999">${esc(detail)}</td></tr>`;
     }
     html += '</tbody></table>';
     container.innerHTML = html;
@@ -884,6 +987,11 @@ function connectSSE() {
         } else if (event === 'tags_updated') {
             // Atualiza badges/chips de tags na lista (Atendimento) e no painel da conversa aberta
             refreshTagsUI();
+        } else if (event === 'wa_status') {
+            // Atualização de status da instância vinda do servidor (sem requisição)
+            if (currentView === 'whatsapp') {
+                loadWAStatus(data.status);
+            }
         }
     };
     source.onerror = () => {
@@ -965,5 +1073,17 @@ loadDashboard();
 connectSSE();
 updateUnreadBadge();
 updateKnowledgeBadge();
+
+// Pausa/retoma o polling de status da instância conforme a visibilidade da aba
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+        if (currentView === 'whatsapp' && waStatusTimer) {
+            clearInterval(waStatusTimer);
+            waStatusTimer = null;
+        }
+    } else if (currentView === 'whatsapp') {
+        loadWAStatus();
+    }
+});
 setInterval(updateUnreadBadge, 30000);
 setInterval(updateKnowledgeBadge, 30000);
