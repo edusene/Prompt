@@ -138,8 +138,9 @@ async function loadConversations() {
     const status = document.getElementById('conv-filter').value;
     const list = document.getElementById('conv-list');
     const archivedParam = status === 'archived' ? '&archived=1' : '';
+    const statusParam = status === 'archived' ? '' : status;
     if (!list.dataset.loaded) list.innerHTML = skeletonRows(5);
-    conversations = await api(`/api/conversations?status=${status}${archivedParam}`);
+    conversations = await api(`/api/conversations?status=${statusParam}${archivedParam}`);
     if (!conversations) return;
     list.dataset.loaded = '1';
     if (conversations.length === 0) {
@@ -157,6 +158,7 @@ async function loadConversations() {
         if (c.pinned) badges.push('<span class="conv-badge" title="Fixada">📌</span>');
         if (c.muted) badges.push('<span class="conv-badge" title="Silenciado">🔇</span>');
         if (c.favorite) badges.push('<span class="conv-badge" title="Favorita">⭐</span>');
+        if (c.archived) badges.push('<span class="conv-badge" title="Arquivada">📦</span>');
         return `
             <div class="conv-item ${c.id === currentConvId ? 'active' : ''}" data-conv-id="${c.id}" onclick="selectConversation(${c.id})" oncontextmenu="openContextMenu(event, ${c.id})">
                 <div class="conv-avatar">${initials}</div>
@@ -262,7 +264,13 @@ async function setConvFlag(convId, flag, value) {
         body: JSON.stringify({ [flag]: !!value }),
     });
     if (res && !res.error) {
-        toast(`Conversa ${res[flag] ? 'marcada' : 'atualizada'}`, 'success');
+        const flagLabels = {
+            archived: res.archived ? 'Conversa arquivada' : 'Conversa desarquivada',
+            pinned: res.pinned ? 'Conversa fixada' : 'Conversa desafixada',
+            muted: res.muted ? 'Conversa silenciada' : 'Som reativado',
+            favorite: res.favorite ? 'Adicionada aos favoritos' : 'Removida dos favoritos'
+        };
+        toast(flagLabels[flag] || 'Conversa atualizada', 'success');
     } else {
         toast('Erro ao atualizar', 'error');
     }
@@ -382,6 +390,13 @@ function renderInfoPanel(conv, contact, tags, allTags) {
                         `<option value="${s}" ${conv.status===s?'selected':''}>${esc(statusLabel(s))}</option>`
                     ).join('')}
                 </select>
+            </div>
+            <div style="margin-top:8px">
+                <strong>Arquivada:</strong>
+                <button class="btn-sm ${conv.archived ? 'btn-warning' : 'btn-secondary'}"
+                        onclick="setConvFlag(${conv.id}, 'archived', ${conv.archived ? 0 : 1})">
+                    ${conv.archived ? 'Desarquivar' : 'Arquivar'}
+                </button>
             </div>
             <div style="margin-top:8px">
                 <strong>Modo:</strong>

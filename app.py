@@ -492,6 +492,9 @@ def api_conversations_list():
     offset = int(request.args.get("offset", "0"))
     arch = request.args.get("archived", "")
     archived = None if arch == "" else (arch == "1" or arch.lower() == "true")
+    if status == "archived":
+        status = ""
+        archived = True
     convs = database.list_conversations(status=status, archived=archived, limit=limit, offset=offset)
     return jsonify(convs)
 

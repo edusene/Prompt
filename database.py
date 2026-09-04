@@ -271,6 +271,10 @@ def list_conversations(status: str = "", archived: bool | None = None,
 
     Fixadas (pinned=1) sobem para o topo mantendo a ordenação por última mensagem.
     """
+    if status == "archived":
+        status = ""
+        archived = True
+
     with _lock:
         conn = _get_conn()
         where = []
@@ -278,10 +282,10 @@ def list_conversations(status: str = "", archived: bool | None = None,
         if status:
             where.append("c.status=?")
             params.append(status)
-        if archived is None:
-            where.append("c.archived=0")
-        elif archived is True:
+        if archived is True:
             where.append("c.archived=1")
+        else:
+            where.append("c.archived=0")
         where_sql = ("WHERE " + " AND ".join(where)) if where else ""
         rows = conn.execute(
             "SELECT c.*, ct.name as contact_name, ct.phone as contact_phone "
