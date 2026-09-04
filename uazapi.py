@@ -4,6 +4,7 @@ Endpoints testados e confirmados: POST /instance/connect, POST /webhook, GET /in
 """
 
 import os
+import threading
 import requests
 
 _BASE_URL = os.getenv("UAZAPI_BASE_URL", "").rstrip("/")
@@ -20,7 +21,9 @@ def _request(method: str, endpoint: str, body: dict | None = None, params: dict 
             data = r.json()
         except Exception:
             data = r.text
-        print(f"[uazapi] {method} {endpoint} -> {r.status_code} | {str(data)[:300]}")
+        # errors="replace": logs podem conter emoji do WhatsApp e o stdout do
+        # Windows pode estar em cp1252 — nunca deixar o print derrubar o fluxo.
+        print(f"[uazapi] {method} {endpoint} -> {r.status_code} | {str(data)[:300]}", flush=True)
         if r.ok:
             return {"ok": True, "status": r.status_code, "data": data}
         return {"ok": False, "status": r.status_code, "error": f"HTTP {r.status_code}: {str(data)[:200]}"}
@@ -108,6 +111,77 @@ def mark_read(number: str, message_id: str = "") -> dict:
         if r2.get("ok"):
             return r2
     return r
+
+
+def check_numbers(numbers: list[str]) -> list[dict]:
+    """POST /chat/check — resolve PN/LID. Retorna a lista de itens da UAZAPI
+    (cada item: query, isInWhatsapp, jid, lid, verifiedName, error)."""
+    r = _request("POST", "/chat/check", {"numbers": numbers})
+    if r.get("ok") and isinstance(r.get("data"), list):
+        return r["data"]
+    return []
+
+
+_lid_cache: dict[str, str] = {}
+_lid_cache_lock = threading.Lock()
+
+
+def resolve_lid_to_pn(number: str) -> str:
+    """Se 'number' for um LID (ex.: 223656663867638, 15-16 dígitos, não é um PN),
+    resolve para o PN canônico via POST /chat/check (com cache em memória).
+
+    O /chat/check só converte LID→PN quando o LID é enviado com o sufixo '@lid'.
+    Consultamos de uma vez o número puro e a forma @lid e decidimos:
+      - puro existe no WhatsApp -> é um PN (o 'jid' traz a forma canônica);
+      - só a forma @lid resolve -> é um LID e o 'jid' traz o PN real.
+    PNs plausíveis (10-13 dígitos) nem chegam a consumir chamada de API.
+    """
+    n = normalize_number(number)
+    if n.lower().endswith("@lid"):
+        n = "".join(c for c in n.split("@")[0] if c.isdigit())
+    if not n or not n.isdigit():
+        return number
+    if 10 <= len(n) <= 13:
+        return n  # Parece um PN (DDI+DDD+número): nada a resolver.
+    with _lid_cache_lock:
+        if n in _lid_cache:
+            return _lid_cache[n]
+    items = check_numbers([n, f"{n}@lid"])
+    by_query = {str(it.get("query", "")): it for it in items if isinstance(it, dict)}
+    pn = ""
+    plain = by_query.get(n) or {}
+    if plain.get("isInWhatsapp") and plain.get("jid"):
+        pn = str(plain["jid"]).split("@")[0]
+    else:
+        lid_item = by_query.get(f"{n}@lid") or {}
+        jid = str(lid_item.get("jid", ""))
+        if lid_item.get("isInWhatsapp") and jid.endswith("@s.whatsapp.net"):
+            pn = jid.split("@")[0]
+    if not pn:
+        pn = n  # não achou: mantém o próprio número
+    with _lid_cache_lock:
+        _lid_cache[n] = pn
+    print(f"[uazapi] resolve_lid_to_pn: {n} -> {pn}")
+    return pn
+
+
+def get_avatar(number: str) -> str:
+    """POST /chat/avatar — retorna a URL da foto de perfil do contato (ou '').
+    Aceita PN ou LID (a UAZAPI resolve ambos). Nunca lança exceção."""
+    try:
+        n = normalize_number(number)
+        if not n:
+            return ""
+        # normalize_number preserva sufixo @lid; para avatares precisamos de jid
+        if "@" not in n:
+            n = f"{n}@s.whatsapp.net"
+        r = _request("POST", "/chat/avatar", {"number": n})
+        if r.get("ok") and isinstance(r.get("data"), dict):
+            return str(r["data"].get("url", "") or "")
+        return ""
+    except Exception as e:
+        print(f"[uazapi] get_avatar erro: {e}")
+        return ""
 
 
 def chat_archive(number: str, archive: bool) -> dict:

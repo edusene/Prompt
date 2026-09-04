@@ -150,6 +150,9 @@ async function loadConversations() {
     list.innerHTML = conversations.map(c => {
         const name = c.contact_name || c.contact_phone;
         const initials = name.slice(0, 2).toUpperCase();
+        const avatar = c.contact_avatar
+            ? `<img src="${esc(c.contact_avatar)}" alt="" class="conv-avatar-img" onerror="this.remove()">`
+            : '';
         const lastMsg = c.last_message_at ? new Date(c.last_message_at + 'Z').toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'}) : '';
         const tagChips = (c.tags || []).map(t =>
             `<span class="conv-tag-chip" style="background:${t.color}" title="${esc(t.name)}">${esc(t.name)}</span>`
@@ -161,7 +164,7 @@ async function loadConversations() {
         if (c.archived) badges.push('<span class="conv-badge" title="Arquivada">📦</span>');
         return `
             <div class="conv-item ${c.id === currentConvId ? 'active' : ''}" data-conv-id="${c.id}" onclick="selectConversation(${c.id})" oncontextmenu="openContextMenu(event, ${c.id})">
-                <div class="conv-avatar">${initials}</div>
+                <div class="conv-avatar">${avatar}${initials}</div>
                 <div class="conv-meta">
                     <div class="conv-name">${esc(name)} ${badges.join('')}</div>
                     <div class="conv-preview"><span class="status-dot status-${c.status}"></span>${esc(statusLabel(c.status))}</div>
@@ -344,7 +347,12 @@ function renderChatHeader(conv, contact) {
     const name = contact?.name || contact?.phone || 'Desconhecido';
     const autoMode = contact?.auto_mode ? 'Auto' : 'Humano';
     const autoClass = contact?.auto_mode ? 'auto-on' : 'auto-off';
+    const avatar = contact?.avatar_url
+        ? `<img src="${esc(contact.avatar_url)}" alt="" class="conv-avatar-img" onerror="this.remove()">`
+        : '';
+    const initials = esc(name.slice(0, 2).toUpperCase());
     document.getElementById('chat-header').innerHTML = `
+        <div class="chat-header-avatar">${avatar}${initials}</div>
         <span>${esc(name)} (${esc(statusLabel(conv.status))})</span>
         <span class="auto-badge ${autoClass}">${autoMode}</span>
     `;

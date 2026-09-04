@@ -288,7 +288,7 @@ def list_conversations(status: str = "", archived: bool | None = None,
             where.append("c.archived=0")
         where_sql = ("WHERE " + " AND ".join(where)) if where else ""
         rows = conn.execute(
-            "SELECT c.*, ct.name as contact_name, ct.phone as contact_phone "
+            "SELECT c.*, ct.name as contact_name, ct.phone as contact_phone, ct.avatar_url as contact_avatar "
             "FROM conversations c LEFT JOIN contacts ct ON c.contact_id=ct.id "
             f"{where_sql} ORDER BY c.pinned DESC, c.last_message_at DESC, c.id DESC "
             "LIMIT ? OFFSET ?",

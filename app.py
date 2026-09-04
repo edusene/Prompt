@@ -4,6 +4,7 @@ app.py — Flask webhook + pipeline de flush do agente WhatsApp + Gemini.
 """
 
 import os
+import sys
 import json
 import time
 import threading
@@ -11,7 +12,17 @@ import subprocess
 
 from dotenv import load_dotenv
 
-load_dotenv()
+# override=True: o .env do projeto vence placeholders/eventuais variáveis globais
+# (ex.: UAZAPI_BASE_URL=https://seudominio.uazapi.com definida no Windows).
+load_dotenv(override=True)
+
+# Windows: o stdout pode estar em cp1252/charmap; emoji do WhatsApp nos logs
+# (prints de payload) lançaria UnicodeEncodeError e quebraria o pipeline.
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 from flask import Flask, request, jsonify, Response, redirect, url_for, render_template, session, send_from_directory
 
@@ -19,6 +30,7 @@ import memory
 import llm
 import database
 import events
+import uazapi
 from uazapi import send_text, send_presence, mark_read, chat_archive, chat_pin, chat_mute, chat_delete
 from buffer import MessageBuffer
 from auth import login_required, do_login, do_logout
@@ -140,34 +152,47 @@ def split_reply(text: str) -> list[str]:
 
 def handle_flush(user: str, texts: list[str]) -> None:
     """Executado numa thread do Timer quando o debounce dispara."""
-    contact = database.get_contact(user)
-    if contact and not contact["auto_mode"]:
-        print(f"[flush] user={user} modo=humano, ignorando agente")
-        return
+    try:
+        contact = database.get_contact(user)
+        if contact and not contact["auto_mode"]:
+            print(f"[flush] user={user} modo=humano, ignorando agente")
+            return
+        if not contact:
+            # Contato novo criado pelo webhook tem auto_mode=1 por padrão.
+            print(f"[flush] user={user} sem contato no banco (auto_mode=1 por padrão)")
 
-    send_presence(user, "composing")
-
-    user_turn = "\n".join(texts)
-    memory.append(user, "user", user_turn)
-
-    reply = llm.generate_reply(memory.get(user), FULL_SYSTEM_PROMPT)
-    memory.append(user, "model", reply)
-
-    chunks = split_reply(reply)
-    if not chunks:
-        send_presence(user, "paused")
-        return
-
-    for chunk in chunks:
         send_presence(user, "composing")
-        time.sleep(1 + len(chunk) / 200)
-        res = send_text(user, chunk)
-        if not res.get("ok"):
-            print(f"[flush] ERRO ao enviar p/ {user}: {res.get('error')}")
-            continue
-        send_msg_out_to_panel(user, chunk)
 
-    send_presence(user, "paused")
+        user_turn = "\n".join(texts)
+        memory.append(user, "user", user_turn)
+
+        try:
+            reply = llm.generate_reply(memory.get(user), FULL_SYSTEM_PROMPT)
+        except Exception as e:
+            print(f"[flush] ERRO llm p/ {user}: {e}")
+            send_presence(user, "paused")
+            return
+        memory.append(user, "model", reply)
+        print(f"[flush] user={user} reply_len={len(reply)}")
+
+        chunks = split_reply(reply)
+        if not chunks:
+            send_presence(user, "paused")
+            return
+
+        for chunk in chunks:
+            send_presence(user, "composing")
+            time.sleep(1 + len(chunk) / 200)
+            res = send_text(user, chunk)
+            if not res.get("ok"):
+                print(f"[flush] ERRO ao enviar p/ {user}: {res.get('error')}")
+                continue
+            send_msg_out_to_panel(user, chunk)
+
+        send_presence(user, "paused")
+    except Exception as e:
+        # Nunca deixa a thread do Timer morrer em silêncio.
+        print(f"[flush] ERRO inesperado p/ {user}: {e}")
 
 
 def send_msg_out_to_panel(user: str, text: str) -> None:
@@ -287,6 +312,11 @@ def webhook():
     if not number:
         return jsonify({"ok": True})
 
+    # UAZAPI v3: o remetente pode chegar como LID (ex.: 223656663867638) em vez do
+    # PN real. Resolve para o PN canônico ANTES de gravar/bufferizar, para que
+    # contato, conversa, painel e envio usem sempre a mesma identidade.
+    number = uazapi.resolve_lid_to_pn(number)
+
     push_name = msg.get("pushName") or msg.get("notifyName") or msg.get("senderName") or msg.get("name") or ""
     message_id = msg.get("id", "") or msg.get("messageid", "")
     if not message_id and isinstance(msg.get("key"), dict):
@@ -360,6 +390,13 @@ def webhook():
             "body": body,
             "message_id": str(message_id),
         })
+
+    # Avatar do contato (best-effort, não bloqueia o fluxo): a URL do WhatsApp
+    # expira, então atualiza quando o contato ainda não tem foto.
+    if not contact.get("avatar_url"):
+        avatar = uazapi.get_avatar(number)
+        if avatar:
+            database.update_contact(contact["id"], avatar_url=avatar)
 
     buffer.add(number, body)
 
