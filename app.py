@@ -230,32 +230,7 @@ def logout_action():
     return redirect(url_for("login_page"))
 
 
-# ── Healthcheck ───────────────────────────────────────────────────────────────
-
-@app.get("/favicon.ico")
-def favicon():
-    return send_from_directory("static", "favicon.ico", mimetype="image/x-icon")
-
-
-@app.get("/")
-def healthcheck():
-    return "ok"
-
-
-# ── Webhook config (UAZAPI chama PUT aqui para configurar) ────────────────────
-
-@app.put("/webhook")
-def webhook_config():
-    """Endpoint chamado pela UAZAPI para configurar/validar o webhook."""
-    data = request.get_json(silent=True) or {}
-    webhook_url = data.get("webhookUrl", "")
-    events = data.get("events", [])
-    print(f"[webhook-config] url={webhook_url} events={events}")
-    return jsonify({"ok": True, "message": "Webhook configurado com sucesso"})
-
-
-# ── Webhook (preservado integralmente) ────────────────────────────────────────
-
+# ── Webhook ──────────────────────────────────────────────────────────────────
 @app.post("/webhook")
 def webhook():
     data = request.get_json(silent=True) or {}
@@ -264,35 +239,100 @@ def webhook():
     # Evento de conexão (connection.open / connection.close / ...) → atualiza
     # o status no painel em tempo real e invalida o cache de status.
     if event == "connection":
-        status_raw = str(data.get("data", {}).get("status", ""))
-        status = status_raw.replace("connection.", "", 1) if status_raw else "unknown"
+        status_raw = str(data.get("data", {}).get("status", "")).replace("connection.", "", 1)
+        status = status_raw.lower() if status_raw else "unknown"
+        if status in ("closed", "disconnected", "logout"):
+            status = "close"
+        elif status in ("connected",):
+            status = "open"
         if status in ("open", "close", "connecting", "qr", "error"):
             _invalidate_status_cache()
             events.emit("wa_status", {"status": status})
         return jsonify({"ok": True})
 
-    if event != "message":
+    # Ignora eventos que não são de mensagem
+    if event and event not in ("message", "messages", "messages.upsert"):
         return jsonify({"ok": True})
 
-    msg = data.get("data", {})
+    # Extrai o payload da mensagem de forma resiliente
+    msg = data.get("data") or data.get("message") or data.get("payload") or data
+    if isinstance(msg, list) and len(msg) > 0:
+        msg = msg[0]
+    if not isinstance(msg, dict):
+        msg = {}
 
-    if msg.get("fromMe") or msg.get("isGroup") or msg.get("type") != "text":
+    # Ignora mensagens enviadas pelo próprio número ou mensagens de grupo
+    if msg.get("fromMe") or msg.get("isGroup") or msg.get("participant"):
         return jsonify({"ok": True})
 
-    raw_from = msg.get("from", "")
-    number = raw_from.split("@")[0]
-    body = msg.get("body", "").strip()
+    # Extrai e limpa o número de telefone do remetente
+    raw_from = (
+        msg.get("from", "")
+        or msg.get("remoteJid", "")
+        or msg.get("chatId", "")
+        or msg.get("sender", "")
+    )
+    if not raw_from:
+        return jsonify({"ok": True})
+
+    phone_clean = str(raw_from).split("@")[0].split(":")[0]
+    number = "".join([c for c in phone_clean if c.isdigit()])
+    if not number:
+        return jsonify({"ok": True})
+
+    push_name = msg.get("pushName") or msg.get("notifyName") or msg.get("senderName") or msg.get("name") or ""
     message_id = msg.get("id", "")
+    if not message_id and isinstance(msg.get("key"), dict):
+        message_id = msg.get("key", {}).get("id", "")
 
-    if not number or not body:
+    # Determina o texto / corpo da mensagem (atendendo a mídias, botões e variados tipos)
+    msg_type = msg.get("type", "text")
+    body = (
+        msg.get("body")
+        or msg.get("text")
+        or msg.get("caption")
+        or (msg.get("message", {}).get("conversation") if isinstance(msg.get("message"), dict) else "")
+        or (msg.get("message", {}).get("extendedTextMessage", {}).get("text") if isinstance(msg.get("message"), dict) else "")
+        or (msg.get("message", {}).get("buttonsResponseMessage", {}).get("selectedButtonId") if isinstance(msg.get("message"), dict) else "")
+        or (msg.get("message", {}).get("listResponseMessage", {}).get("singleSelectReply", {}).get("selectedRowId") if isinstance(msg.get("message"), dict) else "")
+    )
+    if isinstance(body, str):
+        body = body.strip()
+    else:
+        body = ""
+
+    if not body:
+        if msg_type == "image":
+            body = "📷 [Imagem]"
+        elif msg_type == "video":
+            body = "🎥 [Vídeo]"
+        elif msg_type in ("audio", "ptt"):
+            body = "🎵 [Áudio]"
+        elif msg_type == "document":
+            doc_name = ""
+            if isinstance(msg.get("media"), dict):
+                doc_name = msg.get("media", {}).get("fileName", "")
+            body = f"📄 [Documento: {doc_name}]" if doc_name else "📄 [Documento]"
+        elif msg_type == "sticker":
+            body = "📱 [Figurinha]"
+        elif msg_type == "location":
+            body = "📍 [Localização]"
+        elif msg_type in ("contact", "vcard"):
+            body = "👤 [Contato]"
+        elif msg_type in ("button_reply", "list_reply"):
+            body = msg.get("buttonText") or "🔘 [Resposta de Opção]"
+        elif msg_type != "text":
+            body = f"[{str(msg_type).capitalize()}]"
+
+    if not body:
         return jsonify({"ok": True})
 
-    print(f"[webhook] from={number} len={len(body)}")
+    print(f"[webhook] from={number} ({push_name}) type={msg_type} len={len(body)}")
 
-    mark_read(number, message_id)
+    mark_read(number, str(message_id))
 
     # Persistir no banco e notificar o painel
-    contact = database.upsert_contact(number)
+    contact = database.upsert_contact(number, name=push_name) if push_name else database.upsert_contact(number)
     conv = database.get_or_create_conversation(number)
     saved = database.save_message(
         conversation_id=conv["id"],
@@ -300,8 +340,8 @@ def webhook():
         direction="in",
         body=body,
         sender="user",
-        msg_type="text",
-        uazapi_id=message_id,
+        msg_type=str(msg_type) if msg_type else "text",
+        uazapi_id=str(message_id) if message_id else None,
     )
     if saved:
         database.update_conversation(conv["id"], last_message_at=time.strftime("%Y-%m-%dT%H:%M:%S"))
@@ -311,7 +351,7 @@ def webhook():
             "contact_name": contact.get("name", ""),
             "phone": number,
             "body": body,
-            "message_id": message_id,
+            "message_id": str(message_id),
         })
 
     buffer.add(number, body)
@@ -414,6 +454,8 @@ def api_instance_status():
     data = r["data"] or {}
     inst = data.get("instance", data) if isinstance(data, dict) else {}
     status = inst.get("status", "unknown")
+    if status in ("closed", "disconnected", "logout"):
+        status = "close"
     payload = {"status": status}
     _set_cached_status(payload)
     return jsonify(payload)
@@ -458,13 +500,14 @@ def api_instance_qr():
 @login_required
 def api_instance_disconnect():
     from uazapi import disconnect_instance
+    _invalidate_status_cache()
+    events.emit("wa_status", {"status": "close"})
     r = disconnect_instance()
     if not r["ok"]:
         err = r["error"]
         if "401" in err:
             err = "Token invalido. Verifique as configuracoes."
         return jsonify({"ok": False, "error": err}), 400
-    _invalidate_status_cache()
     return jsonify({"ok": True})
 
 
@@ -472,13 +515,14 @@ def api_instance_disconnect():
 @login_required
 def api_instance_restart():
     from uazapi import restart_instance
+    _invalidate_status_cache()
+    events.emit("wa_status", {"status": "connecting"})
     r = restart_instance()
     if not r["ok"]:
         err = r["error"]
         if "401" in err:
             err = "Token invalido. Verifique as configuracoes."
         return jsonify({"ok": False, "error": err}), 400
-    _invalidate_status_cache()
     return jsonify({"ok": True})
 
 

@@ -846,7 +846,12 @@ h3 { font-size: 14px; font-weight: 600; }
     color: #fbbf24;
     border: 1px solid rgba(245, 158, 11, 0.3);
 }
-.wa-status-pill.close, .wa-status-pill.error {
+.wa-status-pill.close {
+    background: rgba(245, 158, 11, 0.15);
+    color: #fbbf24;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+}
+.wa-status-pill.error {
     background: rgba(239, 68, 68, 0.15);
     color: #f87171;
     border: 1px solid rgba(239, 68, 68, 0.3);

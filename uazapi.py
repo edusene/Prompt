@@ -75,20 +75,20 @@ def get_instance_status() -> dict:
 
 
 def disconnect_instance() -> dict:
-    """Desconecta instância (free tier: PUT /instance/logout)."""
-    r = _request("PUT", "/instance/logout", {})
+    """Desconecta instância (UAZAPI v2 / paid: DELETE /instance/logout, fallback POST/PUT)."""
+    r = _request("DELETE", "/instance/logout")
     if not r["ok"]:
         r = _request("POST", "/instance/logout", {})
     if not r["ok"]:
-        r = _request("DELETE", "/instance/logout")
+        r = _request("PUT", "/instance/logout", {})
     return r
 
 
 def restart_instance() -> dict:
-    """Reinicia instância (free tier: PUT /instance/restart)."""
-    r = _request("PUT", "/instance/restart", {})
+    """Reinicia instância (UAZAPI v2 / paid: POST /instance/restart, fallback PUT)."""
+    r = _request("POST", "/instance/restart", {})
     if not r["ok"]:
-        r = _request("POST", "/instance/restart", {})
+        r = _request("PUT", "/instance/restart", {})
     return r
 
 

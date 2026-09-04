@@ -969,8 +969,8 @@ async function loadWAStatus(pushedStatus) {
     }
     const status = typeof data.status === 'string' ? data.status : 'desconhecido';
     const labels = { open: 'Conectado', connecting: 'Conectando...', close: 'Desconectado', qr: 'Aguardando QR Code', error: 'Erro' };
-    const pillClass = status === 'open' ? 'open' : (status === 'connecting' || status === 'qr' ? 'connecting' : 'close');
-    const dotColor = status === 'open' ? 'green' : (status === 'connecting' || status === 'qr' ? 'yellow' : 'red');
+    const pillClass = status === 'open' ? 'open' : (status === 'error' ? 'error' : 'close');
+    const dotColor = status === 'open' ? 'green' : (status === 'error' ? 'red' : 'yellow');
     el.innerHTML = `
         <span class="wa-status-pill ${pillClass}">
             <span class="pulse-dot ${dotColor}"></span>
@@ -1194,7 +1194,6 @@ function skeletonMsgs() {
 function friendlyError(err) {
     if (!err) return 'Erro desconhecido';
     if (err.includes('401')) return 'Token invalido. Verifique as configuracoes.';
-    if (err.includes('405')) return 'Operacao nao suportada neste plano.';
     if (err.includes('404')) return 'Recurso nao encontrado.';
     if (err.includes('Connection error') || err.includes('Timeout')) return 'Servidor indisponivel.';
     return err;
