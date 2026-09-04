@@ -204,6 +204,7 @@ async function selectConversation(convId) {
     // Mark as read
     await api(`/api/conversations/${convId}/read`, { method: 'PUT' });
     loadConversations();
+    updateUnreadBadge();
 }
 
 function deselectConversation() {
@@ -219,11 +220,10 @@ function deselectConversation() {
     if (info) info.innerHTML = '<p class="muted">Selecione uma conversa para ver detalhes</p>';
 }
 
-/* ── Context menu (clique direito en contacto) ────────────────────────────── */
+/* ── Context menu (clique direito em conversa) ────────────────────────────── */
 function openContextMenu(event, convId) {
     event.preventDefault();
     event.stopPropagation();
-    selectConversation(convId);
     contextMenuConvId = convId;
     closeContextMenu();
 
@@ -233,6 +233,9 @@ function openContextMenu(event, convId) {
     const muteLabel = c.muted ? 'Ativar som' : 'Silenciar';
     const pinLabel = c.pinned ? 'Desafixar' : 'Fixar';
     const favLabel = c.favorite ? 'Remover dos favoritos' : 'Adicionar aos favoritos';
+    const isUnread = (c.unread_count || 0) > 0;
+    const readLabel = isUnread ? 'Marcar como lida' : 'Marcar como não lida';
+    const readFn = isUnread ? `markReadConv(${convId})` : `markUnreadConv(${convId})`;
 
     const menu = document.createElement('div');
     menu.className = 'ctx-menu';
@@ -245,7 +248,7 @@ function openContextMenu(event, convId) {
         <div class="ctx-menu-item" onclick="setConvFlag(${convId}, 'pinned', ${c.pinned ? 0 : 1})">${pinLabel}</div>
         <div class="ctx-menu-item" onclick="setConvFlag(${convId}, 'favorite', ${c.favorite ? 0 : 1})">${favLabel}</div>
         <div class="ctx-menu-sep"></div>
-        <div class="ctx-menu-item" onclick="markUnreadConv(${convId})">Marcar como não lida</div>
+        <div class="ctx-menu-item" onclick="${readFn}">${readLabel}</div>
         <div class="ctx-menu-item" onclick="clearConv(${convId})">Limpar conversa</div>
         <div class="ctx-menu-item danger" onclick="deleteConv(${convId})">Apagar conversa</div>
     `;
@@ -278,10 +281,19 @@ async function setConvFlag(convId, flag, value) {
     loadConversations();
 }
 
+async function markReadConv(convId) {
+    closeContextMenu();
+    const res = await api(`/api/conversations/${convId}/read`, { method: 'PUT' });
+    if (res && !res.error) toast('Conversa marcada como lida', 'success');
+    else toast('Erro ao marcar', 'error');
+    loadConversations();
+    updateUnreadBadge();
+}
+
 async function markUnreadConv(convId) {
     closeContextMenu();
     const res = await api(`/api/conversations/${convId}/unread`, { method: 'PUT' });
-    if (res && !res.error) toast('Mensagens marcadas como não lidas', 'success');
+    if (res && !res.error) toast('Conversa marcada como não lida', 'success');
     else toast('Erro ao marcar', 'error');
     loadConversations();
     updateUnreadBadge();

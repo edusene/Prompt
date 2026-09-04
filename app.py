@@ -551,7 +551,17 @@ def api_conversations_toggle_mode(conv_id):
 @app.put("/api/conversations/<int:conv_id>/read")
 @login_required
 def api_conversations_mark_read(conv_id):
+    conv = database.get_conversation(conv_id)
     database.reset_unread(conv_id)
+    if conv:
+        contact = database.get_contact_by_id(conv["contact_id"])
+        if contact and contact.get("phone"):
+            number = str(contact["phone"]).replace("@s.whatsapp.net", "")
+            try:
+                mark_read(number)
+            except Exception:
+                pass
+    events.emit("conversation_updated", {"conversation_id": conv_id, "unread_count": 0})
     return jsonify({"ok": True})
 
 
