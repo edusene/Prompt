@@ -463,6 +463,7 @@ h3 { font-size: 14px; font-weight: 600; }
 .conv-item.active::after { transform: translateY(-50%) scaleY(1); }
 
 .conv-avatar {
+    position: relative;
     width: 36px;
     height: 36px;
     border-radius: 50%;
