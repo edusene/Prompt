@@ -248,23 +248,14 @@ def restart_instance() -> dict:
     """
     r = _request("POST", "/instance/reset")
     if not r["ok"]:
-        # Fallback v2: POST /instance/restart.
-        r = _request("POST", "/instance/restart", {})
+        r = _request("POST", "/instance/restart")
     if not r["ok"]:
-        # Último fallback: PUT /instance/restart.
-        r = _request("PUT", "/instance/restart", {})
+        r = _request("PUT", "/instance/restart")
     if not r["ok"]:
         status = r.get("status", 0)
         if status == 405:
             return {"ok": False, "status": 405,
-                    "error": "Operacao dereinicio nao suportada por esta instancia. "
-                             "Use o painel da UAZAPI para reiniciar."}
-    return r
-    if not r["ok"]:
-        status = r.get("status", 0)
-        if status == 405:
-            return {"ok": False, "status": 405,
-                    "error": "Operacao dereinicio nao suportada por esta instancia. "
+                    "error": "Operacao de reinicio nao suportada por esta instancia. "
                              "Use o painel da UAZAPI para reiniciar."}
     return r
 
