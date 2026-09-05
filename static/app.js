@@ -1147,6 +1147,14 @@ function connectSSE() {
         } else if (event === 'message_sent') {
             if (currentView === 'conversations' && currentConvId === data.conversation_id) {
                 refreshConversationPanel(data.conversation_id);
+                const d = await api(`/api/conversations/${data.conversation_id}`);
+                if (d?.messages?.length) {
+                    const last = d.messages[d.messages.length - 1];
+                    const lastEl = document.querySelector('#chat-messages .msg:last-child');
+                    if (!lastEl || !lastEl.textContent.includes(esc(last.body).slice(0, 30))) {
+                        appendMessage(last);
+                    }
+                }
             }
         } else if (event === 'conversation_updated') {
             loadConversations();

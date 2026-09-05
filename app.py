@@ -276,6 +276,9 @@ def webhook():
         if status in ("open", "close", "connecting", "qr", "error"):
             _invalidate_status_cache()
             events.emit("wa_status", {"status": status})
+        if status == "open" and WEBHOOK_URL:
+            from uazapi import configure_webhook
+            configure_webhook(WEBHOOK_URL)
         return jsonify({"ok": True})
 
     # Ignora eventos que não são de mensagem
