@@ -373,7 +373,9 @@ def webhook():
         msg = {}
 
     # Ignora mensagens enviadas pelo próprio número ou mensagens de grupo
-    if msg.get("fromMe") or msg.get("isGroup") or msg.get("participant"):
+    # UAZAPI v3: fromMe pode estar dentro de msg.key (Baileys), não só no raiz.
+    _is_from_me = msg.get("fromMe") or (isinstance(msg.get("key"), dict) and msg["key"].get("fromMe"))
+    if _is_from_me or msg.get("isGroup") or msg.get("participant"):
         return jsonify({"ok": True})
 
     # Extrai e limpa o número de telefone do remetente.
