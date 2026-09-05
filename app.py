@@ -372,9 +372,32 @@ def webhook():
     if not isinstance(msg, dict):
         msg = {}
 
-    # Ignora mensagens enviadas pelo próprio número ou mensagens de grupo
-    # UAZAPI v3: fromMe pode estar dentro de msg.key (Baileys), não só no raiz.
-    _is_from_me = msg.get("fromMe") or (isinstance(msg.get("key"), dict) and msg["key"].get("fromMe"))
+    # Ignora mensagens enviadas pelo próprio número ou mensagens de grupo.
+    # UAZAPI v3 (Baileys) pode entregar fromMe em vários formatos:
+    #   - v2: data.fromMe (boolean direto)
+    #   - v3: data.key.fromMe (nested no objeto key)
+    #   - edge: fromMe como string "true" em vez de boolean
+    #   - edge: data é uma lista de mensagens [{ key: { fromMe: true }, ... }]
+    def _check_from_me(obj: dict) -> bool:
+        if not isinstance(obj, dict):
+            return False
+        fm = obj.get("fromMe")
+        if fm is True or str(fm).lower() == "true":
+            return True
+        k = obj.get("key")
+        if isinstance(k, dict):
+            fm2 = k.get("fromMe")
+            if fm2 is True or str(fm2).lower() == "true":
+                return True
+        return False
+
+    _is_from_me = _check_from_me(msg)
+    # Caso data inteiro seja uma lista (v3 batches)
+    if not _is_from_me and isinstance(data.get("data"), list):
+        for _item in data["data"]:
+            if _check_from_me(_item):
+                _is_from_me = True
+                break
     if _is_from_me or msg.get("isGroup") or msg.get("participant"):
         return jsonify({"ok": True})
 

@@ -6,6 +6,7 @@ let selectedTags = [];
 let pollTimers = [];
 let lastWAStatus = '';
 let waStatusTimer = null;
+let lastSentBody = '';
 
 /* ── Estado de conversas (portugués) ─────────────────────────────────────── */
 const CONV_STATUS = { new: 'Novo', open: 'Aberto', waiting: 'Aguardando', resolved: 'Resolvido', closed: 'Fechado' };
@@ -621,12 +622,14 @@ async function sendMessage() {
     if (!conv) return;
 
     setBtnLoading(btn, true);
+    lastSentBody = text;
     const res = await api('/api/messages/send', {
         method: 'POST',
         body: JSON.stringify({ phone: conv.contact_phone, body: text }),
     });
     setBtnLoading(btn, false);
     if (res?.error) {
+        lastSentBody = '';
         toast(friendlyError(res.error), 'error');
         return;
     }
@@ -1146,12 +1149,12 @@ function connectSSE() {
         if (event === 'new_message') {
             if (currentView === 'conversations') {
                 if (currentConvId === data.conversation_id) {
-                    // Anexa apenas a mensagem nova (anima só ela)
                     refreshConversationPanel(data.conversation_id);
                     const d = await api(`/api/conversations/${data.conversation_id}`);
                     if (d?.messages?.length) {
                         const last = d.messages[d.messages.length - 1];
-                        // Evita duplicar se já for a mesma da última renderização
+                        // Ignora se é eco da mensagem que acabamos de enviar pelo painel
+                        if (last.body === lastSentBody) { lastSentBody = ''; return; }
                         const lastEl = document.querySelector('#chat-messages .msg:last-child');
                         if (!lastEl || !lastEl.textContent.includes(esc(last.body).slice(0, 30))) {
                             appendMessage(last);
@@ -1164,11 +1167,15 @@ function connectSSE() {
             updateUnreadBadge();
             if (currentView === 'dashboard') debouncedLoadDashboard();
         } else if (event === 'message_sent') {
+            lastSentBody = '';
             if (currentView === 'conversations' && currentConvId === data.conversation_id) {
                 refreshConversationPanel(data.conversation_id);
+                // Recarrega todas as mensagens (evita duplicação visual)
                 const d = await api(`/api/conversations/${data.conversation_id}`);
                 if (d?.messages?.length) {
-                    appendMessage(d.messages[d.messages.length - 1]);
+                    const msgDiv = document.getElementById('chat-messages');
+                    msgDiv.innerHTML = d.messages.map(m => msgHTML(m, false)).join('');
+                    scrollChatBottom();
                 }
             }
             if (currentView === 'dashboard') debouncedLoadDashboard();
