@@ -1,35 +1,20 @@
 """
-database.py — SQLite + ORM leve (sqlite3 puro).
-Armazena contatos, conversas, mensagens, tags, templates e tarefas para o painel CRM.
+database.py — ORM leve para o painel CRM.
+Usa db.py como camada de abstração (suporta SQLite e PostgreSQL).
 O agente Gemini continua usando memory.py (in-memory) para seu histórico.
 """
 
-import os
-import sqlite3
-import threading
+import db
 from datetime import datetime
 from typing import Any
-
-_DB_PATH = os.getenv("DB_PATH", "whatsapp.db")
-_lock = threading.Lock()
-
-
-def _get_conn() -> sqlite3.Connection:
-    conn = sqlite3.connect(_DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
-    return conn
 
 
 def init_db() -> None:
     """Cria todas as tabelas se não existirem (e aplica migrações idempotentes)."""
-    conn = _get_conn()
-    conn.executescript(SCHEMA)
+    db.executescript(SCHEMA)
 
     # Migração idempotente: adiciona colunas de gerenciamento de conversa
-    # (arquivada, silenciada, fixada, favorita) se não existirem ainda.
-    cols = {r["name"] for r in conn.execute("PRAGMA table_info(conversations)").fetchall()}
+    cols = db.table_columns("conversations")
     for col, ddl in (
         ("archived", "ALTER TABLE conversations ADD COLUMN archived INTEGER DEFAULT 0"),
         ("muted", "ALTER TABLE conversations ADD COLUMN muted INTEGER DEFAULT 0"),
@@ -37,9 +22,7 @@ def init_db() -> None:
         ("favorite", "ALTER TABLE conversations ADD COLUMN favorite INTEGER DEFAULT 0"),
     ):
         if col not in cols:
-            conn.execute(ddl)
-    conn.commit()
-    conn.close()
+            db.execute(ddl)
 
 
 SCHEMA = """
@@ -135,269 +118,200 @@ CREATE INDEX IF NOT EXISTS idx_tasks_contact ON tasks(contact_id);
 
 def upsert_contact(phone: str, name: str = "", **extra: Any) -> dict:
     """Insere ou atualiza contato pelo phone. Retorna o contato."""
-    with _lock:
-        conn = _get_conn()
-        existing = conn.execute("SELECT * FROM contacts WHERE phone=?", (phone,)).fetchone()
-        now = datetime.utcnow().isoformat()
-        if existing:
-            fields = []
-            vals = []
-            for k, v in extra.items():
-                if k in ("name", "email", "company", "notes", "avatar_url", "assigned_to", "auto_mode"):
-                    fields.append(f"{k}=?")
-                    vals.append(v)
-            if name:
-                fields.append("name=?")
-                vals.append(name)
-            fields.append("updated_at=?")
-            vals.append(now)
-            vals.append(phone)
-            conn.execute(f"UPDATE contacts SET {','.join(fields)} WHERE phone=?", vals)
-        else:
-            conn.execute(
-                "INSERT INTO contacts (phone, name, email, company, notes, avatar_url, assigned_to, auto_mode, created_at, updated_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?)",
-                (phone, name, extra.get("email", ""), extra.get("company", ""),
-                 extra.get("notes", ""), extra.get("avatar_url", ""),
-                 extra.get("assigned_to", ""), extra.get("auto_mode", 1), now, now),
-            )
-        conn.commit()
-        row = conn.execute("SELECT * FROM contacts WHERE phone=?", (phone,)).fetchone()
-        conn.close()
-        return dict(row)
+    now = datetime.utcnow().isoformat()
+    existing = db.fetch_one("SELECT * FROM contacts WHERE phone=?", (phone,))
+    if existing:
+        fields = []
+        vals = []
+        for k, v in extra.items():
+            if k in ("name", "email", "company", "notes", "avatar_url", "assigned_to", "auto_mode"):
+                fields.append(f"{k}=?")
+                vals.append(v)
+        if name:
+            fields.append("name=?")
+            vals.append(name)
+        fields.append("updated_at=?")
+        vals.append(now)
+        vals.append(phone)
+        db.execute(f"UPDATE contacts SET {','.join(fields)} WHERE phone=?", tuple(vals))
+    else:
+        db.execute(
+            "INSERT INTO contacts (phone, name, email, company, notes, avatar_url, assigned_to, auto_mode, created_at, updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (phone, name, extra.get("email", ""), extra.get("company", ""),
+             extra.get("notes", ""), extra.get("avatar_url", ""),
+             extra.get("assigned_to", ""), extra.get("auto_mode", 1), now, now),
+        )
+    return db.fetch_one("SELECT * FROM contacts WHERE phone=?", (phone,))
 
 
 def get_contact(phone: str) -> dict | None:
-    with _lock:
-        conn = _get_conn()
-        row = conn.execute("SELECT * FROM contacts WHERE phone=?", (phone,)).fetchone()
-        conn.close()
-        return dict(row) if row else None
+    return db.fetch_one("SELECT * FROM contacts WHERE phone=?", (phone,))
 
 
 def get_contact_by_id(contact_id: int) -> dict | None:
-    with _lock:
-        conn = _get_conn()
-        row = conn.execute("SELECT * FROM contacts WHERE id=?", (contact_id,)).fetchone()
-        conn.close()
-        return dict(row) if row else None
+    return db.fetch_one("SELECT * FROM contacts WHERE id=?", (contact_id,))
 
 
 def list_contacts(limit: int = 100, offset: int = 0) -> list[dict]:
-    with _lock:
-        conn = _get_conn()
-        rows = conn.execute(
-            "SELECT * FROM contacts ORDER BY updated_at DESC LIMIT ? OFFSET ?", (limit, offset)
-        ).fetchall()
-        conn.close()
-        return [dict(r) for r in rows]
+    return db.fetch_all(
+        "SELECT * FROM contacts ORDER BY updated_at DESC LIMIT ? OFFSET ?", (limit, offset)
+    )
 
 
 def update_contact(contact_id: int, **fields: Any) -> None:
-    with _lock:
-        conn = _get_conn()
-        allowed = ("name", "email", "company", "notes", "avatar_url", "assigned_to", "auto_mode")
-        sets = []
-        vals = []
-        for k, v in fields.items():
-            if k in allowed:
-                sets.append(f"{k}=?")
-                vals.append(v)
-        if sets:
-            sets.append("updated_at=?")
-            vals.append(datetime.utcnow().isoformat())
-            vals.append(contact_id)
-            conn.execute(f"UPDATE contacts SET {','.join(sets)} WHERE id=?", vals)
-            conn.commit()
-        conn.close()
+    allowed = ("name", "email", "company", "notes", "avatar_url", "assigned_to", "auto_mode")
+    sets = []
+    vals = []
+    for k, v in fields.items():
+        if k in allowed:
+            sets.append(f"{k}=?")
+            vals.append(v)
+    if sets:
+        sets.append("updated_at=?")
+        vals.append(datetime.utcnow().isoformat())
+        vals.append(contact_id)
+        db.execute(f"UPDATE contacts SET {','.join(sets)} WHERE id=?", tuple(vals))
 
 
 def delete_contact(contact_id: int) -> None:
-    with _lock:
-        conn = _get_conn()
-        conn.execute("DELETE FROM contact_tags WHERE contact_id=?", (contact_id,))
-        conn.execute("DELETE FROM tasks WHERE contact_id=?", (contact_id,))
-        conn.execute("DELETE FROM contacts WHERE id=?", (contact_id,))
-        conn.commit()
-        conn.close()
+    db.execute("DELETE FROM contact_tags WHERE contact_id=?", (contact_id,))
+    db.execute("DELETE FROM tasks WHERE contact_id=?", (contact_id,))
+    db.execute("DELETE FROM contacts WHERE id=?", (contact_id,))
 
 
 # ── Conversations ─────────────────────────────────────────────────────────────
 
 def get_or_create_conversation(phone: str) -> dict:
     """Retorna conversa aberta (new|open|waiting) ou cria uma nova."""
-    with _lock:
-        conn = _get_conn()
-        contact = conn.execute("SELECT id FROM contacts WHERE phone=?", (phone,)).fetchone()
-        if not contact:
-            now = datetime.utcnow().isoformat()
-            conn.execute("INSERT INTO contacts (phone, created_at, updated_at) VALUES (?,?,?)", (phone, now, now))
-            conn.commit()
-            contact = conn.execute("SELECT id FROM contacts WHERE phone=?", (phone,)).fetchone()
-        contact_id = contact["id"]
-
-        conv = conn.execute(
-            "SELECT * FROM conversations WHERE contact_id=? AND status IN ('new','open','waiting') ORDER BY id DESC LIMIT 1",
-            (contact_id,),
-        ).fetchone()
-        if conv:
-            conn.close()
-            return dict(conv)
-
+    contact = db.fetch_one("SELECT id FROM contacts WHERE phone=?", (phone,))
+    if not contact:
         now = datetime.utcnow().isoformat()
-        conn.execute(
-            "INSERT INTO conversations (contact_id, status, last_message_at, created_at, updated_at) VALUES (?,?,?,?,?)",
-            (contact_id, "new", now, now, now),
-        )
-        conn.commit()
-        conv = conn.execute(
-            "SELECT * FROM conversations WHERE contact_id=? ORDER BY id DESC LIMIT 1", (contact_id,)
-        ).fetchone()
-        conn.close()
-        return dict(conv)
+        db.execute("INSERT INTO contacts (phone, created_at, updated_at) VALUES (?,?,?)", (phone, now, now))
+        contact = db.fetch_one("SELECT id FROM contacts WHERE phone=?", (phone,))
+    contact_id = contact["id"]
+
+    conv = db.fetch_one(
+        "SELECT * FROM conversations WHERE contact_id=? AND status IN ('new','open','waiting') ORDER BY id DESC LIMIT 1",
+        (contact_id,),
+    )
+    if conv:
+        return conv
+
+    now = datetime.utcnow().isoformat()
+    db.execute(
+        "INSERT INTO conversations (contact_id, status, last_message_at, created_at, updated_at) VALUES (?,?,?,?,?)",
+        (contact_id, "new", now, now, now),
+    )
+    return db.fetch_one(
+        "SELECT * FROM conversations WHERE contact_id=? ORDER BY id DESC LIMIT 1", (contact_id,)
+    )
 
 
 def get_conversation(conv_id: int) -> dict | None:
-    with _lock:
-        conn = _get_conn()
-        row = conn.execute("SELECT * FROM conversations WHERE id=?", (conv_id,)).fetchone()
-        conn.close()
-        return dict(row) if row else None
+    return db.fetch_one("SELECT * FROM conversations WHERE id=?", (conv_id,))
 
 
 def list_conversations(status: str = "", archived: bool | None = None,
                        limit: int = 100, offset: int = 0) -> list[dict]:
-    """Lista conversas. Por padrão esconde arquivadas; `archived=True` mostra só arquivadas.
-
-    Fixadas (pinned=1) sobem para o topo mantendo a ordenação por última mensagem.
-    """
+    """Lista conversas. Por padrão esconde arquivadas; `archived=True` mostra só arquivadas."""
     if status == "archived":
         status = ""
         archived = True
 
-    with _lock:
-        conn = _get_conn()
-        where = []
-        params: list[Any] = []
-        if status:
-            where.append("c.status=?")
-            params.append(status)
-        if archived is True:
-            where.append("c.archived=1")
-        else:
-            where.append("c.archived=0")
-        where_sql = ("WHERE " + " AND ".join(where)) if where else ""
-        rows = conn.execute(
-            "SELECT c.*, ct.name as contact_name, ct.phone as contact_phone, ct.avatar_url as contact_avatar "
-            "FROM conversations c LEFT JOIN contacts ct ON c.contact_id=ct.id "
-            f"{where_sql} ORDER BY c.pinned DESC, c.last_message_at DESC, c.id DESC "
-            "LIMIT ? OFFSET ?",
-            (*params, limit, offset),
-        ).fetchall()
+    where = []
+    params: list[Any] = []
+    if status:
+        where.append("c.status=?")
+        params.append(status)
+    if archived is True:
+        where.append("c.archived=1")
+    else:
+        where.append("c.archived=0")
+    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+    rows = db.fetch_all(
+        "SELECT c.*, ct.name as contact_name, ct.phone as contact_phone, ct.avatar_url as contact_avatar "
+        "FROM conversations c LEFT JOIN contacts ct ON c.contact_id=ct.id "
+        f"{where_sql} ORDER BY c.pinned DESC, c.last_message_at DESC, c.id DESC "
+        "LIMIT ? OFFSET ?",
+        (*params, limit, offset),
+    )
 
-        # Agrega as tags de cada conversa para exibição direta na lista
-        conv_ids = [r["id"] for r in rows]
-        tags_by_conv: dict[int, list[dict]] = {}
-        if conv_ids:
-            placeholders = ",".join("?" * len(conv_ids))
-            tag_rows = conn.execute(
-                f"SELECT ct.conversation_id AS conv_id, t.id, t.name, t.color "
-                f"FROM conversation_tags ct JOIN tags t ON t.id=ct.tag_id "
-                f"WHERE ct.conversation_id IN ({placeholders}) ORDER BY t.name",
-                conv_ids,
-            ).fetchall()
-            for tr in tag_rows:
-                tags_by_conv.setdefault(tr["conv_id"], []).append(
-                    {"id": tr["id"], "name": tr["name"], "color": tr["color"]}
-                )
-            conn.close()
-        else:
-            conn.close()
+    conv_ids = [r["id"] for r in rows]
+    tags_by_conv: dict[int, list[dict]] = {}
+    if conv_ids:
+        placeholders = ",".join(["?"] * len(conv_ids))
+        tag_rows = db.fetch_all(
+            f"SELECT ct.conversation_id AS conv_id, t.id, t.name, t.color "
+            f"FROM conversation_tags ct JOIN tags t ON t.id=ct.tag_id "
+            f"WHERE ct.conversation_id IN ({placeholders}) ORDER BY t.name",
+            conv_ids,
+        )
+        for tr in tag_rows:
+            tags_by_conv.setdefault(tr["conv_id"], []).append(
+                {"id": tr["id"], "name": tr["name"], "color": tr["color"]}
+            )
 
-        result = []
-        for r in rows:
-            item = dict(r)
-            item["tags"] = tags_by_conv.get(item["id"], [])
-            result.append(item)
-        return result
+    result = []
+    for r in rows:
+        item = dict(r)
+        item["tags"] = tags_by_conv.get(item["id"], [])
+        result.append(item)
+    return result
 
 
 def update_conversation(conv_id: int, **fields: Any) -> None:
-    with _lock:
-        conn = _get_conn()
-        allowed = ("status", "assigned_to", "priority", "unread_count", "last_message_at",
-                   "archived", "muted", "pinned", "favorite")
-        sets = []
-        vals = []
-        for k, v in fields.items():
-            if k in allowed:
-                sets.append(f"{k}=?")
-                vals.append(v)
-        if sets:
-            sets.append("updated_at=?")
-            vals.append(datetime.utcnow().isoformat())
-            vals.append(conv_id)
-            conn.execute(f"UPDATE conversations SET {','.join(sets)} WHERE id=?", vals)
-            conn.commit()
-        conn.close()
+    allowed = ("status", "assigned_to", "priority", "unread_count", "last_message_at",
+               "archived", "muted", "pinned", "favorite")
+    sets = []
+    vals = []
+    for k, v in fields.items():
+        if k in allowed:
+            sets.append(f"{k}=?")
+            vals.append(v)
+    if sets:
+        sets.append("updated_at=?")
+        vals.append(datetime.utcnow().isoformat())
+        vals.append(conv_id)
+        db.execute(f"UPDATE conversations SET {','.join(sets)} WHERE id=?", tuple(vals))
 
 
 def increment_unread(conv_id: int) -> None:
-    with _lock:
-        conn = _get_conn()
-        conn.execute(
-            "UPDATE conversations SET unread_count=unread_count+1, updated_at=? WHERE id=?",
-            (datetime.utcnow().isoformat(), conv_id),
-        )
-        conn.commit()
-        conn.close()
+    db.execute(
+        "UPDATE conversations SET unread_count=unread_count+1, updated_at=? WHERE id=?",
+        (datetime.utcnow().isoformat(), conv_id),
+    )
 
 
 def reset_unread(conv_id: int) -> None:
-    with _lock:
-        conn = _get_conn()
-        conn.execute(
-            "UPDATE conversations SET unread_count=0, updated_at=? WHERE id=?",
-            (datetime.utcnow().isoformat(), conv_id),
-        )
-        conn.commit()
-        conn.close()
+    db.execute(
+        "UPDATE conversations SET unread_count=0, updated_at=? WHERE id=?",
+        (datetime.utcnow().isoformat(), conv_id),
+    )
 
 
 def mark_unread(conv_id: int) -> None:
     """Marca como não lida (garante unread_count >= 1)."""
-    with _lock:
-        conn = _get_conn()
-        conn.execute(
-            "UPDATE conversations SET unread_count=MAX(unread_count,1), updated_at=? WHERE id=?",
-            (datetime.utcnow().isoformat(), conv_id),
-        )
-        conn.commit()
-        conn.close()
+    db.execute(
+        "UPDATE conversations SET unread_count=MAX(unread_count,1), updated_at=? WHERE id=?",
+        (datetime.utcnow().isoformat(), conv_id),
+    )
 
 
 def clear_conversation(conv_id: int) -> None:
     """Remove todas as mensagens da conversa (mantém o chat/contato)."""
-    with _lock:
-        conn = _get_conn()
-        conn.execute("DELETE FROM messages WHERE conversation_id=?", (conv_id,))
-        conn.execute(
-            "UPDATE conversations SET unread_count=0, last_message_at=NULL, updated_at=? WHERE id=?",
-            (datetime.utcnow().isoformat(), conv_id),
-        )
-        conn.commit()
-        conn.close()
+    db.execute("DELETE FROM messages WHERE conversation_id=?", (conv_id,))
+    db.execute(
+        "UPDATE conversations SET unread_count=0, last_message_at=NULL, updated_at=? WHERE id=?",
+        (datetime.utcnow().isoformat(), conv_id),
+    )
 
 
 def delete_conversation(conv_id: int) -> None:
     """Remove mensagens, vínculo de tags e a própria conversa."""
-    with _lock:
-        conn = _get_conn()
-        conn.execute("DELETE FROM messages WHERE conversation_id=?", (conv_id,))
-        conn.execute("DELETE FROM conversation_tags WHERE conversation_id=?", (conv_id,))
-        conn.execute("DELETE FROM conversations WHERE id=?", (conv_id,))
-        conn.commit()
-        conn.close()
+    db.execute("DELETE FROM messages WHERE conversation_id=?", (conv_id,))
+    db.execute("DELETE FROM conversation_tags WHERE conversation_id=?", (conv_id,))
+    db.execute("DELETE FROM conversations WHERE id=?", (conv_id,))
 
 
 # ── Messages ──────────────────────────────────────────────────────────────────
@@ -414,309 +328,201 @@ def save_message(
     status: str = "sent",
 ) -> dict | None:
     """Salva mensagem com idempotência via uazapi_id. Retorna a mensagem ou None se duplicata."""
-    # uazapi_id vazio deve virar NULL para não violar a constraint UNIQUE.
-    if not uazapi_id:
-        uazapi_id = None
-    with _lock:
-        conn = _get_conn()
-        if uazapi_id:
-            existing = conn.execute("SELECT id FROM messages WHERE uazapi_id=?", (uazapi_id,)).fetchone()
-            if existing:
-                conn.close()
-                return None
+    uazapi_id_clean = uazapi_id if uazapi_id else None
+    if uazapi_id_clean:
+        existing = db.fetch_one("SELECT id FROM messages WHERE uazapi_id=?", (uazapi_id_clean,))
+        if existing:
+            return None
 
-        now = datetime.utcnow().isoformat()
-        conn.execute(
-            "INSERT INTO messages (conversation_id, phone, uazapi_id, direction, sender, body, msg_type, media_url, status, created_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?)",
-            (conversation_id, phone, uazapi_id, direction, sender, body, msg_type, media_url, status, now),
-        )
-        conn.commit()
-        msg = conn.execute("SELECT * FROM messages WHERE id=last_insert_rowid()").fetchone()
-        conn.close()
-        return dict(msg) if msg else None
+    now = datetime.utcnow().isoformat()
+    cur = db.execute(
+        "INSERT INTO messages (conversation_id, phone, uazapi_id, direction, sender, body, msg_type, media_url, status, created_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (conversation_id, phone, uazapi_id_clean, direction, sender, body, msg_type, media_url, status, now),
+    )
+    msg_id = db.last_insert_id(cur)
+    if msg_id:
+        return db.fetch_one("SELECT * FROM messages WHERE id=?", (msg_id,))
+    return None
 
 
 def get_messages(conversation_id: int, limit: int = 50, offset: int = 0) -> list[dict]:
-    with _lock:
-        conn = _get_conn()
-        rows = conn.execute(
-            "SELECT * FROM messages WHERE conversation_id=? ORDER BY created_at ASC LIMIT ? OFFSET ?",
-            (conversation_id, limit, offset),
-        ).fetchall()
-        conn.close()
-        return [dict(r) for r in rows]
+    return db.fetch_all(
+        "SELECT * FROM messages WHERE conversation_id=? ORDER BY created_at ASC LIMIT ? OFFSET ?",
+        (conversation_id, limit, offset),
+    )
 
 
 def count_messages(conversation_id: int) -> int:
-    with _lock:
-        conn = _get_conn()
-        row = conn.execute("SELECT COUNT(*) as cnt FROM messages WHERE conversation_id=?", (conversation_id,)).fetchone()
-        conn.close()
-        return row["cnt"] if row else 0
+    row = db.fetch_one("SELECT COUNT(*) as cnt FROM messages WHERE conversation_id=?", (conversation_id,))
+    return row["cnt"] if row else 0
 
 
 def search_messages(query: str, limit: int = 50) -> list[dict]:
-    with _lock:
-        conn = _get_conn()
-        rows = conn.execute(
-            "SELECT m.*, c.id as conv_id, ct.name as contact_name "
-            "FROM messages m "
-            "JOIN conversations c ON m.conversation_id=c.id "
-            "LEFT JOIN contacts ct ON c.contact_id=ct.id "
-            "WHERE m.body LIKE ? ORDER BY m.created_at DESC LIMIT ?",
-            (f"%{query}%", limit),
-        ).fetchall()
-        conn.close()
-        return [dict(r) for r in rows]
+    return db.fetch_all(
+        "SELECT m.*, c.id as conv_id, ct.name as contact_name "
+        "FROM messages m "
+        "JOIN conversations c ON m.conversation_id=c.id "
+        "LEFT JOIN contacts ct ON c.contact_id=ct.id "
+        "WHERE m.body LIKE ? ORDER BY m.created_at DESC LIMIT ?",
+        (f"%{query}%", limit),
+    )
 
 
 # ── Tags ──────────────────────────────────────────────────────────────────────
 
 def create_tag(name: str, color: str = "#6366f1") -> dict:
-    with _lock:
-        conn = _get_conn()
-        conn.execute("INSERT INTO tags (name, color) VALUES (?,?)", (name, color))
-        conn.commit()
-        tag = conn.execute("SELECT * FROM tags WHERE name=?", (name,)).fetchone()
-        conn.close()
-        return dict(tag)
+    db.execute("INSERT INTO tags (name, color) VALUES (?,?)", (name, color))
+    return db.fetch_one("SELECT * FROM tags WHERE name=?", (name,))
 
 
 def list_tags() -> list[dict]:
-    with _lock:
-        conn = _get_conn()
-        rows = conn.execute("SELECT * FROM tags ORDER BY name").fetchall()
-        conn.close()
-        return [dict(r) for r in rows]
+    return db.fetch_all("SELECT * FROM tags ORDER BY name")
 
 
 def get_tag(tag_id: int) -> dict | None:
-    with _lock:
-        conn = _get_conn()
-        row = conn.execute("SELECT * FROM tags WHERE id=?", (tag_id,)).fetchone()
-        conn.close()
-        return dict(row) if row else None
+    return db.fetch_one("SELECT * FROM tags WHERE id=?", (tag_id,))
 
 
 def update_tag(tag_id: int, name: str = "", color: str = "") -> None:
-    with _lock:
-        conn = _get_conn()
-        sets, vals = [], []
-        if name:
-            sets.append("name=?")
-            vals.append(name)
-        if color:
-            sets.append("color=?")
-            vals.append(color)
-        if sets:
-            vals.append(tag_id)
-            conn.execute(f"UPDATE tags SET {','.join(sets)} WHERE id=?", vals)
-            conn.commit()
-        conn.close()
+    sets, vals = [], []
+    if name:
+        sets.append("name=?")
+        vals.append(name)
+    if color:
+        sets.append("color=?")
+        vals.append(color)
+    if sets:
+        vals.append(tag_id)
+        db.execute(f"UPDATE tags SET {','.join(sets)} WHERE id=?", tuple(vals))
 
 
 def delete_tag(tag_id: int) -> None:
-    with _lock:
-        conn = _get_conn()
-        conn.execute("DELETE FROM contact_tags WHERE tag_id=?", (tag_id,))
-        conn.execute("DELETE FROM conversation_tags WHERE tag_id=?", (tag_id,))
-        conn.execute("DELETE FROM tags WHERE id=?", (tag_id,))
-        conn.commit()
-        conn.close()
+    db.execute("DELETE FROM contact_tags WHERE tag_id=?", (tag_id,))
+    db.execute("DELETE FROM conversation_tags WHERE tag_id=?", (tag_id,))
+    db.execute("DELETE FROM tags WHERE id=?", (tag_id,))
 
 
 def add_tag_to_contact(contact_id: int, tag_id: int) -> None:
-    with _lock:
-        conn = _get_conn()
-        conn.execute(
-            "INSERT OR IGNORE INTO contact_tags (contact_id, tag_id) VALUES (?,?)",
-            (contact_id, tag_id),
-        )
-        conn.commit()
-        conn.close()
+    db.insert_ignore("contact_tags", ["contact_id", "tag_id"], (contact_id, tag_id))
 
 
 def remove_tag_from_contact(contact_id: int, tag_id: int) -> None:
-    with _lock:
-        conn = _get_conn()
-        conn.execute("DELETE FROM contact_tags WHERE contact_id=? AND tag_id=?", (contact_id, tag_id))
-        conn.commit()
-        conn.close()
+    db.execute("DELETE FROM contact_tags WHERE contact_id=? AND tag_id=?", (contact_id, tag_id))
 
 
 def get_contact_tags(contact_id: int) -> list[dict]:
-    with _lock:
-        conn = _get_conn()
-        rows = conn.execute(
-            "SELECT t.* FROM tags t JOIN contact_tags ct ON t.id=ct.tag_id WHERE ct.contact_id=?",
-            (contact_id,),
-        ).fetchall()
-        conn.close()
-        return [dict(r) for r in rows]
+    return db.fetch_all(
+        "SELECT t.* FROM tags t JOIN contact_tags ct ON t.id=ct.tag_id WHERE ct.contact_id=?",
+        (contact_id,),
+    )
 
 
 def add_tag_to_conversation(conversation_id: int, tag_id: int) -> None:
-    with _lock:
-        conn = _get_conn()
-        conn.execute(
-            "INSERT OR IGNORE INTO conversation_tags (conversation_id, tag_id) VALUES (?,?)",
-            (conversation_id, tag_id),
-        )
-        conn.commit()
-        conn.close()
+    db.insert_ignore("conversation_tags", ["conversation_id", "tag_id"], (conversation_id, tag_id))
 
 
 def get_conversation_tags(conversation_id: int) -> list[dict]:
-    with _lock:
-        conn = _get_conn()
-        rows = conn.execute(
-            "SELECT t.* FROM tags t JOIN conversation_tags ct ON t.id=ct.tag_id WHERE ct.conversation_id=?",
-            (conversation_id,),
-        ).fetchall()
-        conn.close()
-        return [dict(r) for r in rows]
+    return db.fetch_all(
+        "SELECT t.* FROM tags t JOIN conversation_tags ct ON t.id=ct.tag_id WHERE ct.conversation_id=?",
+        (conversation_id,),
+    )
 
 
 # ── Templates ─────────────────────────────────────────────────────────────────
 
 def create_template(title: str, body: str) -> dict:
-    with _lock:
-        conn = _get_conn()
-        now = datetime.utcnow().isoformat()
-        conn.execute("INSERT INTO templates (title, body, created_at) VALUES (?,?,?)", (title, body, now))
-        conn.commit()
-        tpl = conn.execute("SELECT * FROM templates WHERE id=last_insert_rowid()").fetchone()
-        conn.close()
-        return dict(tpl)
+    now = datetime.utcnow().isoformat()
+    cur = db.execute("INSERT INTO templates (title, body, created_at) VALUES (?,?,?)", (title, body, now))
+    tpl_id = db.last_insert_id(cur)
+    return db.fetch_one("SELECT * FROM templates WHERE id=?", (tpl_id,))
 
 
 def list_templates() -> list[dict]:
-    with _lock:
-        conn = _get_conn()
-        rows = conn.execute("SELECT * FROM templates ORDER BY title").fetchall()
-        conn.close()
-        return [dict(r) for r in rows]
+    return db.fetch_all("SELECT * FROM templates ORDER BY title")
 
 
 def get_template(tpl_id: int) -> dict | None:
-    with _lock:
-        conn = _get_conn()
-        row = conn.execute("SELECT * FROM templates WHERE id=?", (tpl_id,)).fetchone()
-        conn.close()
-        return dict(row) if row else None
+    return db.fetch_one("SELECT * FROM templates WHERE id=?", (tpl_id,))
 
 
 def update_template(tpl_id: int, title: str = "", body: str = "") -> None:
-    with _lock:
-        conn = _get_conn()
-        sets, vals = [], []
-        if title:
-            sets.append("title=?")
-            vals.append(title)
-        if body:
-            sets.append("body=?")
-            vals.append(body)
-        if sets:
-            vals.append(tpl_id)
-            conn.execute(f"UPDATE templates SET {','.join(sets)} WHERE id=?", vals)
-            conn.commit()
-        conn.close()
+    sets, vals = [], []
+    if title:
+        sets.append("title=?")
+        vals.append(title)
+    if body:
+        sets.append("body=?")
+        vals.append(body)
+    if sets:
+        vals.append(tpl_id)
+        db.execute(f"UPDATE templates SET {','.join(sets)} WHERE id=?", tuple(vals))
 
 
 def delete_template(tpl_id: int) -> None:
-    with _lock:
-        conn = _get_conn()
-        conn.execute("DELETE FROM templates WHERE id=?", (tpl_id,))
-        conn.commit()
-        conn.close()
+    db.execute("DELETE FROM templates WHERE id=?", (tpl_id,))
 
 
 # ── Tasks ─────────────────────────────────────────────────────────────────────
 
 def create_task(contact_id: int, title: str, description: str = "", due_date: str = "") -> dict:
-    with _lock:
-        conn = _get_conn()
-        now = datetime.utcnow().isoformat()
-        conn.execute(
-            "INSERT INTO tasks (contact_id, title, description, due_date, created_at) VALUES (?,?,?,?,?)",
-            (contact_id, title, description, due_date, now),
-        )
-        conn.commit()
-        task = conn.execute("SELECT * FROM tasks WHERE title=? AND contact_id=?", (title, contact_id)).fetchone()
-        conn.close()
-        return dict(task)
+    now = datetime.utcnow().isoformat()
+    db.execute(
+        "INSERT INTO tasks (contact_id, title, description, due_date, created_at) VALUES (?,?,?,?,?)",
+        (contact_id, title, description, due_date, now),
+    )
+    return db.fetch_one("SELECT * FROM tasks WHERE title=? AND contact_id=?", (title, contact_id))
 
 
 def list_tasks(contact_id: int | None = None) -> list[dict]:
-    with _lock:
-        conn = _get_conn()
-        if contact_id:
-            rows = conn.execute(
-                "SELECT * FROM tasks WHERE contact_id=? ORDER BY created_at DESC", (contact_id,)
-            ).fetchall()
-        else:
-            rows = conn.execute("SELECT * FROM tasks ORDER BY created_at DESC").fetchall()
-        conn.close()
-        return [dict(r) for r in rows]
+    if contact_id:
+        return db.fetch_all(
+            "SELECT * FROM tasks WHERE contact_id=? ORDER BY created_at DESC", (contact_id,)
+        )
+    return db.fetch_all("SELECT * FROM tasks ORDER BY created_at DESC")
 
 
 def get_task(task_id: int) -> dict | None:
-    with _lock:
-        conn = _get_conn()
-        row = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
-        conn.close()
-        return dict(row) if row else None
+    return db.fetch_one("SELECT * FROM tasks WHERE id=?", (task_id,))
 
 
 def update_task(task_id: int, **fields: Any) -> None:
-    with _lock:
-        conn = _get_conn()
-        allowed = ("title", "description", "status", "due_date")
-        sets, vals = [], []
-        for k, v in fields.items():
-            if k in allowed:
-                sets.append(f"{k}=?")
-                vals.append(v)
-        if sets:
-            vals.append(task_id)
-            conn.execute(f"UPDATE tasks SET {','.join(sets)} WHERE id=?", vals)
-            conn.commit()
-        conn.close()
+    allowed = ("title", "description", "status", "due_date")
+    sets, vals = [], []
+    for k, v in fields.items():
+        if k in allowed:
+            sets.append(f"{k}=?")
+            vals.append(v)
+    if sets:
+        vals.append(task_id)
+        db.execute(f"UPDATE tasks SET {','.join(sets)} WHERE id=?", tuple(vals))
 
 
 def delete_task(task_id: int) -> None:
-    with _lock:
-        conn = _get_conn()
-        conn.execute("DELETE FROM tasks WHERE id=?", (task_id,))
-        conn.commit()
-        conn.close()
+    db.execute("DELETE FROM tasks WHERE id=?", (task_id,))
 
 
 # ── Dashboard / Stats ─────────────────────────────────────────────────────────
 
 def get_dashboard_stats() -> dict:
-    with _lock:
-        conn = _get_conn()
-        total_contacts = conn.execute("SELECT COUNT(*) as cnt FROM contacts").fetchone()["cnt"]
-        total_conversations = conn.execute("SELECT COUNT(*) as cnt FROM conversations").fetchone()["cnt"]
-        open_conversations = conn.execute(
-            "SELECT COUNT(*) as cnt FROM conversations WHERE status IN ('new','open','waiting')"
-        ).fetchone()["cnt"]
-        total_messages = conn.execute("SELECT COUNT(*) as cnt FROM messages").fetchone()["cnt"]
-        unread_messages = conn.execute(
-            "SELECT COALESCE(SUM(unread_count),0) as cnt FROM conversations"
-        ).fetchone()["cnt"]
-        today = datetime.utcnow().strftime("%Y-%m-%d")
-        messages_today = conn.execute(
-            "SELECT COUNT(*) as cnt FROM messages WHERE created_at >= ?", (today,)
-        ).fetchone()["cnt"]
-        conn.close()
-        return {
-            "total_contacts": total_contacts,
-            "total_conversations": total_conversations,
-            "open_conversations": open_conversations,
-            "total_messages": total_messages,
-            "unread_messages": unread_messages,
-            "messages_today": messages_today,
-        }
+    total_contacts = db.fetch_one("SELECT COUNT(*) as cnt FROM contacts")["cnt"]
+    total_conversations = db.fetch_one("SELECT COUNT(*) as cnt FROM conversations")["cnt"]
+    open_conversations = db.fetch_one(
+        "SELECT COUNT(*) as cnt FROM conversations WHERE status IN ('new','open','waiting')"
+    )["cnt"]
+    total_messages = db.fetch_one("SELECT COUNT(*) as cnt FROM messages")["cnt"]
+    unread_messages = db.fetch_one(
+        "SELECT COALESCE(SUM(unread_count),0) as cnt FROM conversations"
+    )["cnt"]
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    messages_today = db.fetch_one(
+        "SELECT COUNT(*) as cnt FROM messages WHERE created_at >= ?", (today,)
+    )["cnt"]
+    return {
+        "total_contacts": total_contacts,
+        "total_conversations": total_conversations,
+        "open_conversations": open_conversations,
+        "total_messages": total_messages,
+        "unread_messages": unread_messages,
+        "messages_today": messages_today,
+    }

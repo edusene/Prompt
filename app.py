@@ -277,8 +277,9 @@ def webhook():
             _invalidate_status_cache()
             events.emit("wa_status", {"status": status})
         if status == "open" and WEBHOOK_URL:
+            import threading
             from uazapi import configure_webhook
-            configure_webhook(WEBHOOK_URL)
+            threading.Thread(target=configure_webhook, args=(WEBHOOK_URL,), daemon=True).start()
         return jsonify({"ok": True})
 
     # Ignora eventos que não são de mensagem
@@ -772,11 +773,8 @@ def api_conversations_add_tag(conv_id):
 @app.delete("/api/conversations/<int:conv_id>/tags/<int:tag_id>")
 @login_required
 def api_conversations_remove_tag(conv_id, tag_id):
-    with database._lock:
-        conn = database._get_conn()
-        conn.execute("DELETE FROM conversation_tags WHERE conversation_id=? AND tag_id=?", (conv_id, tag_id))
-        conn.commit()
-        conn.close()
+    import db
+    db.execute("DELETE FROM conversation_tags WHERE conversation_id=? AND tag_id=?", (conv_id, tag_id))
     events.emit("tags_updated", {"conversation_id": conv_id, "tag_id": tag_id, "action": "remove"})
     return jsonify({"ok": True})
 

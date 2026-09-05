@@ -60,7 +60,10 @@ function loadView(view) {
     pollTimers = [];
     if (waStatusTimer) { clearInterval(waStatusTimer); waStatusTimer = null; }
     switch (view) {
-        case 'dashboard': loadDashboard(); break;
+        case 'dashboard':
+            loadDashboard();
+            pollTimers.push(setInterval(loadDashboard, 15000));
+            break;
         case 'conversations':
             loadConversations();
             // Atualiza o painel da conversa aberta sem reconstruir o chat (evita animação de reabrir)
@@ -1013,7 +1016,7 @@ function startWAStatusPolling() {
     if (waStatusTimer) { clearInterval(waStatusTimer); waStatusTimer = null; }
     if (document.hidden) return; // aba oculta → não gera requisições
     const fast = (lastWAStatus === 'connecting' || lastWAStatus === 'qr');
-    waStatusTimer = setInterval(() => loadWAStatus(), fast ? 5000 : 60000);
+    waStatusTimer = setInterval(() => loadWAStatus(), fast ? 2000 : 60000);
 }
 
 async function loadQRCode() {
@@ -1144,6 +1147,7 @@ function connectSSE() {
                 }
             }
             updateUnreadBadge();
+            if (currentView === 'dashboard') loadDashboard();
         } else if (event === 'message_sent') {
             if (currentView === 'conversations' && currentConvId === data.conversation_id) {
                 refreshConversationPanel(data.conversation_id);
@@ -1156,6 +1160,7 @@ function connectSSE() {
                     }
                 }
             }
+            if (currentView === 'dashboard') loadDashboard();
         } else if (event === 'conversation_updated') {
             loadConversations();
         } else if (event === 'tags_updated') {
