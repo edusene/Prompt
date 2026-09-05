@@ -633,8 +633,7 @@ async function sendMessage() {
     input.value = '';
     autoResizeChatInput();
     toast('Mensagem enviada', 'success');
-    const sent = await api(`/api/conversations/${currentConvId}`);
-    if (sent?.messages?.length) appendMessage(sent.messages[sent.messages.length - 1]);
+    // A atualização visual vem via SSE (evento message_sent) — evita duplicação.
 }
 
 /* ── Contacts ─────────────────────────────────────────────────────────────── */
@@ -1169,11 +1168,7 @@ function connectSSE() {
                 refreshConversationPanel(data.conversation_id);
                 const d = await api(`/api/conversations/${data.conversation_id}`);
                 if (d?.messages?.length) {
-                    const last = d.messages[d.messages.length - 1];
-                    const lastEl = document.querySelector('#chat-messages .msg:last-child');
-                    if (!lastEl || !lastEl.textContent.includes(esc(last.body).slice(0, 30))) {
-                        appendMessage(last);
-                    }
+                    appendMessage(d.messages[d.messages.length - 1]);
                 }
             }
             if (currentView === 'dashboard') debouncedLoadDashboard();
