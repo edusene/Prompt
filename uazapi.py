@@ -205,8 +205,8 @@ def chat_delete(number: str) -> dict:
 
 
 def get_qr_code() -> dict:
-    """GET /instance/connect — retorna QR code base64 (conforme docs uazapi)."""
-    return _request("GET", "/instance/connect")
+    """POST /instance/connect — retorna QR code base64 (API v2.0)."""
+    return _request("POST", "/instance/connect", {})
 
 
 def get_instance_status() -> dict:

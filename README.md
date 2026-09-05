@@ -171,6 +171,8 @@ Consulte `LLMs-uazapi.txt` para endpoints disponíveis:
 
 | Feature | Endpoint |
 |---|---|
+| Conectar instância / QR Code | `POST /instance/connect` |
+| Status da instância | `GET /instance/status` |
 | Enviar imagem | `POST /send/image` |
 | Enviar áudio | `POST /send/audio` |
 | Botões interativos | `POST /send/menu` |

@@ -77,8 +77,9 @@ Body:
 Resposta: { "instanceName": "...", "token": "INSTANCE_TOKEN", "status": "created" }
 
 ### Conectar / Obter QR Code (requer Instance Token)
-GET /instance/connect
-Resposta: { "qrcode": "base64...", "pairingCode": "XXXX-XXXX" }
+POST /instance/connect
+Body (opcional): { "phoneNumber": "5511999999999" }  // para pairing code
+Resposta: { "qrcode": "data:image/png;base64,...", "pairingCode": "XXXX-XXXX" }
 Use o QR code ou o código de pareamento para autenticar o número no WhatsApp.
 
 ### Ver status da instância (requer Instance Token)
@@ -906,7 +907,8 @@ const { token: INSTANCE_TOKEN } = await create.json();
 
 // 2. Obter QR Code
 const connect = await fetch(`${BASE_URL}/instance/connect`, {
-  headers: { 'token': INSTANCE_TOKEN },
+  method: 'POST',
+  headers: { 'token': INSTANCE_TOKEN, 'Content-Type': 'application/json' },
 });
 const { qrcode } = await connect.json();
 // qrcode é uma string base64 — exiba-a como imagem para o usuário escanear
