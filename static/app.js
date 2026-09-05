@@ -996,6 +996,14 @@ async function loadWAStatus(pushedStatus) {
         </span>
     `;
     lastWAStatus = status === 'desconhecido' ? '' : status;
+    // Auto-fechar QR popup quando conectar (escaneou com sucesso)
+    if (status === 'open') {
+        const qrEl = document.getElementById('qr-container');
+        if (qrEl && qrEl.innerHTML.trim()) {
+            closeQR();
+            toast('WhatsApp conectado com sucesso!', 'success');
+        }
+    }
     startWAStatusPolling();
 }
 
@@ -1059,7 +1067,7 @@ async function loadQRCode() {
 async function restartWA() {
     if (!confirm('Reiniciar instancia WhatsApp?')) return;
     const btn = event.currentTarget;
-    setBtnLoading(btn, true);
+    setBtnLoading(btn, true, 'Reiniciando...');
     const data = await api('/api/instance/restart', { method: 'POST' });
     setBtnLoading(btn, false);
     if (data?.error) {
@@ -1073,7 +1081,7 @@ async function restartWA() {
 async function disconnectWA() {
     if (!confirm('Desconectar WhatsApp?')) return;
     const btn = event.currentTarget;
-    setBtnLoading(btn, true);
+    setBtnLoading(btn, true, 'Desconectando...');
     const data = await api('/api/instance/disconnect', { method: 'POST' });
     setBtnLoading(btn, false);
     if (data?.error) {
@@ -1149,14 +1157,6 @@ function connectSSE() {
             // Atualização de status da instância vinda do servidor (sem requisição)
             if (currentView === 'whatsapp') {
                 loadWAStatus(data.status);
-                // Auto-fechar QR popup quando conectar (escaneou com sucesso)
-                if (data.status === 'open') {
-                    const qrEl = document.getElementById('qr-container');
-                    if (qrEl && qrEl.innerHTML.trim()) {
-                        closeQR();
-                        toast('WhatsApp conectado com sucesso!', 'success');
-                    }
-                }
             }
         }
     };
@@ -1192,9 +1192,11 @@ function setBtnLoading(btn, loading, label) {
     if (loading) {
         btn.dataset.originalHtml = btn.innerHTML;
         btn.classList.add('btn-loading');
-        btn.innerHTML = spinHTML(label || 'Carregando...');
+        btn.disabled = true;
+        btn.innerHTML = spinHTML(label);
     } else {
         btn.classList.remove('btn-loading');
+        btn.disabled = false;
         btn.innerHTML = btn.dataset.originalHtml || '';
     }
 }
