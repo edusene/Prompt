@@ -249,7 +249,7 @@ def restart_instance() -> dict:
     _request("POST", "/instance/restart")
     _request("DELETE", "/instance/logout")
     _request("POST", "/instance/disconnect")
-    r = _request("GET", "/instance/connect")
+    r = _request("POST", "/instance/connect", {})
     return r
 
 
