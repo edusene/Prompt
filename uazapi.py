@@ -239,24 +239,17 @@ def disconnect_instance() -> dict:
 
 
 def restart_instance() -> dict:
-    """Reinicia a sessão da instância (reconexão suave, mantém a sessão).
+    """Reinicia a instância: desconecta (best-effort) e inicia nova conexão.
 
-    v3 (instâncias pagas atuais): POST /instance/reset SEM corpo — validado ao vivo:
-    200 {"resetting": true, "response": "Instance reset started"}; com corpo JSON
-    responde 400 "reset payload is not supported".
-    Fallbacks v2: POST/PUT /instance/restart (docs antigas LLMs-uazapi.txt).
+    O endpoint /instance/reset da v3 e /instance/restart da v2 retornam 405
+    quando a instância não está conectada. O painel da UAZAPI resolve isso
+    desconectando e reconectando — fazemos o mesmo.
     """
-    r = _request("POST", "/instance/reset")
-    if not r["ok"]:
-        r = _request("POST", "/instance/restart")
-    if not r["ok"]:
-        r = _request("PUT", "/instance/restart")
-    if not r["ok"]:
-        status = r.get("status", 0)
-        if status == 405:
-            return {"ok": False, "status": 405,
-                    "error": "Operacao de reinicio nao suportada por esta instancia. "
-                             "Use o painel da UAZAPI para reiniciar."}
+    _request("POST", "/instance/reset")
+    _request("POST", "/instance/restart")
+    _request("DELETE", "/instance/logout")
+    _request("POST", "/instance/disconnect")
+    r = _request("GET", "/instance/connect")
     return r
 
 
