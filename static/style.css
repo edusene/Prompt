@@ -474,6 +474,7 @@ h3 { font-size: 14px; font-weight: 600; }
     font-weight: 700;
     color: #fff;
     flex-shrink: 0;
+    overflow: hidden;
     transition: transform var(--transition-fast), box-shadow var(--transition-fast);
 }
 .conv-item:hover .conv-avatar { transform: scale(1.05); box-shadow: 0 0 12px var(--accent-glow); }

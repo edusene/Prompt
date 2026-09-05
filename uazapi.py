@@ -215,10 +215,19 @@ def get_instance_status() -> dict:
 
 
 def disconnect_instance() -> dict:
-    """Desconecta instância (DELETE /instance/logout conforme docs uazapi)."""
-    r = _request("DELETE", "/instance/logout")
+    """Desconecta a sessão do WhatsApp.
+
+    v3 (instâncias pagas atuais): POST /instance/disconnect SEM corpo — confirmado
+    por sonda de roteamento (401 "Invalid token" com token inválido; 405/404 nos
+    demais). A v3 rejeita payload ({"error": "... payload is not supported"}).
+    Fallbacks v2: DELETE/POST /instance/logout (docs antigas LLMs-uazapi.txt).
+    """
+    r = _request("POST", "/instance/disconnect")
     if not r["ok"]:
-        # Fallback: POST /instance/logout (algumas instâncias usam POST)
+        # Fallback v2: DELETE /instance/logout (docs uazapi v2).
+        r = _request("DELETE", "/instance/logout")
+    if not r["ok"]:
+        # Último fallback: POST /instance/logout (algumas instalações usam POST).
         r = _request("POST", "/instance/logout", {})
     if not r["ok"]:
         status = r.get("status", 0)
@@ -230,11 +239,27 @@ def disconnect_instance() -> dict:
 
 
 def restart_instance() -> dict:
-    """Reinicia instância (POST /instance/restart conforme docs uazapi)."""
-    r = _request("POST", "/instance/restart", {})
+    """Reinicia a sessão da instância (reconexão suave, mantém a sessão).
+
+    v3 (instâncias pagas atuais): POST /instance/reset SEM corpo — validado ao vivo:
+    200 {"resetting": true, "response": "Instance reset started"}; com corpo JSON
+    responde 400 "reset payload is not supported".
+    Fallbacks v2: POST/PUT /instance/restart (docs antigas LLMs-uazapi.txt).
+    """
+    r = _request("POST", "/instance/reset")
     if not r["ok"]:
-        # Fallback: PUT /instance/restart
+        # Fallback v2: POST /instance/restart.
+        r = _request("POST", "/instance/restart", {})
+    if not r["ok"]:
+        # Último fallback: PUT /instance/restart.
         r = _request("PUT", "/instance/restart", {})
+    if not r["ok"]:
+        status = r.get("status", 0)
+        if status == 405:
+            return {"ok": False, "status": 405,
+                    "error": "Operacao dereinicio nao suportada por esta instancia. "
+                             "Use o painel da UAZAPI para reiniciar."}
+    return r
     if not r["ok"]:
         status = r.get("status", 0)
         if status == 405:
