@@ -99,13 +99,15 @@ async function api(url, opts = {}) {
 
 /* ── Dashboard ────────────────────────────────────────────────────────────── */
 async function loadDashboard() {
-    document.getElementById('stats-grid').innerHTML = skeletonCards(5);
+    const grid = document.getElementById('stats-grid');
+    if (!grid.dataset.loaded) grid.innerHTML = skeletonCards(5);
     const stats = await api('/api/dashboard');
     if (!stats) {
-        document.getElementById('stats-grid').innerHTML = '<p class="muted">Erro ao carregar</p>';
+        grid.innerHTML = '<p class="muted">Erro ao carregar</p>';
         return;
     }
-    document.getElementById('stats-grid').innerHTML = `
+    grid.dataset.loaded = '1';
+    grid.innerHTML = `
         <div class="stat-card">
             <div class="stat-icon"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></div>
             <div class="stat-value">${stats.total_contacts}</div>
@@ -143,6 +145,7 @@ async function loadConversations() {
     const archivedParam = status === 'archived' ? '&archived=1' : '';
     const statusParam = status === 'archived' ? '' : status;
     if (!list.dataset.loaded) list.innerHTML = skeletonRows(5);
+    const scrollPos = list.scrollTop;
     conversations = await api(`/api/conversations?status=${statusParam}${archivedParam}`);
     if (!conversations) return;
     list.dataset.loaded = '1';
@@ -179,6 +182,7 @@ async function loadConversations() {
                 </div>
             </div>`;
     }).join('');
+    list.scrollTop = scrollPos;
 }
 
 async function selectConversation(convId) {
@@ -629,10 +633,8 @@ async function sendMessage() {
     input.value = '';
     autoResizeChatInput();
     toast('Mensagem enviada', 'success');
-    // Anexa a mensagem enviada sem reconstruir o histórico (só a nova anima)
     const sent = await api(`/api/conversations/${currentConvId}`);
     if (sent?.messages?.length) appendMessage(sent.messages[sent.messages.length - 1]);
-    refreshConversationPanel(currentConvId);
 }
 
 /* ── Contacts ─────────────────────────────────────────────────────────────── */
@@ -1124,6 +1126,20 @@ function closeModal() {
 }
 
 /* ── SSE ──────────────────────────────────────────────────────────────────── */
+let _convDebounce = null;
+let _dashDebounce = null;
+function debouncedLoadConversations() {
+    clearTimeout(_convDebounce);
+    _convDebounce = setTimeout(() => {
+        if (currentView === 'conversations') loadConversations();
+    }, 500);
+}
+function debouncedLoadDashboard() {
+    clearTimeout(_dashDebounce);
+    _dashDebounce = setTimeout(() => {
+        if (currentView === 'dashboard') loadDashboard();
+    }, 1000);
+}
 function connectSSE() {
     const source = new EventSource('/api/events');
     source.onmessage = async e => {
@@ -1143,11 +1159,11 @@ function connectSSE() {
                         }
                     }
                 } else {
-                    loadConversations();
+                    debouncedLoadConversations();
                 }
             }
             updateUnreadBadge();
-            if (currentView === 'dashboard') loadDashboard();
+            if (currentView === 'dashboard') debouncedLoadDashboard();
         } else if (event === 'message_sent') {
             if (currentView === 'conversations' && currentConvId === data.conversation_id) {
                 refreshConversationPanel(data.conversation_id);
@@ -1160,9 +1176,9 @@ function connectSSE() {
                     }
                 }
             }
-            if (currentView === 'dashboard') loadDashboard();
+            if (currentView === 'dashboard') debouncedLoadDashboard();
         } else if (event === 'conversation_updated') {
-            loadConversations();
+            debouncedLoadConversations();
         } else if (event === 'tags_updated') {
             // Atualiza badges/chips de tags na lista (Atendimento) e no painel da conversa aberta
             refreshTagsUI();

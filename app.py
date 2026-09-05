@@ -31,6 +31,7 @@ import llm
 import database
 import events
 import uazapi
+from google.genai import types
 from uazapi import send_text, send_presence, mark_read, chat_archive, chat_pin, chat_mute, chat_delete
 from buffer import MessageBuffer
 from auth import login_required, do_login, do_logout
@@ -48,32 +49,91 @@ _BASE_PROMPT = os.getenv(
 )
 
 
-def _load_knowledge() -> str:
-    """Lê todos os .md/.txt da pasta knowledge e retorna concatenado."""
-    import glob as _glob
-    path = os.path.join(os.path.dirname(__file__), SYSTEM_PROMPT_DIR)
+def _knowledge_dir() -> str:
+    return os.path.join(os.path.dirname(__file__), SYSTEM_PROMPT_DIR)
+
+
+def _build_knowledge_index() -> str:
+    """Lê os arquivos knowledge e gera um índice leve: '- nome.md: primeira linha significativa'."""
+    path = _knowledge_dir()
     if not os.path.isdir(path):
         return ""
-    files = sorted(_glob.glob(os.path.join(path, "*.md")) + _glob.glob(os.path.join(path, "*.txt")))
-    parts = []
+    files = sorted([f for f in os.listdir(path)
+                    if f.endswith(('.md', '.txt')) and f != 'README.md'])
+    lines = []
     for f in files:
-        if os.path.basename(f) == "README.md":
-            continue
+        fp = os.path.join(path, f)
         try:
-            with open(f, encoding="utf-8") as fh:
-                content = fh.read().strip()
-                if content:
-                    parts.append(content)
-        except Exception as e:
-            print(f"[knowledge] erro lendo {f}: {e}")
-    return "\n\n".join(parts)
+            with open(fp, encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if line and not line.startswith("#"):
+                        lines.append(f"- {f}: {line[:80]}")
+                        break
+                else:
+                    lines.append(f"- {f}")
+        except Exception:
+            lines.append(f"- {f}")
+    return "\n".join(lines)
 
 
-_KNOWLEDGE = _load_knowledge()
-FULL_SYSTEM_PROMPT = f"{_BASE_PROMPT}\n\n---\n\n{_KNOWLEDGE}" if _KNOWLEDGE else _BASE_PROMPT
+_KNOWLEDGE_INDEX = _build_knowledge_index()
 
-if _KNOWLEDGE:
-    print(f"[knowledge] {len(_KNOWLEDGE)} chars carregados de {SYSTEM_PROMPT_DIR}/")
+# Tool definition para o Gemini — busca seletiva de knowledge
+KNOWLEDGE_TOOL = types.Tool(
+    function_declarations=[
+        types.FunctionDeclaration(
+            name="get_knowledge",
+            description="Busca o conteúdo de um arquivo de conhecimento específico da empresa. Use quando precisar de informações detalhadas para responder o usuário.",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "filename": types.Schema(
+                        type=types.Type.STRING,
+                        description="Nome do arquivo de conhecimento (ex: 01-produtos.md)",
+                    )
+                },
+                required=["filename"],
+            ),
+        )
+    ]
+)
+
+
+def handle_get_knowledge(filename: str) -> str:
+    """Handler da tool get_knowledge — lê e retorna o conteúdo do arquivo."""
+    safe = os.path.basename(filename)
+    path = os.path.join(_knowledge_dir(), safe)
+    if not os.path.exists(path):
+        return f"Arquivo {filename} não encontrado"
+    try:
+        with open(path, encoding="utf-8") as f:
+            content = f.read().strip()
+        print(f"[knowledge] tool fetch={filename} len={len(content)}")
+        return content if content else "(arquivo vazio)"
+    except Exception as e:
+        return f"Erro lendo {filename}: {e}"
+
+
+TOOL_HANDLERS = {"get_knowledge": handle_get_knowledge}
+
+# System prompt com índice leve (sem carregar conteúdo dos arquivos)
+_KNOWLEDGE_BLOCK = f"""
+
+Você tem acesso a arquivos de conhecimento da empresa.
+Use a função get_knowledge para buscar informações quando o usuário perguntar sobre:
+- Empresa, contato, horário → get_knowledge("00-empresa.md")
+- Produtos, serviços, preços → get_knowledge("01-produtos.md")
+- Valores, missão → get_knowledge("02-valores.md")
+- Perguntas frequentes → get_knowledge("03-faq.md")
+
+Só busque o arquivo relevante. Não busque vários de uma vez.
+
+Arquivos disponíveis:
+{_KNOWLEDGE_INDEX}
+""" if _KNOWLEDGE_INDEX else ""
+
+FULL_SYSTEM_PROMPT = f"{_BASE_PROMPT}{_KNOWLEDGE_BLOCK}"
 
 
 def _knowledge_dir() -> str:
@@ -111,10 +171,24 @@ def _knowledge_git_status() -> dict:
 
 
 def reload_knowledge():
-    global _KNOWLEDGE, FULL_SYSTEM_PROMPT
-    _KNOWLEDGE = _load_knowledge()
-    FULL_SYSTEM_PROMPT = f"{_BASE_PROMPT}\n\n---\n\n{_KNOWLEDGE}" if _KNOWLEDGE else _BASE_PROMPT
-    print(f"[knowledge] recarregado: {len(_KNOWLEDGE)} chars")
+    global _KNOWLEDGE_INDEX, _KNOWLEDGE_BLOCK, FULL_SYSTEM_PROMPT
+    _KNOWLEDGE_INDEX = _build_knowledge_index()
+    _KNOWLEDGE_BLOCK = f"""
+
+Você tem acesso a arquivos de conhecimento da empresa.
+Use a função get_knowledge para buscar informações quando o usuário perguntar sobre:
+- Empresa, contato, horário → get_knowledge("00-empresa.md")
+- Produtos, serviços, preços → get_knowledge("01-produtos.md")
+- Valores, missão → get_knowledge("02-valores.md")
+- Perguntas frequentes → get_knowledge("03-faq.md")
+
+Só busque o arquivo relevante. Não busque vários de uma vez.
+
+Arquivos disponíveis:
+{_KNOWLEDGE_INDEX}
+""" if _KNOWLEDGE_INDEX else ""
+    FULL_SYSTEM_PROMPT = f"{_BASE_PROMPT}{_KNOWLEDGE_BLOCK}"
+    print(f"[knowledge] recarregado: idx={len(_KNOWLEDGE_INDEX)} chars")
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -167,7 +241,12 @@ def handle_flush(user: str, texts: list[str]) -> None:
         memory.append(user, "user", user_turn)
 
         try:
-            reply = llm.generate_reply(memory.get(user), FULL_SYSTEM_PROMPT)
+            reply = llm.generate_reply(
+                history=memory.get(user),
+                system=FULL_SYSTEM_PROMPT,
+                tools=[KNOWLEDGE_TOOL],
+                tool_handlers=TOOL_HANDLERS,
+            )
         except Exception as e:
             print(f"[flush] ERRO llm p/ {user}: {e}")
             send_presence(user, "paused")
