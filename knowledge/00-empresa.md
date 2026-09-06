@@ -1,10 +1,10 @@
 # Empresa
 
 ## Quem Somos
-[Sua empresa aqui]
+Eduardo Sene E companhia LTDA
 
 ## Contato
-- WhatsApp: [seu-whatsapp] | 69999963376
+- WhatsApp: 69999963376 
 - Email: [seu-email]
 - Site: [seu-site]
 
