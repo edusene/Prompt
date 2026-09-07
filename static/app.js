@@ -76,7 +76,6 @@ function loadView(view) {
         case 'templates': loadTemplates(); break;
         case 'knowledge':
             loadKnowledge();
-            updateKnowledgeBadge();
             break;
         case 'whatsapp':
             loadWAStatus();
@@ -873,9 +872,9 @@ async function loadKnowledge() {
         return;
     }
     list.innerHTML = files.map(f => `
-        <div class="knowledge-file ${f.name === currentKnowledgeFile ? 'active' : ''}" onclick="selectKnowledgeFile('${esc(f.name)}')">
-            <div class="knowledge-file-name">${esc(f.name)}</div>
-            <div class="knowledge-file-size">${f.size} bytes</div>
+        <div class="knowledge-file ${f.filename === currentKnowledgeFile ? 'active' : ''}" onclick="selectKnowledgeFile('${esc(f.filename)}')">
+            <div class="knowledge-file-name">${esc(f.filename)}</div>
+            <div class="knowledge-file-size">${f.chunks} chunks</div>
         </div>
     `).join('');
 }
@@ -911,21 +910,8 @@ async function saveKnowledge() {
     if (data?.error) {
         toast(friendlyError(data.error), 'error');
     } else {
-        toast('Knowledge salvo', 'success');
-        updateKnowledgeBadge();
-    }
-}
-
-async function publishKnowledge() {
-    const btn = event.currentTarget;
-    setBtnLoading(btn, true, 'Publicando...');
-    const data = await api('/api/knowledge/publish', { method: 'POST' });
-    setBtnLoading(btn, false);
-    if (data?.error) {
-        toast(friendlyError(data.error), 'error');
-    } else {
-        toast(data?.message || 'Publicado no GitHub', 'success');
-        updateKnowledgeBadge();
+        toast('Knowledge salvo e indexado', 'success');
+        loadKnowledge();
     }
 }
 
@@ -951,23 +937,11 @@ async function createKnowledge(e) {
     if (res?.error) {
         toast(friendlyError(res.error), 'error');
     } else {
-        toast('Arquivo criado', 'success');
+        toast('Arquivo criado e indexado', 'success');
         closeModal();
         currentKnowledgeFile = data.filename;
         loadKnowledge();
         selectKnowledgeFile(data.filename);
-    }
-}
-
-async function updateKnowledgeBadge() {
-    const status = await api('/api/knowledge/status');
-    if (!status) return;
-    const badge = document.getElementById('knowledge-badge');
-    if (status.dirty) {
-        badge.textContent = status.count;
-        badge.style.display = 'inline';
-    } else {
-        badge.style.display = 'none';
     }
 }
 
@@ -1270,7 +1244,6 @@ function closeQR() {
 loadDashboard();
 connectSSE();
 updateUnreadBadge();
-updateKnowledgeBadge();
 
 // Pausa/retoma o polling de status da instância conforme a visibilidade da aba
 document.addEventListener('visibilitychange', () => {
@@ -1284,7 +1257,6 @@ document.addEventListener('visibilitychange', () => {
     }
 });
 setInterval(updateUnreadBadge, 30000);
-setInterval(updateKnowledgeBadge, 30000);
 
 /* ── Deseleccionar conversa al clicar fuera (como WhatsApp Web) ─────────── */
 document.addEventListener('click', (e) => {

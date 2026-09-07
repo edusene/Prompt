@@ -24,6 +24,48 @@ def init_db() -> None:
         if col not in cols:
             db.execute(ddl)
 
+    # Habilita extensão pgvector no PostgreSQL (necessário para busca semântica)
+    if db.DB_DRIVER == "postgresql":
+        try:
+            db.execute("CREATE EXTENSION IF NOT EXISTS vector")
+        except Exception:
+            print("[db] extensão vector não disponível (ok se já habilitada)")
+
+    # Migração idempotente: cria tabela knowledge se não existir
+    kcols = db.table_columns("knowledge") if "knowledge" in _get_tables() else set()
+    if not kcols:
+        db.executescript(KNOWLEDGE_SCHEMA)
+    elif "embedding" not in kcols and db.DB_DRIVER == "postgresql":
+        try:
+            db.execute("ALTER TABLE knowledge ADD COLUMN embedding vector(768)")
+        except Exception:
+            pass
+
+
+def _get_tables() -> set[str]:
+    """Retorna nomes das tabelas existentes no banco."""
+    if db.DB_DRIVER == "postgresql":
+        rows = db.fetch_all(
+            "SELECT table_name FROM information_schema.tables WHERE table_schema='public'"
+        )
+        return {r["table_name"] for r in rows}
+    else:
+        rows = db.fetch_all("SELECT name FROM sqlite_master WHERE type='table'")
+        return {r["name"] for r in rows}
+
+
+KNOWLEDGE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS knowledge (
+    id SERIAL PRIMARY KEY,
+    filename TEXT NOT NULL,
+    chunk_index INTEGER DEFAULT 0,
+    title TEXT DEFAULT '',
+    content TEXT DEFAULT '',
+    created_at TEXT DEFAULT NOW(),
+    updated_at TEXT DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_knowledge_filename ON knowledge(filename);
+"""
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS contacts (
@@ -529,3 +571,67 @@ def get_dashboard_stats() -> dict:
         "unread_messages": unread_messages,
         "messages_today": messages_today,
     }
+
+
+# ── Knowledge (RAG) ──────────────────────────────────────────────────────────
+
+def insert_knowledge_chunks(filename: str, chunks: list[str], embeddings: list) -> None:
+    """Insere chunks de knowledge com embeddings."""
+    now = datetime.utcnow().isoformat()
+    for i, (chunk, emb) in enumerate(zip(chunks, embeddings)):
+        if db.DB_DRIVER == "postgresql" and emb is not None:
+            # Converte lista para string pgvector: '[0.1, 0.2, ...]'
+            emb_str = "[" + ",".join(str(x) for x in emb) + "]"
+            db.execute(
+                "INSERT INTO knowledge (filename, chunk_index, content, embedding, created_at, updated_at) "
+                "VALUES (?,?,?,?,?,?)",
+                (filename, i, chunk, emb_str, now, now),
+            )
+        else:
+            db.execute(
+                "INSERT INTO knowledge (filename, chunk_index, content, created_at, updated_at) "
+                "VALUES (?,?,?, ?,?)",
+                (filename, i, chunk, now, now),
+            )
+
+
+def search_knowledge(query_embedding: list[float], top_k: int = 5) -> list[dict]:
+    """Busca chunks por cosine similarity usando pgvector."""
+    if db.DB_DRIVER != "postgresql":
+        # Fallback: busca por LIKE
+        return db.fetch_all(
+            "SELECT * FROM knowledge ORDER BY filename, chunk_index LIMIT ?", (top_k,)
+        )
+
+    emb_str = "[" + ",".join(str(x) for x in query_embedding) + "]"
+    rows = db.fetch_all(
+        "SELECT *, 1 - (embedding <=> %s::vector) AS similarity "
+        "FROM knowledge "
+        "WHERE embedding IS NOT NULL "
+        "ORDER BY embedding <=> %s::vector "
+        "LIMIT %s",
+        (emb_str, emb_str, top_k),
+    )
+    return rows
+
+
+def list_knowledge_files() -> list[dict]:
+    """Lista arquivos distintos com contagem de chunks."""
+    rows = db.fetch_all(
+        "SELECT filename, COUNT(*) as chunks, MIN(created_at) as created_at "
+        "FROM knowledge GROUP BY filename ORDER BY filename"
+    )
+    return rows
+
+
+def get_knowledge_chunks(filename: str) -> list[dict]:
+    """Retorna todos os chunks de um arquivo."""
+    return db.fetch_all(
+        "SELECT * FROM knowledge WHERE filename=? ORDER BY chunk_index",
+        (filename,),
+    )
+
+
+def delete_knowledge_file(filename: str) -> None:
+    """Deleta todos os chunks de um arquivo."""
+    db.execute("DELETE FROM knowledge WHERE filename=?", (filename,))

@@ -8,7 +8,6 @@ import sys
 import json
 import time
 import threading
-import subprocess
 
 from dotenv import load_dotenv
 
@@ -31,7 +30,7 @@ import llm
 import database
 import events
 import uazapi
-from google.genai import types
+import knowledge_rag
 from uazapi import send_text, send_presence, mark_read, chat_archive, chat_pin, chat_mute, chat_delete
 from buffer import MessageBuffer
 from auth import login_required, do_login, do_logout
@@ -40,7 +39,6 @@ from auth import login_required, do_login, do_logout
 BUFFER_SECONDS = float(os.getenv("BUFFER_SECONDS", "8"))
 PORT = int(os.getenv("PORT", "5000"))
 SECRET_KEY = os.getenv("SECRET_KEY", "troque_esta_chave_secreta_aleatoria")
-SYSTEM_PROMPT_DIR = os.getenv("SYSTEM_PROMPT_DIR", "knowledge")
 
 _BASE_PROMPT = os.getenv(
     "SYSTEM_PROMPT",
@@ -49,146 +47,7 @@ _BASE_PROMPT = os.getenv(
 )
 
 
-def _knowledge_dir() -> str:
-    return os.path.join(os.path.dirname(__file__), SYSTEM_PROMPT_DIR)
-
-
-def _build_knowledge_index() -> str:
-    """Lê os arquivos knowledge e gera um índice leve: '- nome.md: primeira linha significativa'."""
-    path = _knowledge_dir()
-    if not os.path.isdir(path):
-        return ""
-    files = sorted([f for f in os.listdir(path)
-                    if f.endswith(('.md', '.txt')) and f != 'README.md'])
-    lines = []
-    for f in files:
-        fp = os.path.join(path, f)
-        try:
-            with open(fp, encoding="utf-8") as fh:
-                for line in fh:
-                    line = line.strip()
-                    if line and not line.startswith("#"):
-                        lines.append(f"- {f}: {line[:80]}")
-                        break
-                else:
-                    lines.append(f"- {f}")
-        except Exception:
-            lines.append(f"- {f}")
-    return "\n".join(lines)
-
-
-_KNOWLEDGE_INDEX = _build_knowledge_index()
-
-# Tool definition para o Gemini — busca seletiva de knowledge
-KNOWLEDGE_TOOL = types.Tool(
-    function_declarations=[
-        types.FunctionDeclaration(
-            name="get_knowledge",
-            description="Busca o conteúdo de um arquivo de conhecimento específico da empresa. Use quando precisar de informações detalhadas para responder o usuário.",
-            parameters=types.Schema(
-                type=types.Type.OBJECT,
-                properties={
-                    "filename": types.Schema(
-                        type=types.Type.STRING,
-                        description="Nome do arquivo de conhecimento (ex: 01-produtos.md)",
-                    )
-                },
-                required=["filename"],
-            ),
-        )
-    ]
-)
-
-
-def handle_get_knowledge(filename: str) -> str:
-    """Handler da tool get_knowledge — lê e retorna o conteúdo do arquivo."""
-    safe = os.path.basename(filename)
-    path = os.path.join(_knowledge_dir(), safe)
-    if not os.path.exists(path):
-        return f"Arquivo {filename} não encontrado"
-    try:
-        with open(path, encoding="utf-8") as f:
-            content = f.read().strip()
-        print(f"[knowledge] tool fetch={filename} len={len(content)}")
-        return content if content else "(arquivo vazio)"
-    except Exception as e:
-        return f"Erro lendo {filename}: {e}"
-
-
-TOOL_HANDLERS = {"get_knowledge": handle_get_knowledge}
-
-# System prompt com índice leve (sem carregar conteúdo dos arquivos)
-_KNOWLEDGE_BLOCK = f"""
-
-Você tem acesso a arquivos de conhecimento da empresa.
-Use a função get_knowledge para buscar informações quando o usuário perguntar sobre:
-- Empresa, contato, horário → get_knowledge("00-empresa.md")
-- Produtos, serviços, preços → get_knowledge("01-produtos.md")
-- Valores, missão → get_knowledge("02-valores.md")
-- Perguntas frequentes → get_knowledge("03-faq.md")
-
-Só busque o arquivo relevante. Não busque vários de uma vez.
-
-Arquivos disponíveis:
-{_KNOWLEDGE_INDEX}
-""" if _KNOWLEDGE_INDEX else ""
-
-FULL_SYSTEM_PROMPT = f"{_BASE_PROMPT}{_KNOWLEDGE_BLOCK}"
-
-
-def _knowledge_dir() -> str:
-    return os.path.join(os.path.dirname(__file__), SYSTEM_PROMPT_DIR)
-
-
-def _list_knowledge_files() -> list[dict]:
-    path = _knowledge_dir()
-    if not os.path.isdir(path):
-        return []
-    files = sorted([f for f in os.listdir(path)
-                    if f.endswith(('.md', '.txt')) and f != 'README.md'])
-    result = []
-    for f in files:
-        fp = os.path.join(path, f)
-        result.append({"name": f, "size": os.path.getsize(fp)})
-    return result
-
-
-def _knowledge_path(filename: str) -> str:
-    safe = os.path.basename(filename)
-    return os.path.join(_knowledge_dir(), safe)
-
-
-def _knowledge_git_status() -> dict:
-    try:
-        r = subprocess.run(
-            ['git', 'status', '--porcelain', 'knowledge/'],
-            capture_output=True, text=True, timeout=10
-        )
-        changed = [l for l in r.stdout.strip().split('\n') if l.strip()]
-        return {"dirty": len(changed) > 0, "count": len(changed)}
-    except Exception:
-        return {"dirty": False, "count": 0}
-
-
-def reload_knowledge():
-    global _KNOWLEDGE_INDEX, _KNOWLEDGE_BLOCK, FULL_SYSTEM_PROMPT
-    _KNOWLEDGE_INDEX = _build_knowledge_index()
-    _KNOWLEDGE_BLOCK = f"""
-
-Você tem acesso a arquivos de conhecimento da empresa.
-Use a função get_knowledge para buscar informações quando o usuário perguntar sobre:
-- Empresa, contato, horário → get_knowledge("00-empresa.md")
-- Produtos, serviços, preços → get_knowledge("01-produtos.md")
-- Valores, missão → get_knowledge("02-valores.md")
-- Perguntas frequentes → get_knowledge("03-faq.md")
-
-Só busque o arquivo relevante. Não busque vários de uma vez.
-
-Arquivos disponíveis:
-{_KNOWLEDGE_INDEX}
-""" if _KNOWLEDGE_INDEX else ""
-    FULL_SYSTEM_PROMPT = f"{_BASE_PROMPT}{_KNOWLEDGE_BLOCK}"
-    print(f"[knowledge] recarregado: idx={len(_KNOWLEDGE_INDEX)} chars")
+FULL_SYSTEM_PROMPT = _BASE_PROMPT
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -232,7 +91,6 @@ def handle_flush(user: str, texts: list[str]) -> None:
             print(f"[flush] user={user} modo=humano, ignorando agente")
             return
         if not contact:
-            # Contato novo criado pelo webhook tem auto_mode=1 por padrão.
             print(f"[flush] user={user} sem contato no banco (auto_mode=1 por padrão)")
 
         send_presence(user, "composing")
@@ -240,12 +98,19 @@ def handle_flush(user: str, texts: list[str]) -> None:
         user_turn = "\n".join(texts)
         memory.append(user, "user", user_turn)
 
+        # RAG: busca contexto relevante no banco de knowledge
+        dynamic_prompt = FULL_SYSTEM_PROMPT
+        try:
+            context = knowledge_rag.search_context(user_turn, top_k=3)
+            if context:
+                dynamic_prompt += f"\n\nContexto relevante da empresa:\n{context}"
+        except Exception as e:
+            print(f"[flush] WARN rag search falhou: {e}")
+
         try:
             reply = llm.generate_reply(
                 history=memory.get(user),
-                system=FULL_SYSTEM_PROMPT,
-                tools=[KNOWLEDGE_TOOL],
-                tool_handlers=TOOL_HANDLERS,
+                system=dynamic_prompt,
             )
         except Exception as e:
             print(f"[flush] ERRO llm p/ {user}: {e}")
@@ -342,6 +207,7 @@ def logout_action():
 def webhook():
     data = request.get_json(silent=True) or {}
     event = data.get("event")
+    print(f"[webhook] event={event} keys={list(data.keys())[:5]}")
 
     # Evento de conexão (connection.open / connection.close / ...) → atualiza
     # o status no painel em tempo real e invalida o cache de status.
@@ -399,6 +265,8 @@ def webhook():
                 _is_from_me = True
                 break
     if _is_from_me or msg.get("isGroup") or msg.get("participant"):
+        reason = "fromMe" if _is_from_me else ("group" if msg.get("isGroup") else "participant")
+        print(f"[webhook] IGNORANDO: {reason} event={event}")
         return jsonify({"ok": True})
 
     # Extrai e limpa o número de telefone do remetente.
@@ -1110,23 +978,21 @@ def api_search():
     return jsonify(database.search_messages(q))
 
 
-# ── Knowledge ────────────────────────────────────────────────────────────────
+# ── Knowledge (RAG via Supabase) ─────────────────────────────────────────────
 
 @app.get("/api/knowledge")
 @login_required
 def api_knowledge_list():
-    return jsonify(_list_knowledge_files())
+    return jsonify(knowledge_rag.list_files())
 
 
 @app.get("/api/knowledge/<filename>")
 @login_required
 def api_knowledge_get(filename):
-    path = _knowledge_path(filename)
-    if not os.path.isfile(path):
+    file_data = knowledge_rag.get_file(filename)
+    if not file_data:
         return jsonify({"error": "Arquivo nao encontrado"}), 404
-    with open(path, encoding="utf-8") as f:
-        content = f.read()
-    return jsonify({"filename": filename, "content": content})
+    return jsonify(file_data)
 
 
 @app.post("/api/knowledge")
@@ -1139,12 +1005,10 @@ def api_knowledge_create():
         return jsonify({"error": "filename obrigatorio"}), 400
     if not filename.endswith(('.md', '.txt')):
         return jsonify({"error": "Extensao invalida (.md ou .txt)"}), 400
-    path = _knowledge_path(filename)
-    if os.path.isfile(path):
+    existing = knowledge_rag.get_file(filename)
+    if existing:
         return jsonify({"error": "Arquivo ja existe"}), 409
-    with open(path, 'w', encoding='utf-8') as f:
-        f.write(content)
-    reload_knowledge()
+    knowledge_rag.save_knowledge(filename, content)
     print(f"[knowledge] criado: {filename}")
     return jsonify({"ok": True, "filename": filename})
 
@@ -1154,12 +1018,7 @@ def api_knowledge_create():
 def api_knowledge_update(filename):
     data = request.get_json(silent=True) or {}
     content = data.get("content", "")
-    path = _knowledge_path(filename)
-    if not os.path.isfile(path):
-        return jsonify({"error": "Arquivo nao encontrado"}), 404
-    with open(path, 'w', encoding='utf-8') as f:
-        f.write(content)
-    reload_knowledge()
+    knowledge_rag.save_knowledge(filename, content)
     print(f"[knowledge] salvo: {filename}")
     return jsonify({"ok": True})
 
@@ -1167,79 +1026,12 @@ def api_knowledge_update(filename):
 @app.delete("/api/knowledge/<filename>")
 @login_required
 def api_knowledge_delete(filename):
-    if filename == "README.md":
-        return jsonify({"error": "Nao e possivel deletar README.md"}), 400
-    path = _knowledge_path(filename)
-    if not os.path.isfile(path):
+    existing = knowledge_rag.get_file(filename)
+    if not existing:
         return jsonify({"error": "Arquivo nao encontrado"}), 404
-    os.remove(path)
-    reload_knowledge()
+    knowledge_rag.delete_file(filename)
     print(f"[knowledge] deletado: {filename}")
     return jsonify({"ok": True})
-
-
-@app.get("/api/knowledge/status")
-@login_required
-def api_knowledge_status():
-    return jsonify(_knowledge_git_status())
-
-
-@app.post("/api/knowledge/publish")
-@login_required
-def api_knowledge_publish():
-    try:
-        token = os.getenv("GITHUB_TOKEN", "")
-        if not token:
-            return jsonify({"ok": False, "error": "GITHUB_TOKEN nao configurado no .env"}), 400
-
-        remote_url = f"https://{token}@github.com/edusene/Prompt.git"
-
-        check = subprocess.run(['git', 'remote', 'get-url', 'origin'],
-                               capture_output=True, text=True, timeout=10)
-        if check.returncode == 0:
-            subprocess.run(['git', 'remote', 'set-url', 'origin', remote_url],
-                           capture_output=True, timeout=10)
-        else:
-            subprocess.run(['git', 'remote', 'add', 'origin', remote_url],
-                           capture_output=True, timeout=10)
-
-        subprocess.run(['git', 'config', 'user.email', 'bot@prompt.app'],
-                       capture_output=True, timeout=10)
-        subprocess.run(['git', 'config', 'user.name', 'Knowledge Bot'],
-                       capture_output=True, timeout=10)
-
-        subprocess.run(['git', 'checkout', '-B', 'main'], capture_output=True, timeout=10)
-
-        subprocess.run(['git', 'add', 'knowledge/'], capture_output=True, timeout=10)
-
-        has_staged = subprocess.run(['git', 'diff', '--cached', '--quiet'],
-                                    capture_output=True, timeout=10)
-        if has_staged.returncode == 0:
-            print("[knowledge] nada para publicar (diff vazio)")
-            return jsonify({"ok": True, "message": "Nada para publicar"})
-
-        r = subprocess.run(
-            ['git', 'commit', '-m', 'chore: update knowledge via panel'],
-            capture_output=True, text=True, timeout=10
-        )
-        if r.returncode != 0:
-            err = (r.stdout + r.stderr).strip()
-            if 'nothing to commit' in err:
-                return jsonify({"ok": True, "message": "Nada para publicar"})
-            print(f"[knowledge] commit ERRO: {err}")
-            return jsonify({"ok": False, "error": f"Commit falhou: {err[:200]}"}), 500
-
-        push = subprocess.run(['git', 'push', '--set-upstream', 'origin', 'main'],
-                              capture_output=True, text=True, timeout=30)
-        if push.returncode != 0:
-            err = push.stderr.strip() or push.stdout.strip()
-            print(f"[knowledge] push ERRO: {err}")
-            return jsonify({"ok": False, "error": f"Falha ao push: {err[:200]}"}), 500
-
-        print("[knowledge] publicado no git")
-        return jsonify({"ok": True, "message": "Publicado no GitHub"})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
