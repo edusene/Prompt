@@ -7,17 +7,22 @@ O database.py chama essas funções em vez de usar sqlite3 diretamente.
 import os
 import threading
 from typing import Any
+from dotenv import load_dotenv
+
+load_dotenv(override=True)
 
 DB_DRIVER = os.getenv("DB_DRIVER", "sqlite")
 _lock = threading.Lock()
+
+if DB_DRIVER == "postgresql":
+    import psycopg2
+    import psycopg2.extras
 
 # ── Conexão ──────────────────────────────────────────────────────────────────
 
 def _get_conn():
     """Retorna uma conexão de banco. Detecta o driver automaticamente."""
     if DB_DRIVER == "postgresql":
-        import psycopg2
-        import psycopg2.extras
         url = os.getenv("DATABASE_URL", "")
         conn = psycopg2.connect(url)
         conn.autocommit = False
@@ -115,7 +120,10 @@ def executescript(sql: str) -> None:
         conn = _get_conn()
         if DB_DRIVER == "postgresql":
             cur = _cursor(conn)
-            cur.execute(sql)
+            for statement in sql.split(";"):
+                statement = statement.strip()
+                if statement:
+                    cur.execute(statement)
             conn.commit()
         else:
             conn.executescript(sql)
@@ -129,6 +137,34 @@ def last_insert_id(cur) -> int | None:
         return row["id"] if row else None
     else:
         return cur.lastrowid
+
+
+def execute_returning(query: str, params: tuple | list | None = None) -> int | None:
+    """Executa um INSERT ... RETURNING id no PostgreSQL e retorna o ID.
+    No SQLite, faz INSERT normal e retorna lastrowid."""
+    with _lock:
+        conn = _get_conn()
+        cur = _cursor(conn)
+        if DB_DRIVER == "postgresql":
+            adapted = query.replace("?", "%s")
+            pg_query = adapted.rstrip().rstrip(";") + " RETURNING id"
+            if params:
+                cur.execute(pg_query, params)
+            else:
+                cur.execute(pg_query)
+            conn.commit()
+            row = cur.fetchone()
+            conn.close()
+            return row["id"] if row else None
+        else:
+            if params:
+                cur.execute(query, params)
+            else:
+                cur.execute(query)
+            conn.commit()
+            lid = cur.lastrowid
+            conn.close()
+            return lid
 
 
 def insert_ignore(table: str, columns: list[str], values: tuple) -> None:

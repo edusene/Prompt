@@ -27,7 +27,7 @@ def init_db() -> None:
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS contacts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     phone TEXT UNIQUE NOT NULL,
     name TEXT DEFAULT '',
     email TEXT DEFAULT '',
@@ -36,12 +36,12 @@ CREATE TABLE IF NOT EXISTS contacts (
     avatar_url TEXT DEFAULT '',
     assigned_to TEXT DEFAULT '',
     auto_mode INTEGER DEFAULT 1,
-    created_at TEXT DEFAULT (datetime('now')),
-    updated_at TEXT DEFAULT (datetime('now'))
+    created_at TEXT DEFAULT NOW(),
+    updated_at TEXT DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS conversations (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     contact_id INTEGER NOT NULL REFERENCES contacts(id),
     status TEXT DEFAULT 'new',
     assigned_to TEXT DEFAULT '',
@@ -52,12 +52,12 @@ CREATE TABLE IF NOT EXISTS conversations (
     muted INTEGER DEFAULT 0,
     pinned INTEGER DEFAULT 0,
     favorite INTEGER DEFAULT 0,
-    created_at TEXT DEFAULT (datetime('now')),
-    updated_at TEXT DEFAULT (datetime('now'))
+    created_at TEXT DEFAULT NOW(),
+    updated_at TEXT DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS messages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     conversation_id INTEGER NOT NULL REFERENCES conversations(id),
     phone TEXT NOT NULL,
     uazapi_id TEXT UNIQUE,
@@ -67,11 +67,11 @@ CREATE TABLE IF NOT EXISTS messages (
     msg_type TEXT DEFAULT 'text',
     media_url TEXT DEFAULT '',
     status TEXT DEFAULT 'sent',
-    created_at TEXT DEFAULT (datetime('now'))
+    created_at TEXT DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS tags (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     name TEXT UNIQUE NOT NULL,
     color TEXT DEFAULT '#6366f1'
 );
@@ -89,20 +89,20 @@ CREATE TABLE IF NOT EXISTS conversation_tags (
 );
 
 CREATE TABLE IF NOT EXISTS templates (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     title TEXT NOT NULL,
     body TEXT NOT NULL,
-    created_at TEXT DEFAULT (datetime('now'))
+    created_at TEXT DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS tasks (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     contact_id INTEGER REFERENCES contacts(id),
     title TEXT NOT NULL,
     description TEXT DEFAULT '',
     status TEXT DEFAULT 'pending',
     due_date TEXT,
-    created_at TEXT DEFAULT (datetime('now'))
+    created_at TEXT DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id);
@@ -175,6 +175,11 @@ def update_contact(contact_id: int, **fields: Any) -> None:
 
 
 def delete_contact(contact_id: int) -> None:
+    convs = db.fetch_all("SELECT id FROM conversations WHERE contact_id=?", (contact_id,))
+    for conv in convs:
+        db.execute("DELETE FROM conversation_tags WHERE conversation_id=?", (conv["id"],))
+        db.execute("DELETE FROM messages WHERE conversation_id=?", (conv["id"],))
+    db.execute("DELETE FROM conversations WHERE contact_id=?", (contact_id,))
     db.execute("DELETE FROM contact_tags WHERE contact_id=?", (contact_id,))
     db.execute("DELETE FROM tasks WHERE contact_id=?", (contact_id,))
     db.execute("DELETE FROM contacts WHERE id=?", (contact_id,))
@@ -335,12 +340,11 @@ def save_message(
             return None
 
     now = datetime.utcnow().isoformat()
-    cur = db.execute(
+    msg_id = db.execute_returning(
         "INSERT INTO messages (conversation_id, phone, uazapi_id, direction, sender, body, msg_type, media_url, status, created_at) "
         "VALUES (?,?,?,?,?,?,?,?,?,?)",
         (conversation_id, phone, uazapi_id_clean, direction, sender, body, msg_type, media_url, status, now),
     )
-    msg_id = db.last_insert_id(cur)
     if msg_id:
         return db.fetch_one("SELECT * FROM messages WHERE id=?", (msg_id,))
     return None
@@ -433,8 +437,7 @@ def get_conversation_tags(conversation_id: int) -> list[dict]:
 
 def create_template(title: str, body: str) -> dict:
     now = datetime.utcnow().isoformat()
-    cur = db.execute("INSERT INTO templates (title, body, created_at) VALUES (?,?,?)", (title, body, now))
-    tpl_id = db.last_insert_id(cur)
+    tpl_id = db.execute_returning("INSERT INTO templates (title, body, created_at) VALUES (?,?,?)", (title, body, now))
     return db.fetch_one("SELECT * FROM templates WHERE id=?", (tpl_id,))
 
 
