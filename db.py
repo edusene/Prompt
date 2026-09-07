@@ -1,7 +1,7 @@
 """
 db.py — Camada de abstração de banco de dados.
-Suporta SQLite (atual) e PostgreSQL (futuro).
-O database.py chama essas funções em vez de usar sqlite3 diretamente.
+Suporta SQLite e PostgreSQL (Supabase).
+Usa conexão persistente para PostgreSQL (evita overhead de abrir/fechar por query).
 """
 
 import os
@@ -17,16 +17,71 @@ _lock = threading.Lock()
 if DB_DRIVER == "postgresql":
     import psycopg2
     import psycopg2.extras
+    import psycopg2.pool
 
-# ── Conexão ──────────────────────────────────────────────────────────────────
+# ── Conexão persistente (PostgreSQL) ─────────────────────────────────────────
+
+_pg_pool: psycopg2.pool.ThreadedConnectionPool | None = None
+_pg_init_done = False
+
+
+def _init_pg_pool():
+    """Inicializa o pool de conexões PostgreSQL (chamado uma vez)."""
+    global _pg_pool, _pg_init_done
+    if _pg_init_done:
+        return
+    _pg_init_done = True
+    url = os.getenv("DATABASE_URL", "")
+    if not url:
+        print("[db] WARN: DATABASE_URL nao configurada")
+        return
+    try:
+        _pg_pool = psycopg2.pool.ThreadedConnectionPool(1, 5, url)
+        print(f"[db] pool PostgreSQL conectado (1-5 conexoes)")
+    except Exception as e:
+        print(f"[db] ERRO pool PostgreSQL: {e}")
+        _pg_pool = None
+
+
+def _get_pg_conn():
+    """Retorna uma conexão do pool. Reconnecta se necessário."""
+    global _pg_pool
+    if _pg_pool is None:
+        _init_pg_pool()
+    if _pg_pool is None:
+        raise ConnectionError("Pool PostgreSQL nao disponivel")
+
+    try:
+        conn = _pg_pool.getconn()
+        # Verifica se a conexão está viva
+        if conn.closed:
+            _pg_pool.putconn(conn, close=True)
+            conn = _pg_pool.getconn()
+        return conn
+    except Exception:
+        # Pool pode ter perdido conexões — reinicializa
+        try:
+            _init_pg_pool()
+            if _pg_pool:
+                return _pg_pool.getconn()
+        except Exception:
+            pass
+        raise
+
+
+def _put_pg_conn(conn):
+    """Devolve a conexão ao pool."""
+    if _pg_pool and conn and not conn.closed:
+        try:
+            _pg_pool.putconn(conn)
+        except Exception:
+            pass
+
 
 def _get_conn():
-    """Retorna uma conexão de banco. Detecta o driver automaticamente."""
+    """Retorna uma conexão de banco (compatibilidade com código existente)."""
     if DB_DRIVER == "postgresql":
-        url = os.getenv("DATABASE_URL", "")
-        conn = psycopg2.connect(url)
-        conn.autocommit = False
-        return conn
+        return _get_pg_conn()
     else:
         import sqlite3
         db_path = os.getenv("DB_PATH", "whatsapp.db")
@@ -49,10 +104,7 @@ def _to_dict(row) -> dict | None:
     """Converte um resultado de query para dict."""
     if row is None:
         return None
-    if DB_DRIVER == "postgresql":
-        return dict(row)
-    else:
-        return dict(row)
+    return dict(row)
 
 
 def _to_dicts(rows) -> list[dict]:
@@ -75,13 +127,24 @@ def execute(query: str, params: tuple | list | None = None, *, commit: bool = Tr
         conn = _get_conn()
         cur = _cursor(conn)
         adapted = _adapt_query(query)
-        if params:
-            cur.execute(adapted, params)
-        else:
-            cur.execute(adapted)
-        if commit:
-            conn.commit()
-        return cur
+        try:
+            if params:
+                cur.execute(adapted, params)
+            else:
+                cur.execute(adapted)
+            if commit:
+                conn.commit()
+            if DB_DRIVER == "postgresql":
+                _put_pg_conn(conn)
+            return cur
+        except Exception:
+            if DB_DRIVER == "postgresql":
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                _put_pg_conn(conn)
+            raise
 
 
 def fetch_one(query: str, params: tuple | list | None = None) -> dict | None:
@@ -90,13 +153,23 @@ def fetch_one(query: str, params: tuple | list | None = None) -> dict | None:
         conn = _get_conn()
         cur = _cursor(conn)
         adapted = _adapt_query(query)
-        if params:
-            cur.execute(adapted, params)
-        else:
-            cur.execute(adapted)
-        row = cur.fetchone()
-        conn.close()
-        return _to_dict(row)
+        try:
+            if params:
+                cur.execute(adapted, params)
+            else:
+                cur.execute(adapted)
+            row = cur.fetchone()
+            if DB_DRIVER == "postgresql":
+                _put_pg_conn(conn)
+            return _to_dict(row)
+        except Exception:
+            if DB_DRIVER == "postgresql":
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                _put_pg_conn(conn)
+            raise
 
 
 def fetch_all(query: str, params: tuple | list | None = None) -> list[dict]:
@@ -105,29 +178,49 @@ def fetch_all(query: str, params: tuple | list | None = None) -> list[dict]:
         conn = _get_conn()
         cur = _cursor(conn)
         adapted = _adapt_query(query)
-        if params:
-            cur.execute(adapted, params)
-        else:
-            cur.execute(adapted)
-        rows = cur.fetchall()
-        conn.close()
-        return _to_dicts(rows)
+        try:
+            if params:
+                cur.execute(adapted, params)
+            else:
+                cur.execute(adapted)
+            rows = cur.fetchall()
+            if DB_DRIVER == "postgresql":
+                _put_pg_conn(conn)
+            return _to_dicts(rows)
+        except Exception:
+            if DB_DRIVER == "postgresql":
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                _put_pg_conn(conn)
+            raise
 
 
 def executescript(sql: str) -> None:
     """Executa um script SQL (múltiplos statements). Usado no init_db."""
     with _lock:
         conn = _get_conn()
-        if DB_DRIVER == "postgresql":
-            cur = _cursor(conn)
-            for statement in sql.split(";"):
-                statement = statement.strip()
-                if statement:
-                    cur.execute(statement)
-            conn.commit()
-        else:
-            conn.executescript(sql)
-        conn.close()
+        try:
+            if DB_DRIVER == "postgresql":
+                cur = _cursor(conn)
+                for statement in sql.split(";"):
+                    statement = statement.strip()
+                    if statement:
+                        cur.execute(statement)
+                conn.commit()
+                _put_pg_conn(conn)
+            else:
+                conn.executescript(sql)
+                conn.close()
+        except Exception:
+            if DB_DRIVER == "postgresql":
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                _put_pg_conn(conn)
+            raise
 
 
 def last_insert_id(cur) -> int | None:
@@ -140,41 +233,50 @@ def last_insert_id(cur) -> int | None:
 
 
 def execute_returning(query: str, params: tuple | list | None = None) -> int | None:
-    """Executa um INSERT ... RETURNING id no PostgreSQL e retorna o ID.
-    No SQLite, faz INSERT normal e retorna lastrowid."""
+    """Executa um INSERT ... RETURNING id no PostgreSQL e retorna o ID."""
     with _lock:
         conn = _get_conn()
         cur = _cursor(conn)
-        if DB_DRIVER == "postgresql":
-            adapted = query.replace("?", "%s")
-            pg_query = adapted.rstrip().rstrip(";") + " RETURNING id"
-            if params:
-                cur.execute(pg_query, params)
+        try:
+            if DB_DRIVER == "postgresql":
+                adapted = query.replace("?", "%s")
+                pg_query = adapted.rstrip().rstrip(";") + " RETURNING id"
+                if params:
+                    cur.execute(pg_query, params)
+                else:
+                    cur.execute(pg_query)
+                conn.commit()
+                row = cur.fetchone()
+                _put_pg_conn(conn)
+                return row["id"] if row else None
             else:
-                cur.execute(pg_query)
-            conn.commit()
-            row = cur.fetchone()
-            conn.close()
-            return row["id"] if row else None
-        else:
-            if params:
-                cur.execute(query, params)
-            else:
-                cur.execute(query)
-            conn.commit()
-            lid = cur.lastrowid
-            conn.close()
-            return lid
+                if params:
+                    cur.execute(query, params)
+                else:
+                    cur.execute(query)
+                conn.commit()
+                lid = cur.lastrowid
+                conn.close()
+                return lid
+        except Exception:
+            if DB_DRIVER == "postgresql":
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                _put_pg_conn(conn)
+            raise
 
 
 def insert_ignore(table: str, columns: list[str], values: tuple) -> None:
     """Insere uma linha ignorando duplicatas (INSERT OR IGNORE / ON CONFLICT DO NOTHING)."""
-    placeholders = ",".join(["?"] * len(columns))
-    cols = ",".join(columns)
     if DB_DRIVER == "postgresql":
         ph = ",".join(["%s"] * len(columns))
+        cols = ",".join(columns)
         query = f"INSERT INTO {table} ({cols}) VALUES ({ph}) ON CONFLICT DO NOTHING"
     else:
+        placeholders = ",".join(["?"] * len(columns))
+        cols = ",".join(columns)
         query = f"INSERT OR IGNORE INTO {table} ({cols}) VALUES ({placeholders})"
     execute(query, values)
 

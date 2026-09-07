@@ -23,7 +23,7 @@ for _s in (sys.stdout, sys.stderr):
     except Exception:
         pass
 
-from flask import Flask, request, jsonify, Response, redirect, url_for, render_template, session, send_from_directory
+from flask import Flask, request, jsonify, Response, redirect, url_for, render_template, session
 
 import memory
 import llm
@@ -163,6 +163,37 @@ app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 buffer = MessageBuffer(wait_seconds=BUFFER_SECONDS, on_flush=handle_flush)
 
 database.init_db()
+
+
+def _migrate_knowledge_files():
+    """Migra arquivos .md do diretorio knowledge/ para o banco (uma unica vez)."""
+    knowledge_dir = os.path.join(os.path.dirname(__file__), "knowledge")
+    if not os.path.isdir(knowledge_dir):
+        return
+    existing = database.list_knowledge_files()
+    existing_names = {f["filename"] for f in existing}
+    files = sorted([f for f in os.listdir(knowledge_dir)
+                    if f.endswith(('.md', '.txt')) and f != 'README.md'])
+    migrated = 0
+    for fname in files:
+        if fname in existing_names:
+            continue
+        fpath = os.path.join(knowledge_dir, fname)
+        try:
+            with open(fpath, encoding="utf-8") as fh:
+                content = fh.read().strip()
+            if content:
+                knowledge_rag.save_knowledge(fname, content)
+                migrated += 1
+        except Exception as e:
+            print(f"[migrate] ERRO {fname}: {e}")
+    if migrated:
+        print(f"[migrate] knowledge: {migrated} arquivos migrados para o banco")
+    else:
+        print(f"[migrate] knowledge: nada para migrar")
+
+
+_migrate_knowledge_files()
 
 # ── Auto-configurar webhook na UAZAPI ───────────────────────────────────────
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "")
@@ -366,6 +397,9 @@ def webhook():
             "body": body,
             "message_id": str(message_id),
         })
+        print(f"[webhook] MSG SALVA conv={conv['id']} from={number} len={len(body)}")
+    else:
+        print(f"[webhook] MSG DUPLICADA (ja existe) msg_id={message_id}")
 
     # Avatar do contato (best-effort, não bloqueia o fluxo): a URL do WhatsApp
     # expira, então atualiza quando o contato ainda não tem foto.

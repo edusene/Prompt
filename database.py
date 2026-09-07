@@ -28,16 +28,19 @@ def init_db() -> None:
     if db.DB_DRIVER == "postgresql":
         try:
             db.execute("CREATE EXTENSION IF NOT EXISTS vector")
-        except Exception:
-            print("[db] extensão vector não disponível (ok se já habilitada)")
+            print("[db] extensão vector habilitada")
+        except Exception as e:
+            print(f"[db] WARN: vector extension: {e}")
 
     # Migração idempotente: cria tabela knowledge se não existir
     kcols = db.table_columns("knowledge") if "knowledge" in _get_tables() else set()
     if not kcols:
         db.executescript(KNOWLEDGE_SCHEMA)
+        print("[db] tabela knowledge criada")
     elif "embedding" not in kcols and db.DB_DRIVER == "postgresql":
         try:
             db.execute("ALTER TABLE knowledge ADD COLUMN embedding vector(768)")
+            print("[db] coluna embedding adicionada")
         except Exception:
             pass
 
@@ -596,23 +599,29 @@ def insert_knowledge_chunks(filename: str, chunks: list[str], embeddings: list) 
 
 
 def search_knowledge(query_embedding: list[float], top_k: int = 5) -> list[dict]:
-    """Busca chunks por cosine similarity usando pgvector."""
+    """Busca chunks por cosine similarity. Fallback para LIKE se pgvector indisponível."""
     if db.DB_DRIVER != "postgresql":
-        # Fallback: busca por LIKE
         return db.fetch_all(
             "SELECT * FROM knowledge ORDER BY filename, chunk_index LIMIT ?", (top_k,)
         )
 
     emb_str = "[" + ",".join(str(x) for x in query_embedding) + "]"
-    rows = db.fetch_all(
-        "SELECT *, 1 - (embedding <=> %s::vector) AS similarity "
-        "FROM knowledge "
-        "WHERE embedding IS NOT NULL "
-        "ORDER BY embedding <=> %s::vector "
-        "LIMIT %s",
-        (emb_str, emb_str, top_k),
-    )
-    return rows
+    try:
+        rows = db.fetch_all(
+            "SELECT *, 1 - (embedding <=> %s::vector) AS similarity "
+            "FROM knowledge "
+            "WHERE embedding IS NOT NULL "
+            "ORDER BY embedding <=> %s::vector "
+            "LIMIT %s",
+            (emb_str, emb_str, top_k),
+        )
+        return rows
+    except Exception as e:
+        print(f"[db] WARN: busca vetorial falhou, usando LIKE: {e}")
+        # Fallback: retorna os chunks mais recentes
+        return db.fetch_all(
+            "SELECT * FROM knowledge ORDER BY filename, chunk_index LIMIT %s", (top_k,)
+        )
 
 
 def list_knowledge_files() -> list[dict]:

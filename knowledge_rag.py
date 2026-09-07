@@ -114,29 +114,37 @@ def save_knowledge(filename: str, content: str) -> None:
 
 
 def search_context(query: str, top_k: int = 3) -> str:
-    """Busca os chunks mais relevantes para a query do usuário.
+    """Busca os chunks mais relevantes para a query do usuario.
     Retorna texto concatenado pronto para injetar no system prompt.
+    Se embedding falhar, retorna os chunks mais recentes como fallback.
     """
     if not query or not query.strip():
         return ""
 
+    # Tenta busca vetorial
     try:
         query_embedding = embed_text(query)
+        results = database.search_knowledge(query_embedding, top_k=top_k)
+        if results:
+            parts = [r["content"] for r in results]
+            joined = "\n\n---\n\n".join(parts)
+            print(f"[rag] search vectorial query_len={len(query)} results={len(results)} context_len={len(joined)}")
+            return joined
     except Exception as e:
-        print(f"[rag] ERRO embedding query: {e}")
-        return ""
+        print(f"[rag] WARN busca vetorial falhou: {e}")
 
-    results = database.search_knowledge(query_embedding, top_k=top_k)
-    if not results:
-        return ""
+    # Fallback: busca os chunks mais recentes do banco
+    try:
+        results = database.search_knowledge([], top_k=top_k)
+        if results:
+            parts = [r["content"] for r in results]
+            joined = "\n\n---\n\n".join(parts)
+            print(f"[rag] search fallback query_len={len(query)} results={len(results)} context_len={len(joined)}")
+            return joined
+    except Exception as e:
+        print(f"[rag] WARN fallback falhou: {e}")
 
-    parts = []
-    for r in results:
-        parts.append(r["content"])
-
-    joined = "\n\n---\n\n".join(parts)
-    print(f"[rag] search query_len={len(query)} results={len(results)} context_len={len(joined)}")
-    return joined
+    return ""
 
 
 def list_files() -> list[dict]:
