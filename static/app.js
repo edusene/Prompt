@@ -461,34 +461,21 @@ function isMediaPlaceholder(text) {
     return MEDIA_PLACEHOLDER_RE.test(String(text || '').trim());
 }
 
+// Tipos que renderizam mídia. "media" é o tipo genérico que instâncias v3 da
+// UAZAPI enviam para qualquer mídia — o elemento certo é criado após buscar
+// a mídia, conforme o mimeType real da data-URI.
+const MEDIA_RENDER_TYPES = new Set(['image', 'video', 'audio', 'ptt', 'document', 'sticker', 'gif', 'media']);
+
 function msgMediaHTML(m) {
-    const type = (m.msg_type || 'text').toLowerCase();
-    if (type === 'image' || type === 'gif' || type === 'sticker') {
-        const cls = type === 'sticker' ? 'msg-sticker msg-media' : 'msg-media-img msg-media';
-        return `<div class="msg-media-box msg-media-lazy" data-media-dbid="${esc(m.id)}">
-                    <span class="spinner"></span>
-                    <img class="${cls}" data-media-src="${esc(m.id)}" alt="" loading="lazy">
-                </div>`;
-    }
-    if (type === 'video') {
-        return `<div class="msg-media-box msg-media-lazy" data-media-dbid="${esc(m.id)}">
-                    <span class="spinner"></span>
-                    <video class="msg-media-video msg-media" data-media-src="${esc(m.id)}" controls preload="none"></video>
-                </div>`;
-    }
-    if (type === 'audio' || type === 'ptt') {
-        return `<div class="msg-media-box msg-media-lazy" data-media-dbid="${esc(m.id)}">
-                    <span class="spinner"></span>
-                    <audio class="msg-media-audio msg-media" data-media-src="${esc(m.id)}" controls preload="none"></audio>
-                </div>`;
-    }
-    if (type === 'document') {
-        return `<div class="msg-media-box msg-media-lazy" data-media-dbid="${esc(m.id)}">
-                    <span class="spinner"></span>
-                    <a class="msg-media-doc msg-media" data-media-src="${esc(m.id)}" target="_blank">Baixar anexo</a>
-                </div>`;
-    }
-    return '';
+    const type = (m.msg_type || 'text').toLowerCase().trim();
+    // Renderiza mídia se o tipo é conhecido OU se o body é um placeholder
+    // ([Imagem]/[Media]/...): cobre linhas antigas com tipo genérico.
+    const isMediaType = MEDIA_RENDER_TYPES.has(type);
+    if (!isMediaType && !isMediaPlaceholder(m.body)) return '';
+    return `<div class="msg-media-box msg-media-lazy" data-media-dbid="${esc(m.id)}" data-media-kind="${esc(isMediaType ? type : 'media')}">
+                <span class="spinner"></span>
+                <div class="msg-media-host"></div>
+            </div>`;
 }
 
 function msgHTML(m, isNew) {
@@ -570,10 +557,9 @@ async function _loadMsgMedia(box) {
     // Evita chamadas duplicadas / ya resueltas.
     if (box.dataset.state === 'loading' || box.dataset.state === 'loaded') return;
 
-    const mediaEl = box.querySelector('.msg-media');
     const msgId = dbid;
     if (_mediaCache.has(msgId)) {
-        _applyMsgMedia(box, mediaEl, _mediaCache.get(msgId));
+        _applyMsgMedia(box, _mediaCache.get(msgId));
         return;
     }
 
@@ -601,28 +587,63 @@ async function _loadMsgMedia(box) {
         return;
     }
     _mediaCache.set(msgId, data.media_url);
-    _applyMsgMedia(box, mediaEl, data.media_url);
+    _applyMsgMedia(box, data.media_url);
 }
 
-function _applyMsgMedia(box, mediaEl, dataUri) {
+function _applyMsgMedia(box, dataUri) {
     box.dataset.state = 'loaded';
     const spinner = box.querySelector('.spinner');
     if (spinner) spinner.remove();
-    if (!mediaEl) return;
-    if (mediaEl.tagName === 'IMG') {
-        mediaEl.src = dataUri;
-    } else if (mediaEl.tagName === 'A') {
-        mediaEl.href = dataUri;
-        mediaEl.setAttribute('download', '');
+    if (!dataUri) return;
+
+    // Cria o elemento certo conforme o mimeType real da data-URI
+    // (data:image/jpeg;base64,...) — funciona até para o tipo genérico "media".
+    const host = box.querySelector('.msg-media-host') || box;
+    const kind = (box.dataset.mediaKind || '').toLowerCase();
+    const mime = (String(dataUri).match(/^data:([^;,]+)/) || [])[1] || '';
+    let el;
+
+    const wantAudio = kind === 'audio' || kind === 'ptt' || mime.startsWith('audio/');
+    const wantVideo = kind === 'video' || mime.startsWith('video/');
+    const wantDoc = kind === 'document'
+        || (!mime && kind === 'media')
+        || (mime && !mime.startsWith('image/') && !mime.startsWith('video/') && !mime.startsWith('audio/'));
+
+    if (wantAudio) {
+        el = document.createElement('audio');
+        el.controls = true;
+        el.preload = 'metadata';
+        el.className = 'msg-media-audio msg-media';
+    } else if (wantVideo) {
+        el = document.createElement('video');
+        el.controls = true;
+        el.preload = 'metadata';
+        el.playsInline = true;
+        el.className = 'msg-media-video msg-media';
+    } else if (wantDoc) {
+        el = document.createElement('a');
+        el.className = 'msg-media-doc msg-media';
+        el.target = '_blank';
+        el.rel = 'noopener';
+        el.textContent = 'Baixar anexo';
+        el.href = dataUri;
+        el.setAttribute('download', '');
     } else {
-        mediaEl.src = dataUri;
+        el = document.createElement('img');
+        el.alt = '';
+        el.className = (kind === 'sticker') ? 'msg-sticker msg-media' : 'msg-media-img msg-media';
+        el.loading = 'lazy';
     }
+
+    if (el.tagName !== 'A') el.src = dataUri;
+    host.appendChild(el);
 }
 
 function _fallbackMsgMedia(box, body) {
     const spinner = box.querySelector('.spinner');
     if (spinner) spinner.remove();
     box.querySelector('.msg-media')?.remove?.();
+    box.querySelector('.msg-media-host')?.remove?.();
     const text = String(body || '').trim();
     if (!text) {
         box.remove();

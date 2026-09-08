@@ -36,7 +36,67 @@ from buffer import MessageBuffer
 from auth import login_required, do_login, do_logout
 
 # Tipos de mensagem que cargamos media desde UAZAPI para mostrar en el panel.
-MEDIA_TYPES = {"image", "video", "audio", "ptt", "document", "sticker", "gif"}
+# "media" = tipo genérico que algumas instâncias v3 enviam para qualquer mídia;
+# nesses casos o tipo concreto (image/video/audio/...) é resolvido pelo mimeType.
+MEDIA_TYPES = {"image", "video", "audio", "ptt", "document", "sticker", "gif", "media"}
+
+_MEDIA_TYPE_MAP = {
+    "image": "image", "imagem": "image", "imagemessage": "image", "photo": "image",
+    "video": "video", "videomessage": "video",
+    "audio": "audio", "audiomessage": "audio", "ptt": "ptt", "voice": "ptt",
+    "sticker": "sticker", "stickermessage": "sticker", "figura": "sticker",
+    "document": "document", "documentmessage": "document", "file": "document",
+    "gif": "gif", "mediamessage": "media",
+}
+
+
+def _norm_msg_type(raw) -> str:
+    """Normaliza o tipo vindo da UAZAPI para um dos MEDIA_TYPES."""
+    t = str(raw or "").strip().lower()
+    return _MEDIA_TYPE_MAP.get(t, t)
+
+
+def _mime_to_kind(mime: str) -> str:
+    """Converte um mimeType em tipo concreto de mídia."""
+    mime = str(mime or "").lower()
+    if mime.startswith("image/"):
+        return "sticker" if "sticker" in mime else "image"
+    if mime.startswith("video/"):
+        return "video"
+    if mime.startswith("audio/"):
+        return "ptt" if "ogg" in mime or "opus" in mime else "audio"
+    if mime:
+        return "document"
+    return ""
+
+
+def _resolve_msg_type(msg: dict, msg_type) -> str:
+    """Resolve o tipo concreto da mensagem.
+
+    Instâncias v3 às vezes enviam só "media" (genérico). Nesse caso deduzimos
+    pelo mimeType ou pelas chaves do payload aninhado (imageMessage etc.),
+    para que a mídia seja baixada e renderizada no painel.
+    """
+    t = _norm_msg_type(msg_type)
+    if t and t not in ("media", "unknown"):
+        return t
+    media = msg.get("media") if isinstance(msg.get("media"), dict) else {}
+    mime = str(
+        media.get("mimeType")
+        or msg.get("mimeType") or msg.get("Mimetype") or msg.get("MIMEType")
+        or (msg.get("message", {}).get("mimeType") if isinstance(msg.get("message"), dict) else "")
+        or ""
+    )
+    kind = _mime_to_kind(mime)
+    if kind:
+        return kind
+    # Chaves típicas do payload aninhado do Baileys/v3.
+    nested = msg.get("message") if isinstance(msg.get("message"), dict) else {}
+    for key in ("imageMessage", "videoMessage", "audioMessage", "stickerMessage",
+                "documentMessage", "pttMessage"):
+        if key in nested:
+            return _MEDIA_TYPE_MAP.get(key.lower(), "media")
+    return t or "text"
 
 
 def _is_media_type(msg_type: str) -> bool:
@@ -466,7 +526,7 @@ def webhook():
         message_id = msg.get("key", {}).get("id", "")
 
     # Extrai corpo da mensagem
-    msg_type = msg.get("type") or msg.get("messageType") or msg.get("MsgType") or "text"
+    msg_type = _resolve_msg_type(msg, msg.get("type") or msg.get("messageType") or msg.get("MsgType") or "text")
     body = (
         msg.get("body")
         or msg.get("Body")
