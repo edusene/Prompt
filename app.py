@@ -157,6 +157,11 @@ def _maybe_store_media_hint(saved, msg: dict) -> None:
         if url:
             database.update_message_media(saved["id"], url)
             print(f"[media] msg={saved['id']} url do payload guardada")
+        else:
+            _media_keys = [k for k in msg.keys() if "media" in k.lower() or "url" in k.lower() or "image" in k.lower() or "video" in k.lower() or "audio" in k.lower()]
+            nested = msg.get("message")
+            _nested_media_keys = list(nested.keys())[:10] if isinstance(nested, dict) else []
+            print(f"[media] msg={saved['id']} payload SEM URL media_keys={_media_keys} nested_keys={_nested_media_keys}")
     except Exception as e:
         print(f"[media] erro guardando url do payload: {e}")
 
@@ -595,7 +600,7 @@ def webhook():
         message_id = msg.get("key", {}).get("id", "")
 
     # Extrai corpo da mensagem
-    msg_type = _resolve_msg_type(msg, msg.get("type") or msg.get("messageType") or msg.get("MsgType") or "text")
+    msg_type = _resolve_msg_type(msg, msg.get("type") or msg.get("messageType") or msg.get("MsgType") or msg.get("mediaType") or "text")
     body = (
         msg.get("body")
         or msg.get("Body")
