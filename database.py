@@ -47,6 +47,22 @@ def init_db() -> None:
     _ensure_indexes()
 
 
+# ═══ Settings (key-value global) ═════════════════════════════════════════════
+
+def get_setting(key: str, default: str = "") -> str:
+    row = db.fetch_one("SELECT value FROM settings WHERE key=?", (key,))
+    return row["value"] if row else default
+
+
+def set_setting(key: str, value: str) -> None:
+    now = datetime.utcnow().isoformat()
+    db.execute(
+        "INSERT INTO settings (key, value, updated_at) VALUES (?,?,?) "
+        "ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value, updated_at=EXCLUDED.updated_at",
+        (key, value, now),
+    )
+
+
 def _ensure_indexes() -> None:
     """Crea índices faltantes que aceleran las consultas más usadas (idempotente).
 
@@ -168,6 +184,13 @@ CREATE TABLE IF NOT EXISTS tasks (
     created_at TEXT DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT DEFAULT '',
+    created_at TEXT DEFAULT NOW(),
+    updated_at TEXT DEFAULT NOW()
+);
+
 CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
 CREATE INDEX IF NOT EXISTS idx_messages_uazapi ON messages(uazapi_id);
@@ -198,12 +221,13 @@ def upsert_contact(phone: str, name: str = "", **extra: Any) -> dict:
         vals.append(phone)
         db.execute(f"UPDATE contacts SET {','.join(fields)} WHERE phone=?", tuple(vals))
     else:
+        default_auto = int(get_setting("agent_mode", "1"))
         db.execute(
             "INSERT INTO contacts (phone, name, email, company, notes, avatar_url, assigned_to, auto_mode, created_at, updated_at) "
             "VALUES (?,?,?,?,?,?,?,?,?,?)",
             (phone, name, extra.get("email", ""), extra.get("company", ""),
              extra.get("notes", ""), extra.get("avatar_url", ""),
-             extra.get("assigned_to", ""), extra.get("auto_mode", 1), now, now),
+             extra.get("assigned_to", ""), extra.get("auto_mode", default_auto), now, now),
         )
     return db.fetch_one("SELECT * FROM contacts WHERE phone=?", (phone,))
 

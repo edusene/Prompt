@@ -256,7 +256,14 @@ _BASE_PROMPT = os.getenv(
 )
 
 
-FULL_SYSTEM_PROMPT = _BASE_PROMPT
+FULL_SYSTEM_PROMPT = _BASE_PROMPT + (
+    "\n\nVocê pode receber e analisar mídias enviadas pelo cliente: "
+    "imagens (fotos, prints, documentos escaneados), áudios (mensagens de voz), "
+    "vídeos e figurinhas. "
+    "Quando receber uma imagem, descreva o que vê e responda de acordo. "
+    "Quando receber um áudio, transcreva mentalmente o conteúdo e responda ao que foi dito. "
+    "Seja útil e objetivo ao lidar com mídias."
+)
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -290,10 +297,106 @@ def split_reply(text: str) -> list[str]:
     return [c for c in chunks if c]
 
 
+# ── Multimodal parts builder ─────────────────────────────────────────────────
+
+_GEMINI_MIME_MAP = {
+    "image/jpeg": "image/jpeg", "image/png": "image/png", "image/webp": "image/webp",
+    "image/gif": "image/gif",
+    "audio/ogg": "audio/ogg", "audio/mpeg": "audio/mpeg", "audio/mp4": "audio/mp4",
+    "audio/wav": "audio/wav",
+    "video/mp4": "video/mp4", "video/webm": "video/webm",
+    "application/pdf": "application/pdf",
+}
+
+
+def _parse_data_uri(data_uri: str) -> tuple[str, str]:
+    """Extrai (mime, base64_data) de um data-URI data:image/jpeg;base64,..."""
+    m = __import__("re").match(r"^data:([^;,]+);base64,(.+)$", data_uri, __import__("re").DOTALL)
+    if m:
+        return m.group(1), m.group(2)
+    return "", data_uri
+
+
+def _build_user_parts(items: list[dict]) -> list[dict]:
+    """Monta parts multimodais para o turno do usuário.
+
+    Para cada item, busca a mensagem no banco por msg_id.
+    Se tiver media_url (data-URI ou URL), inclui como inline_data.
+    Sempre inclui o texto (mesmo que placeholder como "[Imagem]").
+    """
+    import re as _re
+    parts = []
+    seen_media = set()
+
+    for item in items:
+        text = item.get("text", "")
+        msg_id = item.get("msg_id")
+
+        if msg_id:
+            msg = database.get_message(msg_id)
+            media_url = str((msg or {}).get("media_url") or "").strip()
+            msg_type = str((msg or {}).get("msg_type") or "text")
+
+            if media_url and msg_type != "text" and media_url not in seen_media:
+                seen_media.add(media_url)
+                mime = ""
+                b64 = ""
+
+                if media_url.startswith("data:"):
+                    mime, b64 = _parse_data_uri(media_url)
+                elif media_url.startswith("http"):
+                    # URL externa: baixa e converte pra data-URI inline
+                    try:
+                        import requests as _req
+                        resp = _req.get(media_url, timeout=15)
+                        if resp.status_code == 200:
+                            ct = resp.headers.get("Content-Type", "")
+                            mime = ct.split(";")[0].strip() if ct else ""
+                            import base64 as _b64
+                            b64 = _b64.b64encode(resp.content).decode()
+                    except Exception as e:
+                        print(f"[flush] WARN download media falhou msg={msg_id}: {e}")
+
+                if mime and b64:
+                    # Descrição para o modelo entender o contexto
+                    media_desc = {
+                        "image": "O cliente enviou uma imagem.",
+                        "video": "O cliente enviou um vídeo.",
+                        "audio": "O cliente enviou um áudio.",
+                        "ptt": "O cliente enviou um áudio (mensagem de voz).",
+                        "sticker": "O cliente enviou uma figurinha.",
+                        "document": "O cliente enviou um documento.",
+                    }.get(msg_type, f"O cliente enviou mídia ({msg_type}).")
+
+                    if text and not text.startswith("["):
+                        media_desc += f" Legenda: {text}"
+
+                    parts.append({"text": media_desc})
+                    parts.append({
+                        "inline_data": {
+                            "mime_type": mime,
+                            "data": b64,
+                        }
+                    })
+                    continue  # Já adicionou texto + mídia, não precisa adicionar texto de novo
+
+        # Texto puro (sem mídia ou mídia não encontrada)
+        if text:
+            parts.append({"text": text})
+
+    if not parts:
+        parts.append({"text": "[Mensagem sem conteúdo de texto]"})
+
+    return parts
+
+
 # ── Flush handler ─────────────────────────────────────────────────────────────
 
-def handle_flush(user: str, texts: list[str]) -> None:
-    """Executado numa thread do Timer quando o debounce dispara."""
+def handle_flush(user: str, items: list[dict]) -> None:
+    """Executado numa thread do Timer quando o debounce dispara.
+
+    items: [{"text": "...", "msg_id": 123}, ...]
+    """
     try:
         contact = database.get_contact(user)
         if contact and not contact["auto_mode"]:
@@ -304,13 +407,15 @@ def handle_flush(user: str, texts: list[str]) -> None:
 
         send_presence(user, "composing")
 
-        user_turn = "\n".join(texts)
-        memory.append(user, "user", user_turn)
+        # Monta parts multimodais: texto + mídia inline (imagem, áudio, etc.)
+        user_parts = _build_user_parts(items)
+        text_only = "\n".join(it["text"] for it in items)
+        memory.append_multimodal(user, "user", user_parts)
 
         # RAG: busca contexto relevante no banco de knowledge
         dynamic_prompt = FULL_SYSTEM_PROMPT
         try:
-            context = knowledge_rag.search_context(user_turn, top_k=3)
+            context = knowledge_rag.search_context(text_only, top_k=3)
             if context:
                 dynamic_prompt += f"\n\nContexto relevante da empresa:\n{context}"
         except Exception as e:
@@ -713,7 +818,7 @@ def webhook():
         if avatar:
             database.update_contact(contact["id"], avatar_url=avatar)
 
-    buffer.add(number, body)
+    buffer.add(number, body, msg_id=saved["id"] if saved else None)
 
     return jsonify({"ok": True})
 
@@ -1098,6 +1203,122 @@ def api_conversations_remove_tag(conv_id, tag_id):
     db.execute("DELETE FROM conversation_tags WHERE conversation_id=? AND tag_id=?", (conv_id, tag_id))
     events.emit("tags_updated", {"conversation_id": conv_id, "tag_id": tag_id, "action": "remove"})
     return jsonify({"ok": True})
+
+
+@app.post("/api/conversations/bulk")
+@login_required
+def api_conversations_bulk():
+    """Executa uma ação em massa sobre múltiplas conversas."""
+    data = request.get_json(silent=True) or {}
+    ids = data.get("ids") or []
+    action = data.get("action", "")
+    params = data.get("params") or {}
+    if not ids or not isinstance(ids, list):
+        return jsonify({"error": "ids required"}), 400
+
+    processed = 0
+    errors = []
+    for cid in ids:
+        try:
+            conv = database.get_conversation(cid)
+            if not conv:
+                errors.append({"id": cid, "error": "not found"})
+                continue
+
+            if action in ("archive", "mute", "pin", "favorite"):
+                fields = {}
+                if action == "archive":
+                    fields["archived"] = 1 if params.get("archived", True) else 0
+                elif action == "mute":
+                    fields["muted"] = 1 if params.get("muted", True) else 0
+                elif action == "pin":
+                    fields["pinned"] = 1 if params.get("pinned", True) else 0
+                elif action == "favorite":
+                    fields["favorite"] = 1 if params.get("favorite", True) else 0
+                database.update_conversation(cid, **fields)
+                events.emit("conversation_updated", {"conversation_id": cid, **fields})
+                contact = database.get_contact_by_id(conv["contact_id"]) if conv else None
+                phone = (contact or {}).get("phone", "")
+                if phone:
+                    number = str(phone).replace("@s.whatsapp.net", "")
+                    if action == "archive":
+                        chat_archive(number, bool(fields["archived"]))
+                    elif action == "pin":
+                        chat_pin(number, bool(fields["pinned"]))
+                    elif action == "mute":
+                        chat_mute(number, bool(fields["muted"]))
+
+            elif action == "status":
+                status = params.get("status", "")
+                if status not in ("new", "open", "waiting", "resolved", "closed"):
+                    errors.append({"id": cid, "error": "invalid status"})
+                    continue
+                database.update_conversation(cid, status=status)
+                events.emit("conversation_updated", {"conversation_id": cid, "status": status})
+
+            elif action == "mode":
+                contact = database.get_contact_by_id(conv["contact_id"])
+                if contact:
+                    new_mode = 0 if contact["auto_mode"] else 1
+                    database.update_contact(contact["id"], auto_mode=new_mode)
+                    events.emit("conversation_updated", {"conversation_id": cid, "auto_mode": new_mode})
+
+            elif action == "read":
+                database.reset_unread(cid)
+                events.emit("conversation_updated", {"conversation_id": cid, "unread_count": 0})
+
+            elif action == "unread":
+                database.mark_unread(cid)
+                events.emit("conversation_updated", {"conversation_id": cid, "unread_count": 1})
+
+            elif action == "clear":
+                database.clear_conversation(cid)
+                events.emit("conversation_updated", {"conversation_id": cid, "cleared": True})
+
+            elif action == "delete":
+                contact = database.get_contact_by_id(conv["contact_id"]) if conv else None
+                phone = (contact or {}).get("phone", "")
+                database.delete_conversation(cid)
+                if phone:
+                    chat_delete(str(phone).replace("@s.whatsapp.net", ""))
+                events.emit("conversation_updated", {"conversation_id": cid, "deleted": True})
+
+            elif action == "add_tag":
+                tag_id = params.get("tag_id")
+                if tag_id:
+                    database.add_tag_to_conversation(cid, tag_id)
+                    events.emit("tags_updated", {"conversation_id": cid, "tag_id": tag_id, "action": "add"})
+
+            elif action == "remove_tag":
+                tag_id = params.get("tag_id")
+                if tag_id:
+                    db.execute("DELETE FROM conversation_tags WHERE conversation_id=? AND tag_id=?", (cid, tag_id))
+                    events.emit("tags_updated", {"conversation_id": cid, "tag_id": tag_id, "action": "remove"})
+            else:
+                errors.append({"id": cid, "error": f"unknown action: {action}"})
+                continue
+
+            processed += 1
+        except Exception as e:
+            errors.append({"id": cid, "error": str(e)})
+
+    return jsonify({"ok": True, "processed": processed, "errors": errors})
+
+
+@app.get("/api/settings/agent-mode")
+@login_required
+def api_get_agent_mode():
+    val = database.get_setting("agent_mode", "1")
+    return jsonify({"auto_mode": int(val)})
+
+
+@app.put("/api/settings/agent-mode")
+@login_required
+def api_set_agent_mode():
+    data = request.get_json(silent=True) or {}
+    auto = 1 if data.get("auto_mode", True) else 0
+    database.set_setting("agent_mode", str(auto))
+    return jsonify({"ok": True, "auto_mode": auto})
 
 
 # ── Messages ──────────────────────────────────────────────────────────────────

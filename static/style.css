@@ -221,6 +221,60 @@ h3 { font-size: 14px; font-weight: 600; }
 }
 
 .sidebar-nav { flex: 1; padding: 10px 8px; overflow-y: auto; }
+
+/* ═══ Global agent toggle ═══ */
+.sidebar-agent {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    margin: 0 8px 6px;
+    border-radius: 10px;
+    background: rgba(99,102,241,0.08);
+    border: 1px solid rgba(99,102,241,0.15);
+}
+.agent-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: rgba(255,255,255,0.8);
+}
+.agent-label svg { color: var(--accent); }
+.agent-toggle {
+    position: relative;
+    width: 40px;
+    height: 22px;
+    cursor: pointer;
+}
+.agent-toggle input { display: none; }
+.agent-toggle-slider {
+    position: absolute;
+    inset: 0;
+    background: rgba(255,255,255,0.12);
+    border-radius: 22px;
+    transition: background 0.2s;
+}
+.agent-toggle-slider::after {
+    content: '';
+    position: absolute;
+    left: 3px;
+    top: 3px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.5);
+    transition: all 0.2s;
+}
+.agent-toggle input:checked + .agent-toggle-slider {
+    background: var(--accent);
+}
+.agent-toggle input:checked + .agent-toggle-slider::after {
+    transform: translateX(18px);
+    background: #fff;
+}
+
 .sidebar-footer { padding: 8px; border-top: 1px solid var(--border); }
 
 .nav-item {
@@ -476,6 +530,117 @@ h3 { font-size: 14px; font-weight: 600; }
 .conv-item:hover { background: rgba(99,102,241,0.06); }
 .conv-item.active { background: rgba(99,102,241,0.1); }
 .conv-item.active::after { transform: translateY(-50%) scaleY(1); }
+.conv-item.selected { background: rgba(99,102,241,0.14); }
+
+/* ═══ Checkboxes de seleção em massa ═══ */
+.conv-header-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.conv-check {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--accent);
+    cursor: pointer;
+    flex-shrink: 0;
+}
+.conv-check-all {
+    width: 17px;
+    height: 17px;
+}
+.conv-item .conv-check {
+    opacity: 0;
+    transition: opacity 0.15s;
+    margin-left: -4px;
+    margin-right: -2px;
+}
+.conv-item:hover .conv-check,
+.conv-item.selected .conv-check,
+.conv-list-panel:hover .conv-check { opacity: 1; }
+
+/* ═══ Bulk toolbar ═══ */
+.bulk-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background: rgba(99,102,241,0.12);
+    border-bottom: 1px solid rgba(99,102,241,0.2);
+    animation: fadeIn 0.15s ease;
+}
+.bulk-count {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--accent);
+    white-space: nowrap;
+    margin-right: 4px;
+}
+.bulk-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+.bulk-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border: none;
+    border-radius: 6px;
+    background: rgba(255,255,255,0.06);
+    color: rgba(255,255,255,0.7);
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.bulk-btn:hover { background: rgba(255,255,255,0.14); color: #fff; }
+.bulk-btn-danger:hover { background: rgba(239,68,68,0.2); color: #ef4444; }
+.bulk-sep {
+    width: 1px;
+    height: 18px;
+    background: rgba(255,255,255,0.12);
+    margin: 0 2px;
+}
+.bulk-close {
+    margin-left: auto;
+    width: 26px;
+    height: 26px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.08);
+    color: rgba(255,255,255,0.5);
+    font-size: 16px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+}
+.bulk-close:hover { background: rgba(255,255,255,0.18); color: #fff; }
+
+/* ═══ Bulk dropdown menus ═══ */
+.bulk-dropdown {
+    position: fixed;
+    z-index: 1000;
+    background: var(--bg-secondary, #1e293b);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 8px;
+    padding: 4px 0;
+    min-width: 150px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    animation: fadeIn 0.12s ease;
+}
+.bulk-dropdown-item {
+    padding: 7px 14px;
+    font-size: 13px;
+    color: rgba(255,255,255,0.85);
+    cursor: pointer;
+    transition: background 0.12s;
+}
+.bulk-dropdown-item:hover {
+    background: rgba(99,102,241,0.15);
+}
 
 .conv-avatar {
     position: relative;

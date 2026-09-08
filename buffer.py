@@ -8,19 +8,19 @@ from typing import Callable
 
 
 class MessageBuffer:
-    def __init__(self, wait_seconds: float, on_flush: Callable[[str, list[str]], None]):
+    def __init__(self, wait_seconds: float, on_flush: Callable[[str, list[dict]], None]):
         self._wait = wait_seconds
         self._on_flush = on_flush
         self._lock = threading.Lock()
-        # {user: {"texts": [...], "timer": Timer | None}}
+        # {user: {"items": [{"text": ..., "msg_id": ...}], "timer": Timer | None}}
         self._state: dict[str, dict] = {}
 
-    def add(self, user: str, text: str) -> None:
+    def add(self, user: str, text: str, msg_id: int | None = None) -> None:
         with self._lock:
             if user not in self._state:
-                self._state[user] = {"texts": [], "timer": None}
+                self._state[user] = {"items": [], "timer": None}
 
-            self._state[user]["texts"].append(text)
+            self._state[user]["items"].append({"text": text, "msg_id": msg_id})
 
             # Cancela timer anterior e cria novo (debounce)
             timer = self._state[user]["timer"]
@@ -35,11 +35,11 @@ class MessageBuffer:
         with self._lock:
             if user not in self._state:
                 return
-            texts = self._state[user]["texts"]
-            if not texts:
+            items = self._state[user]["items"]
+            if not items:
                 return
             # Limpa estado antes de chamar o callback (evita race condition)
-            self._state[user] = {"texts": [], "timer": None}
+            self._state[user] = {"items": [], "timer": None}
 
-        print(f"[buffer] flush user={user} msgs={len(texts)}")
-        self._on_flush(user, texts)
+        print(f"[buffer] flush user={user} msgs={len(items)}")
+        self._on_flush(user, items)

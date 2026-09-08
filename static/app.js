@@ -14,6 +14,28 @@ const CONV_STATUS = { new: 'Novo', open: 'Aberto', waiting: 'Aguardando', resolv
 function statusLabel(s) { return CONV_STATUS[s] || s || ''; }
 let contextMenuConvId = null;
 
+/* ── Bulk selection ─────────────────────────────────────────────────────── */
+let selectedConvIds = new Set();
+
+/* ── Global agent toggle ───────────────────────────────────────────────── */
+async function loadGlobalAgentMode() {
+    const data = await api('/api/settings/agent-mode');
+    if (data && data.auto_mode !== undefined) {
+        const toggle = document.getElementById('global-agent-toggle');
+        if (toggle) toggle.checked = !!data.auto_mode;
+    }
+}
+
+async function toggleGlobalAgent(checked) {
+    const res = await api('/api/settings/agent-mode', {
+        method: 'PUT',
+        body: JSON.stringify({ auto_mode: checked })
+    });
+    if (res && !res.error) {
+        toast(checked ? 'Agente IA ativado para novas conversas' : 'Agente IA desativado (modo manual)', 'success');
+    }
+}
+
 /* ── Toast Notifications ─────────────────────────────────────────────────── */
 function toast(message, type = 'info') {
     const container = document.getElementById('toast-container');
@@ -175,8 +197,10 @@ async function loadConversations() {
         if (c.muted) badges.push('<span class="conv-badge" title="Silenciado">🔇</span>');
         if (c.favorite) badges.push('<span class="conv-badge" title="Favorita">⭐</span>');
         if (c.archived) badges.push('<span class="conv-badge" title="Arquivada">📦</span>');
+        const isSelected = selectedConvIds.has(c.id);
         return `
-            <div class="conv-item ${c.id === currentConvId ? 'active' : ''}" data-conv-id="${c.id}" onclick="selectConversation(${c.id})" oncontextmenu="openContextMenu(event, ${c.id})">
+            <div class="conv-item ${c.id === currentConvId ? 'active' : ''}${isSelected ? ' selected' : ''}" data-conv-id="${c.id}" onclick="selectConversation(${c.id})" oncontextmenu="openContextMenu(event, ${c.id})">
+                <input type="checkbox" class="conv-check" ${isSelected ? 'checked' : ''} onclick="event.stopPropagation(); toggleConvSelect(${c.id})">
                 <div class="conv-avatar">${avatar}${initials}</div>
                 <div class="conv-meta">
                     <div class="conv-name">${esc(name)} ${badges.join('')}</div>
@@ -343,6 +367,155 @@ function closeContextMenu() {
     const existing = document.querySelector('.ctx-menu');
     if (existing) existing.remove();
 }
+
+/* ── Bulk selection ─────────────────────────────────────────────────────── */
+function toggleConvSelect(convId) {
+    if (selectedConvIds.has(convId)) {
+        selectedConvIds.delete(convId);
+    } else {
+        selectedConvIds.add(convId);
+    }
+    const item = document.querySelector(`.conv-item[data-conv-id="${convId}"]`);
+    if (item) {
+        item.classList.toggle('selected', selectedConvIds.has(convId));
+        const chk = item.querySelector('.conv-check');
+        if (chk) chk.checked = selectedConvIds.has(convId);
+    }
+    _syncSelectAll();
+    updateBulkToolbar();
+}
+
+function toggleSelectAll(checked) {
+    const items = document.querySelectorAll('.conv-item');
+    items.forEach(el => {
+        const id = Number(el.dataset.convId);
+        if (checked) {
+            selectedConvIds.add(id);
+        } else {
+            selectedConvIds.delete(id);
+        }
+        el.classList.toggle('selected', checked);
+        const chk = el.querySelector('.conv-check');
+        if (chk) chk.checked = checked;
+    });
+    updateBulkToolbar();
+}
+
+function _syncSelectAll() {
+    const items = document.querySelectorAll('.conv-item');
+    const allChecked = items.length > 0 && [...items].every(el => selectedConvIds.has(Number(el.dataset.convId)));
+    const selectAll = document.getElementById('conv-select-all');
+    if (selectAll) selectAll.checked = allChecked;
+}
+
+function deselectAllConvs() {
+    selectedConvIds.clear();
+    document.querySelectorAll('.conv-item').forEach(el => {
+        el.classList.remove('selected');
+        const chk = el.querySelector('.conv-check');
+        if (chk) chk.checked = false;
+    });
+    const selectAll = document.getElementById('conv-select-all');
+    if (selectAll) selectAll.checked = false;
+    updateBulkToolbar();
+    _hideBulkMenus();
+}
+
+function updateBulkToolbar() {
+    const toolbar = document.getElementById('bulk-toolbar');
+    const count = document.getElementById('bulk-count');
+    if (!toolbar) return;
+    const n = selectedConvIds.size;
+    if (n > 0) {
+        toolbar.style.display = 'flex';
+        count.textContent = `${n} selecionada${n > 1 ? 's' : ''}`;
+    } else {
+        toolbar.style.display = 'none';
+        _hideBulkMenus();
+    }
+}
+
+function _hideBulkMenus() {
+    const sm = document.getElementById('bulk-status-menu');
+    const tm = document.getElementById('bulk-tag-menu');
+    if (sm) sm.style.display = 'none';
+    if (tm) tm.style.display = 'none';
+}
+
+async function bulkAction(action, params = {}) {
+    const ids = [...selectedConvIds];
+    if (!ids.length) return;
+    _hideBulkMenus();
+    const res = await api('/api/conversations/bulk', {
+        method: 'POST',
+        body: JSON.stringify({ ids, action, params })
+    });
+    if (res && !res.error) {
+        const n = res.processed || ids.length;
+        toast(`${n} conversa${n > 1 ? 's' : ''} atualizada${n > 1 ? 's' : ''}`, 'success');
+        deselectAllConvs();
+        loadConversations();
+    } else {
+        toast(res?.error || 'Erro ao executar ação em massa', 'error');
+    }
+}
+
+function bulkConfirmAction(action) {
+    const ids = [...selectedConvIds];
+    if (!ids.length) return;
+    const msg = action === 'delete'
+        ? `Apagar ${ids.length} conversa${ids.length > 1 ? 's' : ''}?`
+        : `Limpar ${ids.length} conversa${ids.length > 1 ? 's' : ''}?`;
+    if (!confirm(msg)) return;
+    bulkAction(action);
+}
+
+function bulkShowStatusMenu(e) {
+    e.stopPropagation();
+    const menu = document.getElementById('bulk-status-menu');
+    if (!menu) return;
+    const wasVisible = menu.style.display === 'block';
+    _hideBulkMenus();
+    if (wasVisible) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    menu.style.display = 'block';
+    menu.style.position = 'fixed';
+    menu.style.left = rect.left + 'px';
+    menu.style.top = (rect.bottom + 4) + 'px';
+}
+
+async function bulkShowTagMenu(e) {
+    e.stopPropagation();
+    const menu = document.getElementById('bulk-tag-menu');
+    if (!menu) return;
+    const wasVisible = menu.style.display === 'block';
+    _hideBulkMenus();
+    if (wasVisible) return;
+    const allTags = await api('/api/tags');
+    if (!allTags || !allTags.length) {
+        toast('Nenhuma tag disponível', 'info');
+        return;
+    }
+    menu.innerHTML = allTags.map(t =>
+        `<div class="bulk-dropdown-item" onclick="bulkAction('add_tag', {tag_id:${t.id}})">${esc(t.name || t.label || 'Tag ' + t.id)}</div>`
+    ).join('');
+    const rect = e.currentTarget.getBoundingClientRect();
+    menu.style.display = 'block';
+    menu.style.position = 'fixed';
+    menu.style.left = rect.left + 'px';
+    menu.style.top = (rect.bottom + 4) + 'px';
+}
+
+document.addEventListener('click', (e) => {
+    if (!e.target.closest('#bulk-status-menu') && !e.target.closest('[onclick*="bulkShowStatus"]')) {
+        const sm = document.getElementById('bulk-status-menu');
+        if (sm) sm.style.display = 'none';
+    }
+    if (!e.target.closest('#bulk-tag-menu') && !e.target.closest('[onclick*="bulkShowTag"]')) {
+        const tm = document.getElementById('bulk-tag-menu');
+        if (tm) tm.style.display = 'none';
+    }
+});
 
 async function setConvFlag(convId, flag, value) {
     closeContextMenu();
@@ -1803,6 +1976,7 @@ function closeQR() {
 
 /* ── Init ─────────────────────────────────────────────────────────────────── */
 loadDashboard();
+loadGlobalAgentMode();
 connectSSE();
 updateUnreadBadge();
 

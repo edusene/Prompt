@@ -1,6 +1,7 @@
 """
 memory.py — Histórico de conversa por usuário em memória.
 Usa formato nativo do Gemini: {"role": "user"|"model", "parts": [{"text": "..."}]}
+Suporta parts multimodais (text + inline_data para imagens/áudio).
 """
 
 import threading
@@ -13,13 +14,22 @@ _store: dict[str, list[dict]] = {}
 
 
 def append(user: str, role: str, text: str) -> None:
-    """Adiciona uma mensagem ao histórico do usuário e trunca se necessário."""
+    """Adiciona uma mensagem de texto ao histórico do usuário."""
     entry = {"role": role, "parts": [{"text": text}]}
+    _append_entry(user, entry)
+
+
+def append_multimodal(user: str, role: str, parts: list[dict]) -> None:
+    """Adiciona uma mensagem com parts multimodais (text + inline_data)."""
+    entry = {"role": role, "parts": parts}
+    _append_entry(user, entry)
+
+
+def _append_entry(user: str, entry: dict) -> None:
     with _lock:
         if user not in _store:
             _store[user] = []
         _store[user].append(entry)
-        # Mantém no máximo MAX_HISTORY mensagens (mais recentes)
         if len(_store[user]) > MAX_HISTORY:
             _store[user] = _store[user][-MAX_HISTORY:]
 
