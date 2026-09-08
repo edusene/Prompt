@@ -154,10 +154,13 @@ async function loadConversations() {
     if (!conversations) return;
     list.dataset.loaded = '1';
     if (conversations.length === 0) {
-        list.innerHTML = '<div class="empty-state">Nenhuma conversa</div>';
+        if (list.dataset.sig !== 'empty') {
+            list.innerHTML = '<div class="empty-state">Nenhuma conversa</div>';
+            list.dataset.sig = 'empty';
+        }
         return;
     }
-    list.innerHTML = conversations.map(c => {
+    const html = conversations.map(c => {
         const name = c.contact_name || c.contact_phone;
         const initials = name.slice(0, 2).toUpperCase();
         const avatar = c.contact_avatar
@@ -186,6 +189,14 @@ async function loadConversations() {
                 </div>
             </div>`;
     }).join('');
+    // Evita piscar: só substitui o DOM se algo mudou de verdade.
+    // (O poll de 10s e os eventos SSE chamam isto constantemente.)
+    if (list.dataset.sig === html) {
+        list.scrollTop = scrollPos;
+        return;
+    }
+    list.dataset.sig = html;
+    list.innerHTML = html;
     list.scrollTop = scrollPos;
 }
 
@@ -210,7 +221,7 @@ async function selectConversation(convId) {
         el.classList.toggle('active', Number(el.dataset.convId) === convId);
     });
 
-    showGlobalLoader(true);
+    setChatLoading(true);
     const msgDiv = document.getElementById('chat-messages');
     msgDiv.innerHTML = skeletonMsgs();
     try {
@@ -237,7 +248,7 @@ async function selectConversation(convId) {
         loadConversations();
         updateUnreadBadge();
     } finally {
-        showGlobalLoader(false);
+        setChatLoading(false);
     }
 }
 
@@ -260,9 +271,18 @@ function isNearBottom(el) {
     return (el.scrollHeight - el.scrollTop - el.clientHeight) < 60;
 }
 
-function showGlobalLoader(show) {
-    const loader = document.getElementById('global-loader');
-    if (loader) loader.style.display = show ? 'flex' : 'none';
+// Carregamento minimalista ao abrir conversa: apenas uma barra fina de
+// progresso no topo do painel do chat (sem overlay/skeleton pesado).
+function setChatLoading(show) {
+    const panel = document.querySelector('.conv-chat-panel');
+    if (panel) panel.classList.toggle('chat-loading', !!show);
+}
+
+// Botão que disparou a ação (via onclick inline). Ignora itens do menu de
+// contexto para não trocar o rótulo deles por spinner.
+function _btnFromEvent() {
+    const b = (typeof event !== 'undefined' && event) ? event.currentTarget : null;
+    return (b && !b.classList.contains('ctx-menu-item')) ? b : null;
 }
 
 function deselectConversation() {
@@ -326,10 +346,17 @@ function closeContextMenu() {
 
 async function setConvFlag(convId, flag, value) {
     closeContextMenu();
-    const res = await api(`/api/conversations/${convId}/flags`, {
-        method: 'PUT',
-        body: JSON.stringify({ [flag]: !!value }),
-    });
+    const btn = _btnFromEvent();
+    setBtnLoading(btn, true);
+    let res = null;
+    try {
+        res = await api(`/api/conversations/${convId}/flags`, {
+            method: 'PUT',
+            body: JSON.stringify({ [flag]: !!value }),
+        });
+    } finally {
+        setBtnLoading(btn, false);
+    }
     if (res && !res.error) {
         const flagLabels = {
             archived: res.archived ? 'Conversa arquivada' : 'Conversa desarquivada',
@@ -426,6 +453,14 @@ const MEDIA_LABELS = {
     document: 'Documento', sticker: 'Figurinha', gif: 'GIF',
 };
 
+// Rótulos que o webhook grava quando não há legenda ([Imagem], [Video]...).
+// Não devem aparecer junto com a mídia renderizada — são redundantes.
+const MEDIA_PLACEHOLDER_RE = /^\[(Imagem|V[íi]deo|[ÁaA]udio|Figurinha|Documento[^\]]*|Sticker|GIF)\](:.*)?$/i;
+
+function isMediaPlaceholder(text) {
+    return MEDIA_PLACEHOLDER_RE.test(String(text || '').trim());
+}
+
 function msgMediaHTML(m) {
     const type = (m.msg_type || 'text').toLowerCase();
     if (type === 'image' || type === 'gif' || type === 'sticker') {
@@ -463,9 +498,13 @@ function msgHTML(m, isNew) {
     const type = (m.msg_type || 'text').toLowerCase();
 
     // Corpo próprio + (opcionalmente) media adjunta da UAZAPI.
-    let bodyHTML = '';
-    if (m.body) bodyHTML += `<div class="msg-body">${esc(m.body)}</div>`;
+    // O rótulo placeholder ([Imagem], [Audio]...) é escondido quando a mídia
+    // renderiza — só legendas reais acompanham a mídia.
     const mediaHTML = msgMediaHTML(m);
+    let bodyHTML = '';
+    if (m.body && !(mediaHTML && isMediaPlaceholder(m.body))) {
+        bodyHTML += `<div class="msg-body">${esc(m.body)}</div>`;
+    }
     if (mediaHTML) bodyHTML += mediaHTML;
 
     // Estado de envio/lectura (só mensagens enviadas pelo panel).
@@ -480,7 +519,7 @@ function msgHTML(m, isNew) {
         statusIcon = `<span class="msg-status error" title="Erro de envio">!</span>`;
     }
 
-    return `<div class="msg msg-${m.direction === 'in' ? 'in' : 'out'}${isNew ? ' msg-new' : ''}" data-msg-id="${esc(msgId)}">
+    return `<div class="msg msg-${m.direction === 'in' ? 'in' : 'out'}${isNew ? ' msg-new' : ''}${mediaHTML ? ' msg-has-media' : ''}" data-msg-id="${esc(msgId)}">
                 ${bodyHTML}
                 <div class="msg-time"><span>${esc(senderName)}</span> · ${timeStr}${statusIcon}</div>
             </div>`;
@@ -547,14 +586,14 @@ async function _loadMsgMedia(box) {
         _mediaInFlight.delete(msgId);
     }
 
-    // La media aún puede estar descargándose en el servidor (async): reintenta
-    // unas veces con backoff antes de mostrar la etiqueta textual como fallback.
+    // O endpoint baixa a media on-demand (pode levar alguns segundos) e
+    // persiste: se ainda não vier, reintenta poucas vezes antes do fallback.
     if (!data || !data.media_url) {
         const attempts = Number(box.dataset.mediaAttempt || 0) + 1;
-        if (attempts <= 5 && !data?.ready) {
+        if (attempts <= 3) {
             box.dataset.mediaAttempt = String(attempts);
             box.dataset.state = '';
-            setTimeout(() => _loadMsgMedia(box), 1500 * attempts);
+            setTimeout(() => _loadMsgMedia(box), 3000 * attempts);
             return;
         }
         box.dataset.state = 'loaded';
@@ -583,10 +622,17 @@ function _applyMsgMedia(box, mediaEl, dataUri) {
 function _fallbackMsgMedia(box, body) {
     const spinner = box.querySelector('.spinner');
     if (spinner) spinner.remove();
-    if (box.querySelector('.msg-media') && !body) return;
     box.querySelector('.msg-media')?.remove?.();
-    if (body) {
-        box.innerHTML = `<div class="msg-body">${esc(body)}</div>`;
+    const text = String(body || '').trim();
+    if (!text) {
+        box.remove();
+        return;
+    }
+    // Placeholder sem mídia disponível: chip estilizado em vez de texto cru.
+    if (isMediaPlaceholder(text)) {
+        box.innerHTML = `<div class="msg-media-unavailable">Mídia não disponível</div>`;
+    } else {
+        box.innerHTML = `<div class="msg-body">${esc(text)}</div>`;
     }
 }
 
@@ -667,7 +713,14 @@ async function updateConvStatus(convId, status) {
 }
 
 async function toggleMode(convId) {
-    const res = await api(`/api/conversations/${convId}/mode`, { method: 'PUT' });
+    const btn = _btnFromEvent();
+    setBtnLoading(btn, true);
+    let res = null;
+    try {
+        res = await api(`/api/conversations/${convId}/mode`, { method: 'PUT' });
+    } finally {
+        setBtnLoading(btn, false);
+    }
     if (!res || res.error) return;
 
     // Atualiza imediatamente o badge do cabeçalho do chat e o botão do painel
@@ -693,7 +746,14 @@ async function toggleMode(convId) {
 
 async function addConvTag(convId, tagId) {
     if (!tagId) return;
-    const res = await api(`/api/conversations/${convId}/tags`, { method: 'POST', body: JSON.stringify({ tag_id: Number(tagId) }) });
+    const btn = _btnFromEvent();
+    setBtnLoading(btn, true);
+    let res = null;
+    try {
+        res = await api(`/api/conversations/${convId}/tags`, { method: 'POST', body: JSON.stringify({ tag_id: Number(tagId) }) });
+    } finally {
+        setBtnLoading(btn, false);
+    }
     if (res && !res.error) {
         toast('Tag adicionada', 'success');
         loadConversations();
@@ -702,7 +762,14 @@ async function addConvTag(convId, tagId) {
 }
 
 async function removeConvTag(convId, tagId) {
-    const res = await api(`/api/conversations/${convId}/tags/${tagId}`, { method: 'DELETE' });
+    const btn = _btnFromEvent();
+    setBtnLoading(btn, true);
+    let res = null;
+    try {
+        res = await api(`/api/conversations/${convId}/tags/${tagId}`, { method: 'DELETE' });
+    } finally {
+        setBtnLoading(btn, false);
+    }
     if (res && !res.error) {
         toast('Tag removida', 'success');
         loadConversations();
@@ -1384,12 +1451,20 @@ function connectSSE() {
                     const d = await api(`/api/conversations/${data.conversation_id}`);
                     if (d?.messages?.length) {
                         const last = d.messages[d.messages.length - 1];
-                        if (last.body === lastSentBody) { lastSentBody = ''; return; }
-                        const lastEl = document.querySelector('#chat-messages .msg:last-child');
-                        const lastId = lastEl?.dataset?.msgId;
-                        if (lastId && lastId === String(last.uazapi_id || last.id || '')) return;
-                        appendMessage(last);
+                        if (last.body === lastSentBody) {
+                            lastSentBody = '';
+                        } else {
+                            const lastEl = document.querySelector('#chat-messages .msg:last-child');
+                            const lastId = lastEl?.dataset?.msgId;
+                            if (!(lastId && lastId === String(last.uazapi_id || last.id || ''))) {
+                                appendMessage(last);
+                            }
+                        }
                     }
+                    // A conversa está aberta e visível: marca como lida na hora,
+                    // sem precisar sair e voltar, e limpa o badge da lista.
+                    await api(`/api/conversations/${data.conversation_id}/read`, { method: 'PUT' });
+                    debouncedLoadConversations();
                 } else {
                     debouncedLoadConversations();
                 }
@@ -1475,9 +1550,8 @@ function skeletonRows(n) {
 }
 
 function skeletonMsgs() {
-    return '<div class="skeleton-msg in"><div class="skeleton" style="height:36px;border-radius:12px"></div></div>'
-         + '<div class="skeleton-msg out"><div class="skeleton" style="height:36px;border-radius:12px"></div></div>'
-         + '<div class="skeleton-msg in"><div class="skeleton" style="height:28px;border-radius:12px"></div></div>';
+    return '<div class="skeleton-msg in"><div class="skeleton" style="height:30px;border-radius:12px;width:55%"></div></div>'
+         + '<div class="skeleton-msg out"><div class="skeleton" style="height:30px;border-radius:12px;width:42%"></div></div>';
 }
 
 function friendlyError(err) {
@@ -1523,8 +1597,7 @@ document.addEventListener('click', (e) => {
     if (e.target.closest('.conv-layout')
         || e.target.closest('.ctx-menu')
         || e.target.closest('.toast-container')
-        || e.target.closest('#modal-overlay')
-        || e.target.closest('#global-loader')) return;
+        || e.target.closest('#modal-overlay')) return;
     if (currentConvId != null) deselectConversation();
 });
 

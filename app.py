@@ -44,27 +44,71 @@ def _is_media_type(msg_type: str) -> bool:
 
 
 def _download_media_async(message_db_id, number, message_id):
-    """Descarga la media (imagen/audio/video/sticker) y la guarda en la DB.
+    """Descarga la media (imagen/audio/video/sticker) en background.
 
-    Corre en un thread de fondo para no frenar el webhook. Best-effort:
-    si falla o aún no está lista, el panel muestra la etiqueta textual.
+    Delega en _fetch_and_store_media, que también usa el endpoint on-demand:
+    así una misma mensagem nunca se baixa duas vezes em paralelo.
     """
     try:
-        r = download_media(number, message_id)
-        if not r.get("ok"):
-            print(f"[media] falha download id={message_id}: {r.get('error')}")
+        m = database.get_message(message_db_id)
+        if not m:
             return
+        uri = _fetch_and_store_media(m)
+        if uri:
+            print(f"[media] msg={message_db_id} guardado len={len(uri)}")
+        else:
+            print(f"[media] falha download id={message_id}")
+    except Exception as e:
+        print(f"[media] erro download id={message_id}: {e}")
+
+
+# Una lock por mensagem: evita downloads duplicados em paralelo
+# (webhook em background + pedido on-demand do painel).
+_media_download_locks: dict[int, threading.Lock] = {}
+_media_locks_guard = threading.Lock()
+
+
+def _get_media_lock(msg_id: int) -> threading.Lock:
+    with _media_locks_guard:
+        lock = _media_download_locks.get(msg_id)
+        if not lock:
+            lock = threading.Lock()
+            _media_download_locks[msg_id] = lock
+        return lock
+
+
+def _fetch_and_store_media(m: dict) -> str:
+    """Baixa a media da mensagem agora e guarda em media_url (data-URI).
+
+    Usado tanto pelo webhook (background) quanto on-demand pelo endpoint do
+    painel — cobre mensagens antigas que chegaram antes do suporte a media e
+    casos em que o download em background falhou. Retorna o data-URI ou ''.
+    """
+    msg_id = m["id"]
+    lock = _get_media_lock(msg_id)
+    with lock:
+        # Recheck: outro thread pode ter baixado enquanto esperávamos o lock.
+        fresh = database.get_message(msg_id)
+        if fresh and str(fresh.get("media_url") or "").startswith("data:"):
+            return fresh["media_url"]
+        uazapi_id = str((fresh or {}).get("uazapi_id") or "")
+        phone = str((fresh or {}).get("phone") or "")
+        if not uazapi_id or not phone:
+            return ""
+        r = download_media(phone, uazapi_id)
+        if not r.get("ok"):
+            print(f"[media] falha download msg={msg_id} uazapi_id={uazapi_id}: {r.get('error')}")
+            return ""
         d = r.get("data") or {}
         b64 = str(d.get("base64") or "")
         mime = str(d.get("mimeType") or "application/octet-stream")
         if not b64:
-            print(f"[media] resposta sem base64 id={message_id}")
-            return
+            print(f"[media] resposta sem base64 msg={msg_id}")
+            return ""
         data_uri = f"data:{mime};base64,{b64}"
-        database.update_message_media(message_db_id, data_uri)
-        print(f"[media] msg={message_db_id} guardado ({mime}) len={len(b64)}")
-    except Exception as e:
-        print(f"[media] erro download id={message_id}: {e}")
+        database.update_message_media(msg_id, data_uri)
+        print(f"[media] msg={msg_id} guardado ({mime}) len={len(b64)}")
+        return data_uri
 
 # ── Config ──────────────────────────────────────────────────────────────────
 BUFFER_SECONDS = float(os.getenv("BUFFER_SECONDS", "8"))
@@ -962,18 +1006,26 @@ def api_messages_send():
 def api_messages_media(msg_id):
     """Devuelve el data-URI base64 de la media de un mensaje (imagen/audio/video/sticker).
 
-    El panel lo pide bajo demanda (lazy) cuando la media entra en el viewport,
-    para mantener ligera la lista de mensajes y la apertura de la conversa.
+    Se la media aún no está guardada (mensajes antiguas o download en background
+    fallido), la baixa on-demand desde UAZAPI y la persiste — así la media
+    siempre se visualiza en el panel, no solo la etiqueta textual.
     """
     m = database.get_message(msg_id)
     if not m:
         return jsonify({"error": "not found"}), 404
+    media_url = m.get("media_url", "") or ""
+    if not media_url.startswith("data:"):
+        try:
+            media_url = _fetch_and_store_media(m)
+        except Exception as e:
+            print(f"[media] erro on-demand msg={msg_id}: {e}")
+            media_url = ""
     return jsonify({
         "msg_id": m["id"],
         "msg_type": m.get("msg_type", "text"),
-        "media_url": m.get("media_url", "") or "",
+        "media_url": media_url,
         "body": m.get("body", "") or "",
-        "ready": bool((m.get("media_url") or "").startswith("data:")),
+        "ready": media_url.startswith("data:"),
     })
 
 
