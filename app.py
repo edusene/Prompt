@@ -227,8 +227,8 @@ def _fetch_and_store_media(m: dict) -> str:
         media_url = ""
         if isinstance(d, dict):
             b64 = str(d.get("base64") or "")
-            mime = str(d.get("mimeType") or "application/octet-stream")
-            media_url = str(d.get("url") or "")
+            mime = str(d.get("mimeType") or d.get("mimetype") or "application/octet-stream")
+            media_url = str(d.get("url") or d.get("link") or d.get("mediaUrl") or "")
             if b64:
                 data_uri = f"data:{mime};base64,{b64}"
         elif isinstance(d, str):

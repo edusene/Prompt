@@ -218,6 +218,8 @@ def download_media(number: str, message_id: str) -> dict:
 
     def _build_payload(method: str, endpoint: str):
         """Payload/params por rota — regenerado sempre (mid/number atuais)."""
+        if endpoint == "/message/download":
+            return {"id": mid, "return_base64": True, "return_link": True}
         if endpoint == "/message/media":
             if method == "POST":
                 return {"id": [mid], "number": n}
@@ -226,6 +228,7 @@ def download_media(number: str, message_id: str) -> dict:
 
     # (método, rota) — a primeira combinação que funcionar é cacheada.
     attempts = [
+        ("POST", "/message/download"),
         ("POST", "/send/download-media"),
         ("GET", "/send/download-media"),
         ("PUT", "/send/download-media"),
