@@ -196,16 +196,27 @@ def _fetch_and_store_media(m: dict) -> str:
         if not r.get("ok"):
             print(f"[media] falha download msg={msg_id} uazapi_id={uazapi_id}: {r.get('error')}")
             return ""
-        d = r.get("data") or {}
-        b64 = str(d.get("base64") or "")
-        mime = str(d.get("mimeType") or "application/octet-stream")
-        if not b64:
-            print(f"[media] resposta sem base64 msg={msg_id}")
+        d = r.get("data")
+        data_uri = ""
+        media_url = ""
+        if isinstance(d, dict):
+            b64 = str(d.get("base64") or "")
+            mime = str(d.get("mimeType") or "application/octet-stream")
+            media_url = str(d.get("url") or "")
+            if b64:
+                data_uri = f"data:{mime};base64,{b64}"
+        elif isinstance(d, str):
+            if d.startswith("http"):
+                media_url = d
+            elif len(d) > 512:  # base64 cru sem envelope
+                data_uri = f"data:application/octet-stream;base64,{d}"
+        result = data_uri or media_url
+        if not result:
+            print(f"[media] resposta sem base64/url msg={msg_id}: {str(d)[:120]}")
             return ""
-        data_uri = f"data:{mime};base64,{b64}"
-        database.update_message_media(msg_id, data_uri)
-        print(f"[media] msg={msg_id} guardado ({mime}) len={len(b64)}")
-        return data_uri
+        database.update_message_media(msg_id, result)
+        print(f"[media] msg={msg_id} guardado len={len(result)}")
+        return result
 
 # ── Config ──────────────────────────────────────────────────────────────────
 BUFFER_SECONDS = float(os.getenv("BUFFER_SECONDS", "8"))

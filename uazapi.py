@@ -11,6 +11,9 @@ _BASE_URL = os.getenv("UAZAPI_BASE_URL", "").rstrip("/")
 _TOKEN = os.getenv("UAZAPI_INSTANCE_TOKEN", "")
 _HEADERS = {"token": _TOKEN, "Content-Type": "application/json"}
 
+# Combinação (método, rota) de download de mídia que funcionou nesta instância.
+_media_working_call: tuple[str, str] | None = None
+
 
 def _request(method: str, endpoint: str, body: dict | None = None, params: dict | None = None) -> dict:
     url = f"{_BASE_URL}{endpoint}"
@@ -198,34 +201,63 @@ def get_avatar(number: str) -> str:
 
 
 def download_media(number: str, message_id: str) -> dict:
-    """Baixa a media de uma mensagem recebida — POST /send/download-media.
+    """Baixa a media de uma mensagem recebida.
 
-    Body: {"messageId": ..., "number": ...}
-    Resposta (v3): { "base64": "...", "mimeType": "image/jpeg", "fileName": "..." }
-
-    Algumas instâncias exigem o JID completo em vez do número puro: tenta
-    sequencialmente PN puro, @s.whatsapp.net e @lid até obter sucesso.
+    A rota exata varia por versão da UAZAPI: a v2 documenta POST
+    /send/download-media; instâncias v3 podem usar outro método (405 = método
+    errado, rota existe) ou rotas sob /message/*. Por isso sondamos uma matriz
+    de combinações método+rota e cacheamos a primeira que funcionar.
     """
     n = normalize_number(number)
     if not n or not message_id:
         return {"ok": False, "status": 400, "error": "number y messageId requeridos."}
-    if n.lower().endswith("@lid"):
-        candidates = [n]
-    else:
-        candidates = [n, f"{n}@s.whatsapp.net", f"{n}@lid"]
+    mid = str(message_id)
+
+    def _build_payload(method: str, endpoint: str):
+        """Payload/params por rota — regenerado sempre (mid/number atuais)."""
+        if endpoint == "/message/media":
+            if method == "POST":
+                return {"id": [mid], "number": n}
+            return {"id": mid, "number": n}
+        return {"messageId": mid, "number": n}
+
+    # (método, rota) — a primeira combinação que funcionar é cacheada.
+    attempts = [
+        ("POST", "/send/download-media"),
+        ("GET", "/send/download-media"),
+        ("PUT", "/send/download-media"),
+        ("POST", "/message/download-media"),
+        ("GET", "/message/download-media"),
+        ("POST", "/message/media"),
+        ("GET", "/message/media"),
+        ("POST", "/chat/media"),
+    ]
+
+    global _media_working_call
+    tried: set[tuple] = set()
     last: dict = {"ok": False, "status": 0, "error": "sem resposta"}
-    tried: set[str] = set()
-    for cand in candidates:
-        if cand in tried:
+
+    # Tenta primeiro a combinação que já funcionou antes.
+    if _media_working_call:
+        attempts.insert(0, _media_working_call)
+
+    for method, endpoint in attempts:
+        key = (method, endpoint)
+        if key in tried:
             continue
-        tried.add(cand)
-        r = _request("POST", "/send/download-media", {"messageId": str(message_id), "number": cand})
+        tried.add(key)
+        payload = _build_payload(method, endpoint)
+        params = payload if method == "GET" else None
+        body = None if method == "GET" else payload
+        r = _request(method, endpoint, body, params)
         if r.get("ok"):
+            _media_working_call = key
+            print(f"[uazapi] download_media OK via {method} {endpoint}")
             return r
         last = r
-        # 404/405: endpoint não existe nessa versão — não adianta variar número.
-        if r.get("status") in (404, 405):
-            break
+        # Token/sessão: não adianta tentar outras rotas.
+        if r.get("status") in (401, 403):
+            return r
     return last
 
 
