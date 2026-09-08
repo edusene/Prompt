@@ -19,7 +19,7 @@ load_dotenv(override=True)
 # (prints de payload) lançaria UnicodeEncodeError e quebraria o pipeline.
 for _s in (sys.stdout, sys.stderr):
     try:
-        _s.reconfigure(encoding="utf-8", errors="replace")
+        _s.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
     except Exception:
         pass
 
@@ -206,6 +206,7 @@ def logout_action():
 @app.post("/webhook")
 def webhook():
     data = request.get_json(silent=True) or {}
+    print(f"[webhook] <<< raw_keys={list(data.keys())[:8]} EventType={data.get('EventType')} event={data.get('event')}", flush=True)
 
     # ── Normalizar os 3 formatos UAZAPI ──
     # Formato v2: {"event": "message", "data": {"from": "...", "body": "..."}}
@@ -233,6 +234,7 @@ def webhook():
     if isinstance(inner, dict):
         wa_type = str(inner.get("Type", "")).lower()
         if wa_type in ("delivered", "sent", "read", "failed", "played"):
+            print(f"[webhook] IGNORANDO receipt: type={wa_type}", flush=True)
             return jsonify({"ok": True})
 
     # Evento de conexão
@@ -256,6 +258,7 @@ def webhook():
 
     # Ignora eventos que não são de mensagem
     if event not in ("message", "messages", "messages.upsert"):
+        print(f"[webhook] IGNORANDO event: {event}", flush=True)
         return jsonify({"ok": True})
 
     # Extrai o payload da mensagem
