@@ -363,18 +363,24 @@ def webhook():
     print(f"[webhook] number={number} raw_from={raw_from}")
 
     if _is_from_me:
-        _sender_raw = msg.get("sender_pn", "") or msg.get("from", "") or ""
+        _owner_raw = msg.get("owner", "") or ""
+        _owner_digits = "".join([c for c in str(_owner_raw).split("@")[0] if c.isdigit()])
+        _sender_raw = msg.get("sender_pn", "") or _owner_raw or ""
         _sender_digits = "".join([c for c in str(_sender_raw).split("@")[0] if c.isdigit()])
         if _sender_digits and number == _sender_digits:
             print(f"[webhook] WARN fromMe: number={number} == sender={_sender_digits} "
-                  f"— destinatario pode estar errado! keys={list(msg.keys())[:15]}")
+                  f"— destinatario pode estar errado! owner={_owner_raw} keys={list(msg.keys())[:15]}")
 
     # push_name: FromMe → nome do destinatário no dict chat; caso contrário → pushName do remetente
-    if _is_from_me and isinstance(data.get("chat"), dict):
-        push_name = (
-            data["chat"].get("name") or data["chat"].get("wa_contactName")
-            or data["chat"].get("wa_name") or ""
-        )
+    if _is_from_me:
+        _chat_raw = data.get("chat")
+        if isinstance(_chat_raw, dict):
+            push_name = (
+                _chat_raw.get("name") or _chat_raw.get("wa_contactName")
+                or _chat_raw.get("wa_name") or ""
+            )
+        else:
+            push_name = msg.get("pushName") or msg.get("notifyName") or msg.get("senderName") or msg.get("name") or msg.get("groupName") or ""
     else:
         push_name = msg.get("pushName") or msg.get("notifyName") or msg.get("senderName") or msg.get("name") or ""
     message_id = msg.get("id", "") or msg.get("messageid", "")
@@ -386,6 +392,7 @@ def webhook():
     body = (
         msg.get("body")
         or msg.get("Body")
+        or msg.get("content")
         or msg.get("text")
         or msg.get("caption")
         or (msg.get("message", {}).get("conversation") if isinstance(msg.get("message"), dict) else "")
@@ -417,7 +424,7 @@ def webhook():
         elif msg_type in ("contact", "vcard"):
             body = "[Contato]"
         elif msg_type in ("button_reply", "list_reply"):
-            body = msg.get("buttonText") or "[Resposta de Opcao]"
+            body = msg.get("buttonText") or msg.get("content") or "[Resposta de Opcao]"
         elif msg_type != "text":
             body = f"[{str(msg_type).capitalize()}]"
 
