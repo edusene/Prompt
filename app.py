@@ -400,6 +400,8 @@ def webhook():
         or (msg.get("message", {}).get("buttonsResponseMessage", {}).get("selectedButtonId") if isinstance(msg.get("message"), dict) else "")
         or (msg.get("message", {}).get("listResponseMessage", {}).get("singleSelectReply", {}).get("selectedRowId") if isinstance(msg.get("message"), dict) else "")
     )
+    if isinstance(body, dict):
+        body = body.get("conversation") or body.get("text") or body.get("message") or ""
     if isinstance(body, str):
         body = body.strip()
     else:

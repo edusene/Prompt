@@ -407,7 +407,7 @@ def link_or_save_outgoing(conversation_id: int, phone: str, body: str, uazapi_id
         existing = db.fetch_one(
             "SELECT id FROM messages WHERE conversation_id=? AND body=? AND direction='out' "
             "AND (uazapi_id IS NULL OR uazapi_id='') "
-            "AND created_at > datetime('now', '-30 seconds')",
+            f"AND created_at > {db.ago_sql(30)}",
             (conversation_id, body),
         )
         if existing:

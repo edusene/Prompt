@@ -121,6 +121,13 @@ def _adapt_query(query: str) -> str:
     return query
 
 
+def ago_sql(seconds: int) -> str:
+    """Retorna expressão SQL para 'há N segundos', compatível com SQLite e PostgreSQL."""
+    if DB_DRIVER == "postgresql":
+        return f"NOW() - INTERVAL '{seconds} seconds'"
+    return f"datetime('now', '-{seconds} seconds')"
+
+
 def execute(query: str, params: tuple | list | None = None, *, commit: bool = True) -> Any:
     """Executa uma query e opcionalmente faz commit. Retorna o cursor."""
     with _lock:
