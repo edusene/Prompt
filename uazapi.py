@@ -212,6 +212,9 @@ def download_media(number: str, message_id: str) -> dict:
     if not n or not message_id:
         return {"ok": False, "status": 400, "error": "number y messageId requeridos."}
     mid = str(message_id)
+    # Normaliza: API pode retornar só o hash, webhook retorna phone:hash
+    if ":" in mid:
+        mid = mid.split(":", 1)[1]
 
     def _build_payload(method: str, endpoint: str):
         """Payload/params por rota — regenerado sempre (mid/number atuais)."""

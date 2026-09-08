@@ -108,17 +108,38 @@ def _extract_media_url(msg: dict) -> str:
 
     Muitos payloads (v2 e v3) trazem media.url direto — nesse caso não
     precisamos do /send/download-media: a URL já serve para renderizar.
+    Suporta formatos v2, v3-A, v3-B e WhatsApp native (imageMessage etc.).
     """
-    candidates = [msg.get("media"), msg.get("Media")]
-    nested = msg.get("message")
-    if isinstance(nested, dict):
-        candidates.append(nested.get("media"))
-    for cand in candidates:
+    # (1) media dict direto: msg.media.url, msg.Media.url
+    for cand in [msg.get("media"), msg.get("Media")]:
         if isinstance(cand, dict):
-            u = str(cand.get("url") or cand.get("link") or cand.get("MediaUrl") or "")
+            u = str(cand.get("url") or cand.get("link") or cand.get("MediaUrl") or cand.get("mediaUrl") or "")
             if u.startswith("http"):
                 return u
-    for key in ("url", "mediaUrl", "MediaUrl", "media_url"):
+    # (2) Aninhado em msg.message.media
+    nested = msg.get("message")
+    if isinstance(nested, dict):
+        for cand in [nested.get("media"), nested.get("Media")]:
+            if isinstance(cand, dict):
+                u = str(cand.get("url") or cand.get("link") or cand.get("MediaUrl") or "")
+                if u.startswith("http"):
+                    return u
+    # (3) WhatsApp native: msg.imageMessage.url, msg.videoMessage.url, etc.
+    for msg_key in ("imageMessage", "videoMessage", "audioMessage", "documentMessage",
+                    "stickerMessage", "pttMessage", "gifMessage"):
+        sub = msg.get(msg_key)
+        if isinstance(sub, dict):
+            u = str(sub.get("url") or sub.get("directPath") or "")
+            if u.startswith("http"):
+                return u
+    # (4) content como dict com url/link
+    content = msg.get("content")
+    if isinstance(content, dict):
+        u = str(content.get("url") or content.get("link") or content.get("mediaUrl") or "")
+        if u.startswith("http"):
+            return u
+    # (5) Chaves soltas no msg
+    for key in ("url", "mediaUrl", "MediaUrl", "media_url", "mediaLink"):
         u = str(msg.get(key) or "")
         if u.startswith("http"):
             return u
