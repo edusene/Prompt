@@ -206,13 +206,33 @@ def logout_action():
 @app.post("/webhook")
 def webhook():
     data = request.get_json(silent=True) or {}
+
+    # ── Normalizar formato UAZAPI v3 ──
+    # v3: {"EventType": "message", "event": {dados}, ...}
+    # v2: {"event": "message", "data": {dados}}
+    event_type = data.get("EventType")
+    event_payload = data.get("event")
+
+    if event_type and isinstance(event_payload, dict):
+        data["event"] = event_type
+        data["data"] = event_payload
+
     event = data.get("event")
-    print(f"[webhook] event={event} keys={list(data.keys())[:5]}")
+    print(f"[webhook] event={event} keys={list(data.keys())[:6]}")
+
+    # Ignora recibos de entrega/leitura (não são mensagens)
+    inner = data.get("data") or data.get("message") or data.get("payload") or data
+    if isinstance(inner, dict):
+        wa_type = str(inner.get("Type", "")).lower()
+        if wa_type in ("delivered", "sent", "read", "failed", "played"):
+            return jsonify({"ok": True})
 
     # Evento de conexão (connection.open / connection.close / ...) → atualiza
     # o status no painel em tempo real e invalida o cache de status.
     if event == "connection":
-        status_raw = str(data.get("data", {}).get("status", "")).replace("connection.", "", 1)
+        status_raw = ""
+        if isinstance(data.get("data"), dict):
+            status_raw = str(data["data"].get("status", "")).replace("connection.", "", 1)
         status = status_raw.lower() if status_raw else "unknown"
         if status in ("closed", "disconnected", "logout"):
             status = "close"
@@ -238,47 +258,60 @@ def webhook():
     if not isinstance(msg, dict):
         msg = {}
 
+    # ── Mapear campos v3 → v2 ──
+    # v3: Chat, IsFromMe, IsGroup, MessageIDs, Sender, MsgType, Body
+    # v2: from, fromMe, isGroup, id, pushName, type, body
+    if not msg.get("from") and msg.get("Chat"):
+        msg["from"] = msg["Chat"]
+    if not msg.get("id") and msg.get("MessageIDs"):
+        ids = msg["MessageIDs"]
+        msg["id"] = ids[0] if isinstance(ids, list) and ids else ""
+    if "IsFromMe" in msg and "fromMe" not in msg:
+        msg["fromMe"] = msg["IsFromMe"]
+    if "IsGroup" in msg and "isGroup" not in msg:
+        msg["isGroup"] = msg["IsGroup"]
+    if msg.get("SenderName") and not msg.get("pushName"):
+        msg["pushName"] = msg["SenderName"]
+    if msg.get("MsgType") and not msg.get("type"):
+        msg["type"] = msg["MsgType"]
+
     # Ignora mensagens enviadas pelo próprio número ou mensagens de grupo.
-    # UAZAPI v3 (Baileys) pode entregar fromMe em vários formatos:
-    #   - v2: data.fromMe (boolean direto)
-    #   - v3: data.key.fromMe (nested no objeto key)
-    #   - edge: fromMe como string "true" em vez de boolean
-    #   - edge: data é uma lista de mensagens [{ key: { fromMe: true }, ... }]
     def _check_from_me(obj: dict) -> bool:
         if not isinstance(obj, dict):
             return False
-        fm = obj.get("fromMe")
-        if fm is True or str(fm).lower() == "true":
-            return True
+        for key in ("fromMe", "IsFromMe"):
+            fm = obj.get(key)
+            if fm is True or str(fm).lower() == "true":
+                return True
         k = obj.get("key")
         if isinstance(k, dict):
-            fm2 = k.get("fromMe")
-            if fm2 is True or str(fm2).lower() == "true":
-                return True
+            for key in ("fromMe", "IsFromMe"):
+                fm2 = k.get(key)
+                if fm2 is True or str(fm2).lower() == "true":
+                    return True
         return False
 
     _is_from_me = _check_from_me(msg)
-    # Caso data inteiro seja uma lista (v3 batches)
     if not _is_from_me and isinstance(data.get("data"), list):
         for _item in data["data"]:
             if _check_from_me(_item):
                 _is_from_me = True
                 break
-    if _is_from_me or msg.get("isGroup") or msg.get("participant"):
-        reason = "fromMe" if _is_from_me else ("group" if msg.get("isGroup") else "participant")
+    _is_group = msg.get("isGroup") or msg.get("IsGroup")
+    _has_participant = msg.get("participant")
+    if _is_from_me or _is_group or _has_participant:
+        reason = "fromMe" if _is_from_me else ("group" if _is_group else "participant")
         print(f"[webhook] IGNORANDO: {reason} event={event}")
         return jsonify({"ok": True})
 
     # Extrai e limpa o número de telefone do remetente.
-    # A UAZAPI v3 fornece sender_pn (número real) e sender_lid (LID) quando disponíveis.
-    # Preferimos o PN (número real) para exibição e envio; LID fica como fallback.
     raw_from = (
         msg.get("sender_pn") or msg.get("sender_lid")
         or msg.get("from", "")
         or msg.get("remoteJid", "")
         or msg.get("chatId", "")
         or msg.get("chatid", "")
-        or msg.get("sender", "")
+        or msg.get("Sender", "")
     )
     if not raw_from:
         return jsonify({"ok": True})
@@ -288,9 +321,6 @@ def webhook():
     if not number:
         return jsonify({"ok": True})
 
-    # UAZAPI v3: o remetente pode chegar como LID (ex.: 223656663867638) em vez do
-    # PN real. Resolve para o PN canônico ANTES de gravar/bufferizar, para que
-    # contato, conversa, painel e envio usem sempre a mesma identidade.
     number = uazapi.resolve_lid_to_pn(number)
 
     push_name = msg.get("pushName") or msg.get("notifyName") or msg.get("senderName") or msg.get("name") or ""
@@ -298,10 +328,11 @@ def webhook():
     if not message_id and isinstance(msg.get("key"), dict):
         message_id = msg.get("key", {}).get("id", "")
 
-    # Determina o texto / corpo da mensagem (atendendo a mídias, botões e variados tipos)
-    msg_type = msg.get("type") or msg.get("messageType", "text")
+    # Determina o texto / corpo da mensagem
+    msg_type = msg.get("type") or msg.get("messageType") or msg.get("MsgType") or "text"
     body = (
         msg.get("body")
+        or msg.get("Body")
         or msg.get("text")
         or msg.get("caption")
         or (msg.get("message", {}).get("conversation") if isinstance(msg.get("message"), dict) else "")
@@ -316,24 +347,24 @@ def webhook():
 
     if not body:
         if msg_type == "image":
-            body = "📷 [Imagem]"
+            body = "[Imagem]"
         elif msg_type == "video":
-            body = "🎥 [Vídeo]"
+            body = "[Video]"
         elif msg_type in ("audio", "ptt"):
-            body = "🎵 [Áudio]"
+            body = "[Audio]"
         elif msg_type == "document":
             doc_name = ""
             if isinstance(msg.get("media"), dict):
                 doc_name = msg.get("media", {}).get("fileName", "")
-            body = f"📄 [Documento: {doc_name}]" if doc_name else "📄 [Documento]"
+            body = f"[Documento: {doc_name}]" if doc_name else "[Documento]"
         elif msg_type == "sticker":
-            body = "📱 [Figurinha]"
+            body = "[Figurinha]"
         elif msg_type == "location":
-            body = "📍 [Localização]"
+            body = "[Localizacao]"
         elif msg_type in ("contact", "vcard"):
-            body = "👤 [Contato]"
+            body = "[Contato]"
         elif msg_type in ("button_reply", "list_reply"):
-            body = msg.get("buttonText") or "🔘 [Resposta de Opção]"
+            body = msg.get("buttonText") or "[Resposta de Opcao]"
         elif msg_type != "text":
             body = f"[{str(msg_type).capitalize()}]"
 
