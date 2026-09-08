@@ -99,7 +99,10 @@
                             </select>
                         </div>
                         <div id="bulk-toolbar" class="bulk-toolbar" style="display:none">
-                            <span id="bulk-count" class="bulk-count"></span>
+                            <div class="bulk-top">
+                                <span id="bulk-count" class="bulk-count"></span>
+                                <button class="bulk-deselect" onclick="deselectAllConvs()">Desmarcar</button>
+                            </div>
                             <div class="bulk-actions">
                                 <button class="bulk-btn" onclick="bulkAction('read')" title="Lida">
                                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
@@ -132,7 +135,6 @@
                                     Apagar
                                 </button>
                             </div>
-                            <button class="bulk-close" onclick="deselectAllConvs()" title="Cancelar">&times;</button>
                         </div>
                         <div id="bulk-status-menu" class="bulk-dropdown" style="display:none">
                             <div class="bulk-dropdown-item" onclick="bulkAction('status', {status:'new'})">Nova</div>
