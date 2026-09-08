@@ -226,9 +226,9 @@ def _fetch_and_store_media(m: dict) -> str:
         data_uri = ""
         media_url = ""
         if isinstance(d, dict):
-            b64 = str(d.get("base64") or "")
+            b64 = str(d.get("base64") or d.get("base64Data") or "")
             mime = str(d.get("mimeType") or d.get("mimetype") or "application/octet-stream")
-            media_url = str(d.get("url") or d.get("link") or d.get("mediaUrl") or "")
+            media_url = str(d.get("url") or d.get("link") or d.get("mediaUrl") or d.get("FileURL") or "")
             if b64:
                 data_uri = f"data:{mime};base64,{b64}"
         elif isinstance(d, str):
@@ -460,7 +460,6 @@ def webhook():
             _invalidate_status_cache()
             events.emit("wa_status", {"status": status})
         if status == "open" and WEBHOOK_URL:
-            import threading
             from uazapi import configure_webhook
             threading.Thread(target=configure_webhook, args=(WEBHOOK_URL,), daemon=True).start()
         return jsonify({"ok": True})
