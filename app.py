@@ -398,6 +398,12 @@ def handle_flush(user: str, items: list[dict]) -> None:
     items: [{"text": "...", "msg_id": 123}, ...]
     """
     try:
+        # Modo global: se desligado, agente nunca responde
+        global_mode = int(database.get_setting("agent_mode", "1"))
+        if not global_mode:
+            print(f"[flush] user={user} agente GLOBAL desligado, ignorando")
+            return
+
         contact = database.get_contact(user)
         if contact and not contact["auto_mode"]:
             print(f"[flush] user={user} modo=humano, ignorando agente")
