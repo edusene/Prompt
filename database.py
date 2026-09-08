@@ -390,8 +390,10 @@ def save_message(
         "VALUES (?,?,?,?,?,?,?,?,?,?)",
         (conversation_id, phone, uazapi_id_clean, direction, sender, body, msg_type, media_url, status, now),
     )
+    print(f"[db] save_message: msg_id={msg_id} uazapi_id_clean={uazapi_id_clean} direction={direction}")
     if msg_id:
         return db.fetch_one("SELECT * FROM messages WHERE id=?", (msg_id,))
+    print(f"[db] save_message: FALHA - msg_id is None!")
     return None
 
 
@@ -400,6 +402,7 @@ def link_or_save_outgoing(conversation_id: int, phone: str, body: str, uazapi_id
     """Se já existe msg out recente (30s) mesma conversa+body sem uazapi_id, atualiza o uazapi_id.
     Caso contrário, insere normalmente via save_message.
     Retorna a mensagem (atualizada ou nova) ou None se duplicata por uazapi_id."""
+    print(f"[db] link_or_save: conv={conversation_id} phone={phone} uazapi_id={uazapi_id} body_len={len(body)}")
     if uazapi_id:
         existing = db.fetch_one(
             "SELECT id FROM messages WHERE conversation_id=? AND body=? AND direction='out' "
@@ -408,12 +411,16 @@ def link_or_save_outgoing(conversation_id: int, phone: str, body: str, uazapi_id
             (conversation_id, body),
         )
         if existing:
+            print(f"[db] link_or_save: linkando msg id={existing['id']} com uazapi_id={uazapi_id}")
             db.execute("UPDATE messages SET uazapi_id=? WHERE id=?", (uazapi_id, existing["id"]))
             return db.fetch_one("SELECT * FROM messages WHERE id=?", (existing["id"],))
-    return save_message(
+    print(f"[db] link_or_save: nenhuma msg anterior, chamando save_message")
+    result = save_message(
         conversation_id=conversation_id, phone=phone, direction="out",
         body=body, sender=sender, msg_type=msg_type, uazapi_id=uazapi_id or "",
     )
+    print(f"[db] link_or_save: save_message retornou id={result['id'] if result else None}")
+    return result
 
 
 def get_messages(conversation_id: int, limit: int = 50, offset: int = 0) -> list[dict]:
