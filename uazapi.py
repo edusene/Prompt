@@ -72,8 +72,15 @@ def send_text(number: str, text: str) -> dict:
     # para que painel/webhook gravem tudo sob a mesma identidade do contato.
     if r.get("ok"):
         data = r.get("data")
-        if isinstance(data, dict) and data.get("chatid"):
-            r["resolved"] = str(data["chatid"]).split("@")[0]
+        if isinstance(data, dict):
+            if data.get("chatid"):
+                r["resolved"] = str(data["chatid"]).split("@")[0]
+            # Extrai messageId para dedup no painel (evita duplicata com webhook fromMe)
+            mid = data.get("messageId") or data.get("messageid")
+            if not mid and isinstance(data.get("key"), dict):
+                mid = data["key"].get("id")
+            if mid:
+                r["message_id"] = str(mid)
         return r
     # Quando o remetente veio como LID no webhook, o número puro não é resolvido
     # pela UAZAPI ("no LID found"). Tenta de novo com o sufixo @lid.
@@ -85,8 +92,14 @@ def send_text(number: str, text: str) -> dict:
             if r2.get("ok"):
                 # Expõe também o número real (PN) resolvido para uso no painel/tela.
                 r2["data"] = r2.get("data") or {}
-                if isinstance(r2["data"], dict) and r2["data"].get("chatid"):
-                    r2["resolved"] = str(r2["data"]["chatid"]).split("@")[0]
+                if isinstance(r2["data"], dict):
+                    if r2["data"].get("chatid"):
+                        r2["resolved"] = str(r2["data"]["chatid"]).split("@")[0]
+                    mid = r2["data"].get("messageId") or r2["data"].get("messageid")
+                    if not mid and isinstance(r2["data"].get("key"), dict):
+                        mid = r2["data"]["key"].get("id")
+                    if mid:
+                        r2["message_id"] = str(mid)
                 return r2
     return r
 

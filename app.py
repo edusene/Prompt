@@ -873,6 +873,7 @@ def api_messages_send():
         body=body,
         sender="human",
         msg_type="text",
+        uazapi_id=res.get("message_id", ""),
     )
     database.update_conversation(conv["id"], last_message_at=time.strftime("%Y-%m-%dT%H:%M:%S"))
     events.emit("message_sent", {"conversation_id": conv["id"], "phone": contact_phone, "body": body})
