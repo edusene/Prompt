@@ -1739,11 +1739,15 @@ h3 { font-size: 14px; font-weight: 600; }
 .msg-sticker {
     display: block;
     max-width: 100%;
-    max-height: 320px;
+    max-height: 180px;
     border-radius: 12px;
     border: 1px solid rgba(255, 255, 255, 0.1);
     animation: fadeIn 0.3s ease;
+    cursor: pointer;
+    transition: opacity 0.15s;
 }
+.msg-media-img:hover,
+.msg-sticker:hover { opacity: 0.85; }
 .msg-sticker {
     max-width: 140px;
     max-height: 140px;
@@ -1752,16 +1756,97 @@ h3 { font-size: 14px; font-weight: 600; }
 .msg-media-video {
     display: block;
     max-width: 100%;
-    max-height: 360px;
+    max-height: 200px;
     border-radius: 12px;
     background: rgba(15, 23, 42, 0.9);
+    cursor: pointer;
 }
 .msg-media-audio {
     display: block;
     width: 100%;
-    max-width: 280px;
-    height: 38px;
+    max-width: 300px;
 }
+
+/* ═══ WhatsApp-style voice note player ═══ */
+.wa-player {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 10px 6px 6px;
+    background: rgba(255,255,255,0.07);
+    border-radius: 22px;
+    min-width: 240px;
+    max-width: 300px;
+}
+.msg-out .wa-player { background: rgba(255,255,255,0.15); }
+
+.wa-player-play {
+    flex-shrink: 0;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(255,255,255,0.15);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.wa-player-play:hover { background: rgba(255,255,255,0.25); }
+.wa-player-play svg { margin-left: 2px; }
+.wa-player-play.playing svg { margin-left: 0; }
+
+.wa-player-track {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.wa-player-wave {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    height: 28px;
+    cursor: pointer;
+    position: relative;
+}
+.wa-player-wave .bar {
+    flex: 1;
+    min-width: 2px;
+    max-width: 3px;
+    border-radius: 2px;
+    background: rgba(255,255,255,0.3);
+    transition: background 0.15s;
+}
+.wa-player-wave .bar.filled {
+    background: rgba(255,255,255,0.85);
+}
+
+.wa-player-info {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 2px;
+}
+.wa-player-time {
+    font-size: 11px;
+    color: rgba(255,255,255,0.55);
+    font-variant-numeric: tabular-nums;
+}
+.wa-player-speed {
+    font-size: 11px;
+    font-weight: 700;
+    color: rgba(255,255,255,0.55);
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0 4px;
+}
+.wa-player-speed:hover { color: rgba(255,255,255,0.85); }
 .msg-media-doc {
     display: inline-flex;
     align-items: center;
@@ -1778,6 +1863,82 @@ h3 { font-size: 14px; font-weight: 600; }
 .msg-media-img.loading,
 .msg-media-video.loading,
 .msg-media-audio.loading { opacity: 0.35; }
+
+/* ═══ Lightbox — visor de mídia em tela cheia ═══ */
+.media-lightbox {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    background: rgba(0, 0, 0, 0.92);
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+    animation: fadeIn 0.2s ease;
+}
+.media-lightbox.open { display: flex; }
+.media-lightbox-content {
+    max-width: 92vw;
+    max-height: 82vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+.media-lightbox-content img {
+    max-width: 100%;
+    max-height: 82vh;
+    border-radius: 8px;
+    object-fit: contain;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.6);
+}
+.media-lightbox-content video {
+    max-width: 100%;
+    max-height: 82vh;
+    border-radius: 8px;
+    background: #000;
+}
+.media-lightbox-content audio {
+    width: 320px;
+}
+.media-lightbox-toolbar {
+    display: flex;
+    gap: 10px;
+    margin-top: 14px;
+}
+.media-lightbox-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border: none;
+    border-radius: 8px;
+    background: rgba(255,255,255,0.12);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s;
+    backdrop-filter: blur(4px);
+}
+.media-lightbox-btn:hover { background: rgba(255,255,255,0.22); }
+.media-lightbox-close {
+    position: absolute;
+    top: 14px;
+    right: 18px;
+    width: 38px;
+    height: 38px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.1);
+    color: #fff;
+    font-size: 22px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s;
+}
+.media-lightbox-close:hover { background: rgba(255,255,255,0.25); }
 
 /* ── Estados de envío de mensajes ───────────────────────────────────────── */
 .msg-status {

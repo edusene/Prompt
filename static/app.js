@@ -590,6 +590,118 @@ async function _loadMsgMedia(box) {
     _applyMsgMedia(box, data.media_url);
 }
 
+function _buildWaPlayer(container, src) {
+    const audio = new Audio();
+    audio.preload = 'metadata';
+    audio.src = src;
+
+    const playSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,3 20,12 6,21"/></svg>';
+    const pauseSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="3" width="4" height="18"/><rect x="15" y="3" width="4" height="18"/></svg>';
+
+    const player = document.createElement('div');
+    player.className = 'wa-player';
+
+    const btnPlay = document.createElement('button');
+    btnPlay.className = 'wa-player-play';
+    btnPlay.innerHTML = playSvg;
+
+    const track = document.createElement('div');
+    track.className = 'wa-player-track';
+
+    const wave = document.createElement('div');
+    wave.className = 'wa-player-wave';
+
+    const info = document.createElement('div');
+    info.className = 'wa-player-info';
+
+    const timeEl = document.createElement('span');
+    timeEl.className = 'wa-player-time';
+    timeEl.textContent = '0:00';
+
+    const speedBtn = document.createElement('button');
+    speedBtn.className = 'wa-player-speed';
+    speedBtn.textContent = '1x';
+    const speeds = [1, 1.5, 2];
+    let speedIdx = 0;
+    speedBtn.onclick = () => {
+        speedIdx = (speedIdx + 1) % speeds.length;
+        audio.playbackRate = speeds[speedIdx];
+        speedBtn.textContent = speeds[speedIdx] + 'x';
+    };
+
+    info.appendChild(timeEl);
+    info.appendChild(speedBtn);
+    track.appendChild(wave);
+    track.appendChild(info);
+    player.appendChild(btnPlay);
+    player.appendChild(track);
+    container.appendChild(player);
+
+    const BAR_COUNT = 32;
+    const bars = [];
+    for (let i = 0; i < BAR_COUNT; i++) {
+        const bar = document.createElement('div');
+        bar.className = 'bar';
+        bar.style.height = (4 + Math.random() * 20) + 'px';
+        wave.appendChild(bar);
+        bars.push(bar);
+    }
+
+    function fmt(s) {
+        if (!isFinite(s)) return '0:00';
+        const m = Math.floor(s / 60);
+        const sec = Math.floor(s % 60);
+        return m + ':' + String(sec).padStart(2, '0');
+    }
+
+    function updateWave() {
+        const dur = audio.duration || 0;
+        const cur = audio.currentTime;
+        const pct = dur ? cur / dur : 0;
+        const filled = Math.round(pct * BAR_COUNT);
+        bars.forEach((b, i) => {
+            b.classList.toggle('filled', i < filled);
+        });
+    }
+
+    audio.addEventListener('loadedmetadata', () => {
+        timeEl.textContent = fmt(audio.duration);
+    });
+
+    audio.addEventListener('timeupdate', () => {
+        timeEl.textContent = fmt(audio.currentTime);
+        updateWave();
+    });
+
+    audio.addEventListener('ended', () => {
+        btnPlay.innerHTML = playSvg;
+        btnPlay.classList.remove('playing');
+        audio.currentTime = 0;
+        updateWave();
+    });
+
+    btnPlay.onclick = () => {
+        if (audio.paused) {
+            document.querySelectorAll('.wa-player audio').forEach(a => { if (a !== audio) a.pause(); });
+            audio.play();
+            btnPlay.innerHTML = pauseSvg;
+            btnPlay.classList.add('playing');
+        } else {
+            audio.pause();
+            btnPlay.innerHTML = playSvg;
+            btnPlay.classList.remove('playing');
+        }
+    };
+
+    wave.onclick = (e) => {
+        if (!audio.duration) return;
+        const rect = wave.getBoundingClientRect();
+        const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+        audio.currentTime = pct * audio.duration;
+        updateWave();
+    };
+}
+
 function _applyMsgMedia(box, dataUri) {
     box.dataset.state = 'loaded';
     const spinner = box.querySelector('.spinner');
@@ -623,10 +735,11 @@ function _applyMsgMedia(box, dataUri) {
         || (mime && !mime.startsWith('image/') && !mime.startsWith('video/') && !mime.startsWith('audio/'));
 
     if (wantAudio) {
-        el = document.createElement('audio');
-        el.controls = true;
-        el.preload = 'metadata';
+        el = document.createElement('div');
         el.className = 'msg-media-audio msg-media';
+        _buildWaPlayer(el, uri);
+        host.appendChild(el);
+        return;
     } else if (wantVideo) {
         el = document.createElement('video');
         el.controls = true;
@@ -649,6 +762,17 @@ function _applyMsgMedia(box, dataUri) {
     }
 
     if (el.tagName !== 'A') el.src = uri;
+
+    if (el.tagName === 'IMG' || el.tagName === 'VIDEO') {
+        el.style.cursor = 'pointer';
+        el.addEventListener('click', () => {
+            const fname = uri.startsWith('data:')
+                ? ((uri.match(/^data:[^/]+\/([^;,]+)/) || [])[1] || 'midia')
+                : decodeURIComponent(uri.split('/').pop().split('?')[0] || 'midia');
+            openLightbox(uri, fname);
+        });
+    }
+
     host.appendChild(el);
 }
 
@@ -1452,6 +1576,62 @@ function closeModal() {
     if (modal) modal.style.animation = 'msgOut 0.18s ease forwards';
     setTimeout(() => { overlay.style.display = 'none'; }, 140);
 }
+
+/* ── Lightbox de mídia (tela cheia) ─────────────────────────────────────── */
+let _lbCurrentSrc = '';
+let _lbCurrentFilename = 'midia';
+
+function openLightbox(src, filename) {
+    _lbCurrentSrc = src;
+    _lbCurrentFilename = filename || 'midia';
+    const lb = document.getElementById('media-lightbox');
+    const content = document.getElementById('media-lightbox-content');
+    if (!lb || !content) return;
+    content.innerHTML = '';
+    const ext = (_lbCurrentFilename.split('.').pop() || '').toLowerCase();
+    const isVideo = /^mp4|mov|webm|ogg$/.test(ext) || src.startsWith('data:video');
+    const isAudio = /^mp3|wav|m4a|ogg|opus$/.test(ext) || src.startsWith('data:audio');
+    let el;
+    if (isVideo) {
+        el = document.createElement('video');
+        el.controls = true;
+        el.autoplay = true;
+        el.playsInline = true;
+        el.src = src;
+    } else if (isAudio) {
+        el = document.createElement('audio');
+        el.controls = true;
+        el.autoplay = true;
+        el.src = src;
+    } else {
+        el = document.createElement('img');
+        el.src = src;
+        el.alt = filename || '';
+    }
+    content.appendChild(el);
+    lb.classList.add('open');
+    document.body.style.overflow = 'hidden';
+}
+
+function closeLightbox(e) {
+    if (e && e.target !== e.currentTarget && !e.target.classList.contains('media-lightbox-close')) return;
+    const lb = document.getElementById('media-lightbox');
+    if (lb) lb.classList.remove('open');
+    document.body.style.overflow = '';
+    _lbCurrentSrc = '';
+}
+
+function downloadLightboxMedia() {
+    if (!_lbCurrentSrc) return;
+    const a = document.createElement('a');
+    a.href = _lbCurrentSrc;
+    a.download = _lbCurrentFilename;
+    a.click();
+}
+
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeLightbox();
+});
 
 /* ── SSE ──────────────────────────────────────────────────────────────────── */
 let _convDebounce = null;
