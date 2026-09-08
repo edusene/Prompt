@@ -200,7 +200,7 @@ async function loadConversations() {
         const isSelected = selectedConvIds.has(c.id);
         return `
             <div class="conv-item ${c.id === currentConvId ? 'active' : ''}${isSelected ? ' selected' : ''}" data-conv-id="${c.id}" onclick="selectConversation(${c.id})" oncontextmenu="openContextMenu(event, ${c.id})">
-                <input type="checkbox" class="conv-check" ${isSelected ? 'checked' : ''} onclick="event.stopPropagation(); toggleConvSelect(${c.id})">
+                <div class="conv-check-visual${isSelected ? ' checked' : ''}" onclick="event.stopPropagation(); toggleConvSelect(${c.id})"></div>
                 <div class="conv-avatar">${avatar}${initials}</div>
                 <div class="conv-meta">
                     <div class="conv-name">${esc(name)} ${badges.join('')}</div>
@@ -378,8 +378,8 @@ function toggleConvSelect(convId) {
     const item = document.querySelector(`.conv-item[data-conv-id="${convId}"]`);
     if (item) {
         item.classList.toggle('selected', selectedConvIds.has(convId));
-        const chk = item.querySelector('.conv-check');
-        if (chk) chk.checked = selectedConvIds.has(convId);
+        const vis = item.querySelector('.conv-check-visual');
+        if (vis) vis.classList.toggle('checked', selectedConvIds.has(convId));
     }
     _syncSelectAll();
     updateBulkToolbar();
@@ -395,8 +395,8 @@ function toggleSelectAll(checked) {
             selectedConvIds.delete(id);
         }
         el.classList.toggle('selected', checked);
-        const chk = el.querySelector('.conv-check');
-        if (chk) chk.checked = checked;
+        const vis = el.querySelector('.conv-check-visual');
+        if (vis) vis.classList.toggle('checked', checked);
     });
     updateBulkToolbar();
 }
@@ -405,18 +405,18 @@ function _syncSelectAll() {
     const items = document.querySelectorAll('.conv-item');
     const allChecked = items.length > 0 && [...items].every(el => selectedConvIds.has(Number(el.dataset.convId)));
     const selectAll = document.getElementById('conv-select-all');
-    if (selectAll) selectAll.checked = allChecked;
+    if (selectAll) selectAll.classList.toggle('checked', allChecked);
 }
 
 function deselectAllConvs() {
     selectedConvIds.clear();
     document.querySelectorAll('.conv-item').forEach(el => {
         el.classList.remove('selected');
-        const chk = el.querySelector('.conv-check');
-        if (chk) chk.checked = false;
+        const vis = el.querySelector('.conv-check-visual');
+        if (vis) vis.classList.remove('checked');
     });
     const selectAll = document.getElementById('conv-select-all');
-    if (selectAll) selectAll.checked = false;
+    if (selectAll) selectAll.classList.remove('checked');
     updateBulkToolbar();
     _hideBulkMenus();
 }
@@ -2003,7 +2003,8 @@ document.addEventListener('click', (e) => {
         || e.target.closest('.ctx-menu')
         || e.target.closest('.toast-container')
         || e.target.closest('#modal-overlay')
-        || e.target.closest('.media-lightbox')) return;
+        || e.target.closest('.media-lightbox')
+        || e.target.closest('.sidebar')) return;
     if (currentConvId != null) deselectConversation();
 });
 

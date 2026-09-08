@@ -85,7 +85,7 @@
                     <div class="conv-list-panel">
                         <div class="panel-header">
                             <div class="conv-header-row">
-                                <input type="checkbox" id="conv-select-all" class="conv-check conv-check-all" onchange="toggleSelectAll(this.checked)">
+                                <div class="conv-check-visual" id="conv-select-all" onclick="toggleSelectAll(!this.classList.contains('checked'))"></div>
                                 <h2>Conversas</h2>
                             </div>
                             <select id="conv-filter" class="select-sm">
