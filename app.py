@@ -311,6 +311,15 @@ def webhook():
 
     print(f"[webhook] fromMe={_is_from_me} IsFromMe={msg.get('IsFromMe')} fromMe_field={msg.get('fromMe')} group={_is_group} chat={data.get('chat') if not isinstance(data.get('chat'), dict) else 'DICT'} sender_pn={msg.get('sender_pn')} chatid={msg.get('chatid')}")
 
+    if _is_from_me:
+        _chat_raw = data.get("chat")
+        _chat_type = type(_chat_raw).__name__
+        print(f"[webhook] fromMe DETAIL: to={msg.get('to')} from={msg.get('from')} "
+              f"chat_type={_chat_type} chat_keys={list(_chat_raw.keys())[:10] if isinstance(_chat_raw, dict) else 'N/A'} "
+              f"chatid={msg.get('chatid')} chatlid={msg.get('chatlid')} Chat={msg.get('Chat')} "
+              f"remoteJid={msg.get('remoteJid')} sender_pn={msg.get('sender_pn')} "
+              f"msg_keys={list(msg.keys())[:15]}")
+
     # Grupo e participant: ignora completamente
     if _is_group or _has_participant:
         reason = "group" if _is_group else "participant"
@@ -324,8 +333,10 @@ def webhook():
         chat_dict = data.get("chat") if isinstance(data.get("chat"), dict) else None
         raw_from = (
             (chat_dict.get("wa_chatid") if chat_dict else None)
+            or (chat_dict.get("id") if chat_dict else None)
             or msg.get("chatid") or msg.get("chatlid")
             or msg.get("Chat") or msg.get("to", "")
+            or msg.get("remoteJid") or msg.get("chatId")
             or msg.get("sender_pn") or msg.get("from", "")
         )
     else:
@@ -350,6 +361,13 @@ def webhook():
 
     number = uazapi.resolve_lid_to_pn(number)
     print(f"[webhook] number={number} raw_from={raw_from}")
+
+    if _is_from_me:
+        _sender_raw = msg.get("sender_pn", "") or msg.get("from", "") or ""
+        _sender_digits = "".join([c for c in str(_sender_raw).split("@")[0] if c.isdigit()])
+        if _sender_digits and number == _sender_digits:
+            print(f"[webhook] WARN fromMe: number={number} == sender={_sender_digits} "
+                  f"— destinatario pode estar errado! keys={list(msg.keys())[:15]}")
 
     # push_name: FromMe → nome do destinatário no dict chat; caso contrário → pushName do remetente
     if _is_from_me and isinstance(data.get("chat"), dict):
