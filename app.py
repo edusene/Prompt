@@ -413,14 +413,13 @@ def webhook():
     if _is_from_me:
         contact = database.upsert_contact(number, name=push_name) if push_name else database.upsert_contact(number)
         conv = database.get_or_create_conversation(number)
-        database.save_message(
+        database.link_or_save_outgoing(
             conversation_id=conv["id"],
             phone=number,
-            direction="out",
             body=body,
+            uazapi_id=str(message_id) if message_id else None,
             sender="human",
             msg_type=str(msg_type) if msg_type else "text",
-            uazapi_id=str(message_id) if message_id else None,
         )
         database.update_conversation(conv["id"], last_message_at=time.strftime("%Y-%m-%dT%H:%M:%S"))
         events.emit("message_sent", {
