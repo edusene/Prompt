@@ -197,6 +197,18 @@ def get_avatar(number: str) -> str:
         return ""
 
 
+def download_media(number: str, message_id: str) -> dict:
+    """Baixa a media de uma mensagem recebida — POST /send/download-media.
+
+    Body: {"messageId": ..., "number": ...}
+    Resposta (v3): { "base64": "...", "mimeType": "image/jpeg", "fileName": "..." }
+    """
+    n = normalize_number(number)
+    if not n or not message_id:
+        return {"ok": False, "status": 400, "error": "number y messageId requeridos."}
+    return _request("POST", "/send/download-media", {"messageId": str(message_id), "number": n})
+
+
 def chat_archive(number: str, archive: bool) -> dict:
     """Arquiva/desarquiva o chat no WhatsApp (best-effort)."""
     return _request("PUT", "/chat/archive", {"number": number, "archive": archive})

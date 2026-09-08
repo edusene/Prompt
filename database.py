@@ -44,6 +44,24 @@ def init_db() -> None:
         except Exception:
             pass
 
+    _ensure_indexes()
+
+
+def _ensure_indexes() -> None:
+    """Crea índices faltantes que aceleran las consultas más usadas (idempotente).
+
+    La mayoría ya los crea el SCHEMA (messages.conversation_id/created_at/uazapi_id,
+    conversations.contact_id/status). Aquí solo añadimos el orden por pinned de la
+    lista de conversas, sin duplicar ni alterar las consultas existentes.
+    """
+    for name, table, column in (
+        ("idx_conversations_pinned", "conversations", "pinned"),
+    ):
+        try:
+            db.execute(f"CREATE INDEX IF NOT EXISTS {name} ON {table}({column})")
+        except Exception as e:
+            print(f"[db] WARN index {name}: {e}")
+
 
 def _get_tables() -> set[str]:
     """Retorna nomes das tabelas existentes no banco."""
@@ -395,6 +413,21 @@ def save_message(
         return db.fetch_one("SELECT * FROM messages WHERE id=?", (msg_id,))
     print(f"[db] save_message: FALHA - msg_id is None!")
     return None
+
+
+def update_message_media(msg_id: int, media_url: str) -> None:
+    """Guarda o data-URI base64 da média baixada (image/audio/video/sticker)."""
+    try:
+        db.execute(
+            "UPDATE messages SET media_url=? WHERE id=?",
+            (media_url or "", int(msg_id)),
+        )
+    except Exception as e:
+        print(f"[db] update_message_media: {e}")
+
+
+def get_message(msg_id: int) -> dict | None:
+    return db.fetch_one("SELECT * FROM messages WHERE id=?", (msg_id,))
 
 
 def link_or_save_outgoing(conversation_id: int, phone: str, body: str, uazapi_id: str | None,

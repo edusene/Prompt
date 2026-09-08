@@ -132,6 +132,21 @@ h3 { font-size: 14px; font-weight: 600; }
     to { transform: translateX(100%) scale(0.9); opacity: 0; }
 }
 
+@keyframes msgOut {
+    from { opacity: 1; transform: translateY(0) scale(1); }
+    to { opacity: 0; transform: translateY(10px) scale(0.96); }
+}
+
+@keyframes listItemIn {
+    from { opacity: 0; transform: translateX(-10px); }
+    to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
 /* ── Layout ──────────────────────────────────────────────────────────────── */
 #app { display: flex; height: 100vh; }
 
@@ -1666,3 +1681,121 @@ h3 { font-size: 14px; font-weight: 600; }
     .btn-group { flex-direction: column; }
     .card { padding: 18px; }
 }
+/* ═══ Mejoras de UX: loaders, media y animaciones (mantiene el funcionamiento) ═══ */
+
+/* ── Global loader overlay ──────────────────────────────────────────────── */
+.global-loader {
+    position: fixed;
+    inset: 0;
+    z-index: 1500;
+    background: rgba(6, 10, 20, 0.45);
+    backdrop-filter: blur(2px);
+    display: none;
+    align-items: center;
+    justify-content: center;
+}
+.global-loader-spinner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 18px 24px;
+    box-shadow: var(--shadow-lg);
+    animation: fadeInScale 0.2s ease;
+}
+.global-loader .spinner {
+    width: 28px;
+    height: 28px;
+    border-width: 3px;
+}
+.global-loader-text {
+    font-size: 13px;
+    color: var(--text-muted);
+    letter-spacing: 0.02em;
+}
+
+/* ═══ Mensajes con media (imagen / audio / video / sticker) ═══ */
+.msg-media-box {
+    max-width: 100%;
+    width: 100%;
+    min-height: 40px;
+    margin-bottom: 4px;
+    overflow: hidden;
+}
+.msg-media-box .spinner {
+    display: flex;
+    width: 20px;
+    height: 20px;
+    border-width: 2px;
+    margin: 6px 0;
+}
+.msg-media-box:not(.msg-media-lazy) .spinner { display: none; }
+.msg-media-lazy { position: relative; }
+.msg-media-img,
+.msg-sticker {
+    display: block;
+    max-width: 100%;
+    max-height: 320px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    animation: fadeIn 0.3s ease;
+}
+.msg-sticker {
+    max-width: 140px;
+    max-height: 140px;
+    background: rgba(255, 255, 255, 0);
+}
+.msg-media-video {
+    display: block;
+    max-width: 100%;
+    max-height: 360px;
+    border-radius: 12px;
+    background: rgba(15, 23, 42, 0.9);
+}
+.msg-media-audio {
+    display: block;
+    width: 100%;
+    max-width: 280px;
+    height: 38px;
+}
+.msg-media-doc {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background: rgba(99, 102, 241, 0.15);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 12.5px;
+    font-weight: 600;
+}
+.msg-media-img.loading,
+.msg-media-video.loading,
+.msg-media-audio.loading { opacity: 0.35; }
+
+/* ── Estados de envío de mensajes ───────────────────────────────────────── */
+.msg-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    margin-left: 5px;
+    font-size: 11px;
+    line-height: 1;
+}
+.msg-status.sending { color: rgba(255, 255, 255, 0.85); }
+.msg-status.sent { color: rgba(255, 255, 255, 0.8); font-size: 10px; }
+.msg-status.error { color: #f87171; font-size: 11px; font-weight: 800; }
+.msg-status.error { color: #ef4444; }
+
+/* ── Animación de entrada progresiva de mensajes nuevos ────────────────── */
+.msg-enter { animation: msgIn 0.25s cubic-bezier(0.16, 1, 0.3, 1); }
+.msg.msg-new { animation: msgIn 0.25s cubic-bezier(0.16, 1, 0.3, 1); }
+
+/* ── Entrada de ítems de la lista de conversas ──────────────────────────── */
+.conv-item { animation: listItemIn 0.25s ease; }
+.conv-item:nth-child(n+20) { animation: none; }

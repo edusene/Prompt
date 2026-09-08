@@ -24,7 +24,10 @@ function toast(message, type = 'info') {
         error: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#ef4444" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>',
         info: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#6366f1" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>',
     };
-    el.innerHTML = `${icons[type] || icons.info}<span>${message}</span><button class="toast-close" onclick="this.parentElement.remove()">&times;</button>`;
+    el.innerHTML = `${icons[type] || icons.info}<span>${message}</span><button class="toast-close" onclick="event.stopPropagation(); this.parentElement.remove()">&times;</button>`;
+    // O clic em qualquer parte do toast (ou do seu botão de cerrar) não deve
+    // propagarse al handler de "clic fuera" que deselecciona la conversación.
+    el.addEventListener('click', e => e.stopPropagation());
     container.appendChild(el);
     setTimeout(() => { el.classList.add('toast-exit'); }, 3000);
     setTimeout(() => { el.remove(); }, 3400);
@@ -187,35 +190,79 @@ async function loadConversations() {
 }
 
 async function selectConversation(convId) {
+    // Se já está aberta esta conversa, apenas atualiza em contexto
+    // (sem recargar skeleton nem saltar o scroll): refresh rápido.
+    if (convId === currentConvId) {
+        document.querySelectorAll('.conv-item').forEach(el => {
+            el.classList.toggle('active', Number(el.dataset.convId) === convId);
+        });
+        refreshConversationPanel(convId);
+        const data = await api(`/api/conversations/${convId}`);
+        if (data && data.messages) {
+            renderMessages(data.messages);
+        }
+        return;
+    }
+
     // Render completo (header + mensagens + painel) — usado ao abrir uma conversa
     currentConvId = convId;
-    // Marca o item ativo pela conversa selecionada (não depende do elemento clicado)
     document.querySelectorAll('.conv-item').forEach(el => {
         el.classList.toggle('active', Number(el.dataset.convId) === convId);
     });
 
+    showGlobalLoader(true);
     const msgDiv = document.getElementById('chat-messages');
     msgDiv.innerHTML = skeletonMsgs();
-    const data = await api(`/api/conversations/${convId}`);
-    if (!data) return;
+    try {
+        // Consultas independentes em paralelo (evita esperas em sequência).
+        const [data, allTags] = await Promise.all([
+            api(`/api/conversations/${convId}`),
+            api('/api/tags'),
+        ]);
+        if (!data) return;
+        const { conversation: conv, contact, messages, tags } = data;
 
-    const { conversation: conv, contact, messages, tags } = data;
+        renderChatHeader(conv, contact);
+        msgDiv.innerHTML = messages.map(m => msgHTML(m, false)).join('');
+        bindMsgMedia(msgDiv);
+        scrollChatBottom();
 
-    renderChatHeader(conv, contact);
-    msgDiv.innerHTML = messages.map(m => msgHTML(m, false)).join('');
-    scrollChatBottom();
+        document.getElementById('chat-input-area').style.display = 'flex';
+        autoResizeChatInput();
 
-    document.getElementById('chat-input-area').style.display = 'flex';
-    autoResizeChatInput();
+        renderInfoPanel(conv, contact, tags, allTags || []);
 
-    // Info panel
-    const allTags = await api('/api/tags');
-    renderInfoPanel(conv, contact, tags, allTags || []);
+        // Mark as read
+        await api(`/api/conversations/${convId}/read`, { method: 'PUT' });
+        loadConversations();
+        updateUnreadBadge();
+    } finally {
+        showGlobalLoader(false);
+    }
+}
 
-    // Mark as read
-    await api(`/api/conversations/${convId}/read`, { method: 'PUT' });
-    loadConversations();
-    updateUnreadBadge();
+// Renderiza mensagens preservando a posição de scroll (salta só se está abaixo).
+function renderMessages(messages) {
+    const el = document.getElementById('chat-messages');
+    if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+    const oldHeight = el.scrollHeight;
+    el.innerHTML = messages.map(m => msgHTML(m, false)).join('');
+    bindMsgMedia(el);
+    if (atBottom) {
+        scrollChatBottom();
+    } else {
+        el.scrollTop = oldHeight;
+    }
+}
+
+function isNearBottom(el) {
+    return (el.scrollHeight - el.scrollTop - el.clientHeight) < 60;
+}
+
+function showGlobalLoader(show) {
+    const loader = document.getElementById('global-loader');
+    if (loader) loader.style.display = show ? 'flex' : 'none';
 }
 
 function deselectConversation() {
@@ -224,7 +271,13 @@ function deselectConversation() {
     const header = document.getElementById('chat-header');
     if (header) header.innerHTML = '<span>Selecione uma conversa</span>';
     const msgDiv = document.getElementById('chat-messages');
-    if (msgDiv) msgDiv.innerHTML = '';
+    // Animación de salida breve antes de limpiar el chat.
+    if (msgDiv && msgDiv.innerHTML) {
+        msgDiv.style.animation = 'msgOut 0.16s ease forwards';
+        setTimeout(() => {
+            if (msgDiv) { msgDiv.innerHTML = ''; msgDiv.style.animation = ''; }
+        }, 140);
+    }
     const inputArea = document.getElementById('chat-input-area');
     if (inputArea) inputArea.style.display = 'none';
     const info = document.getElementById('info-panel');
@@ -341,13 +394,15 @@ async function deleteConv(convId) {
 // Atualiza header + painel de detalhes sem reconstruir as mensagens (sem animação de "reabrir")
 async function refreshConversationPanel(convId) {
     if (!convId) return;
-    const data = await api(`/api/conversations/${convId}`);
+    const [data, allTags] = await Promise.all([
+        api(`/api/conversations/${convId}`),
+        api('/api/tags'),
+    ]);
     if (!data) return;
     const { conversation: conv, contact, tags } = data;
     renderChatHeader(conv, contact);
     document.getElementById('chat-input-area').style.display = 'flex';
     autoResizeChatInput();
-    const allTags = await api('/api/tags');
     renderInfoPanel(conv, contact, tags, allTags || []);
 }
 
@@ -366,22 +421,173 @@ function renderChatHeader(conv, contact) {
     `;
 }
 
+const MEDIA_LABELS = {
+    image: 'Imagem', video: 'Vídeo', audio: 'Áudio', ptt: 'Áudio',
+    document: 'Documento', sticker: 'Figurinha', gif: 'GIF',
+};
+
+function msgMediaHTML(m) {
+    const type = (m.msg_type || 'text').toLowerCase();
+    if (type === 'image' || type === 'gif' || type === 'sticker') {
+        const cls = type === 'sticker' ? 'msg-sticker msg-media' : 'msg-media-img msg-media';
+        return `<div class="msg-media-box msg-media-lazy" data-media-dbid="${esc(m.id)}">
+                    <span class="spinner"></span>
+                    <img class="${cls}" data-media-src="${esc(m.id)}" alt="" loading="lazy">
+                </div>`;
+    }
+    if (type === 'video') {
+        return `<div class="msg-media-box msg-media-lazy" data-media-dbid="${esc(m.id)}">
+                    <span class="spinner"></span>
+                    <video class="msg-media-video msg-media" data-media-src="${esc(m.id)}" controls preload="none"></video>
+                </div>`;
+    }
+    if (type === 'audio' || type === 'ptt') {
+        return `<div class="msg-media-box msg-media-lazy" data-media-dbid="${esc(m.id)}">
+                    <span class="spinner"></span>
+                    <audio class="msg-media-audio msg-media" data-media-src="${esc(m.id)}" controls preload="none"></audio>
+                </div>`;
+    }
+    if (type === 'document') {
+        return `<div class="msg-media-box msg-media-lazy" data-media-dbid="${esc(m.id)}">
+                    <span class="spinner"></span>
+                    <a class="msg-media-doc msg-media" data-media-src="${esc(m.id)}" target="_blank">Baixar anexo</a>
+                </div>`;
+    }
+    return '';
+}
+
 function msgHTML(m, isNew) {
     const timeStr = m.created_at ? new Date(m.created_at.endsWith('Z') ? m.created_at : m.created_at + 'Z').toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
     const senderName = m.sender || (m.direction === 'in' ? 'Contato' : 'Atendente');
     const msgId = m.uazapi_id || m.id || '';
-    return `<div class="msg msg-${m.direction === 'in' ? 'in' : 'out'}${isNew ? ' msg-new' : ''}" data-msg-id="${esc(msgId)}"><div class="msg-body">${esc(m.body)}</div><div class="msg-time"><span>${esc(senderName)}</span> · ${timeStr}</div></div>`;
+    const type = (m.msg_type || 'text').toLowerCase();
+
+    // Corpo próprio + (opcionalmente) media adjunta da UAZAPI.
+    let bodyHTML = '';
+    if (m.body) bodyHTML += `<div class="msg-body">${esc(m.body)}</div>`;
+    const mediaHTML = msgMediaHTML(m);
+    if (mediaHTML) bodyHTML += mediaHTML;
+
+    // Estado de envio/lectura (só mensagens enviadas pelo panel).
+    let statusIcon = '';
+    if (m.direction === 'out' && (m.status === 'sending' || (m.id && String(m.id).startsWith('temp-')))) {
+        statusIcon = `<span class="msg-status sending"><span class="spinner" style="width:11px;height:11px;border-width:2px"></span></span>`;
+    }
+    if (m.direction === 'out' && m.status === 'sent') {
+        statusIcon = `<span class="msg-status sent" title="Enviado">✓✓</span>`;
+    }
+    if (m.direction === 'out' && m.status === 'error') {
+        statusIcon = `<span class="msg-status error" title="Erro de envio">!</span>`;
+    }
+
+    return `<div class="msg msg-${m.direction === 'in' ? 'in' : 'out'}${isNew ? ' msg-new' : ''}" data-msg-id="${esc(msgId)}">
+                ${bodyHTML}
+                <div class="msg-time"><span>${esc(senderName)}</span> · ${timeStr}${statusIcon}</div>
+            </div>`;
 }
 
 function appendMessage(msg) {
     const msgDiv = document.getElementById('chat-messages');
+    if (!msgDiv) return;
     msgDiv.insertAdjacentHTML('beforeend', msgHTML(msg, true));
+    bindMsgMedia(msgDiv);
     scrollChatBottom();
 }
 
 function scrollChatBottom() {
     const msgDiv = document.getElementById('chat-messages');
     if (msgDiv) msgDiv.scrollTop = msgDiv.scrollHeight;
+}
+
+/* ── Media lazy-load (imagens/áudio/vídeo/figurinhas UAZAPI) ──────────────── */
+let _mediaObserver = null;
+let _mediaCache = new Map();
+let _mediaInFlight = new Map();
+
+function ensureMediaObserver() {
+    if (_mediaObserver) return _mediaObserver;
+    _mediaObserver = new IntersectionObserver(entries => {
+        for (const entry of entries) {
+            if (entry.isIntersecting) {
+                _loadMsgMedia(entry.target);
+                _mediaObserver.unobserve(entry.target);
+            }
+        }
+    }, { rootMargin: '120px' });
+    return _mediaObserver;
+}
+
+function bindMsgMedia(container) {
+    if (!container) return;
+    const boxes = container.querySelectorAll('.msg-media-lazy[data-media-dbid]');
+    if (!boxes.length) return;
+    const observer = ensureMediaObserver();
+    boxes.forEach(b => observer.observe(b));
+}
+
+async function _loadMsgMedia(box) {
+    const dbid = box?.dataset?.mediaDbid;
+    if (!dbid) return;
+    // Evita chamadas duplicadas / ya resueltas.
+    if (box.dataset.state === 'loading' || box.dataset.state === 'loaded') return;
+
+    const mediaEl = box.querySelector('.msg-media');
+    const msgId = dbid;
+    if (_mediaCache.has(msgId)) {
+        _applyMsgMedia(box, mediaEl, _mediaCache.get(msgId));
+        return;
+    }
+
+    box.dataset.state = 'loading';
+    _mediaInFlight.set(msgId, true);
+    let data = null;
+    try {
+        data = await api(`/api/messages/${encodeURIComponent(msgId)}/media`);
+    } finally {
+        _mediaInFlight.delete(msgId);
+    }
+
+    // La media aún puede estar descargándose en el servidor (async): reintenta
+    // unas veces con backoff antes de mostrar la etiqueta textual como fallback.
+    if (!data || !data.media_url) {
+        const attempts = Number(box.dataset.mediaAttempt || 0) + 1;
+        if (attempts <= 5 && !data?.ready) {
+            box.dataset.mediaAttempt = String(attempts);
+            box.dataset.state = '';
+            setTimeout(() => _loadMsgMedia(box), 1500 * attempts);
+            return;
+        }
+        box.dataset.state = 'loaded';
+        _fallbackMsgMedia(box, data?.body);
+        return;
+    }
+    _mediaCache.set(msgId, data.media_url);
+    _applyMsgMedia(box, mediaEl, data.media_url);
+}
+
+function _applyMsgMedia(box, mediaEl, dataUri) {
+    box.dataset.state = 'loaded';
+    const spinner = box.querySelector('.spinner');
+    if (spinner) spinner.remove();
+    if (!mediaEl) return;
+    if (mediaEl.tagName === 'IMG') {
+        mediaEl.src = dataUri;
+    } else if (mediaEl.tagName === 'A') {
+        mediaEl.href = dataUri;
+        mediaEl.setAttribute('download', '');
+    } else {
+        mediaEl.src = dataUri;
+    }
+}
+
+function _fallbackMsgMedia(box, body) {
+    const spinner = box.querySelector('.spinner');
+    if (spinner) spinner.remove();
+    if (box.querySelector('.msg-media') && !body) return;
+    box.querySelector('.msg-media')?.remove?.();
+    if (body) {
+        box.innerHTML = `<div class="msg-body">${esc(body)}</div>`;
+    }
 }
 
 function renderInfoPanel(conv, contact, tags, allTags) {
@@ -622,22 +828,61 @@ async function sendMessage() {
     const conv = conversations.find(c => c.id === currentConvId);
     if (!conv) return;
 
-    setBtnLoading(btn, true);
-    lastSentBody = text;
-    const res = await api('/api/messages/send', {
-        method: 'POST',
-        body: JSON.stringify({ phone: conv.contact_phone, body: text }),
+    // ── Mensaje optimista: se muestra al instante con spinner de "enviando",
+    //    sin esperar la respuesta del servidor (evita la sensación de "congelado").
+    const tempId = 'temp-' + Date.now();
+    appendMessage({
+        id: tempId, direction: 'out', sender: 'Atendente',
+        body: text, status: 'sending', msg_type: 'text',
+        created_at: new Date().toISOString(), uazapi_id: '',
     });
-    setBtnLoading(btn, false);
-    if (res?.error) {
-        lastSentBody = '';
-        toast(friendlyError(res.error), 'error');
-        return;
-    }
+
     input.value = '';
     autoResizeChatInput();
+
+    setBtnLoading(btn, true);
+    lastSentBody = text;
+    let res = null;
+    try {
+        res = await api('/api/messages/send', {
+            method: 'POST',
+            body: JSON.stringify({ phone: conv.contact_phone, body: text }),
+        });
+    } finally {
+        setBtnLoading(btn, false);
+    }
+
+    if (!res || res.error) {
+        lastSentBody = '';
+        markTempMsgError(tempId);
+        toast(friendlyError(res?.error), 'error');
+        return;
+    }
+
     toast('Mensagem enviada', 'success');
-    // A atualização visual vem via SSE (evento message_sent) — evita duplicação.
+    // El evento SSE message_sent re-renderiza la conversa y reemplaza el temporal.
+    // Como respaldo, si SSE no llega en ~3s, marcamos el temporal como enviado.
+    setTimeout(() => markTempMsgSent(tempId), 3000);
+}
+
+function markTempMsgError(tempId) {
+    const el = document.querySelector(`#chat-messages .msg[data-msg-id="${tempId}"]`);
+    if (!el) return;
+    el.setAttribute('data-status', 'error');
+    const st = el.querySelector('.msg-status');
+    if (st) { st.className = 'msg-status error'; st.textContent = '!'; st.title = 'Erro de envio'; }
+    const spinner = el.querySelector('.spinner');
+    if (spinner) spinner.remove();
+}
+
+function markTempMsgSent(tempId) {
+    const el = document.querySelector(`#chat-messages .msg[data-msg-id="${tempId}"]`);
+    if (!el) return;
+    el.setAttribute('data-status', 'sent');
+    const st = el.querySelector('.msg-status');
+    if (st) { st.className = 'msg-status sent'; st.textContent = '✓✓'; st.title = 'Enviado'; }
+    const spinner = el.querySelector('.spinner');
+    if (spinner) spinner.remove();
 }
 
 /* ── Contacts ─────────────────────────────────────────────────────────────── */
@@ -1100,7 +1345,11 @@ async function runDiagnose() {
 
 /* ── Modal ────────────────────────────────────────────────────────────────── */
 function closeModal() {
-    document.getElementById('modal-overlay').style.display = 'none';
+    const overlay = document.getElementById('modal-overlay');
+    if (!overlay) return;
+    const modal = overlay.querySelector('.modal');
+    if (modal) modal.style.animation = 'msgOut 0.18s ease forwards';
+    setTimeout(() => { overlay.style.display = 'none'; }, 140);
 }
 
 /* ── SSE ──────────────────────────────────────────────────────────────────── */
@@ -1155,6 +1404,7 @@ function connectSSE() {
                 if (d?.messages?.length) {
                     const msgDiv = document.getElementById('chat-messages');
                     msgDiv.innerHTML = d.messages.map(m => msgHTML(m, false)).join('');
+                    bindMsgMedia(msgDiv);
                     scrollChatBottom();
                 }
             }
@@ -1268,8 +1518,31 @@ setInterval(updateUnreadBadge, 30000);
 document.addEventListener('click', (e) => {
     // Cierra el menú de contexto en cualquier clic
     if (!e.target.closest('.ctx-menu')) closeContextMenu();
-    // Não deseleciona ao clicar dentro do layout de conversação (lista, chat o detalhes)
-    // nem dentro do menú de contexto
-    if (e.target.closest('.conv-layout') || e.target.closest('.ctx-menu')) return;
+    // Não deseleciona ao clicar dentro do layout de conversação (lista, chat o detalhes),
+    // nem dentro de overlays flotantes (toast, modal, loader, contexto).
+    if (e.target.closest('.conv-layout')
+        || e.target.closest('.ctx-menu')
+        || e.target.closest('.toast-container')
+        || e.target.closest('#modal-overlay')
+        || e.target.closest('#global-loader')) return;
     if (currentConvId != null) deselectConversation();
+});
+
+/* ── ESC: cerrar modal → menú de templates → salir de la conversa ─────────── */
+document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' && e.keyCode !== 27) return;
+    // Si una modal está abierta, la cerramos primero.
+    const overlay = document.getElementById('modal-overlay');
+    if (overlay && overlay.style.display !== 'none') {
+        closeModal();
+        return;
+    }
+    const menu = document.getElementById('template-menu');
+    if (menu && menu.style.display === 'flex') {
+        closeTemplateMenu();
+        return;
+    }
+    if (currentConvId != null) {
+        deselectConversation();
+    }
 });

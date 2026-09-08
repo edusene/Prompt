@@ -31,9 +31,40 @@ import database
 import events
 import uazapi
 import knowledge_rag
-from uazapi import send_text, send_presence, mark_read, chat_archive, chat_pin, chat_mute, chat_delete
+from uazapi import send_text, send_presence, mark_read, chat_archive, chat_pin, chat_mute, chat_delete, download_media
 from buffer import MessageBuffer
 from auth import login_required, do_login, do_logout
+
+# Tipos de mensagem que cargamos media desde UAZAPI para mostrar en el panel.
+MEDIA_TYPES = {"image", "video", "audio", "ptt", "document", "sticker", "gif"}
+
+
+def _is_media_type(msg_type: str) -> bool:
+    return str(msg_type or "").lower().strip() in MEDIA_TYPES
+
+
+def _download_media_async(message_db_id, number, message_id):
+    """Descarga la media (imagen/audio/video/sticker) y la guarda en la DB.
+
+    Corre en un thread de fondo para no frenar el webhook. Best-effort:
+    si falla o aún no está lista, el panel muestra la etiqueta textual.
+    """
+    try:
+        r = download_media(number, message_id)
+        if not r.get("ok"):
+            print(f"[media] falha download id={message_id}: {r.get('error')}")
+            return
+        d = r.get("data") or {}
+        b64 = str(d.get("base64") or "")
+        mime = str(d.get("mimeType") or "application/octet-stream")
+        if not b64:
+            print(f"[media] resposta sem base64 id={message_id}")
+            return
+        data_uri = f"data:{mime};base64,{b64}"
+        database.update_message_media(message_db_id, data_uri)
+        print(f"[media] msg={message_db_id} guardado ({mime}) len={len(b64)}")
+    except Exception as e:
+        print(f"[media] erro download id={message_id}: {e}")
 
 # ── Config ──────────────────────────────────────────────────────────────────
 BUFFER_SECONDS = float(os.getenv("BUFFER_SECONDS", "8"))
@@ -453,6 +484,9 @@ def webhook():
                 msg_type=str(msg_type) if msg_type else "text",
             )
             print(f"[webhook] fromMe msg salva: id={saved['id'] if saved else None}")
+            if saved and _is_media_type(str(msg_type)) and message_id:
+                threading.Thread(target=_download_media_async,
+                                 args=(saved["id"], number, str(message_id)), daemon=True).start()
             database.update_conversation(conv["id"], last_message_at=time.strftime("%Y-%m-%dT%H:%M:%S"))
             events.emit("message_sent", {
                 "conversation_id": conv["id"],
@@ -490,6 +524,10 @@ def webhook():
         print(f"[webhook] MSG SALVA conv={conv['id']} from={number} len={len(body)}")
     else:
         print(f"[webhook] MSG DUPLICADA msg_id={message_id}")
+
+    if saved and _is_media_type(str(msg_type)) and message_id:
+        threading.Thread(target=_download_media_async,
+                         args=(saved["id"], number, str(message_id)), daemon=True).start()
 
     if not contact.get("avatar_url"):
         avatar = uazapi.get_avatar(number)
@@ -733,6 +771,12 @@ def api_conversations_detail(conv_id):
         return jsonify({"error": "not found"}), 404
     contact = database.get_contact_by_id(conv["contact_id"])
     messages = database.get_messages(conv_id, limit=200)
+    # No enviamos el base64 de media en el payload (se pide bajo demanda por
+    # /api/messages/<id>/media): mantiene ligera la lista y la carga rápida.
+    for m in messages:
+        mu = m.get("media_url") or ""
+        if mu.startswith("data:"):
+            m["media_url"] = ""
     tags = database.get_conversation_tags(conv_id)
     return jsonify({"conversation": conv, "contact": contact, "messages": messages, "tags": tags})
 
@@ -911,6 +955,26 @@ def api_messages_send():
     database.update_conversation(conv["id"], last_message_at=time.strftime("%Y-%m-%dT%H:%M:%S"))
     events.emit("message_sent", {"conversation_id": conv["id"], "phone": contact_phone, "body": body})
     return jsonify({"ok": True, "phone": contact_phone, "resolved": resolved})
+
+
+@app.get("/api/messages/<int:msg_id>/media")
+@login_required
+def api_messages_media(msg_id):
+    """Devuelve el data-URI base64 de la media de un mensaje (imagen/audio/video/sticker).
+
+    El panel lo pide bajo demanda (lazy) cuando la media entra en el viewport,
+    para mantener ligera la lista de mensajes y la apertura de la conversa.
+    """
+    m = database.get_message(msg_id)
+    if not m:
+        return jsonify({"error": "not found"}), 404
+    return jsonify({
+        "msg_id": m["id"],
+        "msg_type": m.get("msg_type", "text"),
+        "media_url": m.get("media_url", "") or "",
+        "body": m.get("body", "") or "",
+        "ready": bool((m.get("media_url") or "").startswith("data:")),
+    })
 
 
 # ── Contacts ──────────────────────────────────────────────────────────────────
