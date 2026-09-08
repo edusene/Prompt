@@ -207,28 +207,35 @@ def logout_action():
 def webhook():
     data = request.get_json(silent=True) or {}
 
-    # ── Normalizar formato UAZAPI v3 ──
-    # v3: {"EventType": "message", "event": {dados}, ...}
-    # v2: {"event": "message", "data": {dados}}
+    # ── Normalizar os 3 formatos UAZAPI ──
+    # Formato v2: {"event": "message", "data": {"from": "...", "body": "..."}}
+    # Formato v3-A: {"EventType": "message", "event": {"Chat": "...", "IsFromMe": false}}
+    # Formato v3-B: {"EventType": "message", "chat": "...", "message": {...}}
     event_type = data.get("EventType")
     event_payload = data.get("event")
 
-    if event_type and isinstance(event_payload, dict):
+    if event_type:
         data["event"] = event_type
-        data["data"] = event_payload
+        if isinstance(event_payload, dict):
+            data["data"] = event_payload
+        elif not data.get("data") and isinstance(data.get("message"), dict):
+            data["data"] = data["message"]
 
     event = data.get("event")
+    if not event:
+        print(f"[webhook] RAW s/ event: {str(data)[:300]}")
+        return jsonify({"ok": True})
+
     print(f"[webhook] event={event} keys={list(data.keys())[:6]}")
 
     # Ignora recibos de entrega/leitura (não são mensagens)
-    inner = data.get("data") or data.get("message") or data.get("payload") or data
+    inner = data.get("data") or data.get("message") or data
     if isinstance(inner, dict):
         wa_type = str(inner.get("Type", "")).lower()
         if wa_type in ("delivered", "sent", "read", "failed", "played"):
             return jsonify({"ok": True})
 
-    # Evento de conexão (connection.open / connection.close / ...) → atualiza
-    # o status no painel em tempo real e invalida o cache de status.
+    # Evento de conexão
     if event == "connection":
         status_raw = ""
         if isinstance(data.get("data"), dict):
@@ -248,19 +255,17 @@ def webhook():
         return jsonify({"ok": True})
 
     # Ignora eventos que não são de mensagem
-    if event and event not in ("message", "messages", "messages.upsert"):
+    if event not in ("message", "messages", "messages.upsert"):
         return jsonify({"ok": True})
 
-    # Extrai o payload da mensagem de forma resiliente
-    msg = data.get("data") or data.get("message") or data.get("payload") or data
+    # Extrai o payload da mensagem
+    msg = data.get("data") or data.get("message") or data
     if isinstance(msg, list) and len(msg) > 0:
         msg = msg[0]
     if not isinstance(msg, dict):
         msg = {}
 
     # ── Mapear campos v3 → v2 ──
-    # v3: Chat, IsFromMe, IsGroup, MessageIDs, Sender, MsgType, Body
-    # v2: from, fromMe, isGroup, id, pushName, type, body
     if not msg.get("from") and msg.get("Chat"):
         msg["from"] = msg["Chat"]
     if not msg.get("id") and msg.get("MessageIDs"):
@@ -274,8 +279,12 @@ def webhook():
         msg["pushName"] = msg["SenderName"]
     if msg.get("MsgType") and not msg.get("type"):
         msg["type"] = msg["MsgType"]
+    if not msg.get("from") and msg.get("chat"):
+        msg["from"] = msg["chat"]
+    if not msg.get("from") and msg.get("chatid"):
+        msg["from"] = msg["chatid"]
 
-    # Ignora mensagens enviadas pelo próprio número ou mensagens de grupo.
+    # Detecta fromMe em todos os formatos
     def _check_from_me(obj: dict) -> bool:
         if not isinstance(obj, dict):
             return False
@@ -299,12 +308,14 @@ def webhook():
                 break
     _is_group = msg.get("isGroup") or msg.get("IsGroup")
     _has_participant = msg.get("participant")
-    if _is_from_me or _is_group or _has_participant:
-        reason = "fromMe" if _is_from_me else ("group" if _is_group else "participant")
+
+    # Grupo e participant: ignora completamente
+    if _is_group or _has_participant:
+        reason = "group" if _is_group else "participant"
         print(f"[webhook] IGNORANDO: {reason} event={event}")
         return jsonify({"ok": True})
 
-    # Extrai e limpa o número de telefone do remetente.
+    # Extrai número de telefone
     raw_from = (
         msg.get("sender_pn") or msg.get("sender_lid")
         or msg.get("from", "")
@@ -312,8 +323,10 @@ def webhook():
         or msg.get("chatId", "")
         or msg.get("chatid", "")
         or msg.get("Sender", "")
+        or msg.get("chat", "")
     )
     if not raw_from:
+        print(f"[webhook] SEM REMETENTE: {str(msg)[:200]}")
         return jsonify({"ok": True})
 
     phone_clean = str(raw_from).split("@")[0].split(":")[0]
@@ -328,7 +341,7 @@ def webhook():
     if not message_id and isinstance(msg.get("key"), dict):
         message_id = msg.get("key", {}).get("id", "")
 
-    # Determina o texto / corpo da mensagem
+    # Extrai corpo da mensagem
     msg_type = msg.get("type") or msg.get("messageType") or msg.get("MsgType") or "text"
     body = (
         msg.get("body")
@@ -369,13 +382,35 @@ def webhook():
             body = f"[{str(msg_type).capitalize()}]"
 
     if not body:
+        print(f"[webhook] SEM BODY: msg_type={msg_type} from={number}")
         return jsonify({"ok": True})
 
-    print(f"[webhook] from={number} ({push_name}) type={msg_type} len={len(body)}")
+    print(f"[webhook] from={number} ({push_name}) type={msg_type} len={len(body)} fromMe={_is_from_me}")
 
+    # ── fromMe: salva no painel mas NÃO responde ──
+    if _is_from_me:
+        contact = database.upsert_contact(number, name=push_name) if push_name else database.upsert_contact(number)
+        conv = database.get_or_create_conversation(number)
+        database.save_message(
+            conversation_id=conv["id"],
+            phone=number,
+            direction="out",
+            body=body,
+            sender="human",
+            msg_type=str(msg_type) if msg_type else "text",
+            uazapi_id=str(message_id) if message_id else None,
+        )
+        database.update_conversation(conv["id"], last_message_at=time.strftime("%Y-%m-%dT%H:%M:%S"))
+        events.emit("message_sent", {
+            "conversation_id": conv["id"],
+            "phone": number,
+            "body": body,
+        })
+        return jsonify({"ok": True})
+
+    # ── Mensagem de outro usuário: processa normalmente ──
     mark_read(number, str(message_id))
 
-    # Persistir no banco e notificar o painel
     contact = database.upsert_contact(number, name=push_name) if push_name else database.upsert_contact(number)
     conv = database.get_or_create_conversation(number)
     saved = database.save_message(
@@ -399,10 +434,8 @@ def webhook():
         })
         print(f"[webhook] MSG SALVA conv={conv['id']} from={number} len={len(body)}")
     else:
-        print(f"[webhook] MSG DUPLICADA (ja existe) msg_id={message_id}")
+        print(f"[webhook] MSG DUPLICADA msg_id={message_id}")
 
-    # Avatar do contato (best-effort, não bloqueia o fluxo): a URL do WhatsApp
-    # expira, então atualiza quando o contato ainda não tem foto.
     if not contact.get("avatar_url"):
         avatar = uazapi.get_avatar(number)
         if avatar:
