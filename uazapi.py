@@ -202,11 +202,31 @@ def download_media(number: str, message_id: str) -> dict:
 
     Body: {"messageId": ..., "number": ...}
     Resposta (v3): { "base64": "...", "mimeType": "image/jpeg", "fileName": "..." }
+
+    Algumas instâncias exigem o JID completo em vez do número puro: tenta
+    sequencialmente PN puro, @s.whatsapp.net e @lid até obter sucesso.
     """
     n = normalize_number(number)
     if not n or not message_id:
         return {"ok": False, "status": 400, "error": "number y messageId requeridos."}
-    return _request("POST", "/send/download-media", {"messageId": str(message_id), "number": n})
+    if n.lower().endswith("@lid"):
+        candidates = [n]
+    else:
+        candidates = [n, f"{n}@s.whatsapp.net", f"{n}@lid"]
+    last: dict = {"ok": False, "status": 0, "error": "sem resposta"}
+    tried: set[str] = set()
+    for cand in candidates:
+        if cand in tried:
+            continue
+        tried.add(cand)
+        r = _request("POST", "/send/download-media", {"messageId": str(message_id), "number": cand})
+        if r.get("ok"):
+            return r
+        last = r
+        # 404/405: endpoint não existe nessa versão — não adianta variar número.
+        if r.get("status") in (404, 405):
+            break
+    return last
 
 
 def chat_archive(number: str, archive: bool) -> dict:

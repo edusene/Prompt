@@ -455,7 +455,7 @@ const MEDIA_LABELS = {
 
 // Rótulos que o webhook grava quando não há legenda ([Imagem], [Video]...).
 // Não devem aparecer junto com a mídia renderizada — são redundantes.
-const MEDIA_PLACEHOLDER_RE = /^\[(Imagem|V[íi]deo|[ÁaA]udio|Figurinha|Documento[^\]]*|Sticker|GIF)\](:.*)?$/i;
+const MEDIA_PLACEHOLDER_RE = /^\[(Imagem|V[íi]deo|[ÁaA]udio|Figurinha|Documento[^\]]*|Sticker|GIF|Media|Mídia)\](:.*)?$/i;
 
 function isMediaPlaceholder(text) {
     return MEDIA_PLACEHOLDER_RE.test(String(text || '').trim());
@@ -600,13 +600,26 @@ function _applyMsgMedia(box, dataUri) {
     // (data:image/jpeg;base64,...) — funciona até para o tipo genérico "media".
     const host = box.querySelector('.msg-media-host') || box;
     const kind = (box.dataset.mediaKind || '').toLowerCase();
-    const mime = (String(dataUri).match(/^data:([^;,]+)/) || [])[1] || '';
+    const uri = String(dataUri);
+    let mime = '';
+    if (uri.startsWith('data:')) {
+        mime = (uri.match(/^data:([^;,]+)/) || [])[1] || '';
+    } else if (/^https?:/i.test(uri)) {
+        // URL do payload: deduz o mime pela extensão do arquivo.
+        const ext = ((uri.split('?')[0]).match(/\.([a-z0-9]{2,5})$/i) || [])[1] || '';
+        const MIME_BY_EXT = {
+            jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp',
+            gif: 'image/gif', mp4: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm',
+            ogg: 'audio/ogg', oga: 'audio/ogg', opus: 'audio/ogg', mp3: 'audio/mpeg',
+            wav: 'audio/wav', m4a: 'audio/mp4', pdf: 'application/pdf',
+        };
+        mime = MIME_BY_EXT[ext.toLowerCase()] || '';
+    }
     let el;
 
     const wantAudio = kind === 'audio' || kind === 'ptt' || mime.startsWith('audio/');
     const wantVideo = kind === 'video' || mime.startsWith('video/');
     const wantDoc = kind === 'document'
-        || (!mime && kind === 'media')
         || (mime && !mime.startsWith('image/') && !mime.startsWith('video/') && !mime.startsWith('audio/'));
 
     if (wantAudio) {
@@ -626,7 +639,7 @@ function _applyMsgMedia(box, dataUri) {
         el.target = '_blank';
         el.rel = 'noopener';
         el.textContent = 'Baixar anexo';
-        el.href = dataUri;
+        el.href = uri;
         el.setAttribute('download', '');
     } else {
         el = document.createElement('img');
@@ -635,7 +648,7 @@ function _applyMsgMedia(box, dataUri) {
         el.loading = 'lazy';
     }
 
-    if (el.tagName !== 'A') el.src = dataUri;
+    if (el.tagName !== 'A') el.src = uri;
     host.appendChild(el);
 }
 

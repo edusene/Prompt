@@ -103,6 +103,43 @@ def _is_media_type(msg_type: str) -> bool:
     return str(msg_type or "").lower().strip() in MEDIA_TYPES
 
 
+def _extract_media_url(msg: dict) -> str:
+    """Extrai a URL temporária da mídia do payload do webhook, se houver.
+
+    Muitos payloads (v2 e v3) trazem media.url direto — nesse caso não
+    precisamos do /send/download-media: a URL já serve para renderizar.
+    """
+    candidates = [msg.get("media"), msg.get("Media")]
+    nested = msg.get("message")
+    if isinstance(nested, dict):
+        candidates.append(nested.get("media"))
+    for cand in candidates:
+        if isinstance(cand, dict):
+            u = str(cand.get("url") or cand.get("link") or cand.get("MediaUrl") or "")
+            if u.startswith("http"):
+                return u
+    for key in ("url", "mediaUrl", "MediaUrl", "media_url"):
+        u = str(msg.get(key) or "")
+        if u.startswith("http"):
+            return u
+    return ""
+
+
+def _maybe_store_media_hint(saved, msg: dict) -> None:
+    """Se o payload trouxer URL de mídia, guarda direto (sem download)."""
+    if not saved:
+        return
+    try:
+        if str(saved.get("media_url") or ""):
+            return
+        url = _extract_media_url(msg)
+        if url:
+            database.update_message_media(saved["id"], url)
+            print(f"[media] msg={saved['id']} url do payload guardada")
+    except Exception as e:
+        print(f"[media] erro guardando url do payload: {e}")
+
+
 def _download_media_async(message_db_id, number, message_id):
     """Descarga la media (imagen/audio/video/sticker) en background.
 
@@ -149,8 +186,8 @@ def _fetch_and_store_media(m: dict) -> str:
     with lock:
         # Recheck: outro thread pode ter baixado enquanto esperávamos o lock.
         fresh = database.get_message(msg_id)
-        if fresh and str(fresh.get("media_url") or "").startswith("data:"):
-            return fresh["media_url"]
+        if fresh and str(fresh.get("media_url") or "").strip():
+            return fresh["media_url"]  # data-URI ou URL do payload
         uazapi_id = str((fresh or {}).get("uazapi_id") or "")
         phone = str((fresh or {}).get("phone") or "")
         if not uazapi_id or not phone:
@@ -589,6 +626,7 @@ def webhook():
             )
             print(f"[webhook] fromMe msg salva: id={saved['id'] if saved else None}")
             if saved and _is_media_type(str(msg_type)) and message_id:
+                _maybe_store_media_hint(saved, msg)
                 threading.Thread(target=_download_media_async,
                                  args=(saved["id"], number, str(message_id)), daemon=True).start()
             database.update_conversation(conv["id"], last_message_at=time.strftime("%Y-%m-%dT%H:%M:%S"))
@@ -630,6 +668,7 @@ def webhook():
         print(f"[webhook] MSG DUPLICADA msg_id={message_id}")
 
     if saved and _is_media_type(str(msg_type)) and message_id:
+        _maybe_store_media_hint(saved, msg)
         threading.Thread(target=_download_media_async,
                          args=(saved["id"], number, str(message_id)), daemon=True).start()
 
@@ -1073,8 +1112,10 @@ def api_messages_media(msg_id):
     m = database.get_message(msg_id)
     if not m:
         return jsonify({"error": "not found"}), 404
-    media_url = m.get("media_url", "") or ""
-    if not media_url.startswith("data:"):
+    media_url = str(m.get("media_url", "") or "").strip()
+    # Se não há nada guardado (mensagens antigas ou download em background
+    # falho), baixa on-demand desde UAZAPI e persiste.
+    if not media_url:
         try:
             media_url = _fetch_and_store_media(m)
         except Exception as e:
@@ -1085,7 +1126,7 @@ def api_messages_media(msg_id):
         "msg_type": m.get("msg_type", "text"),
         "media_url": media_url,
         "body": m.get("body", "") or "",
-        "ready": media_url.startswith("data:"),
+        "ready": bool(media_url),
     })
 
 
