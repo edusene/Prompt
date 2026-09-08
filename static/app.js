@@ -602,6 +602,7 @@ function _buildWaPlayer(container, src) {
     player.className = 'wa-player';
 
     const btnPlay = document.createElement('button');
+    btnPlay.type = 'button';
     btnPlay.className = 'wa-player-play';
     btnPlay.innerHTML = playSvg;
 
@@ -619,11 +620,13 @@ function _buildWaPlayer(container, src) {
     timeEl.textContent = '0:00';
 
     const speedBtn = document.createElement('button');
+    speedBtn.type = 'button';
     speedBtn.className = 'wa-player-speed';
     speedBtn.textContent = '1x';
     const speeds = [1, 1.5, 2];
     let speedIdx = 0;
-    speedBtn.onclick = () => {
+    speedBtn.onclick = (e) => {
+        e.stopPropagation();
         speedIdx = (speedIdx + 1) % speeds.length;
         audio.playbackRate = speeds[speedIdx];
         speedBtn.textContent = speeds[speedIdx] + 'x';
@@ -680,7 +683,8 @@ function _buildWaPlayer(container, src) {
         updateWave();
     });
 
-    btnPlay.onclick = () => {
+    btnPlay.onclick = (e) => {
+        e.stopPropagation();
         if (audio.paused) {
             document.querySelectorAll('.wa-player audio').forEach(a => { if (a !== audio) a.pause(); });
             audio.play();
@@ -694,6 +698,7 @@ function _buildWaPlayer(container, src) {
     };
 
     wave.onclick = (e) => {
+        e.stopPropagation();
         if (!audio.duration) return;
         const rect = wave.getBoundingClientRect();
         const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
@@ -765,7 +770,8 @@ function _applyMsgMedia(box, dataUri) {
 
     if (el.tagName === 'IMG' || el.tagName === 'VIDEO') {
         el.style.cursor = 'pointer';
-        el.addEventListener('click', () => {
+        el.addEventListener('click', (e) => {
+            e.stopPropagation();
             const fname = uri.startsWith('data:')
                 ? ((uri.match(/^data:[^/]+\/([^;,]+)/) || [])[1] || 'midia')
                 : decodeURIComponent(uri.split('/').pop().split('?')[0] || 'midia');
