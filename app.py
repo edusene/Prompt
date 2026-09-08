@@ -227,10 +227,6 @@ def webhook():
         return jsonify({"ok": True})
 
     print(f"[webhook] event={event} keys={list(data.keys())[:8]}")
-    if event in ("message", "messages", "messages.upsert"):
-        inner_dbg = data.get("data") or data.get("message") or data
-        if isinstance(inner_dbg, dict):
-            print(f"[webhook] inner keys={list(inner_dbg.keys())[:10]} IsFromMe={inner_dbg.get('IsFromMe')} fromMe={inner_dbg.get('fromMe')} Chat={inner_dbg.get('Chat')} chat={inner_dbg.get('chat')} sender_pn={inner_dbg.get('sender_pn')}")
 
     # Ignora recibos de entrega/leitura (não são mensagens)
     inner = data.get("data") or data.get("message") or data
@@ -313,7 +309,7 @@ def webhook():
     _is_group = msg.get("isGroup") or msg.get("IsGroup")
     _has_participant = msg.get("participant")
 
-    print(f"[webhook] fromMe={_is_from_me} IsFromMe={msg.get('IsFromMe')} fromMe_field={msg.get('fromMe')} group={_is_group} chat={data.get('chat')} sender_pn={msg.get('sender_pn')}")
+    print(f"[webhook] fromMe={_is_from_me} IsFromMe={msg.get('IsFromMe')} fromMe_field={msg.get('fromMe')} group={_is_group} chat={data.get('chat') if not isinstance(data.get('chat'), dict) else 'DICT'} sender_pn={msg.get('sender_pn')} chatid={msg.get('chatid')}")
 
     # Grupo e participant: ignora completamente
     if _is_group or _has_participant:
@@ -322,11 +318,13 @@ def webhook():
         return jsonify({"ok": True})
 
     # Extrai número de telefone
-    # fromMe=true → destinatário (chat top-level v3-B, ou Chat/to no msg)
+    # fromMe=true → destinatário (wa_chatid dentro do dict chat, ou chatid no msg)
     # fromMe=false → remetente (sender_pn, from, etc.)
     if _is_from_me:
+        chat_dict = data.get("chat") if isinstance(data.get("chat"), dict) else None
         raw_from = (
-            data.get("chat") or data.get("chatSource")
+            (chat_dict.get("wa_chatid") if chat_dict else None)
+            or msg.get("chatid") or msg.get("chatlid")
             or msg.get("Chat") or msg.get("to", "")
             or msg.get("sender_pn") or msg.get("from", "")
         )
@@ -353,7 +351,14 @@ def webhook():
     number = uazapi.resolve_lid_to_pn(number)
     print(f"[webhook] number={number} raw_from={raw_from}")
 
-    push_name = msg.get("pushName") or msg.get("notifyName") or msg.get("senderName") or msg.get("name") or ""
+    # push_name: FromMe → nome do destinatário no dict chat; caso contrário → pushName do remetente
+    if _is_from_me and isinstance(data.get("chat"), dict):
+        push_name = (
+            data["chat"].get("name") or data["chat"].get("wa_contactName")
+            or data["chat"].get("wa_name") or ""
+        )
+    else:
+        push_name = msg.get("pushName") or msg.get("notifyName") or msg.get("senderName") or msg.get("name") or ""
     message_id = msg.get("id", "") or msg.get("messageid", "")
     if not message_id and isinstance(msg.get("key"), dict):
         message_id = msg.get("key", {}).get("id", "")
