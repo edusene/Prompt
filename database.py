@@ -399,21 +399,31 @@ def save_message(
 
 def link_or_save_outgoing(conversation_id: int, phone: str, body: str, uazapi_id: str | None,
                           sender: str = "human", msg_type: str = "text") -> dict | None:
-    """Se já existe msg out recente (30s) mesma conversa+body sem uazapi_id, atualiza o uazapi_id.
-    Caso contrário, insere normalmente via save_message.
-    Retorna a mensagem (atualizada ou nova) ou None se duplicata por uazapi_id."""
+    """Linka ou cria mensagem de saída com proteção contra duplicidade.
+    Prioridade:
+      (1) uazapi_id exato já existe → retorna (dedup entre formatos API/webhook).
+      (2) msg recente (30s) mesma conversa+body → linka o uazapi_id.
+      (3) Nada encontrado → insere nova via save_message."""
     print(f"[db] link_or_save: conv={conversation_id} phone={phone} uazapi_id={uazapi_id} body_len={len(body)}")
+
     if uazapi_id:
-        existing = db.fetch_one(
+        existing_exact = db.fetch_one(
+            "SELECT id FROM messages WHERE uazapi_id=?", (uazapi_id,),
+        )
+        if existing_exact:
+            print(f"[db] link_or_save: uazapi_id exato ja existe msg_id={existing_exact['id']}")
+            return db.fetch_one("SELECT * FROM messages WHERE id=?", (existing_exact["id"],))
+
+        existing_recent = db.fetch_one(
             "SELECT id FROM messages WHERE conversation_id=? AND body=? AND direction='out' "
-            "AND (uazapi_id IS NULL OR uazapi_id='') "
             f"AND {db.ago_sql('created_at', 30)}",
             (conversation_id, body),
         )
-        if existing:
-            print(f"[db] link_or_save: linkando msg id={existing['id']} com uazapi_id={uazapi_id}")
-            db.execute("UPDATE messages SET uazapi_id=? WHERE id=?", (uazapi_id, existing["id"]))
-            return db.fetch_one("SELECT * FROM messages WHERE id=?", (existing["id"],))
+        if existing_recent:
+            print(f"[db] link_or_save: linkando msg id={existing_recent['id']} com uazapi_id={uazapi_id}")
+            db.execute("UPDATE messages SET uazapi_id=? WHERE id=?", (uazapi_id, existing_recent["id"]))
+            return db.fetch_one("SELECT * FROM messages WHERE id=?", (existing_recent["id"],))
+
     print(f"[db] link_or_save: nenhuma msg anterior, chamando save_message")
     result = save_message(
         conversation_id=conversation_id, phone=phone, direction="out",
