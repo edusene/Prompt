@@ -780,6 +780,11 @@ function _applyMsgMedia(box, dataUri) {
     }
 
     host.appendChild(el);
+
+    requestAnimationFrame(() => {
+        const msgDiv = document.getElementById('chat-messages');
+        if (msgDiv && isNearBottom(msgDiv)) scrollChatBottom();
+    });
 }
 
 function _fallbackMsgMedia(box, body) {
