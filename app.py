@@ -223,10 +223,14 @@ def webhook():
 
     event = data.get("event")
     if not event:
-        print(f"[webhook] RAW s/ event: {str(data)[:300]}")
+        print(f"[webhook] RAW s/ event: {str(data)[:500]}")
         return jsonify({"ok": True})
 
-    print(f"[webhook] event={event} keys={list(data.keys())[:6]}")
+    print(f"[webhook] event={event} keys={list(data.keys())[:8]}")
+    if event in ("message", "messages", "messages.upsert"):
+        inner_dbg = data.get("data") or data.get("message") or data
+        if isinstance(inner_dbg, dict):
+            print(f"[webhook] inner keys={list(inner_dbg.keys())[:10]} IsFromMe={inner_dbg.get('IsFromMe')} fromMe={inner_dbg.get('fromMe')} Chat={inner_dbg.get('Chat')} chat={inner_dbg.get('chat')} sender_pn={inner_dbg.get('sender_pn')}")
 
     # Ignora recibos de entrega/leitura (não são mensagens)
     inner = data.get("data") or data.get("message") or data
@@ -309,6 +313,8 @@ def webhook():
     _is_group = msg.get("isGroup") or msg.get("IsGroup")
     _has_participant = msg.get("participant")
 
+    print(f"[webhook] fromMe={_is_from_me} IsFromMe={msg.get('IsFromMe')} fromMe_field={msg.get('fromMe')} group={_is_group} chat={data.get('chat')} sender_pn={msg.get('sender_pn')}")
+
     # Grupo e participant: ignora completamente
     if _is_group or _has_participant:
         reason = "group" if _is_group else "participant"
@@ -341,9 +347,11 @@ def webhook():
     phone_clean = str(raw_from).split("@")[0].split(":")[0]
     number = "".join([c for c in phone_clean if c.isdigit()])
     if not number:
+        print(f"[webhook] NUM INVALIDO: raw_from={raw_from} phone_clean={phone_clean}")
         return jsonify({"ok": True})
 
     number = uazapi.resolve_lid_to_pn(number)
+    print(f"[webhook] number={number} raw_from={raw_from}")
 
     push_name = msg.get("pushName") or msg.get("notifyName") or msg.get("senderName") or msg.get("name") or ""
     message_id = msg.get("id", "") or msg.get("messageid", "")
