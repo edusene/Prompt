@@ -384,14 +384,13 @@ def save_message(
         if existing:
             return None
     # Fallback: dedup por conteúdo (mesmo conversation_id + body + direction nos últimos 60s)
-    if not uazapi_id_clean:
-        existing = db.fetch_one(
-            "SELECT id FROM messages WHERE conversation_id=? AND phone=? AND body=? AND direction=? "
-            "AND created_at > datetime('now', '-60 seconds')",
-            (conversation_id, phone, body, direction),
-        )
-        if existing:
-            return None
+    existing = db.fetch_one(
+        "SELECT id FROM messages WHERE conversation_id=? AND phone=? AND body=? AND direction=? "
+        "AND created_at > datetime('now', '-60 seconds')",
+        (conversation_id, phone, body, direction),
+    )
+    if existing:
+        return None
 
     now = datetime.utcnow().isoformat()
     msg_id = db.execute_returning(
