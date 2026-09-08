@@ -7,6 +7,7 @@ let pollTimers = [];
 let lastWAStatus = '';
 let waStatusTimer = null;
 let lastSentBody = '';
+let _sseSource = null;
 
 /* ── Estado de conversas (portugués) ─────────────────────────────────────── */
 const CONV_STATUS = { new: 'Novo', open: 'Aberto', waiting: 'Aguardando', resolved: 'Resolvido', closed: 'Fechado' };
@@ -368,7 +369,8 @@ function renderChatHeader(conv, contact) {
 function msgHTML(m, isNew) {
     const timeStr = m.created_at ? new Date(m.created_at.endsWith('Z') ? m.created_at : m.created_at + 'Z').toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
     const senderName = m.sender || (m.direction === 'in' ? 'Contato' : 'Atendente');
-    return `<div class="msg msg-${m.direction === 'in' ? 'in' : 'out'}${isNew ? ' msg-new' : ''}"><div class="msg-body">${esc(m.body)}</div><div class="msg-time"><span>${esc(senderName)}</span> · ${timeStr}</div></div>`;
+    const msgId = m.uazapi_id || m.id || '';
+    return `<div class="msg msg-${m.direction === 'in' ? 'in' : 'out'}${isNew ? ' msg-new' : ''}" data-msg-id="${esc(msgId)}"><div class="msg-body">${esc(m.body)}</div><div class="msg-time"><span>${esc(senderName)}</span> · ${timeStr}</div></div>`;
 }
 
 function appendMessage(msg) {
@@ -1117,8 +1119,14 @@ function debouncedLoadDashboard() {
     }, 1000);
 }
 function connectSSE() {
+    if (_sseSource) {
+        _sseSource.close();
+        _sseSource = null;
+    }
     const source = new EventSource('/api/events');
+    _sseSource = source;
     source.onmessage = async e => {
+        if (e.data === ': keepalive') return;
         const { event, data } = JSON.parse(e.data);
         if (event === 'new_message') {
             if (currentView === 'conversations') {
@@ -1127,12 +1135,11 @@ function connectSSE() {
                     const d = await api(`/api/conversations/${data.conversation_id}`);
                     if (d?.messages?.length) {
                         const last = d.messages[d.messages.length - 1];
-                        // Ignora se é eco da mensagem que acabamos de enviar pelo painel
                         if (last.body === lastSentBody) { lastSentBody = ''; return; }
                         const lastEl = document.querySelector('#chat-messages .msg:last-child');
-                        if (!lastEl || !lastEl.textContent.includes(esc(last.body).slice(0, 30))) {
-                            appendMessage(last);
-                        }
+                        const lastId = lastEl?.dataset?.msgId;
+                        if (lastId && lastId === String(last.uazapi_id || last.id || '')) return;
+                        appendMessage(last);
                     }
                 } else {
                     debouncedLoadConversations();
@@ -1144,7 +1151,6 @@ function connectSSE() {
             lastSentBody = '';
             if (currentView === 'conversations' && currentConvId === data.conversation_id) {
                 refreshConversationPanel(data.conversation_id);
-                // Recarrega todas as mensagens (evita duplicação visual)
                 const d = await api(`/api/conversations/${data.conversation_id}`);
                 if (d?.messages?.length) {
                     const msgDiv = document.getElementById('chat-messages');
@@ -1156,16 +1162,16 @@ function connectSSE() {
         } else if (event === 'conversation_updated') {
             debouncedLoadConversations();
         } else if (event === 'tags_updated') {
-            // Atualiza badges/chips de tags na lista (Atendimento) e no painel da conversa aberta
             refreshTagsUI();
         } else if (event === 'wa_status') {
-            // Atualização de status da instância vinda do servidor (sem requisição)
             if (currentView === 'whatsapp') {
                 loadWAStatus(data.status);
             }
         }
     };
     source.onerror = () => {
+        source.close();
+        _sseSource = null;
         setTimeout(connectSSE, 3000);
     };
 }

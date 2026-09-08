@@ -164,37 +164,6 @@ buffer = MessageBuffer(wait_seconds=BUFFER_SECONDS, on_flush=handle_flush)
 
 database.init_db()
 
-
-def _migrate_knowledge_files():
-    """Migra arquivos .md do diretorio knowledge/ para o banco (uma unica vez)."""
-    knowledge_dir = os.path.join(os.path.dirname(__file__), "knowledge")
-    if not os.path.isdir(knowledge_dir):
-        return
-    existing = database.list_knowledge_files()
-    existing_names = {f["filename"] for f in existing}
-    files = sorted([f for f in os.listdir(knowledge_dir)
-                    if f.endswith(('.md', '.txt')) and f != 'README.md'])
-    migrated = 0
-    for fname in files:
-        if fname in existing_names:
-            continue
-        fpath = os.path.join(knowledge_dir, fname)
-        try:
-            with open(fpath, encoding="utf-8") as fh:
-                content = fh.read().strip()
-            if content:
-                knowledge_rag.save_knowledge(fname, content)
-                migrated += 1
-        except Exception as e:
-            print(f"[migrate] ERRO {fname}: {e}")
-    if migrated:
-        print(f"[migrate] knowledge: {migrated} arquivos migrados para o banco")
-    else:
-        print(f"[migrate] knowledge: nada para migrar")
-
-
-_migrate_knowledge_files()
-
 # ── Auto-configurar webhook na UAZAPI ───────────────────────────────────────
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "")
 print(f"[config] UAZAPI: {os.getenv('UAZAPI_BASE_URL', '') or 'NÃO CONFIGURADO'}")
@@ -431,13 +400,17 @@ def panel_page():
 @app.get("/api/events")
 @login_required
 def sse_stream():
+    import queue as _queue
     def stream():
         q = events.subscribe()
         try:
             while True:
-                data = q.get(timeout=30)
-                yield f"data: {data}\n\n"
-        except Exception:
+                try:
+                    data = q.get(timeout=20)
+                    yield f"data: {data}\n\n"
+                except _queue.Empty:
+                    yield ": keepalive\n\n"
+        except GeneratorExit:
             pass
         finally:
             events.unsubscribe(q)
