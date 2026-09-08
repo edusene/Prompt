@@ -316,15 +316,24 @@ def webhook():
         return jsonify({"ok": True})
 
     # Extrai número de telefone
-    raw_from = (
-        msg.get("sender_pn") or msg.get("sender_lid")
-        or msg.get("from", "")
-        or msg.get("remoteJid", "")
-        or msg.get("chatId", "")
-        or msg.get("chatid", "")
-        or msg.get("Sender", "")
-        or msg.get("chat", "")
-    )
+    # fromMe=true → destinatário (chat top-level v3-B, ou Chat/to no msg)
+    # fromMe=false → remetente (sender_pn, from, etc.)
+    if _is_from_me:
+        raw_from = (
+            data.get("chat") or data.get("chatSource")
+            or msg.get("Chat") or msg.get("to", "")
+            or msg.get("sender_pn") or msg.get("from", "")
+        )
+    else:
+        raw_from = (
+            msg.get("sender_pn") or msg.get("sender_lid")
+            or msg.get("from", "")
+            or msg.get("remoteJid", "")
+            or msg.get("chatId", "")
+            or msg.get("chatid", "")
+            or msg.get("Sender", "")
+            or msg.get("chat", "")
+        )
     if not raw_from:
         print(f"[webhook] SEM REMETENTE: {str(msg)[:200]}")
         return jsonify({"ok": True})
