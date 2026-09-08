@@ -284,7 +284,7 @@ def get_or_create_conversation(phone: str) -> dict:
     contact_id = contact["id"]
 
     conv = db.fetch_one(
-        "SELECT * FROM conversations WHERE contact_id=? AND status IN ('new','open','waiting') ORDER BY id DESC LIMIT 1",
+        "SELECT * FROM conversations WHERE contact_id=? ORDER BY id DESC LIMIT 1",
         (contact_id,),
     )
     if conv:

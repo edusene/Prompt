@@ -101,31 +101,38 @@
                         <div id="bulk-toolbar" class="bulk-toolbar" style="display:none">
                             <span id="bulk-count" class="bulk-count"></span>
                             <div class="bulk-actions">
-                                <button class="bulk-btn" onclick="bulkAction('read')" title="Marcar como lida">
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                                <button class="bulk-btn" onclick="bulkAction('read')" title="Lida">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                                    Lida
                                 </button>
-                                <button class="bulk-btn" onclick="bulkAction('unread')" title="Marcar como não lida">
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                                <button class="bulk-btn" onclick="bulkAction('unread')" title="Não lida">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                                    Não lida
                                 </button>
                                 <div class="bulk-sep"></div>
-                                <button class="bulk-btn" onclick="bulkShowStatusMenu(event)" title="Alterar status">
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="3"/><path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/></svg>
+                                <button class="bulk-btn" onclick="bulkShowStatusMenu(event)" title="Status">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="3"/><path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4"/></svg>
+                                    Status
                                 </button>
                                 <button class="bulk-btn" onclick="bulkAction('archive')" title="Arquivar">
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+                                    Arquivar
                                 </button>
-                                <button class="bulk-btn" onclick="bulkShowTagMenu(event)" title="Adicionar tag">
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+                                <button class="bulk-btn" onclick="bulkShowTagMenu(event)" title="Tag">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+                                    Tag
                                 </button>
                                 <div class="bulk-sep"></div>
-                                <button class="bulk-btn" onclick="bulkConfirmAction('clear')" title="Limpar conversas">
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                                <button class="bulk-btn" onclick="bulkConfirmAction('clear')" title="Limpar">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                                    Limpar
                                 </button>
-                                <button class="bulk-btn bulk-btn-danger" onclick="bulkConfirmAction('delete')" title="Apagar conversas">
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                                <button class="bulk-btn bulk-btn-danger" onclick="bulkConfirmAction('delete')" title="Apagar">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                                    Apagar
                                 </button>
                             </div>
-                            <button class="bulk-close" onclick="deselectAllConvs()" title="Cancelar seleção">&times;</button>
+                            <button class="bulk-close" onclick="deselectAllConvs()" title="Cancelar">&times;</button>
                         </div>
                         <div id="bulk-status-menu" class="bulk-dropdown" style="display:none">
                             <div class="bulk-dropdown-item" onclick="bulkAction('status', {status:'new'})">Nova</div>
