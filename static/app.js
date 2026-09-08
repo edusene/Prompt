@@ -1630,7 +1630,13 @@ function downloadLightboxMedia() {
 }
 
 document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') closeLightbox();
+    if (e.key === 'Escape') {
+        const lb = document.getElementById('media-lightbox');
+        if (lb && lb.classList.contains('open')) {
+            e.stopPropagation();
+            closeLightbox();
+        }
+    }
 });
 
 /* ── SSE ──────────────────────────────────────────────────────────────────── */
@@ -1811,14 +1817,16 @@ document.addEventListener('click', (e) => {
     if (e.target.closest('.conv-layout')
         || e.target.closest('.ctx-menu')
         || e.target.closest('.toast-container')
-        || e.target.closest('#modal-overlay')) return;
+        || e.target.closest('#modal-overlay')
+        || e.target.closest('.media-lightbox')) return;
     if (currentConvId != null) deselectConversation();
 });
 
 /* ── ESC: cerrar modal → menú de templates → salir de la conversa ─────────── */
-document.addEventListener('keydown', (e) => {
+document.addEventListener('keydown', e => {
     if (e.key !== 'Escape' && e.keyCode !== 27) return;
-    // Si una modal está abierta, la cerramos primero.
+    const lb = document.getElementById('media-lightbox');
+    if (lb && lb.classList.contains('open')) return;
     const overlay = document.getElementById('modal-overlay');
     if (overlay && overlay.style.display !== 'none') {
         closeModal();
