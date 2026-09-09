@@ -454,6 +454,16 @@ def handle_flush(user: str, items: list[dict]) -> None:
             send_msg_out_to_panel(user, chunk)
 
         send_presence(user, "paused")
+
+        # O agente IA leu e respondeu: marca conversa como lida no painel
+        # (equivale a abrir a conversa na aba de atendimento).
+        try:
+            conv = database.get_or_create_conversation(user)
+            database.reset_unread(conv["id"])
+            events.emit("conversation_updated", {"conversation_id": conv["id"], "unread_count": 0})
+            print(f"[flush] user={user} conv={conv['id']} marcada como lida (agente respondeu)")
+        except Exception as e:
+            print(f"[flush] WARN reset_unread falhou p/ {user}: {e}")
     except Exception as e:
         # Nunca deixa a thread do Timer morrer em silêncio.
         print(f"[flush] ERRO inesperado p/ {user}: {e}")
@@ -782,6 +792,11 @@ def webhook():
                 "phone": number,
                 "body": body,
             })
+            # Mensagem enviada pelo celular/outro dispositivo: marca conversa
+            # como lida no painel (o usuário visualizou/respondeu fora do painel).
+            database.reset_unread(conv["id"])
+            events.emit("conversation_updated", {"conversation_id": conv["id"], "unread_count": 0})
+            print(f"[webhook] fromMe conv={conv['id']} marcada como lida (visualizada no celular)")
         except Exception as e:
             print(f"[webhook] ERRO fromMe: {e}")
         return jsonify({"ok": True})
