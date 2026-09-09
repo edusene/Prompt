@@ -341,9 +341,11 @@ h3 { font-size: 14px; font-weight: 600; }
     padding: 0 6px;
     border-radius: 10px;
     margin-left: auto;
-    display: flex;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
+    line-height: 1;
+    box-sizing: border-box;
     animation: pulse 2s ease-in-out infinite;
 }
 
@@ -783,10 +785,13 @@ h3 { font-size: 14px; font-weight: 600; }
     font-weight: 700;
     min-width: 20px;
     height: 20px;
+    padding: 0 6px;
     border-radius: 10px;
-    display: flex;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
+    line-height: 1;
+    box-sizing: border-box;
     flex-shrink: 0;
     animation: bounceIn 0.4s ease;
     box-shadow: 0 0 8px var(--accent-glow);

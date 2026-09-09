@@ -1911,7 +1911,7 @@ async function updateUnreadBadge() {
     const badge = document.getElementById('unread-badge');
     if (stats.unread_messages > 0) {
         badge.textContent = stats.unread_messages;
-        badge.style.display = 'inline';
+        badge.style.display = 'inline-flex';
     } else {
         badge.style.display = 'none';
     }
