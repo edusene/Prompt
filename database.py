@@ -44,6 +44,11 @@ def init_db() -> None:
         except Exception:
             pass
 
+    # Migração idempotente: cria tabela knowledge_files (descrições)
+    if "knowledge_files" not in _get_tables():
+        db.executescript(KNOWLEDGE_FILES_SCHEMA)
+        print("[db] tabela knowledge_files criada")
+
     _ensure_indexes()
 
 
@@ -102,6 +107,15 @@ CREATE TABLE IF NOT EXISTS knowledge (
     updated_at TEXT DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_knowledge_filename ON knowledge(filename);
+"""
+
+KNOWLEDGE_FILES_SCHEMA = """
+CREATE TABLE IF NOT EXISTS knowledge_files (
+    filename TEXT PRIMARY KEY,
+    description TEXT DEFAULT '',
+    created_at TEXT DEFAULT NOW(),
+    updated_at TEXT DEFAULT NOW()
+);
 """
 
 SCHEMA = """
@@ -693,9 +707,22 @@ def insert_knowledge_chunks(filename: str, chunks: list[str], embeddings: list) 
             )
 
 
-def search_knowledge(query_embedding: list[float], top_k: int = 5) -> list[dict]:
+def search_knowledge(query_embedding: list[float], top_k: int = 5, query_text: str = "") -> list[dict]:
     """Busca chunks por cosine similarity. Fallback para LIKE se pgvector indisponível."""
     if db.DB_DRIVER != "postgresql":
+        # Busca textual por LIKE quando SQLite (sem pgvector)
+        if query_text:
+            keywords = [w.strip() for w in query_text.split() if len(w.strip()) >= 3]
+            if keywords:
+                like_conditions = " OR ".join(["content LIKE ?"] * len(keywords))
+                like_params = [f"%{kw}%" for kw in keywords]
+                rows = db.fetch_all(
+                    f"SELECT * FROM knowledge WHERE {like_conditions} ORDER BY filename, chunk_index LIMIT ?",
+                    (*like_params, top_k),
+                )
+                if rows:
+                    return rows
+        # Último recurso: retorna os primeiros chunks
         return db.fetch_all(
             "SELECT * FROM knowledge ORDER BY filename, chunk_index LIMIT ?", (top_k,)
         )
@@ -710,20 +737,39 @@ def search_knowledge(query_embedding: list[float], top_k: int = 5) -> list[dict]
             "LIMIT %s",
             (emb_str, emb_str, top_k),
         )
-        return rows
+        if rows:
+            return rows
     except Exception as e:
         print(f"[db] WARN: busca vetorial falhou, usando LIKE: {e}")
-        # Fallback: retorna os chunks mais recentes
-        return db.fetch_all(
-            "SELECT * FROM knowledge ORDER BY filename, chunk_index LIMIT %s", (top_k,)
-        )
+
+    # Fallback PostgreSQL: busca textual por LIKE
+    if query_text:
+        keywords = [w.strip() for w in query_text.split() if len(w.strip()) >= 3]
+        if keywords:
+            like_conditions = " OR ".join(["content LIKE %s"] * len(keywords))
+            like_params = [f"%{kw}%" for kw in keywords]
+            try:
+                rows = db.fetch_all(
+                    f"SELECT * FROM knowledge WHERE {like_conditions} ORDER BY filename, chunk_index LIMIT %s",
+                    (*like_params, top_k),
+                )
+                if rows:
+                    return rows
+            except Exception:
+                pass
+
+    # Último recurso
+    return db.fetch_all(
+        "SELECT * FROM knowledge ORDER BY filename, chunk_index LIMIT %s", (top_k,)
+    )
 
 
 def list_knowledge_files() -> list[dict]:
-    """Lista arquivos distintos com contagem de chunks."""
+    """Lista arquivos distintos com contagem de chunks e descrição."""
     rows = db.fetch_all(
-        "SELECT filename, COUNT(*) as chunks, MIN(created_at) as created_at "
-        "FROM knowledge GROUP BY filename ORDER BY filename"
+        "SELECT k.filename, COUNT(*) as chunks, kf.description, MIN(k.created_at) as created_at "
+        "FROM knowledge k LEFT JOIN knowledge_files kf ON k.filename = kf.filename "
+        "GROUP BY k.filename, kf.description ORDER BY k.filename"
     )
     return rows
 
@@ -737,5 +783,36 @@ def get_knowledge_chunks(filename: str) -> list[dict]:
 
 
 def delete_knowledge_file(filename: str) -> None:
-    """Deleta todos os chunks de um arquivo."""
+    """Deleta todos os chunks de um arquivo e sua descrição."""
     db.execute("DELETE FROM knowledge WHERE filename=?", (filename,))
+    db.execute("DELETE FROM knowledge_files WHERE filename=?", (filename,))
+
+
+# ── Knowledge Files (descrições) ──────────────────────────────────────────────
+
+def upsert_knowledge_file(filename: str, description: str = "") -> None:
+    """Insere ou atualiza a descrição de um arquivo knowledge."""
+    now = datetime.utcnow().isoformat()
+    db.execute(
+        "INSERT INTO knowledge_files (filename, description, created_at, updated_at) VALUES (?,?,?,?) "
+        "ON CONFLICT(filename) DO UPDATE SET description=EXCLUDED.description, updated_at=EXCLUDED.updated_at",
+        (filename, description, now, now),
+    )
+
+
+def get_knowledge_file_description(filename: str) -> str:
+    """Retorna a descrição de um arquivo knowledge."""
+    row = db.fetch_one("SELECT description FROM knowledge_files WHERE filename=?", (filename,))
+    return row["description"] if row else ""
+
+
+def get_all_knowledge_descriptions() -> list[dict]:
+    """Retorna todos os arquivos com suas descrições (para montar o índice)."""
+    return db.fetch_all(
+        "SELECT filename, description FROM knowledge_files ORDER BY filename"
+    )
+
+
+def delete_knowledge_file_meta(filename: str) -> None:
+    """Deleta apenas os metadados (descrição) de um arquivo."""
+    db.execute("DELETE FROM knowledge_files WHERE filename=?", (filename,))

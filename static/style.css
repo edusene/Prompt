@@ -1314,6 +1314,24 @@ h3 { font-size: 14px; font-weight: 600; }
 }
 .btn-danger:active { transform: scale(0.98); }
 
+.btn-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border: none;
+    border-radius: var(--radius-md);
+    background: transparent;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    flex-shrink: 0;
+}
+.btn-icon:hover { background: var(--bg-card-hover); }
+.btn-icon.btn-danger { color: #fca5a5; }
+.btn-icon.btn-danger:hover { background: rgba(153,27,27,0.4); }
+
 .btn-sm {
     padding: 5px 12px;
     font-size: 12px;
@@ -1794,6 +1812,31 @@ h3 { font-size: 14px; font-weight: 600; }
     font-size: 13px; line-height: 1.6; outline: none;
 }
 .knowledge-editor::placeholder { color: var(--text-dim); }
+.knowledge-desc-bar {
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-sidebar);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.knowledge-desc-bar label {
+    font-size: 11px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+.knowledge-desc-input {
+    flex: 1;
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-input);
+    color: var(--text);
+    font-size: 12px;
+    outline: none;
+}
+.knowledge-desc-input:focus { border-color: var(--accent); }
 .knowledge-actions {
     padding: 12px 16px;
     border-top: 1px solid var(--border);
@@ -1804,10 +1847,15 @@ h3 { font-size: 14px; font-weight: 600; }
     cursor: pointer;
     border-bottom: 1px solid var(--border);
     transition: background var(--transition-fast);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
 }
 .knowledge-file:hover { background: var(--bg-card-hover); }
 .knowledge-file.active { background: var(--bg-card); border-left: 3px solid var(--accent); }
-.knowledge-file-name { font-size: 13px; font-weight: 500; color: var(--text); }
+.knowledge-file-info { flex: 1; min-width: 0; }
+.knowledge-file-name { font-size: 13px; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .knowledge-file-size { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
 
 /* ── Loading Spinner ────────────────────────────────────────────────────── */

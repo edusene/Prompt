@@ -87,7 +87,7 @@ def chunk_text(text: str, max_len: int = 500) -> list[str]:
 # ── Knowledge CRUD ───────────────────────────────────────────────────────────
 
 
-def save_knowledge(filename: str, content: str) -> None:
+def save_knowledge(filename: str, content: str, description: str = "") -> None:
     """Salva knowledge no banco: deleta antigo, chunka, embeda, insere."""
     content = (content or "").strip()
     if not content:
@@ -110,6 +110,11 @@ def save_knowledge(filename: str, content: str) -> None:
 
     # Insere no banco
     database.insert_knowledge_chunks(filename, chunks, embeddings)
+
+    # Salva descrição do arquivo
+    if description:
+        database.upsert_knowledge_file(filename, description)
+
     print(f"[rag] salvo {filename}: {len(chunks)} chunks")
 
 
@@ -124,7 +129,7 @@ def search_context(query: str, top_k: int = 3) -> str:
     # Tenta busca vetorial
     try:
         query_embedding = embed_text(query)
-        results = database.search_knowledge(query_embedding, top_k=top_k)
+        results = database.search_knowledge(query_embedding, top_k=top_k, query_text=query)
         if results:
             parts = [r["content"] for r in results]
             joined = "\n\n---\n\n".join(parts)
@@ -133,9 +138,9 @@ def search_context(query: str, top_k: int = 3) -> str:
     except Exception as e:
         print(f"[rag] WARN busca vetorial falhou: {e}")
 
-    # Fallback: busca os chunks mais recentes do banco
+    # Fallback: busca textual por palavras-chave no banco
     try:
-        results = database.search_knowledge([], top_k=top_k)
+        results = database.search_knowledge([], top_k=top_k, query_text=query)
         if results:
             parts = [r["content"] for r in results]
             joined = "\n\n---\n\n".join(parts)
@@ -148,22 +153,38 @@ def search_context(query: str, top_k: int = 3) -> str:
 
 
 def list_files() -> list[dict]:
-    """Lista arquivos de knowledge no banco (filename + tamanho)."""
+    """Lista arquivos de knowledge no banco (filename + chunks + descrição)."""
     return database.list_knowledge_files()
 
 
 def get_file(filename: str) -> dict | None:
-    """Retorna conteúdo completo de um arquivo (concatenado dos chunks)."""
+    """Retorna conteúdo completo de um arquivo (concatenado dos chunks) + descrição."""
     chunks = database.get_knowledge_chunks(filename)
     if not chunks:
         return None
-    # Ordena por chunk_index e concatena
     chunks.sort(key=lambda c: c["chunk_index"])
     content = "\n\n".join(c["content"] for c in chunks)
-    return {"filename": filename, "content": content}
+    description = database.get_knowledge_file_description(filename)
+    return {"filename": filename, "content": content, "description": description}
 
 
 def delete_file(filename: str) -> None:
-    """Deleta todos os chunks de um arquivo."""
+    """Deleta todos os chunks de um arquivo e sua descrição."""
     database.delete_knowledge_file(filename)
     print(f"[rag] deletado {filename}")
+
+
+# ── Smart Knowledge (tool call support) ──────────────────────────────────────
+
+def get_file_descriptions() -> list[dict]:
+    """Retorna índice compacto de arquivos + descrições para injetar no system prompt."""
+    return database.get_all_knowledge_descriptions()
+
+
+def get_file_content(filename: str) -> str:
+    """Retorna o conteúdo completo de um arquivo específico (chamado pela tool)."""
+    chunks = database.get_knowledge_chunks(filename)
+    if not chunks:
+        return ""
+    chunks.sort(key=lambda c: c["chunk_index"])
+    return "\n\n".join(c["content"] for c in chunks)

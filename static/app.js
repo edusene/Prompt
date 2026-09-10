@@ -1529,8 +1529,13 @@ async function loadKnowledge() {
     }
     list.innerHTML = files.map(f => `
         <div class="knowledge-file ${f.filename === currentKnowledgeFile ? 'active' : ''}" onclick="selectKnowledgeFile('${esc(f.filename)}')">
-            <div class="knowledge-file-name">${esc(f.filename)}</div>
-            <div class="knowledge-file-size">${f.chunks} chunks</div>
+            <div class="knowledge-file-info">
+                <div class="knowledge-file-name">${esc(f.filename)}</div>
+                <div class="knowledge-file-size">${f.chunks} chunks</div>
+            </div>
+            <button class="btn-icon btn-danger" onclick="event.stopPropagation();deleteKnowledge('${esc(f.filename)}')" title="Deletar">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            </button>
         </div>
     `).join('');
 }
@@ -1540,8 +1545,12 @@ async function selectKnowledgeFile(filename) {
     document.querySelectorAll('.knowledge-file').forEach(el => el.classList.remove('active'));
     event.currentTarget?.classList.add('active');
 
-    document.getElementById('knowledge-editor-header').innerHTML = `<span>${esc(filename)}</span>`;
+    document.getElementById('knowledge-editor-header').innerHTML = `<span>${esc(filename)}</span>
+                            <button class="btn-icon btn-danger" id="knowledge-delete-btn" onclick="deleteKnowledge(currentKnowledgeFile)" title="Deletar arquivo">
+                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                            </button>`;
     document.getElementById('knowledge-editor').value = 'Carregando...';
+    document.getElementById('knowledge-description').value = '';
     document.getElementById('knowledge-actions').style.display = 'flex';
 
     const data = await api(`/api/knowledge/${encodeURIComponent(filename)}`);
@@ -1551,16 +1560,18 @@ async function selectKnowledgeFile(filename) {
         return;
     }
     document.getElementById('knowledge-editor').value = data.content;
+    document.getElementById('knowledge-description').value = data.description || '';
 }
 
 async function saveKnowledge() {
     if (!currentKnowledgeFile) return;
     const btn = event.currentTarget;
     const content = document.getElementById('knowledge-editor').value;
+    const description = document.getElementById('knowledge-description').value;
     setBtnLoading(btn, true, 'Salvando...');
     const data = await api(`/api/knowledge/${encodeURIComponent(currentKnowledgeFile)}`, {
         method: 'PUT',
-        body: JSON.stringify({ content })
+        body: JSON.stringify({ content, description })
     });
     setBtnLoading(btn, false);
     if (data?.error) {
@@ -1576,6 +1587,7 @@ function showKnowledgeForm() {
     document.getElementById('modal-body').innerHTML = `
         <form onsubmit="createKnowledge(event)">
             <div class="form-group"><label>Nome do arquivo</label><input name="filename" placeholder="ex: 04-horarios.md" required></div>
+            <div class="form-group"><label>Descricao (para o agente saber quando usar)</label><input name="description" placeholder="ex: Horario de funcionamento e entregas"></div>
             <div class="form-group"><label>Conteudo</label><textarea name="content" rows="10" required></textarea></div>
             <button type="submit" class="btn-primary">Criar</button>
         </form>`;
@@ -1598,6 +1610,23 @@ async function createKnowledge(e) {
         currentKnowledgeFile = data.filename;
         loadKnowledge();
         selectKnowledgeFile(data.filename);
+    }
+}
+
+async function deleteKnowledge(filename) {
+    if (!confirm(`Deletar "${filename}"? Essa ação não pode ser desfeita.`)) return;
+    const res = await api(`/api/knowledge/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+    if (res?.error) {
+        toast(friendlyError(res.error), 'error');
+    } else {
+        toast('Arquivo deletado', 'success');
+        if (currentKnowledgeFile === filename) {
+            currentKnowledgeFile = null;
+            document.getElementById('knowledge-editor').value = '';
+            document.getElementById('knowledge-editor-header').innerHTML = '<span>Selecione um arquivo</span>';
+            document.getElementById('knowledge-actions').style.display = 'none';
+        }
+        loadKnowledge();
     }
 }
 

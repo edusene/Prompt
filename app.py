@@ -265,6 +265,55 @@ FULL_SYSTEM_PROMPT = _BASE_PROMPT + (
     "Seja útil e objetivo ao lidar com mídias."
 )
 
+# ── Knowledge Tool (busca seletiva via function calling) ──────────────────────
+
+KNOWLEDGE_TOOL = types.Tool(
+    function_declarations=[
+        types.FunctionDeclaration(
+            name="search_knowledge",
+            description=(
+                "Busca informações na base de conhecimento da empresa. "
+                "Use quando o usuário perguntar sobre produtos, preços, serviços, "
+                "horários, políticas, ou qualquer informação que esteja na base. "
+                "Retorna o conteúdo do arquivo solicitado."
+            ),
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "filename": types.Schema(
+                        type=types.Type.STRING,
+                        description="Nome do arquivo knowledge a buscar (ex: 01-produtos.md)",
+                    ),
+                },
+                required=["filename"],
+            ),
+        ),
+    ]
+)
+
+
+def _build_knowledge_index() -> str:
+    """Monta o índice compacto de descrições para injetar no system prompt."""
+    descriptions = knowledge_rag.get_file_descriptions()
+    if not descriptions:
+        return ""
+    lines = []
+    for d in descriptions:
+        desc = (d.get("description") or "").strip()
+        if desc:
+            lines.append(f"- {d['filename']}: {desc}")
+        else:
+            lines.append(f"- {d['filename']}")
+    return "\n".join(lines)
+
+
+def _knowledge_tool_handler(filename: str) -> str:
+    """Handler da tool search_knowledge — retorna o conteúdo do arquivo."""
+    content = knowledge_rag.get_file_content(filename)
+    if not content:
+        return f"Arquivo '{filename}' não encontrado na base de conhecimento."
+    return content
+
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def split_reply(text: str) -> list[str]:
@@ -418,19 +467,23 @@ def handle_flush(user: str, items: list[dict]) -> None:
         text_only = "\n".join(it["text"] for it in items)
         memory.append_multimodal(user, "user", user_parts)
 
-        # RAG: busca contexto relevante no banco de knowledge
+        # Monta system prompt dinâmico com índice de knowledge
         dynamic_prompt = FULL_SYSTEM_PROMPT
-        try:
-            context = knowledge_rag.search_context(text_only, top_k=3)
-            if context:
-                dynamic_prompt += f"\n\nContexto relevante da empresa:\n{context}"
-        except Exception as e:
-            print(f"[flush] WARN rag search falhou: {e}")
+        knowledge_index = _build_knowledge_index()
+        if knowledge_index:
+            dynamic_prompt += (
+                "\n\nBase de conhecimento disponível (use a tool search_knowledge "
+                "para buscar o conteúdo quando o usuário precisar):\n"
+                + knowledge_index
+            )
 
+        # Chama LLM com tool de busca seletiva
         try:
             reply = llm.generate_reply(
                 history=memory.get(user),
                 system=dynamic_prompt,
+                tools=[KNOWLEDGE_TOOL],
+                tool_handlers={"search_knowledge": _knowledge_tool_handler},
             )
         except Exception as e:
             print(f"[flush] ERRO llm p/ {user}: {e}")
@@ -1593,6 +1646,13 @@ def api_knowledge_list():
     return jsonify(knowledge_rag.list_files())
 
 
+@app.get("/api/knowledge/descriptions")
+@login_required
+def api_knowledge_descriptions():
+    """Retorna índice de descrições (para o frontend e debug)."""
+    return jsonify(knowledge_rag.get_file_descriptions())
+
+
 @app.get("/api/knowledge/<filename>")
 @login_required
 def api_knowledge_get(filename):
@@ -1608,6 +1668,7 @@ def api_knowledge_create():
     data = request.get_json(silent=True) or {}
     filename = data.get("filename", "").strip()
     content = data.get("content", "")
+    description = data.get("description", "").strip()
     if not filename:
         return jsonify({"error": "filename obrigatorio"}), 400
     if not filename.endswith(('.md', '.txt')):
@@ -1615,7 +1676,7 @@ def api_knowledge_create():
     existing = knowledge_rag.get_file(filename)
     if existing:
         return jsonify({"error": "Arquivo ja existe"}), 409
-    knowledge_rag.save_knowledge(filename, content)
+    knowledge_rag.save_knowledge(filename, content, description=description)
     print(f"[knowledge] criado: {filename}")
     return jsonify({"ok": True, "filename": filename})
 
@@ -1625,7 +1686,8 @@ def api_knowledge_create():
 def api_knowledge_update(filename):
     data = request.get_json(silent=True) or {}
     content = data.get("content", "")
-    knowledge_rag.save_knowledge(filename, content)
+    description = data.get("description", "").strip()
+    knowledge_rag.save_knowledge(filename, content, description=description)
     print(f"[knowledge] salvo: {filename}")
     return jsonify({"ok": True})
 
