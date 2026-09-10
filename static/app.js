@@ -1787,7 +1787,10 @@ function closeModal() {
     if (!overlay) return;
     const modal = overlay.querySelector('.modal');
     if (modal) modal.style.animation = 'msgOut 0.18s ease forwards';
-    setTimeout(() => { overlay.style.display = 'none'; }, 140);
+    setTimeout(() => { 
+        overlay.style.display = 'none'; 
+        if (modal) modal.style.animation = '';
+    }, 140);
 }
 
 /* ── Lightbox de mídia (tela cheia) ─────────────────────────────────────── */
@@ -1940,7 +1943,7 @@ async function updateUnreadBadge() {
     const badge = document.getElementById('unread-badge');
     if (stats.unread_messages > 0) {
         badge.textContent = stats.unread_messages;
-        badge.style.display = 'inline';
+        badge.style.display = 'inline-flex';
     } else {
         badge.style.display = 'none';
     }

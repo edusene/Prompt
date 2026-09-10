@@ -341,9 +341,11 @@ h3 { font-size: 14px; font-weight: 600; }
     padding: 0 6px;
     border-radius: 10px;
     margin-left: auto;
-    display: flex;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
+    line-height: 1;
+    box-sizing: border-box;
     animation: pulse 2s ease-in-out infinite;
 }
 
@@ -670,12 +672,14 @@ h3 { font-size: 14px; font-weight: 600; }
 .bulk-dropdown {
     position: fixed;
     z-index: 1000;
-    background: var(--bg-secondary, #1e293b);
-    border: 1px solid rgba(255,255,255,0.08);
+    background: rgba(15, 23, 42, 0.97);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid rgba(255, 255, 255, 0.14);
     border-radius: 10px;
     padding: 4px;
     min-width: 140px;
-    box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+    box-shadow: 0 16px 40px rgba(0,0,0,0.6);
     animation: fadeIn 0.12s ease;
 }
 .bulk-dropdown-item {
@@ -783,10 +787,13 @@ h3 { font-size: 14px; font-weight: 600; }
     font-weight: 700;
     min-width: 20px;
     height: 20px;
+    padding: 0 6px;
     border-radius: 10px;
-    display: flex;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
+    line-height: 1;
+    box-sizing: border-box;
     flex-shrink: 0;
     animation: bounceIn 0.4s ease;
     box-shadow: 0 0 8px var(--accent-glow);
@@ -804,10 +811,12 @@ h3 { font-size: 14px; font-weight: 600; }
     z-index: 1000;
     min-width: 210px;
     padding: 8px 4px;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
+    background: rgba(15, 23, 42, 0.97);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid rgba(255, 255, 255, 0.14);
     border-radius: var(--radius-md);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6), 0 0 20px rgba(0, 0, 0, 0.4);
     user-select: none;
 }
 .ctx-menu-item {
@@ -1382,6 +1391,11 @@ h3 { font-size: 14px; font-weight: 600; }
     transition: border-color var(--transition-fast);
 }
 .select-sm:focus { border-color: var(--accent); }
+
+select option {
+    background-color: #0f172a;
+    color: #e2e8f0;
+}
 
 /* ── Modal ───────────────────────────────────────────────────────────────── */
 .modal-overlay {
