@@ -1007,9 +1007,14 @@ def api_instance_status():
     if problem:
         return jsonify({"status": "error", "error": problem})
 
-    cached = _get_cached_status()
-    if cached is not None:
-        return jsonify(cached)
+    # Modo "fresh": usado durante o pareamento (QR aberto). Ignora o cache de 15s
+    # e consulta a UAZAPI de verdade para refletir a conexão quase imediatamente.
+    # Chamadas normais (sem ?fresh=1) continuam usando o cache como antes.
+    fresh = request.args.get("fresh") == "1"
+    if not fresh:
+        cached = _get_cached_status()
+        if cached is not None:
+            return jsonify(cached)
 
     from uazapi import get_instance_status
     r = get_instance_status()

@@ -6,6 +6,7 @@ let selectedTags = [];
 let pollTimers = [];
 let lastWAStatus = '';
 let waStatusTimer = null;
+let waPairingActive = false;
 let lastSentBody = '';
 let _sseSource = null;
 
@@ -1636,7 +1637,7 @@ async function loadWAStatus(pushedStatus) {
     if (!el) return;
     // Se vier por push (SSE), atualiza direto sem recarregar o spinner e sem requisição
     const data = pushedStatus ? { status: pushedStatus }
-        : await api('/api/instance/status');
+        : await api((waPairingActive ? '/api/instance/status?fresh=1' : '/api/instance/status'));
     if (!data) {
         el.innerHTML = '<span class="wa-status-pill error"><span class="pulse-dot red"></span>Erro de conexão</span>';
         return;
@@ -1664,6 +1665,7 @@ async function loadWAStatus(pushedStatus) {
     lastWAStatus = status === 'desconhecido' ? '' : status;
     // Auto-fechar QR popup quando conectar (escaneou com sucesso)
     if (status === 'open') {
+        waPairingActive = false; // conexão concluída → volta ao ritmo normal de polling
         const qrEl = document.getElementById('qr-container');
         if (qrEl && qrEl.innerHTML.trim()) {
             closeQR();
@@ -1678,7 +1680,7 @@ async function loadWAStatus(pushedStatus) {
 function startWAStatusPolling() {
     if (waStatusTimer) { clearInterval(waStatusTimer); waStatusTimer = null; }
     if (document.hidden) return; // aba oculta → não gera requisições
-    const fast = (lastWAStatus === 'connecting' || lastWAStatus === 'qr');
+    const fast = (waPairingActive || lastWAStatus === 'connecting' || lastWAStatus === 'qr');
     waStatusTimer = setInterval(() => loadWAStatus(), fast ? 2000 : 60000);
 }
 
@@ -1720,6 +1722,12 @@ async function loadQRCode() {
                 </div>
                 <p class="muted" style="font-size:12px;margin:0">O código atualiza automaticamente a cada tentativa.</p>
             </div>`;
+        // QR mostrado → ativa o pareamento: polling rápido (2s) e consultas
+        // "fresh" para que a conexão apareça quase imediatamente após escanear.
+        waPairingActive = true;
+        lastWAStatus = 'qr';
+        loadWAStatus();
+        startWAStatusPolling();
     } else {
         container.innerHTML = `
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
@@ -2004,6 +2012,10 @@ function closeDiagnose() {
 
 function closeQR() {
     document.getElementById('qr-container').innerHTML = '';
+    // Pareamento terminado (usuário fechou ou conexão concluída) → volta ao ritmo
+    // normal de polling para não martelar a API UAZAPI.
+    waPairingActive = false;
+    startWAStatusPolling();
 }
 
 /* ── Init ─────────────────────────────────────────────────────────────────── */
