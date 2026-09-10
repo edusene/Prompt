@@ -31,6 +31,7 @@ import database
 import events
 import uazapi
 import knowledge_rag
+from google.genai import types
 from uazapi import send_text, send_presence, mark_read, chat_archive, chat_pin, chat_mute, chat_delete, download_media
 from buffer import MessageBuffer
 from auth import login_required, do_login, do_logout
