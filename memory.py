@@ -1,7 +1,7 @@
 """
 memory.py — Histórico de conversa por usuário em memória.
-Usa formato nativo do Gemini: {"role": "user"|"model", "parts": [{"text": "..."}]}
-Suporta parts multimodais (text + inline_data para imagens/áudio).
+Usa formato interno: {"role": "user"|"assistant", "parts": [{"text": "..."}]}
+Suporta parts multimodais (text + inline_data para imagens).
 """
 
 import threading
@@ -35,7 +35,7 @@ def _append_entry(user: str, entry: dict) -> None:
 
 
 def get(user: str) -> list[dict]:
-    """Retorna o histórico pronto para enviar ao Gemini."""
+    """Retorna o histórico pronto para enviar ao LLM."""
     with _lock:
         return list(_store.get(user, []))
 

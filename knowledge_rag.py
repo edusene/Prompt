@@ -1,40 +1,37 @@
 """
-knowledge_rag.py — Knowledge base via RAG no Supabase (pgvector + Google embeddings).
+knowledge_rag.py — Knowledge base via RAG no Supabase (pgvector + OpenAI embeddings).
 Chunking, embedding e busca semântica para injetar contexto no LLM.
 """
 
 import os
 import math
-from google import genai
-from google.genai import types
+from openai import OpenAI
 import database
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-004")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
 
-_client = genai.Client(api_key=GEMINI_API_KEY)
+_client = OpenAI(api_key=OPENAI_API_KEY)
 
 # ── Embeddings ───────────────────────────────────────────────────────────────
 
 
 def embed_text(text: str) -> list[float]:
-    """Gera embedding via Google text-embedding-004."""
-    result = _client.models.embed_content(
+    """Gera embedding via OpenAI text-embedding-3-small."""
+    result = _client.embeddings.create(
         model=EMBEDDING_MODEL,
-        contents=text,
-        config=types.EmbedContentConfig(task_type="RETRIEVAL_QUERY"),
+        input=text,
     )
-    return result.embeddings[0].values
+    return result.data[0].embedding
 
 
 def embed_batch(texts: list[str]) -> list[list[float]]:
     """Gera embeddings em lote (mais eficiente para indexação)."""
-    result = _client.models.embed_content(
+    result = _client.embeddings.create(
         model=EMBEDDING_MODEL,
-        contents=texts,
-        config=types.EmbedContentConfig(task_type="RETRIEVAL_DOCUMENT"),
+        input=texts,
     )
-    return [e.values for e in result.embeddings]
+    return [e.embedding for e in result.data]
 
 
 # ── Chunking ─────────────────────────────────────────────────────────────────

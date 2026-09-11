@@ -1,16 +1,64 @@
 """
-llm.py — Cliente Gemini via SDK novo unificado google-genai.
+llm.py — Cliente OpenAI para geração de respostas.
 Suporta function calling para busca seletiva de knowledge.
 """
 
 import os
-from google import genai
-from google.genai import types
+import json
+from openai import OpenAI
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
-_client = genai.Client(api_key=GEMINI_API_KEY)
+_client = OpenAI(api_key=OPENAI_API_KEY)
+
+
+def _convert_history(history: list[dict]) -> list[dict]:
+    """Converte histórico do formato interno para formato OpenAI.
+
+    Formato interno: {"role": "user"|"assistant", "parts": [{"text": "..."}, ...]}
+    Formato OpenAI:  {"role": "user"|"assistant", "content": "..." | [...]}
+    """
+    messages = []
+    for msg in history:
+        role = msg.get("role", "user")
+        parts = msg.get("parts", [])
+
+        # Verifica se tem conteúdo multimodal (inline_data / image_url)
+        has_media = any(
+            "inline_data" in p or "image_url" in p
+            for p in parts
+        )
+
+        if has_media:
+            # Formato multimodal OpenAI: content é uma lista
+            content_parts = []
+            for p in parts:
+                if "text" in p:
+                    content_parts.append({"type": "text", "text": p["text"]})
+                elif "image_url" in p:
+                    # Já está no formato OpenAI
+                    content_parts.append(p)
+                elif "inline_data" in p:
+                    mime = p["inline_data"].get("mime_type", "")
+                    data = p["inline_data"].get("data", "")
+                    # OpenAI só suporta imagens inline (não áudio/vídeo)
+                    if mime.startswith("image/"):
+                        content_parts.append({
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{mime};base64,{data}",
+                                "detail": "low",
+                            },
+                        })
+                    # Áudio/vídeo: já foi tratado como texto descritivo no builder
+            messages.append({"role": role, "content": content_parts})
+        else:
+            # Texto puro: concatena todos os parts de texto
+            text = "\n".join(p.get("text", "") for p in parts if "text" in p)
+            messages.append({"role": role, "content": text})
+
+    return messages
 
 
 def generate_reply(
@@ -19,79 +67,57 @@ def generate_reply(
     tools: list | None = None,
     tool_handlers: dict | None = None,
 ) -> str:
-    """Chama Gemini com suporte a function calling.
+    """Chama OpenAI com suporte a function calling.
 
-    Se Gemini pedir uma tool, executa localmente e retorna o resultado
+    Se o modelo pedir uma tool, executa localmente e retorna o resultado
     para gerar a resposta final.
     """
-    config = types.GenerateContentConfig(
-        system_instruction=system,
-        max_output_tokens=1024,
-        tools=tools,
-    )
+    messages = [{"role": "system", "content": system}]
+    messages.extend(_convert_history(history))
 
-    response = _client.models.generate_content(
-        model=GEMINI_MODEL,
-        contents=history,
-        config=config,
-    )
+    kwargs = {
+        "model": OPENAI_MODEL,
+        "messages": messages,
+        "max_tokens": 1024,
+    }
+    if tools:
+        kwargs["tools"] = tools
+        kwargs["tool_choice"] = "auto"
 
-    # Verifica se Gemini quer chamar alguma tool
-    if tools and tool_handlers and response.candidates:
-        parts = response.candidates[0].content.parts
-        has_function_call = any(hasattr(p, "function_call") and p.function_call for p in parts)
+    response = _client.chat.completions.create(**kwargs)
+    choice = response.choices[0]
 
-        if has_function_call:
-            # Adiciona a resposta do modelo (com as chamadas de tool) ao histórico
-            history.append({"role": "model", "parts": _parts_to_dict(parts)})
+    # Verifica se o modelo quer chamar alguma tool
+    if tools and tool_handlers and choice.finish_reason == "tool_calls" and choice.message.tool_calls:
+        # Adiciona a mensagem do assistente (com as chamadas de tool) ao histórico
+        messages.append(choice.message.model_dump())
 
-            # Processa cada function call
-            for part in parts:
-                if hasattr(part, "function_call") and part.function_call:
-                    fn_name = part.function_call.name
-                    fn_args = dict(part.function_call.args) if part.function_call.args else {}
+        for tool_call in choice.message.tool_calls:
+            fn_name = tool_call.function.name
+            fn_args = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
 
-                    if fn_name in tool_handlers:
-                        result = tool_handlers[fn_name](**fn_args)
-                    else:
-                        result = f"Função {fn_name} não encontrada"
+            if fn_name in tool_handlers:
+                result = tool_handlers[fn_name](**fn_args)
+            else:
+                result = f"Função {fn_name} não encontrada"
 
-                    print(f"[llm] tool_call={fn_name} args={fn_args} result_len={len(str(result))}")
+            print(f"[llm] tool_call={fn_name} args={fn_args} result_len={len(str(result))}")
 
-                    # Adiciona resultado da tool ao histórico
-                    history.append({
-                        "role": "user",
-                        "parts": [{
-                            "function_response": {
-                                "name": fn_name,
-                                "response": {"result": result},
-                            }
-                        }],
-                    })
+            # Adiciona resultado da tool ao histórico
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tool_call.id,
+                "content": str(result),
+            })
 
-            # Gera resposta final com o resultado da tool
-            response = _client.models.generate_content(
-                model=GEMINI_MODEL,
-                contents=history,
-                config=config,
-            )
+        # Gera resposta final com o resultado da tool
+        response = _client.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=messages,
+            max_tokens=1024,
+        )
+        choice = response.choices[0]
 
-    text = (response.text or "").strip()
+    text = (choice.message.content or "").strip()
     print(f"[llm] reply len={len(text)}")
     return text
-
-
-def _parts_to_dict(parts) -> list[dict]:
-    """Converte parts do Gemini para formato serializável no histórico."""
-    result = []
-    for p in parts:
-        if hasattr(p, "text") and p.text:
-            result.append({"text": p.text})
-        elif hasattr(p, "function_call") and p.function_call:
-            result.append({
-                "function_call": {
-                    "name": p.function_call.name,
-                    "args": dict(p.function_call.args) if p.function_call.args else {},
-                }
-            })
-    return result

@@ -1,5 +1,5 @@
 """
-app.py — Flask webhook + pipeline de flush do agente WhatsApp + Gemini.
+app.py — Flask webhook + pipeline de flush do agente WhatsApp + OpenAI.
 + Painel CRM com autenticação, SSE e API REST completa.
 """
 
@@ -31,7 +31,7 @@ import database
 import events
 import uazapi
 import knowledge_rag
-from google.genai import types
+
 from uazapi import send_text, send_presence, mark_read, chat_archive, chat_pin, chat_mute, chat_delete, download_media
 from buffer import MessageBuffer
 from auth import login_required, do_login, do_logout
@@ -268,29 +268,28 @@ FULL_SYSTEM_PROMPT = _BASE_PROMPT + (
 
 # ── Knowledge Tool (busca seletiva via function calling) ──────────────────────
 
-KNOWLEDGE_TOOL = types.Tool(
-    function_declarations=[
-        types.FunctionDeclaration(
-            name="search_knowledge",
-            description=(
-                "Busca informações na base de conhecimento da empresa. "
-                "Use quando o usuário perguntar sobre produtos, preços, serviços, "
-                "horários, políticas, ou qualquer informação que esteja na base. "
-                "Retorna o conteúdo do arquivo solicitado."
-            ),
-            parameters=types.Schema(
-                type=types.Type.OBJECT,
-                properties={
-                    "filename": types.Schema(
-                        type=types.Type.STRING,
-                        description="Nome do arquivo knowledge a buscar (ex: 01-produtos.md)",
-                    ),
-                },
-                required=["filename"],
-            ),
+KNOWLEDGE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "search_knowledge",
+        "description": (
+            "Busca informações na base de conhecimento da empresa. "
+            "Use quando o usuário perguntar sobre produtos, preços, serviços, "
+            "horários, políticas, ou qualquer informação que esteja na base. "
+            "Retorna o conteúdo do arquivo solicitado."
         ),
-    ]
-)
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "filename": {
+                    "type": "string",
+                    "description": "Nome do arquivo knowledge a buscar (ex: 01-produtos.md)",
+                },
+            },
+            "required": ["filename"],
+        },
+    },
+}
 
 
 def _build_knowledge_index() -> str:
@@ -349,13 +348,9 @@ def split_reply(text: str) -> list[str]:
 
 # ── Multimodal parts builder ─────────────────────────────────────────────────
 
-_GEMINI_MIME_MAP = {
-    "image/jpeg": "image/jpeg", "image/png": "image/png", "image/webp": "image/webp",
-    "image/gif": "image/gif",
-    "audio/ogg": "audio/ogg", "audio/mpeg": "audio/mpeg", "audio/mp4": "audio/mp4",
-    "audio/wav": "audio/wav",
-    "video/mp4": "video/mp4", "video/webm": "video/webm",
-    "application/pdf": "application/pdf",
+# OpenAI Vision só suporta imagens inline (não áudio/vídeo/PDF)
+_OPENAI_SUPPORTED_IMAGES = {
+    "image/jpeg", "image/png", "image/webp", "image/gif",
 }
 
 
@@ -371,7 +366,9 @@ def _build_user_parts(items: list[dict]) -> list[dict]:
     """Monta parts multimodais para o turno do usuário.
 
     Para cada item, busca a mensagem no banco por msg_id.
-    Se tiver media_url (data-URI ou URL), inclui como inline_data.
+    Se tiver media_url (data-URI ou URL) de imagem, inclui como inline_data.
+    Áudio/vídeo/documentos são tratados apenas como texto descritivo
+    (OpenAI Vision só suporta imagens).
     Sempre inclui o texto (mesmo que placeholder como "[Imagem]").
     """
     import re as _re
@@ -407,28 +404,31 @@ def _build_user_parts(items: list[dict]) -> list[dict]:
                     except Exception as e:
                         print(f"[flush] WARN download media falhou msg={msg_id}: {e}")
 
-                if mime and b64:
-                    # Descrição para o modelo entender o contexto
-                    media_desc = {
-                        "image": "O cliente enviou uma imagem.",
-                        "video": "O cliente enviou um vídeo.",
-                        "audio": "O cliente enviou um áudio.",
-                        "ptt": "O cliente enviou um áudio (mensagem de voz).",
-                        "sticker": "O cliente enviou uma figurinha.",
-                        "document": "O cliente enviou um documento.",
-                    }.get(msg_type, f"O cliente enviou mídia ({msg_type}).")
+                # Descrição para o modelo entender o contexto
+                media_desc = {
+                    "image": "O cliente enviou uma imagem.",
+                    "video": "O cliente enviou um vídeo.",
+                    "audio": "O cliente enviou um áudio.",
+                    "ptt": "O cliente enviou um áudio (mensagem de voz).",
+                    "sticker": "O cliente enviou uma figurinha.",
+                    "document": "O cliente enviou um documento.",
+                }.get(msg_type, f"O cliente enviou mídia ({msg_type}).")
 
-                    if text and not text.startswith("["):
-                        media_desc += f" Legenda: {text}"
+                if text and not text.startswith("["):
+                    media_desc += f" Legenda: {text}"
 
-                    parts.append({"text": media_desc})
+                parts.append({"text": media_desc})
+
+                # Só inclui dados binários inline se for imagem suportada
+                if mime and b64 and mime in _OPENAI_SUPPORTED_IMAGES:
                     parts.append({
                         "inline_data": {
                             "mime_type": mime,
                             "data": b64,
                         }
                     })
-                    continue  # Já adicionou texto + mídia, não precisa adicionar texto de novo
+
+                continue  # Já adicionou texto + mídia, não precisa adicionar texto de novo
 
         # Texto puro (sem mídia ou mídia não encontrada)
         if text:
@@ -490,7 +490,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
             print(f"[flush] ERRO llm p/ {user}: {e}")
             send_presence(user, "paused")
             return
-        memory.append(user, "model", reply)
+        memory.append(user, "assistant", reply)
         print(f"[flush] user={user} reply_len={len(reply)}")
 
         chunks = split_reply(reply)
