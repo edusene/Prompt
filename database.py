@@ -51,6 +51,20 @@ def init_db() -> None:
 
     _ensure_indexes()
 
+    # Migration: renomear uazapi_id -> wa_message_id (Supabase/PostgreSQL)
+    cols = db.table_columns("messages")
+    if "uazapi_id" in cols and "wa_message_id" not in cols:
+        try:
+            db.execute("DROP INDEX IF EXISTS idx_messages_uazapi")
+        except Exception:
+            pass
+        db.execute("ALTER TABLE messages RENAME COLUMN uazapi_id TO wa_message_id")
+        try:
+            db.execute("CREATE INDEX IF NOT EXISTS idx_messages_wa_msg ON messages(wa_message_id)")
+        except Exception:
+            pass
+        print("[db] migration: uazapi_id -> wa_message_id concluida")
+
 
 # ═══ Settings (key-value global) ═════════════════════════════════════════════
 
@@ -71,7 +85,7 @@ def set_setting(key: str, value: str) -> None:
 def _ensure_indexes() -> None:
     """Crea índices faltantes que aceleran las consultas más usadas (idempotente).
 
-    La mayoría ya los crea el SCHEMA (messages.conversation_id/created_at/uazapi_id,
+    La mayoría ya los crea el SCHEMA (messages.conversation_id/created_at/wa_message_id,
     conversations.contact_id/status). Aquí solo añadimos el orden por pinned de la
     lista de conversas, sin duplicar ni alterar las consultas existentes.
     """
@@ -153,7 +167,7 @@ CREATE TABLE IF NOT EXISTS messages (
     id SERIAL PRIMARY KEY,
     conversation_id INTEGER NOT NULL REFERENCES conversations(id),
     phone TEXT NOT NULL,
-    uazapi_id TEXT UNIQUE,
+    wa_message_id TEXT UNIQUE,
     direction TEXT NOT NULL,
     sender TEXT DEFAULT '',
     body TEXT DEFAULT '',
@@ -207,7 +221,7 @@ CREATE TABLE IF NOT EXISTS settings (
 
 CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
-CREATE INDEX IF NOT EXISTS idx_messages_uazapi ON messages(uazapi_id);
+CREATE INDEX IF NOT EXISTS idx_messages_wa_msg ON messages(wa_message_id);
 CREATE INDEX IF NOT EXISTS idx_conversations_contact ON conversations(contact_id);
 CREATE INDEX IF NOT EXISTS idx_conversations_status ON conversations(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_contact ON tasks(contact_id);
@@ -430,23 +444,23 @@ def save_message(
     sender: str = "",
     msg_type: str = "text",
     media_url: str = "",
-    uazapi_id: str = "",
+    wa_message_id: str = "",
     status: str = "sent",
 ) -> dict | None:
-    """Salva mensagem com idempotência via uazapi_id. Retorna a mensagem ou None se duplicata."""
-    uazapi_id_clean = uazapi_id if uazapi_id else None
-    if uazapi_id_clean:
-        existing = db.fetch_one("SELECT id FROM messages WHERE uazapi_id=?", (uazapi_id_clean,))
+    """Salva mensagem com idempotencia via wa_message_id. Retorna a mensagem ou None se duplicata."""
+    wa_msg_clean = wa_message_id if wa_message_id else None
+    if wa_msg_clean:
+        existing = db.fetch_one("SELECT id FROM messages WHERE wa_message_id=?", (wa_msg_clean,))
         if existing:
             return None
 
     now = datetime.utcnow().isoformat()
     msg_id = db.execute_returning(
-        "INSERT INTO messages (conversation_id, phone, uazapi_id, direction, sender, body, msg_type, media_url, status, created_at) "
+        "INSERT INTO messages (conversation_id, phone, wa_message_id, direction, sender, body, msg_type, media_url, status, created_at) "
         "VALUES (?,?,?,?,?,?,?,?,?,?)",
-        (conversation_id, phone, uazapi_id_clean, direction, sender, body, msg_type, media_url, status, now),
+        (conversation_id, phone, wa_msg_clean, direction, sender, body, msg_type, media_url, status, now),
     )
-    print(f"[db] save_message: msg_id={msg_id} uazapi_id_clean={uazapi_id_clean} direction={direction}")
+    print(f"[db] save_message: msg_id={msg_id} wa_msg_clean={wa_msg_clean} direction={direction}")
     if msg_id:
         return db.fetch_one("SELECT * FROM messages WHERE id=?", (msg_id,))
     print(f"[db] save_message: FALHA - msg_id is None!")
@@ -468,21 +482,21 @@ def get_message(msg_id: int) -> dict | None:
     return db.fetch_one("SELECT * FROM messages WHERE id=?", (msg_id,))
 
 
-def link_or_save_outgoing(conversation_id: int, phone: str, body: str, uazapi_id: str | None,
+def link_or_save_outgoing(conversation_id: int, phone: str, body: str, wa_message_id: str | None,
                           sender: str = "human", msg_type: str = "text") -> dict | None:
-    """Linka ou cria mensagem de saída com proteção contra duplicidade.
+    """Linka ou cria mensagem de saida com protecao contra duplicidade.
     Prioridade:
-      (1) uazapi_id exato já existe → retorna (dedup entre formatos API/webhook).
-      (2) msg recente (30s) mesma conversa+body → linka o uazapi_id.
-      (3) Nada encontrado → insere nova via save_message."""
-    print(f"[db] link_or_save: conv={conversation_id} phone={phone} uazapi_id={uazapi_id} body_len={len(body)}")
+      (1) wa_message_id exato ja existe -> retorna (dedup entre formatos API/webhook).
+      (2) msg recente (30s) mesma conversa+body -> linka o wa_message_id.
+      (3) Nada encontrado -> insere nova via save_message."""
+    print(f"[db] link_or_save: conv={conversation_id} phone={phone} wa_message_id={wa_message_id} body_len={len(body)}")
 
-    if uazapi_id:
+    if wa_message_id:
         existing_exact = db.fetch_one(
-            "SELECT id FROM messages WHERE uazapi_id=?", (uazapi_id,),
+            "SELECT id FROM messages WHERE wa_message_id=?", (wa_message_id,),
         )
         if existing_exact:
-            print(f"[db] link_or_save: uazapi_id exato ja existe msg_id={existing_exact['id']}")
+            print(f"[db] link_or_save: wa_message_id exato ja existe msg_id={existing_exact['id']}")
             return db.fetch_one("SELECT * FROM messages WHERE id=?", (existing_exact["id"],))
 
         existing_recent = db.fetch_one(
@@ -491,14 +505,14 @@ def link_or_save_outgoing(conversation_id: int, phone: str, body: str, uazapi_id
             (conversation_id, body),
         )
         if existing_recent:
-            print(f"[db] link_or_save: linkando msg id={existing_recent['id']} com uazapi_id={uazapi_id}")
-            db.execute("UPDATE messages SET uazapi_id=? WHERE id=?", (uazapi_id, existing_recent["id"]))
+            print(f"[db] link_or_save: linkando msg id={existing_recent['id']} com wa_message_id={wa_message_id}")
+            db.execute("UPDATE messages SET wa_message_id=? WHERE id=?", (wa_message_id, existing_recent["id"]))
             return db.fetch_one("SELECT * FROM messages WHERE id=?", (existing_recent["id"],))
 
     print(f"[db] link_or_save: nenhuma msg anterior, chamando save_message")
     result = save_message(
         conversation_id=conversation_id, phone=phone, direction="out",
-        body=body, sender=sender, msg_type=msg_type, uazapi_id=uazapi_id or "",
+        body=body, sender=sender, msg_type=msg_type, wa_message_id=wa_message_id or "",
     )
     print(f"[db] link_or_save: save_message retornou id={result['id'] if result else None}")
     return result

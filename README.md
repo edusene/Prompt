@@ -1,10 +1,32 @@
-# WhatsApp AI Agent + CRM Panel — Flask + UAZAPI + Gemini
+# WhatsApp AI Agent + CRM Panel — Meta Cloud API + OpenAI
 
-Agente de IA no WhatsApp com painel CRM completo. Usa a [UAZAPI](https://www.uazapi.com) como gateway e Google Gemini 2.5 Flash como LLM. Mensagens são agrupadas via debounce e respostas chegam divididas em múltiplas mensagens.
+Agente de IA no WhatsApp com painel CRM completo. Usa a [WhatsApp Business Cloud API](https://developers.facebook.com/docs/whatsapp/cloud-api/overview) da Meta como gateway e OpenAI como LLM. Mensagens sao agrupadas via debounce e respostas chegam divididas em multiplas mensagens.
 
 ---
 
-## 1. Instalação
+## 1. Pre-requisitos
+
+- **Conta Meta Business** com WhatsApp Business Account (WABA)
+- **App no [developers.facebook.com](https://developers.facebook.com)** com permissoes:
+  - `whatsapp_business_messaging` (envio/recebimento de mensagens)
+  - `whatsapp_business_management` (gestao de templates, numeros)
+- **Phone Number ID** do numero conectado
+- **System User Access Token** permanente (nao o token de desenvolvimento temporario)
+- **WABA ID** (WhatsApp Business Account ID)
+- Python 3.11+
+
+### Como obter os valores
+
+| Valor | Onde encontrar |
+|---|---|
+| `META_ACCESS_TOKEN` | App Dashboard > WhatsApp > API Setup > System User Access Token |
+| `META_PHONE_NUMBER_ID` | WhatsApp Manager > Phone Numbers > clique no numero |
+| `META_WABA_ID` | WhatsApp Manager > Account Settings > WABA ID |
+| `WEBHOOK_VERIFY_TOKEN` | Qualquer string secreta voce escolher |
+
+---
+
+## 2. Instalacao
 
 ```bash
 pip install -r requirements.txt
@@ -12,7 +34,7 @@ pip install -r requirements.txt
 
 ---
 
-## 2. Configuração
+## 3. Configuracao
 
 ```bash
 cp .env.example .env
@@ -20,26 +42,23 @@ cp .env.example .env
 
 Edite `.env` e preencha:
 
-| Variável | Descrição |
+| Variavel | Descricao |
 |---|---|
-| `UAZAPI_BASE_URL` | URL do seu servidor UAZAPI |
-| `UAZAPI_INSTANCE_TOKEN` | Token da instância |
-| `WEBHOOK_URL` | URL pública do seu servidor (ngrok/localtunnel) — ex: `https://abc-123.ngrok-free.app/webhook` |
-| `GEMINI_API_KEY` | API Key do Google AI Studio — obtenha **grátis** em https://aistudio.google.com/apikey |
-| `GEMINI_MODEL` | Modelo Gemini (padrão: `gemini-2.5-flash`) |
-| `BUFFER_SECONDS` | Segundos de debounce (padrão: `8`) |
-| `MAX_HISTORY` | Máximo de mensagens no histórico (padrão: `20`) |
-| `SYSTEM_PROMPT` | Instrução de sistema base para o LLM |
-| `SYSTEM_PROMPT_DIR` | Pasta com arquivos .md/.txt de conhecimento (padrão: `knowledge`) |
-| `PORT` | Porta do Flask (padrão: `5000`) |
-| `DB_PATH` | Caminho do SQLite (padrão: `whatsapp.db`) |
-| `ADMIN_USER` | Usuário do painel (padrão: `admin`) |
-| `ADMIN_PASSWORD` | Senha do painel |
-| `SECRET_KEY` | Chave secreta para sessões Flask |
+| `META_ACCESS_TOKEN` | System User Access Token (permanente) |
+| `META_PHONE_NUMBER_ID` | ID do numero de telefone business |
+| `META_WABA_ID` | WhatsApp Business Account ID |
+| `META_API_VERSION` | Versao do Graph API (padrao: `v21.0`) |
+| `WEBHOOK_VERIFY_TOKEN` | Token secreto para verificacao do webhook |
+| `OPENAI_API_KEY` | Chave da OpenAI |
+| `OPENAI_MODEL` | Modelo OpenAI (padrao: `gpt-4o-mini`) |
+| `BUFFER_SECONDS` | Segundos de debounce (padrao: `8`) |
+| `MAX_HISTORY` | Maximo de mensagens no historico (padrao: `20`) |
+| `SYSTEM_PROMPT` | Instrucao de sistema para o LLM |
+| `PORT` | Porta do Flask (padrao: `5000`) |
 
 ---
 
-## 3. Rodando
+## 4. Rodando
 
 ```bash
 python app.py
@@ -47,7 +66,7 @@ python app.py
 
 ---
 
-## 4. Expondo na internet
+## 5. Expondo na internet
 
 ```bash
 ngrok http 5000
@@ -55,148 +74,174 @@ ngrok http 5000
 
 ---
 
-## 5. Configurando webhook na UAZAPI
+## 6. Configurando webhook no Meta
+
+### Opcao 1: Via App Dashboard (recomendado)
+
+1. Acesse [developers.facebook.com](https://developers.facebook.com)
+2. Va em **App Dashboard > WhatsApp > Configuration**
+3. Em **Webhook**, clique em **Edit**
+4. Preencha:
+   - **Callback URL**: `https://SEU-NGROK.ngrok-free.app/webhook`
+   - **Verify Token**: o mesmo valor de `WEBHOOK_VERIFY_TOKEN` no `.env`
+5. Clique em **Verify and save**
+6. Em **Webhook fields**, assine ao campo **messages**
+
+### Opcao 2: Verificar manualmente
 
 ```bash
-curl -X PUT "$UAZAPI_BASE_URL/webhook" \
-  -H "token: $UAZAPI_INSTANCE_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d "{\"webhookUrl\": \"$WEBHOOK_URL\", \"events\": [\"message\"]}"
+# Testar se o webhook responde ao challenge
+curl "https://SEU-NGROK.ngrok-free.app/webhook?hub.mode=subscribe&hub.verify_token=SEU_TOKEN&hub.challenge=12345"
+# Deve retornar: 12345
 ```
-
-**Ou manualmente** — substitua os valores do `.env`:
-```bash
-curl -X PUT https://SEU-DOMINIO.uazapi.com/webhook \
-  -H "token: SEU_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"webhookUrl": "https://SEU-NGROK.ngrok-free.app/webhook", "events": ["message"]}'
-```
-
----
-
-## 6. Deploy no Render
-
-### Variáveis de ambiente (Environment Variables)
-No painel do Render, adicione todas as variáveis do `.env`:
-
-| Variável | Valor |
-|---|---|
-| `UAZAPI_BASE_URL` | `https://free.uazapi.com` (ou seu domínio) |
-| `UAZAPI_INSTANCE_TOKEN` | Token da instância |
-| `WEBHOOK_URL` | `https://SEU-APP.onrender.com/webhook` |
-| `GEMINI_API_KEY` | Sua chave do Gemini |
-| `GEMINI_MODEL` | `gemini-2.5-flash` |
-| `SYSTEM_PROMPT` | Instrução base do agente |
-| `SYSTEM_PROMPT_DIR` | `knowledge` |
-| `PORT` | `5000` |
-| `ADMIN_USER` | `admin` |
-| `ADMIN_PASSWORD` | Senha do painel |
-| `SECRET_KEY` | Chave aleatória longa |
-
-### Build & Start
-- **Build Command:** `pip install -r requirements.txt`
-- **Start Command:** `python app.py`
 
 ### Importante
-- O webhook é configurado **automaticamente** quando o app inicia (se `WEBHOOK_URL` estiver definido).
-- O banco SQLite é recriado a cada deploy (disco efémero). Para persistência, use PostgreSQL.
-- A pasta `knowledge/` precisa ser commitada no Git.
+
+- O webhook precisa de HTTPS com certificado valido
+- Assine ao campo **messages** no painel
+- O app deve estar em **Live mode** (nao Dev mode) para receber webhooks reais
+- Meta retries por ate 7 dias se seu endpoint retornar erro
 
 ---
 
 ## 7. Painel CRM
 
-Acesse `http://localhost:5000/panel` e faça login com as credenciais do `.env`.
+Acesse `http://localhost:5000/panel` e faca login com as credenciais do `.env`.
 
 ### Funcionalidades
 
-| Feature | Descrição |
+| Feature | Descricao |
 |---|---|
-| **Dashboard** | Métricas: contatos, conversas abertas, mensagens |
+| **Dashboard** | Metricas: contatos, conversas abertas, mensagens |
 | **Atendimento** | Chat 3 colunas: lista, mensagens, info do cliente |
 | **Auto/Humano** | Toggle por conversa — agente responde ou operador assume |
 | **Contatos** | CRUD completo com notas, empresa, email |
 | **Tags** | Organize conversas e contatos com etiquetas coloridas |
-| **Templates** | Mensagens rápidas pré-definidas |
-| **WhatsApp** | Status, QR code, reconexão |
-| **SSE** | Atualização em tempo real via Server-Sent Events |
+| **Templates** | Mensagens rapidas pre-definidas |
+| **WhatsApp** | Status do numero, templates, business profile |
+| **SSE** | Atualizacao em tempo real via Server-Sent Events |
 
-### Layout
+---
 
+## 8. API do WhatsApp (rotas novas)
+
+| Rota | Metodo | Descricao |
+|---|---|---|
+| `/api/whatsapp/status` | GET | Status do numero (quality rating, display name) |
+| `/api/whatsapp/templates` | GET | Lista templates aprovados na WABA |
+| `/api/whatsapp/templates/<id>` | GET | Detalhe de um template |
+| `/api/whatsapp/templates/<name>` | DELETE | Deleta um template |
+| `/api/whatsapp/profile` | GET | Business profile do numero |
+| `/api/whatsapp/profile` | POST | Atualiza business profile |
+| `/api/whatsapp/send-template` | POST | Envia template message |
+| `/api/whatsapp/send-interactive` | POST | Envia mensagem interativa (botoes/lista) |
+| `/api/whatsapp/upload-media` | POST | Upload de midia para o servidor Meta |
+
+### Exemplo: enviar template
+
+```bash
+curl -X POST http://localhost:5000/api/whatsapp/send-template \
+  -H "Content-Type: application/json" \
+  -d '{
+    "phone": "5511999999999",
+    "template_name": "hello_world",
+    "language": "pt_BR"
+  }'
 ```
-┌──────┬───────────────┬──────────────┬────────────────┐
-│      │  CONVERSAS    │  MENSAGENS   │  INFO CLIENTE   │
-│  S   │  [busca]      │              │  Nome           │
-│  I   │  [filtros]    │  ┌────────┐  │  Telefone       │
-│  D   │               │  │ msg... │  │  Tags           │
-│  E   │  João         │  │ msg... │  │  [Auto|Humano]  │
-│  B   │  Maria  ●2    │  └────────┘  │                 │
-│  A   │               │  [____] [▶]  │                 │
-└──────┴───────────────┴──────────────┴────────────────┘
+
+### Exemplo: enviar botoes interativos
+
+```bash
+curl -X POST http://localhost:5000/api/whatsapp/send-interactive \
+  -H "Content-Type: application/json" \
+  -d '{
+    "phone": "5511999999999",
+    "type": "button",
+    "body": "Escolha uma opcao:",
+    "buttons": [
+      {"type": "reply", "reply": {"id": "op1", "title": "Opcao 1"}},
+      {"type": "reply", "reply": {"id": "op2", "title": "Opcao 2"}}
+    ]
+  }'
 ```
 
 ---
 
-## 7. Adicionando tools (function calling) no futuro
+## 9. Features da Meta Cloud API
 
-O `llm.py` já está preparado. O parâmetro `tools` existe e é passado direto ao Gemini:
+### Mensagens de texto
+Servico: envio de texto simples durante a janela de 24h do servico.
 
-```python
-# llm.py — hoje
-generate_reply(history, system, tools=None)
+### Templates
+Mensagens aprovadas pela Meta para envio fora da janela de 24h. Criadas no WhatsApp Manager > Message Templates.
 
-# Amanhã: passe uma lista de Tools do Gemini
-from google.genai import types
-
-my_tools = [types.Tool(function_declarations=[
-    types.FunctionDeclaration(
-        name="buscar_pedido",
-        description="Busca status de um pedido pelo ID",
-        parameters=types.Schema(
-            type="OBJECT",
-            properties={"pedido_id": types.Schema(type="STRING")},
-            required=["pedido_id"],
-        ),
-    )
-])]
-
-reply = generate_reply(history, system, tools=my_tools)
-```
-
----
-
-## 8. Expandindo features
-
-Consulte `LLMs-uazapi.txt` para endpoints disponíveis:
-
-| Feature | Endpoint |
+| Categoria | Uso |
 |---|---|
-| Conectar instância / QR Code | `POST /instance/connect` |
-| Status da instância | `GET /instance/status` |
-| Enviar imagem | `POST /send/image` |
-| Enviar áudio | `POST /send/audio` |
-| Botões interativos | `POST /send/menu` |
-| Suporte a grupos | Filtrar `isGroup=true` |
-| Campanhas em massa | `POST /campaign/simple` |
+| `MARKETING` | Promocoes, anuncios |
+| `UTILITY` | Atualizacoes de pedido, confirmacoes |
+| `AUTHENTICATION` | OTP/2FA |
+
+### Midia
+Upload e envio de imagens, videos, audios e documentos. Limites:
+- Imagem: 5 MB (JPEG, PNG)
+- Video: 16 MB (MP4, 3GPP)
+- Audio: 16 MB (AAC, AMR, MP3, OGG/Opus)
+- Documento: 100 MB (PDF, DOCX, XLSX, etc.)
+
+### Mensagens interativas
+- **Botoes**: ate 3 botoes de resposta rapida
+- **Lista**: ate 10 secoes com ate 10 rows cada
+
+### Indicadores
+- Typing indicator: exibido por 25 segundos ou ate responder
+- Read receipts: marcacao automatica de leitura
+
+### Webhooks
+Meta envia webhooks para notificacoes:
+- `messages`: mensagens recebidas e status de envio
+- Outros campos disponiveis para assinatura
 
 ---
 
-## Estrutura de arquivos
+## 10. Deploy no Render
+
+### Variaveis de ambiente
+
+| Variavel | Valor |
+|---|---|
+| `META_ACCESS_TOKEN` | System User Access Token |
+| `META_PHONE_NUMBER_ID` | Phone Number ID |
+| `META_WABA_ID` | WABA ID |
+| `META_API_VERSION` | `v21.0` |
+| `WEBHOOK_VERIFY_TOKEN` | Token secreto |
+| `OPENAI_API_KEY` | Chave OpenAI |
+| `OPENAI_MODEL` | `gpt-4o-mini` |
+| `SYSTEM_PROMPT` | Instrucao base do agente |
+| `PORT` | `5000` |
+| `ADMIN_USER` | `admin` |
+| `ADMIN_PASSWORD` | Senha do painel |
+| `SECRET_KEY` | Chave aleatoria longa |
+
+### Build & Start
+- **Build Command:** `pip install -r requirements.txt`
+- **Start Command:** `python app.py`
+
+---
+
+## 11. Estrutura de arquivos
 
 ```
 ├── app.py            # Flask + webhook + rotas API + SSE
-├── database.py       # SQLite + CRUD completo
-├── auth.py           # Login/logout com sessão Flask
+├── database.py       # ORM + CRUD completo (Supabase/PostgreSQL)
+├── db.py             # Camada de abstracao de banco
+├── auth.py           # Login/logout com sessao Flask
 ├── events.py         # SSE pub/sub thread-safe
-├── uazapi.py         # Cliente UAZAPI (MVP + endpoints extras)
-├── llm.py            # Cliente Gemini
-├── buffer.py         # Debounce buffer por usuário
-├── memory.py         # Histórico in-memory para o agente
-├── knowledge/        # Memória do agente (empresa, produtos, FAQ)
-│   ├── 00-empresa.md
-│   ├── 01-produtos.md
-│   ├── 02-valores.md
-│   └── 03-faq.md
+├── meta.py           # Cliente Meta WhatsApp Cloud API
+├── llm.py            # Cliente OpenAI
+├── buffer.py         # Debounce buffer por usuario
+├── memory.py         # Historico in-memory para o agente
+├── knowledge_rag.py  # RAG com embeddings
+├── knowledge/        # Memoria do agente
 ├── requirements.txt
 ├── .env.example
 ├── templates/

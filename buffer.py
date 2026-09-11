@@ -1,6 +1,6 @@
 """
-buffer.py — Debounce buffer por usuário.
-Cada mensagem nova reseta o timer; flush só ocorre após BUFFER_SECONDS de silêncio.
+buffer.py — Debounce buffer por usuario.
+Cada mensagem nova reseta o timer; flush so ocorre apos BUFFER_SECONDS de silencio.
 """
 
 import threading
@@ -12,15 +12,19 @@ class MessageBuffer:
         self._wait = wait_seconds
         self._on_flush = on_flush
         self._lock = threading.Lock()
-        # {user: {"items": [{"text": ..., "msg_id": ...}], "timer": Timer | None}}
+        # {user: {"items": [{"text": ..., "msg_id": ..., "wa_message_id": ..., "wa_media_id": ...}], "timer": Timer | None}}
         self._state: dict[str, dict] = {}
 
-    def add(self, user: str, text: str, msg_id: int | None = None) -> None:
+    def add(self, user: str, text: str, msg_id: int | None = None,
+            wa_message_id: str = "", wa_media_id: str = "") -> None:
         with self._lock:
             if user not in self._state:
                 self._state[user] = {"items": [], "timer": None}
 
-            self._state[user]["items"].append({"text": text, "msg_id": msg_id})
+            self._state[user]["items"].append({
+                "text": text, "msg_id": msg_id,
+                "wa_message_id": wa_message_id, "wa_media_id": wa_media_id,
+            })
 
             # Cancela timer anterior e cria novo (debounce)
             timer = self._state[user]["timer"]

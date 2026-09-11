@@ -1,6 +1,7 @@
 """
 app.py — Flask webhook + pipeline de flush do agente WhatsApp + OpenAI.
 + Painel CRM com autenticação, SSE e API REST completa.
+Migrado para Meta WhatsApp Cloud API.
 """
 
 import os
@@ -11,12 +12,9 @@ import threading
 
 from dotenv import load_dotenv
 
-# override=True: o .env do projeto vence placeholders/eventuais variáveis globais
-# (ex.: UAZAPI_BASE_URL=https://seudominio.uazapi.com definida no Windows).
 load_dotenv(override=True)
 
-# Windows: o stdout pode estar em cp1252/charmap; emoji do WhatsApp nos logs
-# (prints de payload) lançaria UnicodeEncodeError e quebraria o pipeline.
+# Windows: stdout pode estar em cp1252
 for _s in (sys.stdout, sys.stderr):
     try:
         _s.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
@@ -29,254 +27,47 @@ import memory
 import llm
 import database
 import events
-import uazapi
-import knowledge_rag
+import meta
 
-from uazapi import send_text, send_presence, mark_read, chat_archive, chat_pin, chat_mute, chat_delete, download_media
+from meta import send_text, mark_read, send_typing, get_media_url, download_media_bytes
+from meta import get_phone_info, list_templates, get_template, delete_template
+from meta import get_business_profile, update_business_profile
 from buffer import MessageBuffer
 from auth import login_required, do_login, do_logout
-
-# Tipos de mensagem que cargamos media desde UAZAPI para mostrar en el panel.
-# "media" = tipo genérico que algumas instâncias v3 enviam para qualquer mídia;
-# nesses casos o tipo concreto (image/video/audio/...) é resolvido pelo mimeType.
-MEDIA_TYPES = {"image", "video", "audio", "ptt", "document", "sticker", "gif", "media"}
-
-_MEDIA_TYPE_MAP = {
-    "image": "image", "imagem": "image", "imagemessage": "image", "photo": "image",
-    "video": "video", "videomessage": "video",
-    "audio": "audio", "audiomessage": "audio", "ptt": "ptt", "voice": "ptt",
-    "sticker": "sticker", "stickermessage": "sticker", "figura": "sticker",
-    "document": "document", "documentmessage": "document", "file": "document",
-    "gif": "gif", "mediamessage": "media",
-}
-
-
-def _norm_msg_type(raw) -> str:
-    """Normaliza o tipo vindo da UAZAPI para um dos MEDIA_TYPES."""
-    t = str(raw or "").strip().lower()
-    return _MEDIA_TYPE_MAP.get(t, t)
-
-
-def _mime_to_kind(mime: str) -> str:
-    """Converte um mimeType em tipo concreto de mídia."""
-    mime = str(mime or "").lower()
-    if mime.startswith("image/"):
-        return "sticker" if "sticker" in mime else "image"
-    if mime.startswith("video/"):
-        return "video"
-    if mime.startswith("audio/"):
-        return "ptt" if "ogg" in mime or "opus" in mime else "audio"
-    if mime:
-        return "document"
-    return ""
-
-
-def _resolve_msg_type(msg: dict, msg_type) -> str:
-    """Resolve o tipo concreto da mensagem.
-
-    Instâncias v3 às vezes enviam só "media" (genérico). Nesse caso deduzimos
-    pelo mimeType ou pelas chaves do payload aninhado (imageMessage etc.),
-    para que a mídia seja baixada e renderizada no painel.
-    """
-    t = _norm_msg_type(msg_type)
-    if t and t not in ("media", "unknown"):
-        return t
-    media = msg.get("media") if isinstance(msg.get("media"), dict) else {}
-    mime = str(
-        media.get("mimeType")
-        or msg.get("mimeType") or msg.get("Mimetype") or msg.get("MIMEType")
-        or (msg.get("message", {}).get("mimeType") if isinstance(msg.get("message"), dict) else "")
-        or ""
-    )
-    kind = _mime_to_kind(mime)
-    if kind:
-        return kind
-    # Chaves típicas do payload aninhado do Baileys/v3.
-    nested = msg.get("message") if isinstance(msg.get("message"), dict) else {}
-    for key in ("imageMessage", "videoMessage", "audioMessage", "stickerMessage",
-                "documentMessage", "pttMessage"):
-        if key in nested:
-            return _MEDIA_TYPE_MAP.get(key.lower(), "media")
-    return t or "text"
-
-
-def _is_media_type(msg_type: str) -> bool:
-    return str(msg_type or "").lower().strip() in MEDIA_TYPES
-
-
-def _extract_media_url(msg: dict) -> str:
-    """Extrai a URL temporária da mídia do payload do webhook, se houver.
-
-    Muitos payloads (v2 e v3) trazem media.url direto — nesse caso não
-    precisamos do /send/download-media: a URL já serve para renderizar.
-    Suporta formatos v2, v3-A, v3-B e WhatsApp native (imageMessage etc.).
-    """
-    # (1) media dict direto: msg.media.url, msg.Media.url
-    for cand in [msg.get("media"), msg.get("Media")]:
-        if isinstance(cand, dict):
-            u = str(cand.get("url") or cand.get("link") or cand.get("MediaUrl") or cand.get("mediaUrl") or "")
-            if u.startswith("http"):
-                return u
-    # (2) Aninhado em msg.message.media
-    nested = msg.get("message")
-    if isinstance(nested, dict):
-        for cand in [nested.get("media"), nested.get("Media")]:
-            if isinstance(cand, dict):
-                u = str(cand.get("url") or cand.get("link") or cand.get("MediaUrl") or "")
-                if u.startswith("http"):
-                    return u
-    # (3) WhatsApp native: msg.imageMessage.url, msg.videoMessage.url, etc.
-    for msg_key in ("imageMessage", "videoMessage", "audioMessage", "documentMessage",
-                    "stickerMessage", "pttMessage", "gifMessage"):
-        sub = msg.get(msg_key)
-        if isinstance(sub, dict):
-            u = str(sub.get("url") or sub.get("directPath") or "")
-            if u.startswith("http"):
-                return u
-    # (4) content como dict com url/link
-    content = msg.get("content")
-    if isinstance(content, dict):
-        u = str(content.get("url") or content.get("link") or content.get("mediaUrl") or "")
-        if u.startswith("http"):
-            return u
-    # (5) Chaves soltas no msg
-    for key in ("url", "mediaUrl", "MediaUrl", "media_url", "mediaLink"):
-        u = str(msg.get(key) or "")
-        if u.startswith("http"):
-            return u
-    return ""
-
-
-def _maybe_store_media_hint(saved, msg: dict) -> None:
-    """Se o payload trouxer URL de mídia, guarda direto (sem download)."""
-    if not saved:
-        return
-    try:
-        if str(saved.get("media_url") or ""):
-            return
-        url = _extract_media_url(msg)
-        if url:
-            database.update_message_media(saved["id"], url)
-            print(f"[media] msg={saved['id']} url do payload guardada")
-        else:
-            _media_keys = [k for k in msg.keys() if "media" in k.lower() or "url" in k.lower() or "image" in k.lower() or "video" in k.lower() or "audio" in k.lower()]
-            nested = msg.get("message")
-            _nested_media_keys = list(nested.keys())[:10] if isinstance(nested, dict) else []
-            print(f"[media] msg={saved['id']} payload SEM URL media_keys={_media_keys} nested_keys={_nested_media_keys}")
-    except Exception as e:
-        print(f"[media] erro guardando url do payload: {e}")
-
-
-def _download_media_async(message_db_id, number, message_id):
-    """Descarga la media (imagen/audio/video/sticker) en background.
-
-    Delega en _fetch_and_store_media, que también usa el endpoint on-demand:
-    así una misma mensagem nunca se baixa duas vezes em paralelo.
-    """
-    try:
-        m = database.get_message(message_db_id)
-        if not m:
-            return
-        uri = _fetch_and_store_media(m)
-        if uri:
-            print(f"[media] msg={message_db_id} guardado len={len(uri)}")
-        else:
-            print(f"[media] falha download id={message_id}")
-    except Exception as e:
-        print(f"[media] erro download id={message_id}: {e}")
-
-
-# Una lock por mensagem: evita downloads duplicados em paralelo
-# (webhook em background + pedido on-demand do painel).
-_media_download_locks: dict[int, threading.Lock] = {}
-_media_locks_guard = threading.Lock()
-
-
-def _get_media_lock(msg_id: int) -> threading.Lock:
-    with _media_locks_guard:
-        lock = _media_download_locks.get(msg_id)
-        if not lock:
-            lock = threading.Lock()
-            _media_download_locks[msg_id] = lock
-        return lock
-
-
-def _fetch_and_store_media(m: dict) -> str:
-    """Baixa a media da mensagem agora e guarda em media_url (data-URI).
-
-    Usado tanto pelo webhook (background) quanto on-demand pelo endpoint do
-    painel — cobre mensagens antigas que chegaram antes do suporte a media e
-    casos em que o download em background falhou. Retorna o data-URI ou ''.
-    """
-    msg_id = m["id"]
-    lock = _get_media_lock(msg_id)
-    with lock:
-        # Recheck: outro thread pode ter baixado enquanto esperávamos o lock.
-        fresh = database.get_message(msg_id)
-        if fresh and str(fresh.get("media_url") or "").strip():
-            return fresh["media_url"]  # data-URI ou URL do payload
-        uazapi_id = str((fresh or {}).get("uazapi_id") or "")
-        phone = str((fresh or {}).get("phone") or "")
-        if not uazapi_id or not phone:
-            return ""
-        r = download_media(phone, uazapi_id)
-        if not r.get("ok"):
-            print(f"[media] falha download msg={msg_id} uazapi_id={uazapi_id}: {r.get('error')}")
-            return ""
-        d = r.get("data")
-        data_uri = ""
-        media_url = ""
-        if isinstance(d, dict):
-            b64 = str(d.get("base64") or d.get("base64Data") or "")
-            mime = str(d.get("mimeType") or d.get("mimetype") or "application/octet-stream")
-            media_url = str(d.get("url") or d.get("link") or d.get("mediaUrl") or d.get("FileURL") or "")
-            if b64:
-                data_uri = f"data:{mime};base64,{b64}"
-        elif isinstance(d, str):
-            if d.startswith("http"):
-                media_url = d
-            elif len(d) > 512:  # base64 cru sem envelope
-                data_uri = f"data:application/octet-stream;base64,{d}"
-        result = data_uri or media_url
-        if not result:
-            print(f"[media] resposta sem base64/url msg={msg_id}: {str(d)[:120]}")
-            return ""
-        database.update_message_media(msg_id, result)
-        print(f"[media] msg={msg_id} guardado len={len(result)}")
-        return result
 
 # ── Config ──────────────────────────────────────────────────────────────────
 BUFFER_SECONDS = float(os.getenv("BUFFER_SECONDS", "8"))
 PORT = int(os.getenv("PORT", "5000"))
 SECRET_KEY = os.getenv("SECRET_KEY", "troque_esta_chave_secreta_aleatoria")
+WEBHOOK_VERIFY_TOKEN = os.getenv("WEBHOOK_VERIFY_TOKEN", "")
 
 _BASE_PROMPT = os.getenv(
     "SYSTEM_PROMPT",
-    "Você é um assistente útil que responde no WhatsApp. "
-    "Seja breve, natural, use quebras de parágrafo (\\n\\n) quando fizer sentido dividir ideias.",
+    "Voce e um assistente util que responde no WhatsApp. "
+    "Seja breve, natural, use quebras de paragrafo (\\n\\n) quando fizer sentido dividir ideias.",
 )
 
-
 FULL_SYSTEM_PROMPT = _BASE_PROMPT + (
-    "\n\nVocê pode receber e analisar mídias enviadas pelo cliente: "
-    "imagens (fotos, prints, documentos escaneados), áudios (mensagens de voz), "
-    "vídeos e figurinhas. "
-    "Quando receber uma imagem, descreva o que vê e responda de acordo. "
-    "Quando receber um áudio, transcreva mentalmente o conteúdo e responda ao que foi dito. "
-    "Seja útil e objetivo ao lidar com mídias."
+    "\n\nVoce pode receber e analisar midias enviadas pelo cliente: "
+    "imagens (fotos, prints, documentos escaneados), audios (mensagens de voz), "
+    "videos e figurinhas. "
+    "Quando receber uma imagem, descreva o que ve e responda de acordo. "
+    "Quando receber um audio, transcreva mentalmente o conteudo e responda ao que foi dito. "
+    "Seja util e objetivo ao lidar com midias."
 )
 
 # ── Knowledge Tool (busca seletiva via function calling) ──────────────────────
+import knowledge_rag
 
 KNOWLEDGE_TOOL = {
     "type": "function",
     "function": {
         "name": "search_knowledge",
         "description": (
-            "Busca informações na base de conhecimento da empresa. "
-            "Use quando o usuário perguntar sobre produtos, preços, serviços, "
-            "horários, políticas, ou qualquer informação que esteja na base. "
-            "Retorna o conteúdo do arquivo solicitado."
+            "Busca informacoes na base de conhecimento da empresa. "
+            "Use quando o usuario perguntar sobre produtos, precos, servicos, "
+            "horarios, politicas, ou qualquer informacao que esteja na base. "
+            "Retorna o conteudo do arquivo solicitado."
         ),
         "parameters": {
             "type": "object",
@@ -293,7 +84,6 @@ KNOWLEDGE_TOOL = {
 
 
 def _build_knowledge_index() -> str:
-    """Monta o índice compacto de descrições para injetar no system prompt."""
     descriptions = knowledge_rag.get_file_descriptions()
     if not descriptions:
         return ""
@@ -308,21 +98,15 @@ def _build_knowledge_index() -> str:
 
 
 def _knowledge_tool_handler(filename: str) -> str:
-    """Handler da tool search_knowledge — retorna o conteúdo do arquivo."""
     content = knowledge_rag.get_file_content(filename)
     if not content:
-        return f"Arquivo '{filename}' não encontrado na base de conhecimento."
+        return f"Arquivo '{filename}' nao encontrado na base de conhecimento."
     return content
+
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def split_reply(text: str) -> list[str]:
-    """
-    Divide a resposta em chunks para envio como mensagens separadas.
-    Critério 1: separa por parágrafo duplo (\\n\\n).
-    Critério 2: pedaços > 800 chars são quebrados por '. ' (mantendo o ponto).
-    Remove strings vazias.
-    """
     paragraphs = text.split("\n\n")
     chunks: list[str] = []
     for para in paragraphs:
@@ -348,14 +132,12 @@ def split_reply(text: str) -> list[str]:
 
 # ── Multimodal parts builder ─────────────────────────────────────────────────
 
-# OpenAI Vision só suporta imagens inline (não áudio/vídeo/PDF)
 _OPENAI_SUPPORTED_IMAGES = {
     "image/jpeg", "image/png", "image/webp", "image/gif",
 }
 
 
 def _parse_data_uri(data_uri: str) -> tuple[str, str]:
-    """Extrai (mime, base64_data) de um data-URI data:image/jpeg;base64,..."""
     m = __import__("re").match(r"^data:([^;,]+);base64,(.+)$", data_uri, __import__("re").DOTALL)
     if m:
         return m.group(1), m.group(2)
@@ -363,14 +145,6 @@ def _parse_data_uri(data_uri: str) -> tuple[str, str]:
 
 
 def _build_user_parts(items: list[dict]) -> list[dict]:
-    """Monta parts multimodais para o turno do usuário.
-
-    Para cada item, busca a mensagem no banco por msg_id.
-    Se tiver media_url (data-URI ou URL) de imagem, inclui como inline_data.
-    Áudio/vídeo/documentos são tratados apenas como texto descritivo
-    (OpenAI Vision só suporta imagens).
-    Sempre inclui o texto (mesmo que placeholder como "[Imagem]").
-    """
     import re as _re
     parts = []
     seen_media = set()
@@ -392,7 +166,6 @@ def _build_user_parts(items: list[dict]) -> list[dict]:
                 if media_url.startswith("data:"):
                     mime, b64 = _parse_data_uri(media_url)
                 elif media_url.startswith("http"):
-                    # URL externa: baixa e converte pra data-URI inline
                     try:
                         import requests as _req
                         resp = _req.get(media_url, timeout=15)
@@ -404,22 +177,20 @@ def _build_user_parts(items: list[dict]) -> list[dict]:
                     except Exception as e:
                         print(f"[flush] WARN download media falhou msg={msg_id}: {e}")
 
-                # Descrição para o modelo entender o contexto
                 media_desc = {
                     "image": "O cliente enviou uma imagem.",
-                    "video": "O cliente enviou um vídeo.",
-                    "audio": "O cliente enviou um áudio.",
-                    "ptt": "O cliente enviou um áudio (mensagem de voz).",
+                    "video": "O cliente enviou um video.",
+                    "audio": "O cliente enviou um audio.",
+                    "ptt": "O cliente enviou um audio (mensagem de voz).",
                     "sticker": "O cliente enviou uma figurinha.",
                     "document": "O cliente enviou um documento.",
-                }.get(msg_type, f"O cliente enviou mídia ({msg_type}).")
+                }.get(msg_type, f"O cliente enviou midia ({msg_type}).")
 
                 if text and not text.startswith("["):
                     media_desc += f" Legenda: {text}"
 
                 parts.append({"text": media_desc})
 
-                # Só inclui dados binários inline se for imagem suportada
                 if mime and b64 and mime in _OPENAI_SUPPORTED_IMAGES:
                     parts.append({
                         "inline_data": {
@@ -428,14 +199,13 @@ def _build_user_parts(items: list[dict]) -> list[dict]:
                         }
                     })
 
-                continue  # Já adicionou texto + mídia, não precisa adicionar texto de novo
+                continue
 
-        # Texto puro (sem mídia ou mídia não encontrada)
         if text:
             parts.append({"text": text})
 
     if not parts:
-        parts.append({"text": "[Mensagem sem conteúdo de texto]"})
+        parts.append({"text": "[Mensagem sem conteudo de texto]"})
 
     return parts
 
@@ -443,12 +213,7 @@ def _build_user_parts(items: list[dict]) -> list[dict]:
 # ── Flush handler ─────────────────────────────────────────────────────────────
 
 def handle_flush(user: str, items: list[dict]) -> None:
-    """Executado numa thread do Timer quando o debounce dispara.
-
-    items: [{"text": "...", "msg_id": 123}, ...]
-    """
     try:
-        # Modo global: se desligado, agente nunca responde
         global_mode = int(database.get_setting("agent_mode", "1"))
         if not global_mode:
             print(f"[flush] user={user} agente GLOBAL desligado, ignorando")
@@ -459,26 +224,26 @@ def handle_flush(user: str, items: list[dict]) -> None:
             print(f"[flush] user={user} modo=humano, ignorando agente")
             return
         if not contact:
-            print(f"[flush] user={user} sem contato no banco (auto_mode=1 por padrão)")
+            print(f"[flush] user={user} sem contato no banco (auto_mode=1 por padrao)")
 
-        send_presence(user, "composing")
+        # Typing indicator (Meta: combinado com mark_read via typing_indicator)
+        last_wa_msg_id = items[-1].get("wa_message_id", "") if items else ""
+        if last_wa_msg_id:
+            send_typing(last_wa_msg_id)
 
-        # Monta parts multimodais: texto + mídia inline (imagem, áudio, etc.)
         user_parts = _build_user_parts(items)
         text_only = "\n".join(it["text"] for it in items)
         memory.append_multimodal(user, "user", user_parts)
 
-        # Monta system prompt dinâmico com índice de knowledge
         dynamic_prompt = FULL_SYSTEM_PROMPT
         knowledge_index = _build_knowledge_index()
         if knowledge_index:
             dynamic_prompt += (
-                "\n\nBase de conhecimento disponível (use a tool search_knowledge "
-                "para buscar o conteúdo quando o usuário precisar):\n"
+                "\n\nBase de conhecimento disponivel (use a tool search_knowledge "
+                "para buscar o conteudo quando o usuario precisar):\n"
                 + knowledge_index
             )
 
-        # Chama LLM com tool de busca seletiva
         try:
             reply = llm.generate_reply(
                 history=memory.get(user),
@@ -488,18 +253,15 @@ def handle_flush(user: str, items: list[dict]) -> None:
             )
         except Exception as e:
             print(f"[flush] ERRO llm p/ {user}: {e}")
-            send_presence(user, "paused")
             return
         memory.append(user, "assistant", reply)
         print(f"[flush] user={user} reply_len={len(reply)}")
 
         chunks = split_reply(reply)
         if not chunks:
-            send_presence(user, "paused")
             return
 
         for chunk in chunks:
-            send_presence(user, "composing")
             time.sleep(1 + len(chunk) / 200)
             res = send_text(user, chunk)
             if not res.get("ok"):
@@ -507,10 +269,8 @@ def handle_flush(user: str, items: list[dict]) -> None:
                 continue
             send_msg_out_to_panel(user, chunk)
 
-        send_presence(user, "paused")
+        # Meta: indicador some automaticamente apos 25s ou envio
 
-        # O agente IA leu e respondeu: marca conversa como lida no painel
-        # (equivale a abrir a conversa na aba de atendimento).
         try:
             conv = database.get_or_create_conversation(user)
             database.reset_unread(conv["id"])
@@ -519,12 +279,10 @@ def handle_flush(user: str, items: list[dict]) -> None:
         except Exception as e:
             print(f"[flush] WARN reset_unread falhou p/ {user}: {e}")
     except Exception as e:
-        # Nunca deixa a thread do Timer morrer em silêncio.
         print(f"[flush] ERRO inesperado p/ {user}: {e}")
 
 
 def send_msg_out_to_panel(user: str, text: str) -> None:
-    """Notifica o painel de uma mensagem enviada pelo agente."""
     conv = database.get_or_create_conversation(user)
     database.save_message(
         conversation_id=conv["id"],
@@ -538,6 +296,127 @@ def send_msg_out_to_panel(user: str, text: str) -> None:
     events.emit("message_sent", {"conversation_id": conv["id"], "phone": user, "body": text})
 
 
+# ── Download de midia async ──────────────────────────────────────────────────
+
+_media_download_locks: dict[int, threading.Lock] = {}
+_media_locks_guard = threading.Lock()
+
+
+def _get_media_lock(msg_id: int) -> threading.Lock:
+    with _media_locks_guard:
+        lock = _media_download_locks.get(msg_id)
+        if not lock:
+            lock = threading.Lock()
+            _media_download_locks[msg_id] = lock
+        return lock
+
+
+def _download_media_async(message_db_id: int, wa_media_id: str) -> None:
+    """Baixa midia da Meta via media_id e armazena como data-URI."""
+    try:
+        m = database.get_message(message_db_id)
+        if not m:
+            return
+        lock = _get_media_lock(message_db_id)
+        with lock:
+            fresh = database.get_message(message_db_id)
+            if fresh and str(fresh.get("media_url") or "").strip():
+                return
+            if not wa_media_id:
+                return
+            info = get_media_url(wa_media_id)
+            if not info.get("ok") or not isinstance(info.get("data"), dict):
+                print(f"[media] falha get_media_url msg={message_db_id}: {info.get('error')}")
+                return
+            url = info["data"].get("url", "")
+            mime = info["data"].get("mime_type", "application/octet-stream")
+            if not url:
+                print(f"[media] URL vazia msg={message_db_id}")
+                return
+            data = download_media_bytes(url)
+            if not data:
+                print(f"[media] download vazio msg={message_db_id}")
+                return
+            import base64
+            b64 = base64.b64encode(data).decode()
+            data_uri = f"data:{mime};base64,{b64}"
+            database.update_message_media(message_db_id, data_uri)
+            print(f"[media] msg={message_db_id} guardado len={len(data_uri)}")
+    except Exception as e:
+        print(f"[media] ERRO download msg={message_db_id}: {e}")
+
+
+def _fetch_and_store_media(m: dict) -> str:
+    """Busca media on-demand (para o painel)."""
+    msg_id = m["id"]
+    lock = _get_media_lock(msg_id)
+    with lock:
+        fresh = database.get_message(msg_id)
+        if fresh and str(fresh.get("media_url") or "").strip():
+            return fresh["media_url"]
+        wa_media_id = str((fresh or {}).get("wa_message_id") or "")
+        if not wa_media_id:
+            return ""
+        info = get_media_url(wa_media_id)
+        if not info.get("ok") or not isinstance(info.get("data"), dict):
+            return ""
+        url = info["data"].get("url", "")
+        mime = info["data"].get("mime_type", "application/octet-stream")
+        if not url:
+            return ""
+        data = download_media_bytes(url)
+        if not data:
+            return ""
+        import base64
+        b64 = base64.b64encode(data).decode()
+        data_uri = f"data:{mime};base64,{b64}"
+        database.update_message_media(msg_id, data_uri)
+        return data_uri
+
+
+# ── Mapeamento de tipos de midia ─────────────────────────────────────────────
+
+_MEDIA_PLACEHOLDERS = {
+    "image": lambda m: f"[Imagem]{(' ' + m.get('caption', '')) if m.get('caption') else ''}",
+    "video": lambda m: f"[Video]{(' ' + m.get('caption', '')) if m.get('caption') else ''}",
+    "audio": lambda m: "[Audio]" if not m.get("audio", {}).get("voice") else "[Audio (mensagem de voz)]",
+    "document": lambda m: f"[Documento: {m.get('document', {}).get('filename', '')}]",
+    "sticker": lambda m: "[Figurinha]",
+    "location": lambda m: "[Localizacao]",
+    "contacts": lambda m: "[Contato]",
+}
+
+
+def _extract_body_from_meta_message(msg_data: dict) -> tuple[str, str, str]:
+    """Extrai (body, msg_type, wa_media_id) de uma mensagem Meta.
+    Retorna (body, msg_type, wa_media_id).
+    """
+    msg_type = msg_data.get("type", "text")
+    wa_media_id = ""
+
+    if msg_type == "text":
+        return msg_data.get("text", {}).get("body", ""), "text", ""
+
+    if msg_type in _MEDIA_PLACEHOLDERS:
+        media_obj = msg_data.get(msg_type, {})
+        wa_media_id = media_obj.get("id", "")
+        body = _MEDIA_PLACEHOLDERS[msg_type](msg_data)
+        return body, msg_type, wa_media_id
+
+    if msg_type == "interactive":
+        interactive = msg_data.get("interactive", {})
+        itype = interactive.get("type", "")
+        if itype == "button_reply":
+            br = interactive.get("button_reply", {})
+            return br.get("title", br.get("id", "")), "button_reply", ""
+        if itype == "list_reply":
+            lr = interactive.get("list_reply", {})
+            return lr.get("title", lr.get("id", "")), "list_reply", ""
+        return f"[Interativo: {itype}]", itype, ""
+
+    return f"[{msg_type}]", msg_type, ""
+
+
 # ── App & Buffer ──────────────────────────────────────────────────────────────
 
 app = Flask(__name__)
@@ -548,19 +427,8 @@ buffer = MessageBuffer(wait_seconds=BUFFER_SECONDS, on_flush=handle_flush)
 
 database.init_db()
 
-# ── Auto-configurar webhook na UAZAPI ───────────────────────────────────────
-WEBHOOK_URL = os.getenv("WEBHOOK_URL", "")
-print(f"[config] UAZAPI: {os.getenv('UAZAPI_BASE_URL', '') or 'NÃO CONFIGURADO'}")
-print(f"[config] WEBHOOK: {WEBHOOK_URL or 'NÃO CONFIGURADO'}")
-
-if WEBHOOK_URL:
-    from uazapi import configure_webhook
-    r = configure_webhook(WEBHOOK_URL)
-    if r["ok"]:
-        print(f"[webhook] configurado: {WEBHOOK_URL}")
-    else:
-        print(f"[webhook] ERRO: {r['error']}")
-
+print(f"[config] Meta Cloud API: PHONE_ID={os.getenv('META_PHONE_NUMBER_ID', '') or 'N/A'}")
+print(f"[config] Meta Cloud API: WABA_ID={os.getenv('META_WABA_ID', '') or 'N/A'}")
 
 # ── Auth routes ───────────────────────────────────────────────────────────────
 
@@ -577,7 +445,7 @@ def login_action():
     password = request.form.get("password", "")
     if do_login(username, password):
         return redirect(url_for("panel_page"))
-    return render_template("login.html", error="Credenciais inválidas")
+    return render_template("login.html", error="Credenciais invalidas")
 
 
 @app.get("/logout")
@@ -587,313 +455,116 @@ def logout_action():
 
 
 # ── Webhook ──────────────────────────────────────────────────────────────────
+
+@app.get("/webhook")
+def webhook_verify():
+    """Verificacao do handshake Meta (GET challenge)."""
+    mode = request.args.get("hub.mode")
+    token = request.args.get("hub.verify_token")
+    challenge = request.args.get("hub.challenge")
+    if mode == "subscribe" and token == WEBHOOK_VERIFY_TOKEN:
+        print("[webhook] verificado com sucesso")
+        return challenge, 200
+    print(f"[webhook] verificacao falhou: mode={mode} token_ok={token == WEBHOOK_VERIFY_TOKEN}")
+    return "Forbidden", 403
+
+
 @app.post("/webhook")
 def webhook():
     data = request.get_json(silent=True) or {}
-    print(f"[webhook] <<< raw_keys={list(data.keys())[:8]} EventType={data.get('EventType')} event={data.get('event')}", flush=True)
 
-    # ── Normalizar os 3 formatos UAZAPI ──
-    # Formato v2: {"event": "message", "data": {"from": "...", "body": "..."}}
-    # Formato v3-A: {"EventType": "message", "event": {"Chat": "...", "IsFromMe": false}}
-    # Formato v3-B: {"EventType": "message", "chat": "...", "message": {...}}
-    event_type = data.get("EventType")
-    event_payload = data.get("event")
-
-    if event_type:
-        data["event"] = event_type
-        if isinstance(event_payload, dict):
-            data["data"] = event_payload
-        elif not data.get("data") and isinstance(data.get("message"), dict):
-            data["data"] = data["message"]
-
-    event = data.get("event")
-    if not event:
-        print(f"[webhook] RAW s/ event: {str(data)[:500]}")
+    # Validacao basica Meta
+    if data.get("object") != "whatsapp_business_account":
+        print(f"[webhook] object invalido: {data.get('object')}")
         return jsonify({"ok": True})
 
-    print(f"[webhook] event={event} keys={list(data.keys())[:8]}")
+    # Itera entry -> changes -> value
+    for entry in data.get("entry", []):
+        for change in entry.get("changes", []):
+            value = change.get("value", {})
+            if change.get("field") != "messages":
+                continue
 
-    # Ignora recibos de entrega/leitura (não são mensagens)
-    inner = data.get("data") or data.get("message") or data
-    if isinstance(inner, dict):
-        wa_type = str(inner.get("Type", "")).lower()
-        if wa_type in ("delivered", "sent", "read", "failed", "played"):
-            print(f"[webhook] IGNORANDO receipt: type={wa_type}", flush=True)
-            return jsonify({"ok": True})
+            # Status updates (entrega/leitura) -> ignorar
+            if "statuses" in value:
+                for status in value["statuses"]:
+                    print(f"[webhook] status: {status.get('status')} id={status.get('id', '')[:30]}")
+                continue
 
-    # Evento de conexão
-    if event == "connection":
-        status_raw = ""
-        if isinstance(data.get("data"), dict):
-            status_raw = str(data["data"].get("status", "")).replace("connection.", "", 1)
-        status = status_raw.lower() if status_raw else "unknown"
-        if status in ("closed", "disconnected", "logout"):
-            status = "close"
-        elif status in ("connected",):
-            status = "open"
-        if status in ("open", "close", "connecting", "qr", "error"):
-            _invalidate_status_cache()
-            events.emit("wa_status", {"status": status})
-        if status == "open" and WEBHOOK_URL:
-            from uazapi import configure_webhook
-            threading.Thread(target=configure_webhook, args=(WEBHOOK_URL,), daemon=True).start()
-        return jsonify({"ok": True})
+            # Mensagens recebidas
+            if "messages" not in value:
+                continue
 
-    # Ignora eventos que não são de mensagem
-    if event not in ("message", "messages", "messages.upsert"):
-        print(f"[webhook] IGNORANDO event: {event}", flush=True)
-        return jsonify({"ok": True})
+            contacts = value.get("contacts", [])
+            messages = value["messages"]
 
-    # Extrai o payload da mensagem
-    msg = data.get("data") or data.get("message") or data
-    if isinstance(msg, list) and len(msg) > 0:
-        msg = msg[0]
-    if not isinstance(msg, dict):
-        msg = {}
+            if not messages:
+                continue
 
-    # ── Mapear campos v3 → v2 ──
-    if not msg.get("from") and msg.get("Chat"):
-        msg["from"] = msg["Chat"]
-    if not msg.get("id") and msg.get("MessageIDs"):
-        ids = msg["MessageIDs"]
-        msg["id"] = ids[0] if isinstance(ids, list) and ids else ""
-    if "IsFromMe" in msg and "fromMe" not in msg:
-        msg["fromMe"] = msg["IsFromMe"]
-    if "IsGroup" in msg and "isGroup" not in msg:
-        msg["isGroup"] = msg["IsGroup"]
-    if msg.get("SenderName") and not msg.get("pushName"):
-        msg["pushName"] = msg["SenderName"]
-    if msg.get("MsgType") and not msg.get("type"):
-        msg["type"] = msg["MsgType"]
-    if not msg.get("from") and msg.get("chat"):
-        msg["from"] = msg["chat"]
-    if not msg.get("from") and msg.get("chatid"):
-        msg["from"] = msg["chatid"]
+            msg_data = messages[0]
+            number = msg_data.get("from", "")
+            message_id = msg_data.get("id", "")
+            timestamp = msg_data.get("timestamp", "")
 
-    # Detecta fromMe em todos os formatos
-    def _check_from_me(obj: dict) -> bool:
-        if not isinstance(obj, dict):
-            return False
-        for key in ("fromMe", "IsFromMe"):
-            fm = obj.get(key)
-            if fm is True or str(fm).lower() == "true":
-                return True
-        k = obj.get("key")
-        if isinstance(k, dict):
-            for key in ("fromMe", "IsFromMe"):
-                fm2 = k.get(key)
-                if fm2 is True or str(fm2).lower() == "true":
-                    return True
-        return False
+            if not number:
+                print("[webhook] SEM REMETENTE")
+                continue
 
-    _is_from_me = _check_from_me(msg)
-    if not _is_from_me and isinstance(data.get("data"), list):
-        for _item in data["data"]:
-            if _check_from_me(_item):
-                _is_from_me = True
-                break
-    _is_group = msg.get("isGroup") or msg.get("IsGroup")
-    _has_participant = msg.get("participant")
+            # push_name do contato
+            push_name = ""
+            if contacts:
+                push_name = contacts[0].get("profile", {}).get("name", "")
 
-    print(f"[webhook] fromMe={_is_from_me} IsFromMe={msg.get('IsFromMe')} fromMe_field={msg.get('fromMe')} group={_is_group} chat={data.get('chat') if not isinstance(data.get('chat'), dict) else 'DICT'} sender_pn={msg.get('sender_pn')} chatid={msg.get('chatid')}")
+            # Extrai body e tipo
+            body, msg_type, wa_media_id = _extract_body_from_meta_message(msg_data)
 
-    if _is_from_me:
-        _chat_raw = data.get("chat")
-        _chat_type = type(_chat_raw).__name__
-        print(f"[webhook] fromMe DETAIL: to={msg.get('to')} from={msg.get('from')} "
-              f"chat_type={_chat_type} chat_keys={list(_chat_raw.keys())[:10] if isinstance(_chat_raw, dict) else 'N/A'} "
-              f"chatid={msg.get('chatid')} chatlid={msg.get('chatlid')} Chat={msg.get('Chat')} "
-              f"remoteJid={msg.get('remoteJid')} sender_pn={msg.get('sender_pn')} "
-              f"msg_keys={list(msg.keys())[:15]}")
+            if not body:
+                print(f"[webhook] SEM BODY: msg_type={msg_type} from={number}")
+                continue
 
-    # Grupo e participant: ignora completamente
-    if _is_group or _has_participant:
-        reason = "group" if _is_group else "participant"
-        print(f"[webhook] IGNORANDO: {reason} event={event}")
-        return jsonify({"ok": True})
+            print(f"[webhook] from={number} ({push_name}) type={msg_type} len={len(body)} msg_id={message_id[:30]}")
 
-    # Extrai número de telefone
-    # fromMe=true → destinatário (wa_chatid dentro do dict chat, ou chatid no msg)
-    # fromMe=false → remetente (sender_pn, from, etc.)
-    if _is_from_me:
-        chat_dict = data.get("chat") if isinstance(data.get("chat"), dict) else None
-        raw_from = (
-            (chat_dict.get("wa_chatid") if chat_dict else None)
-            or (chat_dict.get("id") if chat_dict else None)
-            or msg.get("chatid") or msg.get("chatlid")
-            or msg.get("Chat") or msg.get("to", "")
-            or msg.get("remoteJid") or msg.get("chatId")
-            or msg.get("sender_pn") or msg.get("from", "")
-        )
-    else:
-        raw_from = (
-            msg.get("sender_pn") or msg.get("sender_lid")
-            or msg.get("from", "")
-            or msg.get("remoteJid", "")
-            or msg.get("chatId", "")
-            or msg.get("chatid", "")
-            or msg.get("Sender", "")
-            or msg.get("chat", "")
-        )
-    if not raw_from:
-        print(f"[webhook] SEM REMETENTE: {str(msg)[:200]}")
-        return jsonify({"ok": True})
+            # Marca como lido
+            mark_read(str(message_id))
 
-    phone_clean = str(raw_from).split("@")[0].split(":")[0]
-    number = "".join([c for c in phone_clean if c.isdigit()])
-    if not number:
-        print(f"[webhook] NUM INVALIDO: raw_from={raw_from} phone_clean={phone_clean}")
-        return jsonify({"ok": True})
-
-    number = uazapi.resolve_lid_to_pn(number)
-    print(f"[webhook] number={number} raw_from={raw_from}")
-
-    if _is_from_me:
-        _owner_raw = msg.get("owner", "") or ""
-        _owner_digits = "".join([c for c in str(_owner_raw).split("@")[0] if c.isdigit()])
-        _sender_raw = msg.get("sender_pn", "") or _owner_raw or ""
-        _sender_digits = "".join([c for c in str(_sender_raw).split("@")[0] if c.isdigit()])
-        if _sender_digits and number == _sender_digits:
-            print(f"[webhook] WARN fromMe: number={number} == sender={_sender_digits} "
-                  f"— destinatario pode estar errado! owner={_owner_raw} keys={list(msg.keys())[:15]}")
-
-    # push_name: FromMe → nome do destinatário no dict chat; caso contrário → pushName do remetente
-    if _is_from_me:
-        _chat_raw = data.get("chat")
-        if isinstance(_chat_raw, dict):
-            push_name = (
-                _chat_raw.get("name") or _chat_raw.get("wa_contactName")
-                or _chat_raw.get("wa_name") or ""
-            )
-        else:
-            push_name = msg.get("pushName") or msg.get("notifyName") or msg.get("senderName") or msg.get("name") or msg.get("groupName") or ""
-    else:
-        push_name = msg.get("pushName") or msg.get("notifyName") or msg.get("senderName") or msg.get("name") or ""
-    message_id = msg.get("id", "") or msg.get("messageid", "")
-    if not message_id and isinstance(msg.get("key"), dict):
-        message_id = msg.get("key", {}).get("id", "")
-
-    # Extrai corpo da mensagem
-    msg_type = _resolve_msg_type(msg, msg.get("type") or msg.get("messageType") or msg.get("MsgType") or msg.get("mediaType") or "text")
-    body = (
-        msg.get("body")
-        or msg.get("Body")
-        or msg.get("content")
-        or msg.get("text")
-        or msg.get("caption")
-        or (msg.get("message", {}).get("conversation") if isinstance(msg.get("message"), dict) else "")
-        or (msg.get("message", {}).get("extendedTextMessage", {}).get("text") if isinstance(msg.get("message"), dict) else "")
-        or (msg.get("message", {}).get("buttonsResponseMessage", {}).get("selectedButtonId") if isinstance(msg.get("message"), dict) else "")
-        or (msg.get("message", {}).get("listResponseMessage", {}).get("singleSelectReply", {}).get("selectedRowId") if isinstance(msg.get("message"), dict) else "")
-    )
-    if isinstance(body, dict):
-        body = body.get("conversation") or body.get("text") or body.get("message") or ""
-    if isinstance(body, str):
-        body = body.strip()
-    else:
-        body = ""
-
-    if not body:
-        if msg_type == "image":
-            body = "[Imagem]"
-        elif msg_type == "video":
-            body = "[Video]"
-        elif msg_type in ("audio", "ptt"):
-            body = "[Audio]"
-        elif msg_type == "document":
-            doc_name = ""
-            if isinstance(msg.get("media"), dict):
-                doc_name = msg.get("media", {}).get("fileName", "")
-            body = f"[Documento: {doc_name}]" if doc_name else "[Documento]"
-        elif msg_type == "sticker":
-            body = "[Figurinha]"
-        elif msg_type == "location":
-            body = "[Localizacao]"
-        elif msg_type in ("contact", "vcard"):
-            body = "[Contato]"
-        elif msg_type in ("button_reply", "list_reply"):
-            body = msg.get("buttonText") or msg.get("content") or "[Resposta de Opcao]"
-        elif msg_type != "text":
-            body = f"[{str(msg_type).capitalize()}]"
-
-    if not body:
-        print(f"[webhook] SEM BODY: msg_type={msg_type} from={number}")
-        return jsonify({"ok": True})
-
-    print(f"[webhook] from={number} ({push_name}) type={msg_type} len={len(body)} fromMe={_is_from_me}")
-
-    # ── fromMe: salva no painel mas NÃO responde ──
-    if _is_from_me:
-        try:
+            # Salva contato e conversa
             contact = database.upsert_contact(number, name=push_name) if push_name else database.upsert_contact(number)
             conv = database.get_or_create_conversation(number)
-            saved = database.link_or_save_outgoing(
+            saved = database.save_message(
                 conversation_id=conv["id"],
                 phone=number,
+                direction="in",
                 body=body,
-                uazapi_id=str(message_id) if message_id else None,
-                sender="human",
+                sender="user",
                 msg_type=str(msg_type) if msg_type else "text",
+                wa_message_id=str(message_id) if message_id else None,
             )
-            print(f"[webhook] fromMe msg salva: id={saved['id'] if saved else None}")
-            if saved and _is_media_type(str(msg_type)) and message_id:
-                _maybe_store_media_hint(saved, msg)
-                threading.Thread(target=_download_media_async,
-                                 args=(saved["id"], number, str(message_id)), daemon=True).start()
-            database.update_conversation(conv["id"], last_message_at=time.strftime("%Y-%m-%dT%H:%M:%S"))
-            events.emit("message_sent", {
-                "conversation_id": conv["id"],
-                "phone": number,
-                "body": body,
-            })
-            # Mensagem enviada pelo celular/outro dispositivo: marca conversa
-            # como lida no painel (o usuário visualizou/respondeu fora do painel).
-            database.reset_unread(conv["id"])
-            events.emit("conversation_updated", {"conversation_id": conv["id"], "unread_count": 0})
-            print(f"[webhook] fromMe conv={conv['id']} marcada como lida (visualizada no celular)")
-        except Exception as e:
-            print(f"[webhook] ERRO fromMe: {e}")
-        return jsonify({"ok": True})
+            if saved:
+                database.update_conversation(conv["id"], last_message_at=time.strftime("%Y-%m-%dT%H:%M:%S"))
+                database.increment_unread(conv["id"])
+                events.emit("new_message", {
+                    "conversation_id": conv["id"],
+                    "contact_name": contact.get("name", ""),
+                    "phone": number,
+                    "body": body,
+                    "message_id": str(message_id),
+                })
+                print(f"[webhook] MSG SALVA conv={conv['id']} from={number} len={len(body)}")
 
-    # ── Mensagem de outro usuário: processa normalmente ──
-    mark_read(number, str(message_id))
+                # Download de midia em background
+                if wa_media_id and msg_type != "text":
+                    threading.Thread(
+                        target=_download_media_async,
+                        args=(saved["id"], wa_media_id),
+                        daemon=True,
+                    ).start()
+            else:
+                print(f"[webhook] MSG DUPLICADA msg_id={message_id}")
 
-    contact = database.upsert_contact(number, name=push_name) if push_name else database.upsert_contact(number)
-    conv = database.get_or_create_conversation(number)
-    saved = database.save_message(
-        conversation_id=conv["id"],
-        phone=number,
-        direction="in",
-        body=body,
-        sender="user",
-        msg_type=str(msg_type) if msg_type else "text",
-        uazapi_id=str(message_id) if message_id else None,
-    )
-    if saved:
-        database.update_conversation(conv["id"], last_message_at=time.strftime("%Y-%m-%dT%H:%M:%S"))
-        database.increment_unread(conv["id"])
-        events.emit("new_message", {
-            "conversation_id": conv["id"],
-            "contact_name": contact.get("name", ""),
-            "phone": number,
-            "body": body,
-            "message_id": str(message_id),
-        })
-        print(f"[webhook] MSG SALVA conv={conv['id']} from={number} len={len(body)}")
-    else:
-        print(f"[webhook] MSG DUPLICADA msg_id={message_id}")
-
-    if saved and _is_media_type(str(msg_type)) and message_id:
-        _maybe_store_media_hint(saved, msg)
-        threading.Thread(target=_download_media_async,
-                         args=(saved["id"], number, str(message_id)), daemon=True).start()
-
-    if not contact.get("avatar_url"):
-        avatar = uazapi.get_avatar(number)
-        if avatar:
-            database.update_contact(contact["id"], avatar_url=avatar)
-
-    buffer.add(number, body, msg_id=saved["id"] if saved else None)
+            buffer.add(number, body,
+                       msg_id=saved["id"] if saved else None,
+                       wa_message_id=str(message_id) if message_id else "",
+                       wa_media_id=wa_media_id)
 
     return jsonify({"ok": True})
 
@@ -942,174 +613,6 @@ def api_dashboard():
     return jsonify(database.get_dashboard_stats())
 
 
-# ── Cache de status da instância ─────────────────────────────────────────────
-# Evita martelar a UAZAPI: múltiplas abas/polls compartilham o mesmo resultado.
-_status_lock = threading.Lock()
-_status_cache: dict = {"payload": None, "expires": 0.0}
-_STATUS_TTL = 15  # segundos
-
-
-def _get_cached_status() -> dict | None:
-    with _status_lock:
-        if _status_cache["payload"] is not None and time.time() < _status_cache["expires"]:
-            return dict(_status_cache["payload"])
-    return None
-
-
-def _set_cached_status(payload: dict) -> None:
-    with _status_lock:
-        _status_cache["payload"] = dict(payload)
-        _status_cache["expires"] = time.time() + _STATUS_TTL
-
-
-def _invalidate_status_cache() -> None:
-    with _status_lock:
-        _status_cache["payload"] = None
-        _status_cache["expires"] = 0.0
-# ── Instance ──────────────────────────────────────────────────────────────────
-
-@app.get("/api/instance/diagnose")
-@login_required
-def api_instance_diagnose():
-    from uazapi import _request
-    results = {}
-    tests = [
-        ("GET  /instance/status",  "GET",  "/instance/status",  None),
-        ("POST /instance/connect", "POST", "/instance/connect", {}),
-        ("GET  /webhook",          "GET",  "/webhook",          None),
-        ("POST /webhook",          "POST", "/webhook",          {"url": "https://test.com/hook", "events": ["message"], "enabled": True}),
-    ]
-    for label, method, endpoint, body in tests:
-        r = _request(method, endpoint, body)
-        results[label] = {"ok": r["ok"], "status": r["status"], "error": r.get("error", "")}
-    return jsonify(results)
-
-
-def _normalize_wa_status(raw: str) -> str:
-    """Normaliza o status retornado pela UAZAPI para um valor conhecido pelo painel."""
-    s = (raw or "").strip().lower()
-    if s in ("connected", "open", "online", "connection",
-             "connection.open", "connection.connected"):
-        return "open"
-    if s in ("disconnected", "close", "closed", "offline", "logout",
-             "connection.close", "connection.disconnected", "login"):
-        return "close"
-    if s in ("connecting", "connection.connecting", "qr", "scanning"):
-        return "connecting" if "connecting" in s else "qr"
-    return s if s in ("open", "close", "connecting", "qr", "error") else "error"
-
-
-@app.get("/api/instance/status")
-@login_required
-def api_instance_status():
-    from uazapi import config_problem
-    problem = config_problem()
-    if problem:
-        return jsonify({"status": "error", "error": problem})
-
-    # Modo "fresh": usado durante o pareamento (QR aberto). Ignora o cache de 15s
-    # e consulta a UAZAPI de verdade para refletir a conexão quase imediatamente.
-    # Chamadas normais (sem ?fresh=1) continuam usando o cache como antes.
-    fresh = request.args.get("fresh") == "1"
-    if not fresh:
-        cached = _get_cached_status()
-        if cached is not None:
-            return jsonify(cached)
-
-    from uazapi import get_instance_status
-    r = get_instance_status()
-    if not r["ok"]:
-        err = r["error"]
-        if "401" in err:
-            err = "Token invalido. Verifique as configuracoes."
-        return jsonify({"status": "error", "error": err})
-    data = r["data"] or {}
-    inst = data.get("instance", data) if isinstance(data, dict) else {}
-    # A UAZAPI v3 também expõe status.connected (booleano) separado do instance.status.
-    status_obj = data.get("status", {}) if isinstance(data, dict) else {}
-    connected = bool(status_obj.get("connected")) if isinstance(status_obj, dict) else None
-    raw_status = str(inst.get("status", "") or "")
-    if not raw_status and connected is not None:
-        raw_status = "connected" if connected else "disconnected"
-    status = _normalize_wa_status(raw_status)
-    if status == "connecting":
-        status = "qr" if not raw_status or "qr" in raw_status else "connecting"
-    payload = {"status": status}
-    _set_cached_status(payload)
-    return jsonify(payload)
-
-
-@app.get("/api/instance/qr")
-@login_required
-def api_instance_qr():
-    from uazapi import get_qr_code, get_instance_status
-
-    status_r = get_instance_status()
-    st = ""
-    if status_r["ok"]:
-        data = status_r["data"] or {}
-        inst = data.get("instance", data) if isinstance(data, dict) else {}
-        # UAZAPI v3 pode retornar status aninhado: {"status": {"connected": true}}
-        status_obj = data.get("status", {}) if isinstance(data, dict) else {}
-        connected = bool(status_obj.get("connected")) if isinstance(status_obj, dict) else None
-        raw_status = str(inst.get("status", "") or "")
-        if not raw_status and connected is not None:
-            raw_status = "connected" if connected else "disconnected"
-        st = _normalize_wa_status(raw_status)
-    print(f"[qr] status: {st}")
-
-    if st == "open":
-        return jsonify({"info": "WhatsApp ja esta conectado."})
-
-    r = get_qr_code()
-    print(f"[qr] GET /instance/connect -> ok={r['ok']} data={str(r.get('data', r.get('error', '')))[:500]}")
-
-    if not r["ok"]:
-        err = r["error"]
-        if "401" in err:
-            err = "Token invalido. Verifique as configuracoes."
-        return jsonify({"error": err})
-
-    qr_data = r["data"] or {}
-    if isinstance(qr_data, dict):
-        inst = qr_data.get("instance", qr_data)
-        qr_value = inst.get("qrcode") or qr_data.get("qrcode") or inst.get("paircode") or ""
-        if qr_value:
-            return jsonify({"qrcode": qr_value, "pairingCode": inst.get("paircode", "")})
-        return jsonify({"raw": qr_data, "error": "Resposta sem campo 'qrcode'."})
-    return jsonify({"raw": str(qr_data), "error": "Formato de resposta inesperado."})
-
-
-@app.post("/api/instance/disconnect")
-@login_required
-def api_instance_disconnect():
-    from uazapi import disconnect_instance
-    r = disconnect_instance()
-    if not r["ok"]:
-        err = r["error"]
-        if "401" in err:
-            err = "Token invalido. Verifique as configuracoes."
-        return jsonify({"ok": False, "error": err}), 400
-    _invalidate_status_cache()
-    events.emit("wa_status", {"status": "close"})
-    return jsonify({"ok": True})
-
-
-@app.post("/api/instance/restart")
-@login_required
-def api_instance_restart():
-    from uazapi import restart_instance
-    r = restart_instance()
-    if not r["ok"]:
-        err = r["error"]
-        if "401" in err:
-            err = "Token invalido. Verifique as configuracoes."
-        return jsonify({"ok": False, "error": err}), 400
-    _invalidate_status_cache()
-    events.emit("wa_status", {"status": "connecting"})
-    return jsonify({"ok": True})
-
-
 # ── Conversations ─────────────────────────────────────────────────────────────
 
 @app.get("/api/conversations")
@@ -1135,8 +638,6 @@ def api_conversations_detail(conv_id):
         return jsonify({"error": "not found"}), 404
     contact = database.get_contact_by_id(conv["contact_id"])
     messages = database.get_messages(conv_id, limit=200)
-    # No enviamos el base64 de media en el payload (se pide bajo demanda por
-    # /api/messages/<id>/media): mantiene ligera la lista y la carga rápida.
     for m in messages:
         mu = m.get("media_url") or ""
         if mu.startswith("data:"):
@@ -1190,11 +691,16 @@ def api_conversations_mark_read(conv_id):
     if conv:
         contact = database.get_contact_by_id(conv["contact_id"])
         if contact and contact.get("phone"):
-            number = str(contact["phone"]).replace("@s.whatsapp.net", "")
-            try:
-                mark_read(number)
-            except Exception:
-                pass
+            number = str(contact["phone"])
+            # Busca a ultima mensagem para mark_read na Meta
+            msgs = database.get_messages(conv_id, limit=1)
+            if msgs:
+                wa_mid = msgs[-1].get("wa_message_id", "")
+                if wa_mid:
+                    try:
+                        mark_read(wa_mid)
+                    except Exception:
+                        pass
     events.emit("conversation_updated", {"conversation_id": conv_id, "unread_count": 0})
     return jsonify({"ok": True})
 
@@ -1202,7 +708,6 @@ def api_conversations_mark_read(conv_id):
 @app.put("/api/conversations/<int:conv_id>/unread")
 @login_required
 def api_conversations_mark_unread(conv_id):
-    """Marca como não lida (painel-only; UAZAPI não expone endpoint)."""
     database.mark_unread(conv_id)
     events.emit("conversation_updated", {"conversation_id": conv_id, "unread_count": 1})
     return jsonify({"ok": True})
@@ -1211,7 +716,7 @@ def api_conversations_mark_unread(conv_id):
 @app.put("/api/conversations/<int:conv_id>/flags")
 @login_required
 def api_conversations_update_flags(conv_id):
-    """Atualiza flags (archived/muted/pinned/favorite). Sincroniza UAZAPI quando aplicable."""
+    """Atualiza flags (archived/muted/pinned/favorite). DB only — Meta nao suporta."""
     data = request.get_json(silent=True) or {}
     fields = {}
     for key in ("archived", "muted", "pinned", "favorite"):
@@ -1226,25 +731,12 @@ def api_conversations_update_flags(conv_id):
         database.update_conversation(conv_id, **fields)
         events.emit("conversation_updated", {"conversation_id": conv_id, **fields})
 
-    # Sincronización con WhatsApp real (best-effort, solo quando conectado/configurado)
-    contact = database.get_contact_by_id(conv["contact_id"]) if conv else None
-    phone = (contact or {}).get("phone", "")
-    if fields and phone:
-        number = str(phone).replace("@s.whatsapp.net", "")
-        if "archived" in fields:
-            chat_archive(number, bool(fields["archived"]))
-        if "pinned" in fields:
-            chat_pin(number, bool(fields["pinned"]))
-        if "muted" in fields:
-            chat_mute(number, bool(fields["muted"]))
-
     return jsonify({"ok": True, **fields})
 
 
 @app.post("/api/conversations/<int:conv_id>/clear")
 @login_required
 def api_conversations_clear(conv_id):
-    """Elimina todas as mensagens da conversa (painel-only)."""
     database.clear_conversation(conv_id)
     events.emit("conversation_updated", {"conversation_id": conv_id, "cleared": True})
     return jsonify({"ok": True})
@@ -1253,13 +745,7 @@ def api_conversations_clear(conv_id):
 @app.delete("/api/conversations/<int:conv_id>")
 @login_required
 def api_conversations_delete(conv_id):
-    """Apaga a conversa (mensagens + conversa). Sincroniza UAZAPI (DELETE /chat) best-effort."""
-    conv = database.get_conversation(conv_id)
-    contact = database.get_contact_by_id(conv["contact_id"]) if conv else None
-    phone = (contact or {}).get("phone", "")
     database.delete_conversation(conv_id)
-    if phone:
-        chat_delete(str(phone).replace("@s.whatsapp.net", ""))
     events.emit("conversation_updated", {"conversation_id": conv_id, "deleted": True})
     return jsonify({"ok": True})
 
@@ -1288,7 +774,6 @@ def api_conversations_remove_tag(conv_id, tag_id):
 @app.post("/api/conversations/bulk")
 @login_required
 def api_conversations_bulk():
-    """Executa uma ação em massa sobre múltiplas conversas."""
     data = request.get_json(silent=True) or {}
     ids = data.get("ids") or []
     action = data.get("action", "")
@@ -1317,16 +802,6 @@ def api_conversations_bulk():
                     fields["favorite"] = 1 if params.get("favorite", True) else 0
                 database.update_conversation(cid, **fields)
                 events.emit("conversation_updated", {"conversation_id": cid, **fields})
-                contact = database.get_contact_by_id(conv["contact_id"]) if conv else None
-                phone = (contact or {}).get("phone", "")
-                if phone:
-                    number = str(phone).replace("@s.whatsapp.net", "")
-                    if action == "archive":
-                        chat_archive(number, bool(fields["archived"]))
-                    elif action == "pin":
-                        chat_pin(number, bool(fields["pinned"]))
-                    elif action == "mute":
-                        chat_mute(number, bool(fields["muted"]))
 
             elif action == "status":
                 status = params.get("status", "")
@@ -1356,11 +831,7 @@ def api_conversations_bulk():
                 events.emit("conversation_updated", {"conversation_id": cid, "cleared": True})
 
             elif action == "delete":
-                contact = database.get_contact_by_id(conv["contact_id"]) if conv else None
-                phone = (contact or {}).get("phone", "")
                 database.delete_conversation(cid)
-                if phone:
-                    chat_delete(str(phone).replace("@s.whatsapp.net", ""))
                 events.emit("conversation_updated", {"conversation_id": cid, "deleted": True})
 
             elif action == "add_tag":
@@ -1372,6 +843,7 @@ def api_conversations_bulk():
             elif action == "remove_tag":
                 tag_id = params.get("tag_id")
                 if tag_id:
+                    import db
                     db.execute("DELETE FROM conversation_tags WHERE conversation_id=? AND tag_id=?", (cid, tag_id))
                     events.emit("tags_updated", {"conversation_id": cid, "tag_id": tag_id, "action": "remove"})
             else:
@@ -1384,6 +856,8 @@ def api_conversations_bulk():
 
     return jsonify({"ok": True, "processed": processed, "errors": errors})
 
+
+# ── Settings ──────────────────────────────────────────────────────────────────
 
 @app.get("/api/settings/agent-mode")
 @login_required
@@ -1414,44 +888,40 @@ def api_messages_send():
 
     res = send_text(phone, body)
     if not res.get("ok"):
-        err = res.get("error") or "Falha ao enviar mensagem pelo WhatsApp."
+        err = res.get("error") or "Falha ao enviar mensagem."
         print(f"[api] ERRO ao enviar p/ {phone}: {err}")
         return jsonify({"error": err}), (res.get("status") or 500)
 
-    # Se o envio via LID resolveu o número real (PN), usa/grava essa identidade.
-    resolved = res.get("resolved") or ""
-    contact_phone = resolved if resolved else phone
-    contact = database.upsert_contact(contact_phone)
-    conv = database.get_or_create_conversation(contact_phone)
+    # Extrai wa_id da resposta Meta
+    data_res = res.get("data") or {}
+    contacts = data_res.get("contacts", [])
+    wa_id = contacts[0].get("wa_id", phone) if contacts else phone
+    messages_res = data_res.get("messages", [])
+    meta_msg_id = messages_res[0].get("id", "") if messages_res else ""
+
+    contact = database.upsert_contact(wa_id)
+    conv = database.get_or_create_conversation(wa_id)
     database.save_message(
         conversation_id=conv["id"],
-        phone=contact_phone,
+        phone=wa_id,
         direction="out",
         body=body,
         sender="human",
         msg_type="text",
-        uazapi_id=res.get("message_id", ""),
+        wa_message_id=meta_msg_id,
     )
     database.update_conversation(conv["id"], last_message_at=time.strftime("%Y-%m-%dT%H:%M:%S"))
-    events.emit("message_sent", {"conversation_id": conv["id"], "phone": contact_phone, "body": body})
-    return jsonify({"ok": True, "phone": contact_phone, "resolved": resolved})
+    events.emit("message_sent", {"conversation_id": conv["id"], "phone": wa_id, "body": body})
+    return jsonify({"ok": True, "phone": wa_id, "message_id": meta_msg_id})
 
 
 @app.get("/api/messages/<int:msg_id>/media")
 @login_required
 def api_messages_media(msg_id):
-    """Devuelve el data-URI base64 de la media de un mensaje (imagen/audio/video/sticker).
-
-    Se la media aún no está guardada (mensajes antiguas o download en background
-    fallido), la baixa on-demand desde UAZAPI y la persiste — así la media
-    siempre se visualiza en el panel, no solo la etiqueta textual.
-    """
     m = database.get_message(msg_id)
     if not m:
         return jsonify({"error": "not found"}), 404
     media_url = str(m.get("media_url", "") or "").strip()
-    # Se não há nada guardado (mensagens antigas ou download em background
-    # falho), baixa on-demand desde UAZAPI e persiste.
     if not media_url:
         try:
             media_url = _fetch_and_store_media(m)
@@ -1670,7 +1140,6 @@ def api_knowledge_list():
 @app.get("/api/knowledge/descriptions")
 @login_required
 def api_knowledge_descriptions():
-    """Retorna índice de descrições (para o frontend e debug)."""
     return jsonify(knowledge_rag.get_file_descriptions())
 
 
@@ -1722,6 +1191,169 @@ def api_knowledge_delete(filename):
     knowledge_rag.delete_file(filename)
     print(f"[knowledge] deletado: {filename}")
     return jsonify({"ok": True})
+
+
+# ── WhatsApp Cloud API (Meta) ────────────────────────────────────────────────
+
+@app.get("/api/whatsapp/status")
+@login_required
+def api_whatsapp_status():
+    """Status do numero: quality rating, display name, etc."""
+    problem = meta.config_problem()
+    if problem:
+        return jsonify({"error": problem}), 400
+    r = get_phone_info()
+    if not r.get("ok"):
+        return jsonify({"error": r.get("error", "Erro ao consultar status")}), 500
+    return jsonify(r.get("data", {}))
+
+
+@app.get("/api/whatsapp/templates")
+@login_required
+def api_whatsapp_templates():
+    """Lista templates aprovados na WABA."""
+    problem = meta.config_problem()
+    if problem:
+        return jsonify({"error": problem}), 400
+    r = list_templates()
+    if not r.get("ok"):
+        return jsonify({"error": r.get("error", "Erro ao listar templates")}), 500
+    return jsonify(r.get("data", {}))
+
+
+@app.get("/api/whatsapp/templates/<template_id>")
+@login_required
+def api_whatsapp_template_detail(template_id):
+    """Detalhe de um template."""
+    problem = meta.config_problem()
+    if problem:
+        return jsonify({"error": problem}), 400
+    r = get_template(template_id)
+    if not r.get("ok"):
+        return jsonify({"error": r.get("error", "Template nao encontrado")}), 404
+    return jsonify(r.get("data", {}))
+
+
+@app.delete("/api/whatsapp/templates/<template_name>")
+@login_required
+def api_whatsapp_template_delete(template_name):
+    """Deleta um template da WABA."""
+    problem = meta.config_problem()
+    if problem:
+        return jsonify({"error": problem}), 400
+    r = delete_template(template_name)
+    if not r.get("ok"):
+        return jsonify({"error": r.get("error", "Erro ao deletar template")}), 500
+    return jsonify({"ok": True})
+
+
+@app.get("/api/whatsapp/profile")
+@login_required
+def api_whatsapp_profile():
+    """Business profile do numero."""
+    problem = meta.config_problem()
+    if problem:
+        return jsonify({"error": problem}), 400
+    r = get_business_profile()
+    if not r.get("ok"):
+        return jsonify({"error": r.get("error", "Erro ao consultar profile")}), 500
+    return jsonify(r.get("data", {}))
+
+
+@app.post("/api/whatsapp/profile")
+@login_required
+def api_whatsapp_profile_update():
+    """Atualiza business profile."""
+    problem = meta.config_problem()
+    if problem:
+        return jsonify({"error": problem}), 400
+    data = request.get_json(silent=True) or {}
+    allowed = ("about", "address", "description", "email", "websites", "vertical")
+    kwargs = {k: data[k] for k in allowed if k in data}
+    if not kwargs:
+        return jsonify({"error": "nenhum campo para atualizar"}), 400
+    r = update_business_profile(**kwargs)
+    if not r.get("ok"):
+        return jsonify({"error": r.get("error", "Erro ao atualizar profile")}), 500
+    return jsonify({"ok": True})
+
+
+@app.post("/api/whatsapp/send-template")
+@login_required
+def api_whatsapp_send_template():
+    """Envia uma template message para um numero."""
+    data = request.get_json(silent=True) or {}
+    phone = data.get("phone", "").strip()
+    template_name = data.get("template_name", "").strip()
+    language = data.get("language", "pt_BR")
+    body_params = data.get("body_params")
+    header_params = data.get("header_params")
+    if not phone or not template_name:
+        return jsonify({"error": "phone and template_name required"}), 400
+    from meta import send_template
+    r = send_template(phone, template_name, language, body_params, header_params)
+    if not r.get("ok"):
+        return jsonify({"error": r.get("error", "Erro ao enviar template")}), (r.get("status") or 500)
+    return jsonify({"ok": True, "data": r.get("data", {})})
+
+
+@app.post("/api/whatsapp/send-interactive")
+@login_required
+def api_whatsapp_send_interactive():
+    """Envia mensagem interativa (botoes ou lista)."""
+    data = request.get_json(silent=True) or {}
+    phone = data.get("phone", "").strip()
+    msg_type = data.get("type", "button")
+    if not phone:
+        return jsonify({"error": "phone required"}), 400
+
+    if msg_type == "list":
+        from meta import send_interactive_list
+        r = send_interactive_list(
+            phone,
+            header_text=data.get("header", ""),
+            body_text=data.get("body", ""),
+            button_text=data.get("button_text", "Opcoes"),
+            sections=data.get("sections", []),
+        )
+    elif msg_type == "button":
+        from meta import send_interactive_buttons
+        r = send_interactive_buttons(
+            phone,
+            body_text=data.get("body", ""),
+            buttons=data.get("buttons", []),
+            header_text=data.get("header", ""),
+            footer_text=data.get("footer", ""),
+        )
+    else:
+        return jsonify({"error": f"tipo interativo invalido: {msg_type}"}), 400
+
+    if not r.get("ok"):
+        return jsonify({"error": r.get("error", "Erro ao enviar interativo")}), (r.get("status") or 500)
+    return jsonify({"ok": True, "data": r.get("data", {})})
+
+
+@app.post("/api/whatsapp/upload-media")
+@login_required
+def api_whatsapp_upload_media():
+    """Upload de midia para o servidor Meta (retorna media_id)."""
+    problem = meta.config_problem()
+    if problem:
+        return jsonify({"error": problem}), 400
+    if "file" not in request.files:
+        return jsonify({"error": "file required"}), 400
+    f = request.files["file"]
+    if not f.filename:
+        return jsonify({"error": "filename required"}), 400
+    import mimetypes
+    mime = mimetypes.guess_type(f.filename)[0] or "application/octet-stream"
+    file_bytes = f.read()
+    from meta import upload_media_bytes
+    r = upload_media_bytes(file_bytes, mime, f.filename)
+    if not r.get("ok"):
+        return jsonify({"error": r.get("error", "Erro ao upload")}), (r.get("status") or 500)
+    data = r.get("data", {})
+    return jsonify({"ok": True, "media_id": data.get("id", ""), "data": data})
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
