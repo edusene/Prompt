@@ -309,7 +309,8 @@ def delete_template(template_name: str) -> dict:
 
 def get_phone_info() -> dict:
     url = f"{_BASE}/{_PHONE_ID}"
-    return _request("GET", url)
+    params = {"fields": "verified_name,display_phone_number,quality_rating,name_status,status"}
+    return _request("GET", url, params=params)
 
 
 def get_business_profile() -> dict:

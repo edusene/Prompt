@@ -1636,29 +1636,45 @@ async function loadWAConnection() {
     const el = document.getElementById('wa-status');
     if (!el) return;
     el.innerHTML = '<span class="wa-status-pill connecting"><span class="pulse-dot yellow"></span>Verificando...</span>';
-    const data = await api('/api/whatsapp/connection');
-    if (!data) {
-        el.innerHTML = '<span class="wa-status-pill error"><span class="pulse-dot red"></span>Erro de conexao</span>';
+    try {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 15000);
+        const res = await fetch('/api/whatsapp/connection', {
+            headers: { 'Content-Type': 'application/json' },
+            signal: ctrl.signal,
+        });
+        clearTimeout(timer);
+        if (res.status === 401 || res.redirected) {
+            window.location.href = '/login';
+            return;
+        }
+        let data;
+        try { data = await res.json(); } catch(e) {
+            el.innerHTML = '<span class="wa-status-pill error"><span class="pulse-dot red"></span>Resposta invalida do servidor</span>';
+            return;
+        }
+        if (!data || data.error || !data.ok) {
+            el.innerHTML = `<span class="wa-status-pill error" title="${esc(data?.error || '')}"><span class="pulse-dot red"></span>${esc(friendlyError(data?.error || 'Erro desconhecido'))}</span>`;
+            document.getElementById('wa-info-grid').style.display = 'none';
+            return;
+        }
+        el.innerHTML = '<span class="wa-status-pill open"><span class="pulse-dot green"></span>Conectado a Datafy API</span>';
+        const infoGrid = document.getElementById('wa-info-grid');
+        infoGrid.style.display = 'grid';
+        document.getElementById('wa-phone').textContent = data.display_phone || data.phone_number_id || '-';
+        document.getElementById('wa-display-name').textContent = data.display_name || '-';
+        const qEl = document.getElementById('wa-quality');
+        if (data.quality_rating) {
+            const qColor = data.quality_rating === 'GREEN' ? '#22c55e' : (data.quality_rating === 'YELLOW' ? '#eab308' : '#ef4444');
+            qEl.innerHTML = `<span style="color:${qColor};font-weight:600">${data.quality_rating}</span>`;
+        } else { qEl.textContent = '-'; }
+        document.getElementById('wa-name-status').textContent = data.name_status || '-';
+        lastWAStatus = 'open';
+    } catch(e) {
+        const msg = e.name === 'AbortError' ? 'Servidor sem resposta (timeout)' : 'Erro de conexao';
+        el.innerHTML = `<span class="wa-status-pill error"><span class="pulse-dot red"></span>${msg}</span>`;
         document.getElementById('wa-info-grid').style.display = 'none';
-        return;
     }
-    if (data.error || !data.ok) {
-        el.innerHTML = `<span class="wa-status-pill error" title="${esc(data.error || '')}"><span class="pulse-dot red"></span>${esc(friendlyError(data.error || 'Erro desconhecido'))}</span>`;
-        document.getElementById('wa-info-grid').style.display = 'none';
-        return;
-    }
-    el.innerHTML = '<span class="wa-status-pill open"><span class="pulse-dot green"></span>Conectado a Datafy API</span>';
-    const infoGrid = document.getElementById('wa-info-grid');
-    infoGrid.style.display = 'grid';
-    document.getElementById('wa-phone').textContent = data.display_phone || data.phone_number_id || '-';
-    document.getElementById('wa-display-name').textContent = data.display_name || '-';
-    const qEl = document.getElementById('wa-quality');
-    if (data.quality_rating) {
-        const qColor = data.quality_rating === 'GREEN' ? '#22c55e' : (data.quality_rating === 'YELLOW' ? '#eab308' : '#ef4444');
-        qEl.innerHTML = `<span style="color:${qColor};font-weight:600">${data.quality_rating}</span>`;
-    } else { qEl.textContent = '-'; }
-    document.getElementById('wa-name-status').textContent = data.name_status || '-';
-    lastWAStatus = 'open';
 }
 
 function startWAConnectionPolling() {
