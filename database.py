@@ -13,6 +13,16 @@ def init_db() -> None:
     """Cria todas as tabelas se não existirem (e aplica migrações idempotentes)."""
     db.executescript(SCHEMA)
 
+    # Migration: renomear uazapi_id -> wa_message_id (Supabase/PostgreSQL)
+    cols = db.table_columns("messages")
+    if "uazapi_id" in cols and "wa_message_id" not in cols:
+        try:
+            db.execute("DROP INDEX IF EXISTS idx_messages_uazapi")
+        except Exception:
+            pass
+        db.execute("ALTER TABLE messages RENAME COLUMN uazapi_id TO wa_message_id")
+        print("[db] migration: uazapi_id -> wa_message_id concluida")
+
     # Migração idempotente: adiciona colunas de gerenciamento de conversa
     cols = db.table_columns("conversations")
     for col, ddl in (
@@ -51,20 +61,6 @@ def init_db() -> None:
 
     _ensure_indexes()
 
-    # Migration: renomear uazapi_id -> wa_message_id (Supabase/PostgreSQL)
-    cols = db.table_columns("messages")
-    if "uazapi_id" in cols and "wa_message_id" not in cols:
-        try:
-            db.execute("DROP INDEX IF EXISTS idx_messages_uazapi")
-        except Exception:
-            pass
-        db.execute("ALTER TABLE messages RENAME COLUMN uazapi_id TO wa_message_id")
-        try:
-            db.execute("CREATE INDEX IF NOT EXISTS idx_messages_wa_msg ON messages(wa_message_id)")
-        except Exception:
-            pass
-        print("[db] migration: uazapi_id -> wa_message_id concluida")
-
 
 # ═══ Settings (key-value global) ═════════════════════════════════════════════
 
@@ -85,12 +81,13 @@ def set_setting(key: str, value: str) -> None:
 def _ensure_indexes() -> None:
     """Crea índices faltantes que aceleran las consultas más usadas (idempotente).
 
-    La mayoría ya los crea el SCHEMA (messages.conversation_id/created_at/wa_message_id,
+    La mayoría ya los crea el SCHEMA (messages.conversation_id/created_at,
     conversations.contact_id/status). Aquí solo añadimos el orden por pinned de la
-    lista de conversas, sin duplicar ni alterar las consultas existentes.
+    lista de conversas y el índice de wa_message_id, sin duplicar ni alterar las consultas existentes.
     """
     for name, table, column in (
         ("idx_conversations_pinned", "conversations", "pinned"),
+        ("idx_messages_wa_msg", "messages", "wa_message_id"),
     ):
         try:
             db.execute(f"CREATE INDEX IF NOT EXISTS {name} ON {table}({column})")
@@ -221,7 +218,6 @@ CREATE TABLE IF NOT EXISTS settings (
 
 CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
-CREATE INDEX IF NOT EXISTS idx_messages_wa_msg ON messages(wa_message_id);
 CREATE INDEX IF NOT EXISTS idx_conversations_contact ON conversations(contact_id);
 CREATE INDEX IF NOT EXISTS idx_conversations_status ON conversations(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_contact ON tasks(contact_id);
