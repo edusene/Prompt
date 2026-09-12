@@ -33,7 +33,8 @@ def _request(method, url, body=None, params=None, extra_headers=None):
         except Exception:
             data = r.text
         short = str(data)[:300]
-        print(f"[meta] {method} {url.split('facebook.com')[1][:60]} -> {r.status_code} | {short}", flush=True)
+        url_path = url.split("//", 1)[-1].split("/", 1)[-1][:60] if "//" in url else url[:60]
+        print(f"[meta] {method} {url_path} -> {r.status_code} | {short}", flush=True)
         if r.ok:
             return {"ok": True, "status": r.status_code, "data": data}
         return {"ok": False, "status": r.status_code,

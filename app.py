@@ -530,10 +530,13 @@ def webhook():
                 print("[webhook] SEM REMETENTE")
                 continue
 
-            # push_name do contato
+            # push_name e avatar do contato
             push_name = ""
+            profile_picture_url = ""
             if contacts:
-                push_name = contacts[0].get("profile", {}).get("name", "")
+                profile = contacts[0].get("profile", {})
+                push_name = profile.get("name", "")
+                profile_picture_url = profile.get("profile_picture_url", "")
 
             # Extrai body e tipo
             body, msg_type, wa_media_id = _extract_body_from_meta_message(msg_data)
@@ -548,7 +551,12 @@ def webhook():
             mark_read(str(message_id))
 
             # Salva contato e conversa
-            contact = database.upsert_contact(number, name=push_name) if push_name else database.upsert_contact(number)
+            contact_kwargs = {}
+            if push_name:
+                contact_kwargs["name"] = push_name
+            if profile_picture_url:
+                contact_kwargs["avatar_url"] = profile_picture_url
+            contact = database.upsert_contact(number, **contact_kwargs)
             conv = database.get_or_create_conversation(number)
             saved = database.save_message(
                 conversation_id=conv["id"],
