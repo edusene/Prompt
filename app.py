@@ -273,13 +273,17 @@ def _build_user_parts(items: list[dict]) -> list[dict]:
                         }
                     })
                 elif mime and b64 and _normalize_mime(mime) in _OPENAI_SUPPORTED_DOCS:
-                    parts.append({"text": media_desc})
-                    parts.append({
-                        "inline_data": {
-                            "mime_type": _normalize_mime(mime),
-                            "data": b64,
-                        }
-                    })
+                    decoded_size = len(b64) * 3 // 4
+                    if decoded_size > 2 * 1024 * 1024:
+                        parts.append({"text": media_desc + " (arquivo muito grande para analisar automaticamente)"})
+                    else:
+                        parts.append({"text": media_desc})
+                        parts.append({
+                            "inline_data": {
+                                "mime_type": _normalize_mime(mime),
+                                "data": b64,
+                            }
+                        })
                 else:
                     parts.append({"text": media_desc})
 

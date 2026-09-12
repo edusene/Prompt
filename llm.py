@@ -42,12 +42,19 @@ def _convert_history(history: list[dict]) -> list[dict]:
                 elif "inline_data" in p:
                     mime = p["inline_data"].get("mime_type", "")
                     data = p["inline_data"].get("data", "")
-                    if mime.startswith("image/") or mime == "application/pdf":
+                    if mime.startswith("image/"):
                         content_parts.append({
                             "type": "image_url",
                             "image_url": {
                                 "url": f"data:{mime};base64,{data}",
                                 "detail": "low",
+                            },
+                        })
+                    elif mime == "application/pdf":
+                        content_parts.append({
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{mime};base64,{data}",
                             },
                         })
             if not content_parts:
