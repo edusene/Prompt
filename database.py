@@ -68,6 +68,15 @@ def init_db() -> None:
         except Exception:
             pass
 
+    # Migração: adiciona avatar_color na tabela contacts
+    ccols = db.table_columns("contacts")
+    if "avatar_color" not in ccols:
+        try:
+            db.execute("ALTER TABLE contacts ADD COLUMN avatar_color TEXT DEFAULT ''")
+            print("[db] coluna avatar_color adicionada")
+        except Exception:
+            pass
+
     _ensure_indexes()
 
 
@@ -147,6 +156,7 @@ CREATE TABLE IF NOT EXISTS contacts (
     company TEXT DEFAULT '',
     notes TEXT DEFAULT '',
     avatar_url TEXT DEFAULT '',
+    avatar_color TEXT DEFAULT '',
     assigned_to TEXT DEFAULT '',
     auto_mode INTEGER DEFAULT 1,
     created_at TEXT DEFAULT NOW(),
@@ -243,7 +253,7 @@ def upsert_contact(phone: str, name: str = "", **extra: Any) -> dict:
         fields = []
         vals = []
         for k, v in extra.items():
-            if k in ("name", "email", "company", "notes", "avatar_url", "assigned_to", "auto_mode"):
+            if k in ("name", "email", "company", "notes", "avatar_url", "avatar_color", "assigned_to", "auto_mode"):
                 fields.append(f"{k}=?")
                 vals.append(v)
         if name:
@@ -256,11 +266,11 @@ def upsert_contact(phone: str, name: str = "", **extra: Any) -> dict:
     else:
         default_auto = int(get_setting("agent_mode", "1"))
         db.execute(
-            "INSERT INTO contacts (phone, name, email, company, notes, avatar_url, assigned_to, auto_mode, created_at, updated_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO contacts (phone, name, email, company, notes, avatar_url, avatar_color, assigned_to, auto_mode, created_at, updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
             (phone, name, extra.get("email", ""), extra.get("company", ""),
              extra.get("notes", ""), extra.get("avatar_url", ""),
-             extra.get("assigned_to", ""), extra.get("auto_mode", default_auto), now, now),
+             extra.get("avatar_color", ""), extra.get("assigned_to", ""), extra.get("auto_mode", default_auto), now, now),
         )
     return db.fetch_one("SELECT * FROM contacts WHERE phone=?", (phone,))
 
@@ -280,7 +290,7 @@ def list_contacts(limit: int = 100, offset: int = 0) -> list[dict]:
 
 
 def update_contact(contact_id: int, **fields: Any) -> None:
-    allowed = ("name", "email", "company", "notes", "avatar_url", "assigned_to", "auto_mode")
+    allowed = ("name", "email", "company", "notes", "avatar_url", "avatar_color", "assigned_to", "auto_mode")
     sets = []
     vals = []
     for k, v in fields.items():
@@ -355,7 +365,7 @@ def list_conversations(status: str = "", archived: bool | None = None,
         where.append("c.archived=0")
     where_sql = ("WHERE " + " AND ".join(where)) if where else ""
     rows = db.fetch_all(
-        "SELECT c.*, ct.name as contact_name, ct.phone as contact_phone, ct.avatar_url as contact_avatar "
+        "SELECT c.*, ct.name as contact_name, ct.phone as contact_phone, ct.avatar_url as contact_avatar, ct.avatar_color as contact_avatar_color "
         "FROM conversations c LEFT JOIN contacts ct ON c.contact_id=ct.id "
         f"{where_sql} ORDER BY c.pinned DESC, c.last_message_at DESC, c.id DESC "
         "LIMIT ? OFFSET ?",

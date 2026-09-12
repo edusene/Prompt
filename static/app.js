@@ -186,6 +186,8 @@ async function loadConversations() {
     const html = conversations.map(c => {
         const name = c.contact_name || c.contact_phone;
         const initials = name.slice(0, 2).toUpperCase();
+        const avatarBg = c.contact_avatar_color || '';
+        const avatarStyle = avatarBg ? `background:${avatarBg}` : '';
         const avatar = c.contact_avatar
             ? `<img src="${esc(c.contact_avatar)}" alt="" class="conv-avatar-img" onerror="this.remove()">`
             : '';
@@ -202,7 +204,7 @@ async function loadConversations() {
         return `
             <div class="conv-item ${c.id === currentConvId ? 'active' : ''}${isSelected ? ' selected' : ''}" data-conv-id="${c.id}" onclick="selectConversation(${c.id})" oncontextmenu="openContextMenu(event, ${c.id})">
                 <div class="conv-check-visual${isSelected ? ' checked' : ''}" onclick="event.stopPropagation(); toggleConvSelect(${c.id})"></div>
-                <div class="conv-avatar">${avatar}${initials}</div>
+                <div class="conv-avatar" style="${avatarStyle}">${avatar}${initials}</div>
                 <div class="conv-meta">
                     <div class="conv-name">${esc(name)} ${badges.join('')}</div>
                     <div class="conv-preview"><span class="status-dot status-${c.status}"></span>${esc(statusLabel(c.status))}</div>
@@ -611,12 +613,14 @@ function renderChatHeader(conv, contact) {
     const name = contact?.name || contact?.phone || 'Desconhecido';
     const autoMode = contact?.auto_mode ? 'Auto' : 'Humano';
     const autoClass = contact?.auto_mode ? 'auto-on' : 'auto-off';
+    const avatarBg = contact?.avatar_color || '';
+    const avatarStyle = avatarBg ? `background:${avatarBg}` : '';
     const avatar = contact?.avatar_url
         ? `<img src="${esc(contact.avatar_url)}" alt="" class="conv-avatar-img" onerror="this.remove()">`
         : '';
     const initials = esc(name.slice(0, 2).toUpperCase());
     document.getElementById('chat-header').innerHTML = `
-        <div class="chat-header-avatar">${avatar}${initials}</div>
+        <div class="chat-header-avatar" style="${avatarStyle}">${avatar}${initials}</div>
         <span>${esc(name)} (${esc(statusLabel(conv.status))})</span>
         <span class="auto-badge ${autoClass}">${autoMode}</span>
     `;
@@ -1333,6 +1337,7 @@ function showContactForm(contact = null) {
             <div class="form-group"><label>Nome</label><input name="name" value="${esc(contact?.name || '')}"></div>
             <div class="form-group"><label>Email</label><input name="email" value="${esc(contact?.email || '')}"></div>
             <div class="form-group"><label>Empresa</label><input name="company" value="${esc(contact?.company || '')}"></div>
+            <div class="form-group"><label>Cor do avatar</label><input type="color" name="avatar_color" value="${esc(contact?.avatar_color || '#6366f1')}"></div>
             <div class="form-group"><label>Notas</label><textarea name="notes" rows="3">${esc(contact?.notes || '')}</textarea></div>
             <button type="submit" class="btn-primary">Salvar</button>
         </form>`;
