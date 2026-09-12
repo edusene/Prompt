@@ -244,12 +244,12 @@
             <!-- WhatsApp Connection -->
             <div id="view-whatsapp" class="view">
                 <div class="wa-view-header">
-                    <h1>Conexão WhatsApp</h1>
-                    <p class="subtitle">Gerencie o pareamento da sua instância do WhatsApp e monitore a conectividade com a API.</p>
+                    <h1>WhatsApp — Datafy API</h1>
+                    <p class="subtitle">Status da conexao, configuracao da API e informacoes do numero.</p>
                 </div>
 
                 <div class="wa-grid">
-                    <!-- Painel de Conexão Principal -->
+                    <!-- Card 1: Status da Conexao -->
                     <div class="wa-card wa-main-card">
                         <div class="wa-card-header">
                             <div class="wa-status-group">
@@ -259,60 +259,98 @@
                                     </svg>
                                 </div>
                                 <div>
-                                    <h3>Status da Instância</h3>
-                                    <div id="wa-status" class="wa-status-container">Carregando...</div>
+                                    <h3>Status da Conexao</h3>
+                                    <div id="wa-status" class="wa-status-container">Verificando...</div>
                                 </div>
+                            </div>
+                        </div>
+
+                        <div class="wa-info-grid" id="wa-info-grid" style="display:none">
+                            <div class="wa-info-item">
+                                <span class="wa-info-label">Telefone</span>
+                                <span class="wa-info-value" id="wa-phone">-</span>
+                            </div>
+                            <div class="wa-info-item">
+                                <span class="wa-info-label">Nome</span>
+                                <span class="wa-info-value" id="wa-display-name">-</span>
+                            </div>
+                            <div class="wa-info-item">
+                                <span class="wa-info-label">Qualidade</span>
+                                <span class="wa-info-value" id="wa-quality">-</span>
+                            </div>
+                            <div class="wa-info-item">
+                                <span class="wa-info-label">Status Nome</span>
+                                <span class="wa-info-value" id="wa-name-status">-</span>
                             </div>
                         </div>
 
                         <div class="wa-actions-toolbar">
-                            <button class="btn-secondary wa-action-btn" onclick="loadQRCode()">
-                                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="3" height="3"/><line x1="21" y1="14" x2="21" y2="14.01"/><line x1="14" y1="21" x2="14" y2="21.01"/><line x1="21" y1="21" x2="21" y2="21.01"/></svg>
-                                <span>QR Code</span>
-                            </button>
-                            <button class="btn-secondary wa-action-btn" onclick="restartWA()">
+                            <button class="btn-secondary wa-action-btn" onclick="loadWAConnection()">
                                 <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-                                <span>Reiniciar</span>
-                            </button>
-                            <button class="btn-secondary wa-action-btn btn-diagnose" onclick="runDiagnose()">
-                                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-                                <span>Diagnóstico</span>
-                            </button>
-                            <button class="btn-danger wa-action-btn" onclick="disconnectWA()">
-                                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                                <span>Desconectar</span>
+                                <span>Testar Conexao</span>
                             </button>
                         </div>
-
-                        <div id="qr-container" class="wa-dynamic-container"></div>
-                        <div id="diagnose-container" class="wa-dynamic-container"></div>
                     </div>
 
-                    <!-- Card de Instruções -->
-                    <div class="wa-card wa-guide-card">
-                        <h3>Como Conectar</h3>
-                        <div class="wa-steps-list">
-                            <div class="wa-step-item">
-                                <span class="wa-step-num">1</span>
-                                <div class="wa-step-content">
-                                    <strong>Gere o QR Code</strong>
-                                    <p>Clique no botão <em>QR Code</em> para solicitar um novo código de conexão.</p>
+                    <!-- Card 2: Configuracao -->
+                    <div class="wa-card wa-config-card">
+                        <h3>Configuracao da API</h3>
+                        <p class="muted" style="font-size:12px;margin:0 0 16px 0">Atualize as variaveis de ambiente direto pelo painel.</p>
+                        <form id="wa-config-form" class="wa-config-form" onsubmit="saveWAConfig(event)">
+                            <div class="wa-config-field">
+                                <label for="wa-cfg-token">Token Datafy</label>
+                                <div class="wa-secret-wrap">
+                                    <input type="password" id="wa-cfg-token" name="DATAFY_TOKEN" class="wa-config-input" autocomplete="off">
+                                    <button type="button" class="wa-secret-toggle" onclick="toggleSecretVisibility('wa-cfg-token')" title="Mostrar/ocultar">
+                                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                    </button>
                                 </div>
                             </div>
-                            <div class="wa-step-item">
-                                <span class="wa-step-num">2</span>
-                                <div class="wa-step-content">
-                                    <strong>Abra o WhatsApp no celular</strong>
-                                    <p>Acesse o menu (Configurações) e selecione <em>Aparelhos conectados</em>.</p>
+                            <div class="wa-config-field">
+                                <label for="wa-cfg-phone">Phone Number ID</label>
+                                <input type="text" id="wa-cfg-phone" name="DATAFY_PHONE_NUMBER_ID" class="wa-config-input" placeholder="Ex: 106540352242922">
+                            </div>
+                            <div class="wa-config-field">
+                                <label for="wa-cfg-waba">WABA ID</label>
+                                <input type="text" id="wa-cfg-waba" name="DATAFY_WABA_ID" class="wa-config-input" placeholder="Ex: 102290129340398">
+                            </div>
+                            <div class="wa-config-field">
+                                <label for="wa-cfg-secret">Webhook Secret</label>
+                                <div class="wa-secret-wrap">
+                                    <input type="password" id="wa-cfg-secret" name="DATAFY_WEBHOOK_SECRET" class="wa-config-input" autocomplete="off">
+                                    <button type="button" class="wa-secret-toggle" onclick="toggleSecretVisibility('wa-cfg-secret')" title="Mostrar/ocultar">
+                                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                    </button>
                                 </div>
                             </div>
-                            <div class="wa-step-item">
-                                <span class="wa-step-num">3</span>
-                                <div class="wa-step-content">
-                                    <strong>Escaneie a imagem</strong>
-                                    <p>Aponte a câmera para o QR Code gerado para conectar a sessão.</p>
-                                </div>
+                            <div class="wa-config-field wa-config-full">
+                                <label for="wa-cfg-webhook">URL Webhook</label>
+                                <input type="text" id="wa-cfg-webhook" name="WEBHOOK_URL" class="wa-config-input" placeholder="https://seu-dominio.com/webhook">
                             </div>
+                            <div class="wa-config-actions">
+                                <button type="submit" class="btn-primary" id="wa-config-save-btn">Salvar Configuracao</button>
+                            </div>
+                        </form>
+                    </div>
+
+                    <!-- Card 3: Webhook Info -->
+                    <div class="wa-card wa-webhook-card">
+                        <h3>Webhook</h3>
+                        <div class="wa-webhook-box">
+                            <div class="wa-webhook-url" id="wa-webhook-url">-</div>
+                            <button class="btn-sm btn-secondary" onclick="copyWebhookUrl()" title="Copiar URL">
+                                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                                Copiar
+                            </button>
+                        </div>
+                        <div class="wa-webhook-steps">
+                            <p class="wa-webhook-title">Como configurar no painel Datafy:</p>
+                            <ol>
+                                <li>Acesse <a href="https://app.datafyapi.com.br" target="_blank" rel="noopener">app.datafyapi.com.br</a></li>
+                                <li>Va em <strong>Configuracoes > Webhook</strong></li>
+                                <li>Cole a URL acima no campo <strong>Webhook URL</strong></li>
+                                <li>Ative o evento <strong>messages</strong></li>
+                            </ol>
                         </div>
                     </div>
                 </div>

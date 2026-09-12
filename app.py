@@ -1384,6 +1384,128 @@ def api_whatsapp_upload_media():
     return jsonify({"ok": True, "media_id": data.get("id", ""), "data": data})
 
 
+# ── WhatsApp — Conexao e Configuracao (Datafy) ──────────────────────────────
+
+_ENV_KEYS = [
+    ("DATAFY_TOKEN", "Token Datafy", True),
+    ("DATAFY_PHONE_NUMBER_ID", "Phone Number ID", False),
+    ("DATAFY_WABA_ID", "WABA ID", False),
+    ("DATAFY_WEBHOOK_SECRET", "Webhook Secret", True),
+    ("WEBHOOK_URL", "URL Webhook", False),
+    ("OPENAI_API_KEY", "OpenAI API Key", True),
+    ("OPENAI_MODEL", "Modelo OpenAI", False),
+    ("BUFFER_SECONDS", "Buffer (segundos)", False),
+    ("MAX_HISTORY", "Max Historico", False),
+    ("SYSTEM_PROMPT", "System Prompt", False),
+]
+
+
+def _mask_value(val: str, is_secret: bool) -> str:
+    if not is_secret or not val or len(val) <= 8:
+        return val
+    return "*" * (len(val) - 4) + val[-4:]
+
+
+def _read_env_file() -> dict[str, str]:
+    env_path = os.path.join(os.path.dirname(__file__), ".env")
+    result = {}
+    if not os.path.isfile(env_path):
+        return result
+    with open(env_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" in line:
+                k, v = line.split("=", 1)
+                result[k.strip()] = v.strip()
+    return result
+
+
+def _write_env_file(updates: dict[str, str]) -> None:
+    env_path = os.path.join(os.path.dirname(__file__), ".env")
+    lines = []
+    existing_keys = set()
+    if os.path.isfile(env_path):
+        with open(env_path, "r", encoding="utf-8") as f:
+            for line in f:
+                stripped = line.strip()
+                if stripped and not stripped.startswith("#") and "=" in stripped:
+                    k = stripped.split("=", 1)[0].strip()
+                    existing_keys.add(k)
+                    if k in updates:
+                        lines.append(f"{k}={updates[k]}\n")
+                    else:
+                        lines.append(line)
+                else:
+                    lines.append(line)
+    for k, v in updates.items():
+        if k not in existing_keys:
+            lines.append(f"{k}={v}\n")
+    with open(env_path, "w", encoding="utf-8") as f:
+        f.writelines(lines)
+
+
+@app.get("/api/whatsapp/connection")
+@login_required
+def api_whatsapp_connection():
+    """Testa conexao com a Datafy API e retorna dados da instância."""
+    r_me = meta.get_me()
+    if not r_me.get("ok"):
+        return jsonify({"ok": False, "error": r_me.get("error", "Erro ao conectar com Datafy")})
+
+    r_phone = meta.get_phone_info()
+    phone_data = r_phone.get("data", {}) if r_phone.get("ok") else {}
+
+    me_data = r_me.get("data", {})
+    return jsonify({
+        "ok": True,
+        "phone_number_id": me_data.get("phone_number_id", _PHONE_ID),
+        "waba_id": me_data.get("waba_id", _WABA_ID),
+        "display_name": phone_data.get("verified_name", ""),
+        "display_phone": phone_data.get("display_phone_number", ""),
+        "quality_rating": phone_data.get("quality_rating", ""),
+        "name_status": phone_data.get("name_status", ""),
+        "config_problem": meta.config_problem(),
+    })
+
+
+@app.get("/api/whatsapp/config")
+@login_required
+def api_whatsapp_config_get():
+    """Retorna valores atuais do .env (secrets mascarados)."""
+    env = _read_env_file()
+    result = {}
+    for key, label, is_secret in _ENV_KEYS:
+        raw = env.get(key, os.getenv(key, ""))
+        result[key] = {"label": label, "value": _mask_value(raw, is_secret), "is_secret": is_secret}
+    return jsonify(result)
+
+
+@app.post("/api/whatsapp/config")
+@login_required
+def api_whatsapp_config_post():
+    """Salva novos valores no .env e recarrega configuracao."""
+    data = request.get_json(silent=True) or {}
+    updates = {}
+    for key, _, _ in _ENV_KEYS:
+        if key in data:
+            val = str(data[key]).strip()
+            if val.startswith("*" * 4):
+                continue
+            updates[key] = val
+    if not updates:
+        return jsonify({"ok": False, "error": "Nenhum campo para atualizar"}), 400
+    try:
+        _write_env_file(updates)
+        os.environ.update(updates)
+        meta.reload_config()
+        print(f"[config] .env atualizado: {list(updates.keys())}")
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

@@ -6,7 +6,6 @@ let selectedTags = [];
 let pollTimers = [];
 let lastWAStatus = '';
 let waStatusTimer = null;
-let waPairingActive = false;
 let lastSentBody = '';
 let _sseSource = null;
 
@@ -105,8 +104,9 @@ function loadView(view) {
             loadKnowledge();
             break;
         case 'whatsapp':
-            loadWAStatus();
-            startWAStatusPolling();
+            loadWAConnection();
+            loadWAConfig();
+            startWAConnectionPolling();
             break;
     }
 }
@@ -1631,162 +1631,91 @@ async function deleteKnowledge(filename) {
     }
 }
 
-/* ── WhatsApp ─────────────────────────────────────────────────────────────── */
-async function loadWAStatus(pushedStatus) {
+/* ── WhatsApp (Datafy) ─────────────────────────────────────────────────────── */
+async function loadWAConnection() {
     const el = document.getElementById('wa-status');
     if (!el) return;
-    // Se vier por push (SSE), atualiza direto sem recarregar o spinner e sem requisição
-    const data = pushedStatus ? { status: pushedStatus }
-        : await api((waPairingActive ? '/api/instance/status?fresh=1' : '/api/instance/status'));
+    el.innerHTML = '<span class="wa-status-pill connecting"><span class="pulse-dot yellow"></span>Verificando...</span>';
+    const data = await api('/api/whatsapp/connection');
     if (!data) {
-        el.innerHTML = '<span class="wa-status-pill error"><span class="pulse-dot red"></span>Erro de conexão</span>';
+        el.innerHTML = '<span class="wa-status-pill error"><span class="pulse-dot red"></span>Erro de conexao</span>';
+        document.getElementById('wa-info-grid').style.display = 'none';
         return;
     }
-    if (data.error) {
-        el.innerHTML = `<span class="wa-status-pill error" title="${esc(data.error)}"><span class="pulse-dot red"></span>${esc(friendlyError(data.error))}</span>`;
+    if (data.error || !data.ok) {
+        el.innerHTML = `<span class="wa-status-pill error" title="${esc(data.error || '')}"><span class="pulse-dot red"></span>${esc(friendlyError(data.error || 'Erro desconhecido'))}</span>`;
+        document.getElementById('wa-info-grid').style.display = 'none';
         return;
     }
-    let status = typeof data.status === 'string' ? data.status.toLowerCase() : 'desconhecido';
-    // Normaliza valores possíveis que a UAZAPI pode enviar para estados do painel.
-    if (['connected', 'open', 'online'].includes(status)) status = 'open';
-    else if (['close', 'closed', 'disconnected', 'offline', 'logout'].includes(status)) status = 'close';
-    else if (['connecting', 'scanning'].includes(status)) status = 'connecting';
-    else if (status !== 'open' && status !== 'close' && status !== 'connecting'
-             && status !== 'qr' && status !== 'error') status = 'close';
-    const labels = { open: 'Conectado', connecting: 'Conectando...', close: 'Desconectado', qr: 'Aguardando QR Code', error: 'Erro' };
-    const pillClass = status === 'open' ? 'open' : (status === 'error' ? 'error' : (status === 'connecting' || status === 'qr' ? 'connecting' : 'close'));
-    const dotColor = status === 'open' ? 'green' : (status === 'error' ? 'red' : 'yellow');
-    el.innerHTML = `
-        <span class="wa-status-pill ${pillClass}">
-            <span class="pulse-dot ${dotColor}"></span>
-            ${labels[status] || status}
-        </span>
-    `;
-    lastWAStatus = status === 'desconhecido' ? '' : status;
-    // Auto-fechar QR popup quando conectar (escaneou com sucesso)
-    if (status === 'open') {
-        waPairingActive = false; // conexão concluída → volta ao ritmo normal de polling
-        const qrEl = document.getElementById('qr-container');
-        if (qrEl && qrEl.innerHTML.trim()) {
-            closeQR();
-            toast('WhatsApp conectado com sucesso!', 'success');
-        }
-    }
-    startWAStatusPolling();
+    el.innerHTML = '<span class="wa-status-pill open"><span class="pulse-dot green"></span>Conectado a Datafy API</span>';
+    const infoGrid = document.getElementById('wa-info-grid');
+    infoGrid.style.display = 'grid';
+    document.getElementById('wa-phone').textContent = data.display_phone || data.phone_number_id || '-';
+    document.getElementById('wa-display-name').textContent = data.display_name || '-';
+    const qEl = document.getElementById('wa-quality');
+    if (data.quality_rating) {
+        const qColor = data.quality_rating === 'GREEN' ? '#22c55e' : (data.quality_rating === 'YELLOW' ? '#eab308' : '#ef4444');
+        qEl.innerHTML = `<span style="color:${qColor};font-weight:600">${data.quality_rating}</span>`;
+    } else { qEl.textContent = '-'; }
+    document.getElementById('wa-name-status').textContent = data.name_status || '-';
+    lastWAStatus = 'open';
 }
 
-/* Polling adaptativo do status: rápido durante pareamento (QR), lento quando
-   estável, e pausado quando a aba do navegador está oculta. */
-function startWAStatusPolling() {
+function startWAConnectionPolling() {
     if (waStatusTimer) { clearInterval(waStatusTimer); waStatusTimer = null; }
-    if (document.hidden) return; // aba oculta → não gera requisições
-    const fast = (waPairingActive || lastWAStatus === 'connecting' || lastWAStatus === 'qr');
-    waStatusTimer = setInterval(() => loadWAStatus(), fast ? 2000 : 60000);
+    if (document.hidden) return;
+    waStatusTimer = setInterval(loadWAConnection, 60000);
 }
 
-async function loadQRCode() {
-    const container = document.getElementById('qr-container');
-    container.innerHTML = `<p class="muted" style="text-align:center;padding:12px 0">${spinHTML('Gerando QR Code...')}</p>`;
-    const data = await api('/api/instance/qr');
-    if (!data) {
-        container.innerHTML = '<p style="color:#ef4444;text-align:center">Erro de conexão com o servidor</p>';
-        return;
+/* ── WhatsApp Config ───────────────────────────────────────────────────────── */
+async function loadWAConfig() {
+    const data = await api('/api/whatsapp/config');
+    if (!data) return;
+    for (const [key, info] of Object.entries(data)) {
+        const input = document.querySelector(`#wa-config-form [name="${key}"]`);
+        if (input) input.value = info.value || '';
     }
-    if (data.info) {
-        container.innerHTML = `
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-                <strong style="font-size:13px;color:#22c55e">WhatsApp Conectado</strong>
-                <button class="btn-sm btn-secondary" onclick="closeQR()">&times; Fechar</button>
-            </div>
-            <p style="color:#22c55e;font-size:13px">${esc(data.info)}</p>`;
-        return;
-    }
-    if (data.error) {
-        container.innerHTML = `
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-                <strong style="font-size:13px;color:#ef4444">Falha ao Obter QR Code</strong>
-                <button class="btn-sm btn-secondary" onclick="closeQR()">&times; Fechar</button>
-            </div>
-            <p style="color:#ef4444;font-size:13px">${esc(friendlyError(data.error))}</p>`;
-        return;
-    }
-    if (data.qrcode) {
-        container.innerHTML = `
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
-                <strong style="font-size:13px">Escaneie o QR Code abaixo</strong>
-                <button class="btn-sm btn-secondary" onclick="closeQR()">&times; Fechar</button>
-            </div>
-            <div class="wa-qr-wrapper">
-                <div class="wa-qr-frame">
-                    <img src="${data.qrcode}" alt="QR Code WhatsApp">
-                </div>
-                <p class="muted" style="font-size:12px;margin:0">O código atualiza automaticamente a cada tentativa.</p>
-            </div>`;
-        // QR mostrado → ativa o pareamento: polling rápido (2s) e consultas
-        // "fresh" para que a conexão apareça quase imediatamente após escanear.
-        waPairingActive = true;
-        lastWAStatus = 'qr';
-        loadWAStatus();
-        startWAStatusPolling();
-    } else {
-        container.innerHTML = `
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-                <strong style="font-size:13px">QR Code</strong>
-                <button class="btn-sm btn-secondary" onclick="closeQR()">&times; Fechar</button>
-            </div>
-            <p class="muted">QR Code não disponível no momento.</p>`;
-    }
+    const webhookInput = document.getElementById('wa-cfg-webhook');
+    const webhookUrlEl = document.getElementById('wa-webhook-url');
+    if (webhookInput) webhookUrlEl.textContent = webhookInput.value || 'Nao configurado';
 }
 
-async function restartWA() {
-    if (!confirm('Reiniciar instancia WhatsApp?')) return;
-    const btn = event.currentTarget;
-    setBtnLoading(btn, true, 'Reiniciando...');
-    const data = await api('/api/instance/restart', { method: 'POST' });
+async function saveWAConfig(e) {
+    e.preventDefault();
+    const form = e.target;
+    const btn = document.getElementById('wa-config-save-btn');
+    const payload = {};
+    const inputs = form.querySelectorAll('input[name]');
+    inputs.forEach(inp => { payload[inp.name] = inp.value; });
+    setBtnLoading(btn, true, 'Salvando...');
+    const res = await api('/api/whatsapp/config', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+    });
     setBtnLoading(btn, false);
-    if (data?.error) {
-        toast(friendlyError(data.error), 'error');
+    if (res?.ok) {
+        toast('Configuracao salva com sucesso', 'success');
+        const webhookUrlEl = document.getElementById('wa-webhook-url');
+        if (webhookUrlEl) webhookUrlEl.textContent = payload.WEBHOOK_URL || 'Nao configurado';
+        loadWAConnection();
     } else {
-        toast('Instancia reiniciada', 'success');
+        toast(res?.error || 'Erro ao salvar', 'error');
     }
-    loadWAStatus();
 }
 
-async function disconnectWA() {
-    if (!confirm('Desconectar WhatsApp?')) return;
-    const btn = event.currentTarget;
-    setBtnLoading(btn, true, 'Desconectando...');
-    const data = await api('/api/instance/disconnect', { method: 'POST' });
-    setBtnLoading(btn, false);
-    if (data?.error) {
-        toast(friendlyError(data.error), 'error');
-    } else {
-        toast('WhatsApp desconectado', 'info');
-    }
-    loadWAStatus();
+function toggleSecretVisibility(inputId) {
+    const input = document.getElementById(inputId);
+    if (!input) return;
+    input.type = input.type === 'password' ? 'text' : 'password';
 }
 
-async function runDiagnose() {
-    const container = document.getElementById('diagnose-container');
-    const btn = event.currentTarget;
-    setBtnLoading(btn, true, 'Testando...');
-    container.innerHTML = '';
-    const data = await api('/api/instance/diagnose');
-    setBtnLoading(btn, false);
-    if (!data) {
-        container.innerHTML = '<p style="color:#ef4444">Erro ao conectar com o servidor</p>';
-        return;
-    }
-    let html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><strong style="font-size:13px">Resultados do Diagnóstico</strong><button class="btn-sm btn-secondary" onclick="closeDiagnose()">&times; Fechar</button></div>';
-    html += '<table style="width:100%;font-size:13px;border-collapse:collapse">';
-    html += '<thead><tr style="border-bottom:1px solid rgba(255,255,255,0.1)"><th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase">Endpoint</th><th style="text-align:center;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase">Status</th><th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase">Detalhe</th></tr></thead><tbody>';
-    for (const [endpoint, result] of Object.entries(data)) {
-        const icon = result.ok ? '<span style="color:#22c55e;font-weight:700">OK (200)</span>' : `<span style="color:#ef4444;font-weight:700">ERRO ${result.status}</span>`;
-        const detail = result.ok ? '<span style="color:#22c55e">Disponível</span>' : friendlyError(result.error);
-        html += `<tr style="border-bottom:1px solid rgba(255,255,255,0.05)"><td style="padding:8px 10px;font-family:monospace;font-size:12px">${esc(endpoint)}</td><td style="text-align:center;padding:8px 10px">${icon}</td><td style="padding:8px 10px;color:#999">${esc(detail)}</td></tr>`;
-    }
-    html += '</tbody></table>';
-    container.innerHTML = html;
+function copyWebhookUrl() {
+    const el = document.getElementById('wa-webhook-url');
+    if (!el || el.textContent === '-') return;
+    navigator.clipboard.writeText(el.textContent).then(
+        () => toast('URL copiada', 'success'),
+        () => toast('Erro ao copiar', 'error')
+    );
 }
 
 /* ── Modal ────────────────────────────────────────────────────────────────── */
@@ -1934,7 +1863,7 @@ function connectSSE() {
             refreshTagsUI();
         } else if (event === 'wa_status') {
             if (currentView === 'whatsapp') {
-                loadWAStatus(data.status);
+                loadWAConnection();
             }
         }
     };
@@ -2007,15 +1936,11 @@ function friendlyError(err) {
 }
 
 function closeDiagnose() {
-    document.getElementById('diagnose-container').innerHTML = '';
+    // Removido: diagnostic container nao existe mais na aba Datafy
 }
 
 function closeQR() {
-    document.getElementById('qr-container').innerHTML = '';
-    // Pareamento terminado (usuário fechou ou conexão concluída) → volta ao ritmo
-    // normal de polling para não martelar a API UAZAPI.
-    waPairingActive = false;
-    startWAStatusPolling();
+    // Removido: QR container nao existe mais na aba Datafy
 }
 
 /* ── Init ─────────────────────────────────────────────────────────────────── */
@@ -2032,7 +1957,7 @@ document.addEventListener('visibilitychange', () => {
             waStatusTimer = null;
         }
     } else if (currentView === 'whatsapp') {
-        loadWAStatus();
+        loadWAConnection();
     }
 });
 setInterval(updateUnreadBadge, 30000);

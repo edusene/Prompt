@@ -335,3 +335,28 @@ def config_problem() -> str | None:
     if not _WABA_ID or "cole_o" in _WABA_ID.lower():
         return "DATAFY_WABA_ID nao configurado no .env"
     return None
+
+
+# ── Datafy extras ────────────────────────────────────────────────────────────
+
+
+def get_me() -> dict:
+    """Verifica se o token e valido e retorna dados basicos da conta."""
+    url = f"{_BASE}/me"
+    return _request("GET", url)
+
+
+def get_display_name() -> dict:
+    """Retorna nome verificado e status de aprovacao do numero."""
+    url = f"{_BASE}/profile/display-name"
+    return _request("GET", url)
+
+
+def reload_config() -> None:
+    """Recarrega variavei de ambiente nos módulos (apos salvar .env pelo painel)."""
+    global _PHONE_ID, _WABA_ID, _TOKEN
+    from dotenv import load_dotenv
+    load_dotenv(override=True)
+    _PHONE_ID = os.getenv("DATAFY_PHONE_NUMBER_ID", "")
+    _WABA_ID = os.getenv("DATAFY_WABA_ID", "")
+    _TOKEN = os.getenv("DATAFY_TOKEN", "")

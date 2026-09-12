@@ -1260,6 +1260,158 @@ h3 { font-size: 14px; font-weight: 600; }
     }
 }
 
+/* ── WhatsApp — Config Form ──────────────────────────────────────────────── */
+.wa-info-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+    padding: 0 20px 16px;
+}
+.wa-info-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.wa-info-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+.wa-info-value {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text);
+}
+
+.wa-config-card {
+    padding: 20px;
+}
+.wa-config-card h3 {
+    margin: 0 0 4px 0;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+}
+.wa-config-form {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+.wa-config-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.wa-config-field label {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-muted);
+}
+.wa-config-input {
+    width: 100%;
+    padding: 8px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg-secondary);
+    color: var(--text);
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+    transition: border-color var(--transition-fast);
+    box-sizing: border-box;
+}
+.wa-config-input:focus {
+    border-color: var(--accent);
+}
+.wa-config-input::placeholder {
+    color: var(--text-muted);
+    opacity: 0.5;
+}
+.wa-secret-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+.wa-secret-wrap .wa-config-input {
+    padding-right: 36px;
+}
+.wa-secret-toggle {
+    position: absolute;
+    right: 6px;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition: color var(--transition-fast);
+}
+.wa-secret-toggle:hover {
+    color: var(--text);
+}
+.wa-config-actions {
+    padding-top: 8px;
+}
+
+.wa-webhook-card {
+    padding: 20px;
+}
+.wa-webhook-card h3 {
+    margin: 0 0 12px 0;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+}
+.wa-webhook-box {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin-bottom: 16px;
+}
+.wa-webhook-url {
+    flex: 1;
+    font-family: monospace;
+    font-size: 12px;
+    color: var(--text);
+    word-break: break-all;
+}
+.wa-webhook-steps {
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.6;
+}
+.wa-webhook-title {
+    font-weight: 600;
+    color: var(--text);
+    margin: 0 0 6px 0;
+}
+.wa-webhook-steps ol {
+    margin: 0;
+    padding-left: 18px;
+}
+.wa-webhook-steps li {
+    margin-bottom: 4px;
+}
+.wa-webhook-steps a {
+    color: var(--accent);
+    text-decoration: none;
+}
+.wa-webhook-steps a:hover {
+    text-decoration: underline;
+}
+
+@media (max-width: 900px) {
+    .wa-info-grid { grid-template-columns: 1fr; }
+}
+
 /* ── Buttons ─────────────────────────────────────────────────────────────── */
 .btn-primary {
     padding: 9px 18px;
