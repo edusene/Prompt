@@ -33,7 +33,7 @@ import meta
 
 from meta import send_text, mark_read, send_typing, get_media_url, download_media_bytes
 from meta import get_phone_info, list_templates, get_template, delete_template
-from meta import get_business_profile, update_business_profile
+from meta import get_business_profile, update_business_profile, get_phone_id, get_waba_id
 from buffer import MessageBuffer
 from auth import login_required, do_login, do_logout
 
@@ -1459,15 +1459,15 @@ def api_whatsapp_connection():
         return jsonify({
             "ok": False,
             "error": r.get("error", "Erro ao conectar com Datafy"),
-            "phone_number_id": _PHONE_ID,
-            "waba_id": _WABA_ID,
+            "phone_number_id": get_phone_id(),
+            "waba_id": get_waba_id(),
         })
 
     d = r.get("data", {})
     return jsonify({
         "ok": True,
-        "phone_number_id": _PHONE_ID,
-        "waba_id": _WABA_ID,
+        "phone_number_id": get_phone_id(),
+        "waba_id": get_waba_id(),
         "display_name": d.get("verified_name", ""),
         "display_phone": d.get("display_phone_number", ""),
         "quality_rating": d.get("quality_rating", ""),

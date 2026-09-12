@@ -354,10 +354,18 @@ def get_display_name() -> dict:
 
 
 def reload_config() -> None:
-    """Recarrega variavei de ambiente nos módulos (apos salvar .env pelo painel)."""
+    """Recarrega variaveis de ambiente nos modulos (apos salvar .env pelo painel)."""
     global _PHONE_ID, _WABA_ID, _TOKEN
     from dotenv import load_dotenv
     load_dotenv(override=True)
     _PHONE_ID = os.getenv("DATAFY_PHONE_NUMBER_ID", "")
     _WABA_ID = os.getenv("DATAFY_WABA_ID", "")
     _TOKEN = os.getenv("DATAFY_TOKEN", "")
+
+
+def get_phone_id() -> str:
+    return _PHONE_ID
+
+
+def get_waba_id() -> str:
+    return _WABA_ID
