@@ -1029,11 +1029,17 @@ h3 { font-size: 14px; font-weight: 600; }
 }
 
 .wa-grid {
-    display: grid;
-    grid-template-columns: minmax(360px, 1.4fr) minmax(280px, 1fr);
+    display: flex;
+    flex-direction: column;
     gap: 24px;
     max-width: 1080px;
-    align-items: start;
+}
+
+.wa-row-top {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr;
+    gap: 24px;
+    align-items: stretch;
 }
 
 .wa-card {
@@ -1250,7 +1256,7 @@ h3 { font-size: 14px; font-weight: 600; }
 }
 
 @media (max-width: 900px) {
-    .wa-grid {
+    .wa-row-top {
         grid-template-columns: 1fr;
     }
 }

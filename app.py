@@ -1450,23 +1450,28 @@ def _write_env_file(updates: dict[str, str]) -> None:
 @login_required
 def api_whatsapp_connection():
     """Testa conexao com a Datafy API e retorna dados da instância."""
-    r_me = meta.get_me()
-    if not r_me.get("ok"):
-        return jsonify({"ok": False, "error": r_me.get("error", "Erro ao conectar com Datafy")})
+    problem = meta.config_problem()
+    if problem:
+        return jsonify({"ok": False, "error": problem})
 
-    r_phone = meta.get_phone_info()
-    phone_data = r_phone.get("data", {}) if r_phone.get("ok") else {}
+    r = meta.get_phone_info()
+    if not r.get("ok"):
+        return jsonify({
+            "ok": False,
+            "error": r.get("error", "Erro ao conectar com Datafy"),
+            "phone_number_id": _PHONE_ID,
+            "waba_id": _WABA_ID,
+        })
 
-    me_data = r_me.get("data", {})
+    d = r.get("data", {})
     return jsonify({
         "ok": True,
-        "phone_number_id": me_data.get("phone_number_id", _PHONE_ID),
-        "waba_id": me_data.get("waba_id", _WABA_ID),
-        "display_name": phone_data.get("verified_name", ""),
-        "display_phone": phone_data.get("display_phone_number", ""),
-        "quality_rating": phone_data.get("quality_rating", ""),
-        "name_status": phone_data.get("name_status", ""),
-        "config_problem": meta.config_problem(),
+        "phone_number_id": _PHONE_ID,
+        "waba_id": _WABA_ID,
+        "display_name": d.get("verified_name", ""),
+        "display_phone": d.get("display_phone_number", ""),
+        "quality_rating": d.get("quality_rating", ""),
+        "name_status": d.get("name_status", ""),
     })
 
 

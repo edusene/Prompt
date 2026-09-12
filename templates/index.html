@@ -249,50 +249,74 @@
                 </div>
 
                 <div class="wa-grid">
-                    <!-- Card 1: Status da Conexao -->
-                    <div class="wa-card wa-main-card">
-                        <div class="wa-card-header">
-                            <div class="wa-status-group">
-                                <div class="wa-icon-pulse">
-                                    <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                        <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
-                                    </svg>
+                    <!-- Linha 1: Status + Webhook lado a lado -->
+                    <div class="wa-row-top">
+                        <!-- Card 1: Status da Conexao -->
+                        <div class="wa-card wa-main-card">
+                            <div class="wa-card-header">
+                                <div class="wa-status-group">
+                                    <div class="wa-icon-pulse">
+                                        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
+                                        </svg>
+                                    </div>
+                                    <div>
+                                        <h3>Status da Conexao</h3>
+                                        <div id="wa-status" class="wa-status-container">Verificando...</div>
+                                    </div>
                                 </div>
-                                <div>
-                                    <h3>Status da Conexao</h3>
-                                    <div id="wa-status" class="wa-status-container">Verificando...</div>
+                            </div>
+
+                            <div class="wa-info-grid" id="wa-info-grid" style="display:none">
+                                <div class="wa-info-item">
+                                    <span class="wa-info-label">Telefone</span>
+                                    <span class="wa-info-value" id="wa-phone">-</span>
                                 </div>
+                                <div class="wa-info-item">
+                                    <span class="wa-info-label">Nome</span>
+                                    <span class="wa-info-value" id="wa-display-name">-</span>
+                                </div>
+                                <div class="wa-info-item">
+                                    <span class="wa-info-label">Qualidade</span>
+                                    <span class="wa-info-value" id="wa-quality">-</span>
+                                </div>
+                                <div class="wa-info-item">
+                                    <span class="wa-info-label">Status Nome</span>
+                                    <span class="wa-info-value" id="wa-name-status">-</span>
+                                </div>
+                            </div>
+
+                            <div class="wa-actions-toolbar">
+                                <button class="btn-secondary wa-action-btn" onclick="loadWAConnection()">
+                                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                                    <span>Testar Conexao</span>
+                                </button>
                             </div>
                         </div>
 
-                        <div class="wa-info-grid" id="wa-info-grid" style="display:none">
-                            <div class="wa-info-item">
-                                <span class="wa-info-label">Telefone</span>
-                                <span class="wa-info-value" id="wa-phone">-</span>
+                        <!-- Card 2: Webhook Info -->
+                        <div class="wa-card wa-webhook-card">
+                            <h3>Webhook</h3>
+                            <div class="wa-webhook-box">
+                                <div class="wa-webhook-url" id="wa-webhook-url">-</div>
+                                <button class="btn-sm btn-secondary" onclick="copyWebhookUrl()" title="Copiar URL">
+                                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                                    Copiar
+                                </button>
                             </div>
-                            <div class="wa-info-item">
-                                <span class="wa-info-label">Nome</span>
-                                <span class="wa-info-value" id="wa-display-name">-</span>
+                            <div class="wa-webhook-steps">
+                                <p class="wa-webhook-title">Como configurar no painel Datafy:</p>
+                                <ol>
+                                    <li>Acesse <a href="https://app.datafyapi.com.br" target="_blank" rel="noopener">app.datafyapi.com.br</a></li>
+                                    <li>Va em <strong>Configuracoes > Webhook</strong></li>
+                                    <li>Cole a URL acima no campo <strong>Webhook URL</strong></li>
+                                    <li>Ative o evento <strong>messages</strong></li>
+                                </ol>
                             </div>
-                            <div class="wa-info-item">
-                                <span class="wa-info-label">Qualidade</span>
-                                <span class="wa-info-value" id="wa-quality">-</span>
-                            </div>
-                            <div class="wa-info-item">
-                                <span class="wa-info-label">Status Nome</span>
-                                <span class="wa-info-value" id="wa-name-status">-</span>
-                            </div>
-                        </div>
-
-                        <div class="wa-actions-toolbar">
-                            <button class="btn-secondary wa-action-btn" onclick="loadWAConnection()">
-                                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-                                <span>Testar Conexao</span>
-                            </button>
                         </div>
                     </div>
 
-                    <!-- Card 2: Configuracao -->
+                    <!-- Linha 2: Configuracao (largura total) -->
                     <div class="wa-card wa-config-card">
                         <h3>Configuracao da API</h3>
                         <p class="muted" style="font-size:12px;margin:0 0 16px 0">Atualize as variaveis de ambiente direto pelo painel.</p>
@@ -331,27 +355,6 @@
                                 <button type="submit" class="btn-primary" id="wa-config-save-btn">Salvar Configuracao</button>
                             </div>
                         </form>
-                    </div>
-
-                    <!-- Card 3: Webhook Info -->
-                    <div class="wa-card wa-webhook-card">
-                        <h3>Webhook</h3>
-                        <div class="wa-webhook-box">
-                            <div class="wa-webhook-url" id="wa-webhook-url">-</div>
-                            <button class="btn-sm btn-secondary" onclick="copyWebhookUrl()" title="Copiar URL">
-                                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                                Copiar
-                            </button>
-                        </div>
-                        <div class="wa-webhook-steps">
-                            <p class="wa-webhook-title">Como configurar no painel Datafy:</p>
-                            <ol>
-                                <li>Acesse <a href="https://app.datafyapi.com.br" target="_blank" rel="noopener">app.datafyapi.com.br</a></li>
-                                <li>Va em <strong>Configuracoes > Webhook</strong></li>
-                                <li>Cole a URL acima no campo <strong>Webhook URL</strong></li>
-                                <li>Ative o evento <strong>messages</strong></li>
-                            </ol>
-                        </div>
                     </div>
                 </div>
             </div>

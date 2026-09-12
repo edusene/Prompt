@@ -341,8 +341,8 @@ def config_problem() -> str | None:
 
 
 def get_me() -> dict:
-    """Verifica se o token e valido e retorna dados basicos da conta."""
-    url = f"{_BASE}/me"
+    """Verifica se o token e valido. Usa o endpoint do phone number (funciona na Datafy)."""
+    url = f"{_BASE}/{_PHONE_ID}"
     return _request("GET", url)
 
 
