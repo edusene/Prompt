@@ -9,6 +9,8 @@ import sys
 import json
 import time
 import threading
+import hmac
+import hashlib
 
 from dotenv import load_dotenv
 
@@ -39,7 +41,7 @@ from auth import login_required, do_login, do_logout
 BUFFER_SECONDS = float(os.getenv("BUFFER_SECONDS", "8"))
 PORT = int(os.getenv("PORT", "5000"))
 SECRET_KEY = os.getenv("SECRET_KEY", "troque_esta_chave_secreta_aleatoria")
-WEBHOOK_VERIFY_TOKEN = os.getenv("WEBHOOK_VERIFY_TOKEN", "")
+DATAFY_WEBHOOK_SECRET = os.getenv("DATAFY_WEBHOOK_SECRET", "")
 
 _BASE_PROMPT = os.getenv(
     "SYSTEM_PROMPT",
@@ -427,8 +429,8 @@ buffer = MessageBuffer(wait_seconds=BUFFER_SECONDS, on_flush=handle_flush)
 
 database.init_db()
 
-print(f"[config] Meta Cloud API: PHONE_ID={os.getenv('META_PHONE_NUMBER_ID', '') or 'N/A'}")
-print(f"[config] Meta Cloud API: WABA_ID={os.getenv('META_WABA_ID', '') or 'N/A'}")
+print(f"[config] Datafy API: PHONE_ID={os.getenv('DATAFY_PHONE_NUMBER_ID', '') or 'N/A'}")
+print(f"[config] Datafy API: WABA_ID={os.getenv('DATAFY_WABA_ID', '') or 'N/A'}")
 
 # ── Auth routes ───────────────────────────────────────────────────────────────
 
@@ -458,22 +460,40 @@ def logout_action():
 
 @app.get("/webhook")
 def webhook_verify():
-    """Verificacao do handshake Meta (GET challenge)."""
-    mode = request.args.get("hub.mode")
-    token = request.args.get("hub.verify_token")
-    challenge = request.args.get("hub.challenge")
-    if mode == "subscribe" and token == WEBHOOK_VERIFY_TOKEN:
-        print("[webhook] verificado com sucesso")
-        return challenge, 200
-    print(f"[webhook] verificacao falhou: mode={mode} token_ok={token == WEBHOOK_VERIFY_TOKEN}")
-    return "Forbidden", 403
+    """Para a Datafy API essa rota não é chamada da mesma maneira que a Meta chama com GET."""
+    return "Datafy API endpoint", 200
 
 
 @app.post("/webhook")
 def webhook():
+    # Validação Datafy
+    signature = request.headers.get("x-datafy-signature-256", "")
+    timestamp = request.headers.get("x-datafy-timestamp", "")
+    raw_body = request.get_data(as_text=True)
+
+    if DATAFY_WEBHOOK_SECRET and signature and timestamp:
+        expected = "sha256=" + hmac.new(
+            DATAFY_WEBHOOK_SECRET.encode("utf-8"),
+            f"{timestamp}.{raw_body}".encode("utf-8"),
+            hashlib.sha256
+        ).hexdigest()
+
+        if not hmac.compare_digest(signature.encode("utf-8"), expected.encode("utf-8")):
+            print("[webhook] Assinatura invalida (Datafy)")
+            return "Forbidden", 401
+
+        try:
+            req_ts = int(timestamp)
+            if abs(time.time() - req_ts) > 300:
+                print("[webhook] Timestamp fora do limite de 5 minutos (Datafy)")
+                return "Forbidden", 401
+        except ValueError:
+            print("[webhook] Timestamp invalido (Datafy)")
+            return "Forbidden", 401
+
     data = request.get_json(silent=True) or {}
 
-    # Validacao basica Meta
+    # Validacao basica Meta / Datafy
     if data.get("object") != "whatsapp_business_account":
         print(f"[webhook] object invalido: {data.get('object')}")
         return jsonify({"ok": True})

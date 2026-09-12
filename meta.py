@@ -7,11 +7,10 @@ import os
 import io
 import requests
 
-_API_VERSION = os.getenv("META_API_VERSION", "v21.0")
-_PHONE_ID = os.getenv("META_PHONE_NUMBER_ID", "")
-_WABA_ID = os.getenv("META_WABA_ID", "")
-_TOKEN = os.getenv("META_ACCESS_TOKEN", "")
-_BASE = f"https://graph.facebook.com/{_API_VERSION}"
+_PHONE_ID = os.getenv("DATAFY_PHONE_NUMBER_ID", "")
+_WABA_ID = os.getenv("DATAFY_WABA_ID", "")
+_TOKEN = os.getenv("DATAFY_TOKEN", "")
+_BASE = "https://cloud.datafyapi.com.br/v1"
 
 
 def _headers(content_type="application/json"):
@@ -329,9 +328,9 @@ def update_business_profile(**kwargs) -> dict:
 
 def config_problem() -> str | None:
     if not _TOKEN or "cole_o" in _TOKEN.lower():
-        return "META_ACCESS_TOKEN nao configurado no .env"
+        return "DATAFY_TOKEN nao configurado no .env"
     if not _PHONE_ID or "cole_o" in _PHONE_ID.lower():
-        return "META_PHONE_NUMBER_ID nao configurado no .env"
+        return "DATAFY_PHONE_NUMBER_ID nao configurado no .env"
     if not _WABA_ID or "cole_o" in _WABA_ID.lower():
-        return "META_WABA_ID nao configurado no .env"
+        return "DATAFY_WABA_ID nao configurado no .env"
     return None

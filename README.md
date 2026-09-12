@@ -1,28 +1,25 @@
-# WhatsApp AI Agent + CRM Panel — Meta Cloud API + OpenAI
+# WhatsApp AI Agent + CRM Panel — Datafy API + OpenAI
 
-Agente de IA no WhatsApp com painel CRM completo. Usa a [WhatsApp Business Cloud API](https://developers.facebook.com/docs/whatsapp/cloud-api/overview) da Meta como gateway e OpenAI como LLM. Mensagens sao agrupadas via debounce e respostas chegam divididas em multiplas mensagens.
+Agente de IA no WhatsApp com painel CRM completo. Usa a [Datafy API](https://app.datafyapi.com.br) como gateway oficial para a Meta Cloud API, e OpenAI como LLM. Mensagens sao agrupadas via debounce e respostas chegam divididas em multiplas mensagens.
 
 ---
 
 ## 1. Pre-requisitos
 
-- **Conta Meta Business** com WhatsApp Business Account (WABA)
-- **App no [developers.facebook.com](https://developers.facebook.com)** com permissoes:
-  - `whatsapp_business_messaging` (envio/recebimento de mensagens)
-  - `whatsapp_business_management` (gestao de templates, numeros)
-- **Phone Number ID** do numero conectado
-- **System User Access Token** permanente (nao o token de desenvolvimento temporario)
-- **WABA ID** (WhatsApp Business Account ID)
+- **Conta na Datafy API** em [app.datafyapi.com.br](https://app.datafyapi.com.br)
+- **Token de Acesso (API Key)**
+- **Phone Number ID** (encontrado via GET /me na Datafy API, ou associado ao seu token)
+- **WABA ID** (WhatsApp Business Account ID vinculado à sua Datafy API ou Meta Cloud Provider)
 - Python 3.11+
 
 ### Como obter os valores
 
 | Valor | Onde encontrar |
 |---|---|
-| `META_ACCESS_TOKEN` | App Dashboard > WhatsApp > API Setup > System User Access Token |
-| `META_PHONE_NUMBER_ID` | WhatsApp Manager > Phone Numbers > clique no numero |
-| `META_WABA_ID` | WhatsApp Manager > Account Settings > WABA ID |
-| `WEBHOOK_VERIFY_TOKEN` | Qualquer string secreta voce escolher |
+| `DATAFY_TOKEN` | Seu token `sk_live_xxx` fornecido pelo painel Datafy. |
+| `DATAFY_PHONE_NUMBER_ID` | Obtenha na aba Dev da Datafy ou via `GET /me` (se necessário). |
+| `DATAFY_WABA_ID` | O ID da WABA retornado via Meta ou associado ao seu app. |
+| `DATAFY_WEBHOOK_SECRET` | Chave mostrada na aba Webhooks no painel (ex: `whsec_xxx`). |
 
 ---
 
