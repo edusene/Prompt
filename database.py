@@ -59,6 +59,15 @@ def init_db() -> None:
         db.executescript(KNOWLEDGE_FILES_SCHEMA)
         print("[db] tabela knowledge_files criada")
 
+    # Migração: adiciona wa_media_id na tabela messages
+    mcols = db.table_columns("messages")
+    if "wa_media_id" not in mcols:
+        try:
+            db.execute("ALTER TABLE messages ADD COLUMN wa_media_id TEXT DEFAULT ''")
+            print("[db] coluna wa_media_id adicionada")
+        except Exception:
+            pass
+
     _ensure_indexes()
 
 
@@ -442,6 +451,7 @@ def save_message(
     media_url: str = "",
     wa_message_id: str = "",
     status: str = "sent",
+    wa_media_id: str = "",
 ) -> dict | None:
     """Salva mensagem com idempotencia via wa_message_id. Retorna a mensagem ou None se duplicata."""
     wa_msg_clean = wa_message_id if wa_message_id else None
@@ -452,9 +462,9 @@ def save_message(
 
     now = datetime.utcnow().isoformat()
     msg_id = db.execute_returning(
-        "INSERT INTO messages (conversation_id, phone, wa_message_id, direction, sender, body, msg_type, media_url, status, created_at) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?)",
-        (conversation_id, phone, wa_msg_clean, direction, sender, body, msg_type, media_url, status, now),
+        "INSERT INTO messages (conversation_id, phone, wa_message_id, direction, sender, body, msg_type, media_url, status, created_at, wa_media_id) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        (conversation_id, phone, wa_msg_clean, direction, sender, body, msg_type, media_url, status, now, wa_media_id or ""),
     )
     print(f"[db] save_message: msg_id={msg_id} wa_msg_clean={wa_msg_clean} direction={direction}")
     if msg_id:

@@ -273,6 +273,12 @@ def get_media_url(media_id: str) -> dict:
     return _request("GET", url, params=params)
 
 
+def get_webhook_media_url(media_id: str) -> dict:
+    """Obtém URL de download de mídia recebida via webhook (Datafy, válida 30 dias)."""
+    url = f"https://cloud.datafyapi.com.br/media/{media_id}"
+    return _request("GET", url)
+
+
 def download_media_bytes(media_url: str) -> bytes:
     try:
         r = requests.get(media_url, headers={"Authorization": f"Bearer {_TOKEN}"}, timeout=60)

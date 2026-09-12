@@ -34,6 +34,7 @@ import meta
 from meta import send_text, mark_read, send_typing, get_media_url, download_media_bytes
 from meta import get_phone_info, list_templates, get_template, delete_template
 from meta import get_business_profile, update_business_profile, get_phone_id, get_waba_id
+from meta import get_webhook_media_url
 from buffer import MessageBuffer
 from auth import login_required, do_login, do_logout
 
@@ -326,7 +327,7 @@ def _download_media_async(message_db_id: int, wa_media_id: str) -> None:
                 return
             if not wa_media_id:
                 return
-            info = get_media_url(wa_media_id)
+            info = get_webhook_media_url(wa_media_id)
             if not info.get("ok") or not isinstance(info.get("data"), dict):
                 print(f"[media] falha get_media_url msg={message_db_id}: {info.get('error')}")
                 return
@@ -356,10 +357,10 @@ def _fetch_and_store_media(m: dict) -> str:
         fresh = database.get_message(msg_id)
         if fresh and str(fresh.get("media_url") or "").strip():
             return fresh["media_url"]
-        wa_media_id = str((fresh or {}).get("wa_message_id") or "")
+        wa_media_id = str((fresh or {}).get("wa_media_id") or "")
         if not wa_media_id:
             return ""
-        info = get_media_url(wa_media_id)
+        info = get_webhook_media_url(wa_media_id)
         if not info.get("ok") or not isinstance(info.get("data"), dict):
             return ""
         url = info["data"].get("url", "")
@@ -566,6 +567,7 @@ def webhook():
                 sender="user",
                 msg_type=str(msg_type) if msg_type else "text",
                 wa_message_id=str(message_id) if message_id else None,
+                wa_media_id=wa_media_id,
             )
             if saved:
                 database.update_conversation(conv["id"], last_message_at=time.strftime("%Y-%m-%dT%H:%M:%S"))
