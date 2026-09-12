@@ -139,12 +139,55 @@ _OPENAI_SUPPORTED_IMAGES = {
     "image/jpeg", "image/png", "image/webp", "image/gif",
 }
 
+_OPENAI_SUPPORTED_AUDIO = {
+    "audio/ogg", "audio/ogg; codecs=opus", "audio/mpeg", "audio/mp3",
+    "audio/mp4", "audio/aac", "audio/wav", "audio/x-wav",
+    "audio/webm", "audio/flac", "audio/x-m4a",
+}
+
+
+def _normalize_mime(mime: str) -> str:
+    """Normaliza MIME type removendo codecs (ex: 'audio/ogg; codecs=opus' -> 'audio/ogg')."""
+    return mime.split(";")[0].strip().lower()
+
 
 def _parse_data_uri(data_uri: str) -> tuple[str, str]:
     m = __import__("re").match(r"^data:([^;,]+);base64,(.+)$", data_uri, __import__("re").DOTALL)
     if m:
         return m.group(1), m.group(2)
     return "", data_uri
+
+
+def transcribe_audio(b64_data: str, mime: str) -> str:
+    """Transcreve áudio via OpenAI Whisper. Retorna texto transcrito ou vazio."""
+    try:
+        import base64 as _b64
+        raw = _b64.b64decode(b64_data)
+        if len(raw) > 25 * 1024 * 1024:
+            print("[transcribe] áudio > 25MB, ignorando")
+            return ""
+        ext_map = {
+            "audio/ogg": "ogg", "audio/ogg; codecs=opus": "ogg",
+            "audio/mpeg": "mp3", "audio/mp3": "mp3",
+            "audio/mp4": "m4a", "audio/aac": "m4a",
+            "audio/wav": "wav", "audio/x-wav": "wav",
+            "audio/webm": "webm", "audio/flac": "flac",
+            "audio/x-m4a": "m4a",
+        }
+        ext = ext_map.get(mime, "ogg")
+        from openai import OpenAI
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY", ""))
+        resp = client.audio.transcriptions.create(
+            model="whisper-1",
+            file=(f"audio.{ext}", raw, mime.split(";")[0]),
+            language="pt",
+        )
+        text = (resp.text or "").strip()
+        print(f"[transcribe] len={len(text)} preview={text[:80]}")
+        return text
+    except Exception as e:
+        print(f"[transcribe] ERRO: {e}")
+        return ""
 
 
 def _build_user_parts(items: list[dict]) -> list[dict]:
@@ -192,15 +235,22 @@ def _build_user_parts(items: list[dict]) -> list[dict]:
                 if text and not text.startswith("["):
                     media_desc += f" Legenda: {text}"
 
-                parts.append({"text": media_desc})
-
-                if mime and b64 and mime in _OPENAI_SUPPORTED_IMAGES:
+                if mime and b64 and msg_type in ("audio", "ptt") and _normalize_mime(mime) in _OPENAI_SUPPORTED_AUDIO:
+                    transcription = transcribe_audio(b64, mime)
+                    if transcription:
+                        parts.append({"text": f"O cliente enviou uma mensagem de voz. Transcrição: {transcription}"})
+                    else:
+                        parts.append({"text": media_desc})
+                elif mime and b64 and mime in _OPENAI_SUPPORTED_IMAGES:
+                    parts.append({"text": media_desc})
                     parts.append({
                         "inline_data": {
                             "mime_type": mime,
                             "data": b64,
                         }
                     })
+                else:
+                    parts.append({"text": media_desc})
 
                 continue
 
