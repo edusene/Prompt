@@ -990,6 +990,13 @@ function renderInfoPanel(conv, contact, tags, allTags) {
             <div><strong>Telefone:</strong> ${esc(contact?.phone || '-')}</div>
             <div><strong>Email:</strong> ${esc(contact?.email || '-')}</div>
             <div><strong>Empresa:</strong> ${esc(contact?.company || '-')}</div>
+            <div style="margin-top:8px;display:flex;align-items:center;gap:8px">
+                <strong>Cor do avatar:</strong>
+                <input type="color" value="${esc(contact?.avatar_color || '#6366f1')}"
+                       onchange="updateContactAvatarColor(${conv.id}, ${contact?.id}, this.value)"
+                       style="width:32px;height:28px;padding:1px;cursor:pointer;border:none;border-radius:4px;background:transparent">
+                <span id="avatar-color-preview" style="width:24px;height:24px;border-radius:50%;background:${esc(contact?.avatar_color || '#6366f1')};display:inline-block;vertical-align:middle;border:2px solid var(--border)"></span>
+            </div>
             <div style="margin-top:12px">
                 <strong>Tags:</strong>
                 <div class="tag-chips">
@@ -1036,6 +1043,20 @@ function renderInfoPanel(conv, contact, tags, allTags) {
             </div>
         </div>
     `;
+}
+
+async function updateContactAvatarColor(convId, contactId, color) {
+    await api(`/api/contacts/${contactId}`, { method: 'PUT', body: JSON.stringify({ avatar_color: color }) });
+    // Atualiza preview no painel
+    const preview = document.getElementById('avatar-color-preview');
+    if (preview) preview.style.background = color;
+    // Atualiza avatar no header do chat
+    const headerAvatar = document.querySelector('#chat-header .chat-header-avatar');
+    if (headerAvatar) headerAvatar.style.background = color;
+    // Atualiza avatar na lista de conversas
+    const convItem = document.querySelector(`.conv-item[data-conv-id="${convId}"] .conv-avatar`);
+    if (convItem) convItem.style.background = color;
+    loadConversations();
 }
 
 async function updateConvStatus(convId, status) {
