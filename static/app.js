@@ -629,7 +629,7 @@ const MEDIA_LABELS = {
 
 // Rótulos que o webhook grava quando não há legenda ([Imagem], [Video]...).
 // Não devem aparecer junto com a mídia renderizada — são redundantes.
-const MEDIA_PLACEHOLDER_RE = /^\[(Imagem|V[íi]deo|[ÁaA]udio|Figurinha|Documento[^\]]*|Sticker|GIF|Media|Mídia)\](:.*)?$/i;
+const MEDIA_PLACEHOLDER_RE = /^\[(Imagem|V[íi]deo|[ÁaA]udio|Figurinha|Documento|Sticker|GIF|Media|Mídia)[^\]]*\](:.*)?$/i;
 
 function isMediaPlaceholder(text) {
     return MEDIA_PLACEHOLDER_RE.test(String(text || '').trim());
