@@ -42,8 +42,7 @@ def _convert_history(history: list[dict]) -> list[dict]:
                 elif "inline_data" in p:
                     mime = p["inline_data"].get("mime_type", "")
                     data = p["inline_data"].get("data", "")
-                    # OpenAI só suporta imagens inline (não áudio/vídeo)
-                    if mime.startswith("image/"):
+                    if mime.startswith("image/") or mime == "application/pdf":
                         content_parts.append({
                             "type": "image_url",
                             "image_url": {
@@ -51,7 +50,6 @@ def _convert_history(history: list[dict]) -> list[dict]:
                                 "detail": "low",
                             },
                         })
-                    # Áudio/vídeo: já foi tratado como texto descritivo no builder
             messages.append({"role": role, "content": content_parts})
         else:
             # Texto puro: concatena todos os parts de texto

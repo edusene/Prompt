@@ -145,6 +145,10 @@ _OPENAI_SUPPORTED_AUDIO = {
     "audio/webm", "audio/flac", "audio/x-m4a",
 }
 
+_OPENAI_SUPPORTED_DOCS = {
+    "application/pdf",
+}
+
 
 def _normalize_mime(mime: str) -> str:
     """Normaliza MIME type removendo codecs (ex: 'audio/ogg; codecs=opus' -> 'audio/ogg')."""
@@ -246,6 +250,14 @@ def _build_user_parts(items: list[dict]) -> list[dict]:
                     parts.append({
                         "inline_data": {
                             "mime_type": mime,
+                            "data": b64,
+                        }
+                    })
+                elif mime and b64 and _normalize_mime(mime) in _OPENAI_SUPPORTED_DOCS:
+                    parts.append({"text": media_desc})
+                    parts.append({
+                        "inline_data": {
+                            "mime_type": _normalize_mime(mime),
                             "data": b64,
                         }
                     })
