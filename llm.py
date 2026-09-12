@@ -50,6 +50,8 @@ def _convert_history(history: list[dict]) -> list[dict]:
                                 "detail": "low",
                             },
                         })
+            if not content_parts:
+                content_parts.append({"type": "text", "text": "[Midia nao processada]"})
             messages.append({"role": role, "content": content_parts})
         else:
             # Texto puro: concatena todos os parts de texto

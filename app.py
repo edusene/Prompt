@@ -179,9 +179,8 @@ def transcribe_audio(b64_data: str, mime: str) -> str:
             "audio/x-m4a": "m4a",
         }
         ext = ext_map.get(mime, "ogg")
-        from openai import OpenAI
-        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY", ""))
-        resp = client.audio.transcriptions.create(
+        from llm import _client as _oai
+        resp = _oai.audio.transcriptions.create(
             model="whisper-1",
             file=(f"audio.{ext}", raw, mime.split(";")[0]),
             language="pt",
@@ -207,6 +206,26 @@ def _build_user_parts(items: list[dict]) -> list[dict]:
             msg = database.get_message(msg_id)
             media_url = str((msg or {}).get("media_url") or "").strip()
             msg_type = str((msg or {}).get("msg_type") or "text")
+
+            if not media_url and msg_type != "text":
+                wa_media_id_db = str((msg or {}).get("wa_media_id") or "").strip()
+                if wa_media_id_db:
+                    try:
+                        info = get_webhook_media_url(wa_media_id_db)
+                        if info.get("ok") and isinstance(info.get("data"), dict):
+                            url = info["data"].get("url", "")
+                            mime_from_api = info["data"].get("mime_type", "application/octet-stream")
+                            if url:
+                                import requests as _req
+                                resp = _req.get(url, timeout=30)
+                                if resp.status_code == 200:
+                                    import base64 as _b64
+                                    b64_data = _b64.b64encode(resp.content).decode()
+                                    media_url = f"data:{mime_from_api};base64,{b64_data}"
+                                    database.update_message_media(msg["id"], media_url)
+                                    print(f"[flush] on-demand download ok msg={msg['id']} mime={mime_from_api}")
+                    except Exception as e:
+                        print(f"[flush] WARN on-demand download falhou msg={msg_id}: {e}")
 
             if media_url and msg_type != "text" and media_url not in seen_media:
                 seen_media.add(media_url)
@@ -245,7 +264,7 @@ def _build_user_parts(items: list[dict]) -> list[dict]:
                         parts.append({"text": f"O cliente enviou uma mensagem de voz. Transcrição: {transcription}"})
                     else:
                         parts.append({"text": media_desc})
-                elif mime and b64 and mime in _OPENAI_SUPPORTED_IMAGES:
+                elif mime and b64 and _normalize_mime(mime) in _OPENAI_SUPPORTED_IMAGES:
                     parts.append({"text": media_desc})
                     parts.append({
                         "inline_data": {
