@@ -1574,19 +1574,25 @@ function toggleKnowledgeDropdown(e) {
     wrapper.classList.toggle('open');
 }
 
-function handleKnowledgeNew() {
+function handleKnowledgeNew(e) {
+    e.stopPropagation();
     closeKnowledgeDropdown();
     showKnowledgeForm();
 }
 
-function handleKnowledgeImport() {
+function handleKnowledgeImport(e) {
+    e.stopPropagation();
     closeKnowledgeDropdown();
     document.getElementById('knowledge-import-input').click();
 }
 
 function closeKnowledgeDropdown() {
     const wrapper = document.querySelector('.knowledge-actions-wrapper');
-    if (wrapper) wrapper.classList.remove('open');
+    if (wrapper) {
+        wrapper.classList.add('closing');
+        wrapper.classList.remove('open');
+        setTimeout(() => wrapper.classList.remove('closing'), 50);
+    }
 }
 
 document.addEventListener('click', (e) => {
