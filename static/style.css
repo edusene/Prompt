@@ -2056,6 +2056,73 @@ select option {
 .knowledge-file-name { font-size: 13px; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .knowledge-file-size { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
 
+/* ── Knowledge Dropdown ─────────────────────────────────────────────────── */
+.knowledge-actions-wrapper {
+    position: relative;
+}
+.knowledge-actions-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.knowledge-chevron {
+    transition: transform 0.2s ease;
+}
+.knowledge-actions-wrapper.open .knowledge-chevron {
+    transform: rotate(180deg);
+}
+.knowledge-dropdown-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    min-width: 180px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+    z-index: 100;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-8px);
+    transition: all 0.15s ease;
+}
+.knowledge-actions-wrapper.open .knowledge-dropdown-menu {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+}
+.knowledge-dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 10px 14px;
+    background: none;
+    border: none;
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background var(--transition-fast);
+    text-align: left;
+}
+.knowledge-dropdown-item:first-child {
+    border-radius: var(--radius-md) var(--radius-md) 0 0;
+}
+.knowledge-dropdown-item:last-child {
+    border-radius: 0 0 var(--radius-md) var(--radius-md);
+}
+.knowledge-dropdown-item:hover {
+    background: var(--bg-card-hover);
+}
+.knowledge-dropdown-item svg {
+    flex-shrink: 0;
+    color: var(--text-muted);
+}
+.knowledge-dropdown-item:hover svg {
+    color: var(--accent);
+}
+
 /* ── Loading Spinner ────────────────────────────────────────────────────── */
 .spinner {
     display: inline-block;

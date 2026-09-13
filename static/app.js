@@ -1567,6 +1567,35 @@ async function loadKnowledge() {
     `).join('');
 }
 
+/* ── Knowledge Dropdown ─────────────────────────────────────────────────── */
+function toggleKnowledgeDropdown(e) {
+    e.stopPropagation();
+    const wrapper = document.querySelector('.knowledge-actions-wrapper');
+    wrapper.classList.toggle('open');
+}
+
+function handleKnowledgeNew() {
+    closeKnowledgeDropdown();
+    showKnowledgeForm();
+}
+
+function handleKnowledgeImport() {
+    closeKnowledgeDropdown();
+    document.getElementById('knowledge-import-input').click();
+}
+
+function closeKnowledgeDropdown() {
+    const wrapper = document.querySelector('.knowledge-actions-wrapper');
+    if (wrapper) wrapper.classList.remove('open');
+}
+
+document.addEventListener('click', (e) => {
+    const wrapper = document.querySelector('.knowledge-actions-wrapper');
+    if (wrapper && !wrapper.contains(e.target)) {
+        wrapper.classList.remove('open');
+    }
+});
+
 async function selectKnowledgeFile(filename) {
     currentKnowledgeFile = filename;
     document.querySelectorAll('.knowledge-file').forEach(el => el.classList.remove('active'));
