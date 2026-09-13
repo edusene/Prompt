@@ -1609,16 +1609,36 @@ async function saveKnowledge() {
     }
 }
 
-function showKnowledgeForm() {
+function showKnowledgeForm(prefill = {}) {
     document.getElementById('modal-title').textContent = 'Novo Arquivo Knowledge';
     document.getElementById('modal-body').innerHTML = `
         <form onsubmit="createKnowledge(event)">
-            <div class="form-group"><label>Nome do arquivo</label><input name="filename" placeholder="ex: 04-horarios.md" required></div>
-            <div class="form-group"><label>Descricao (para o agente saber quando usar)</label><input name="description" placeholder="ex: Horario de funcionamento e entregas"></div>
-            <div class="form-group"><label>Conteudo</label><textarea name="content" rows="10" required></textarea></div>
+            <div class="form-group"><label>Nome do arquivo</label><input name="filename" value="${esc(prefill.filename || '')}" placeholder="ex: 04-horarios.md" required></div>
+            <div class="form-group"><label>Descricao (para o agente saber quando usar)</label><input name="description" value="${esc(prefill.description || '')}" placeholder="ex: Horario de funcionamento e entregas"></div>
+            <div class="form-group"><label>Conteudo</label><textarea name="content" rows="10" required>${esc(prefill.content || '')}</textarea></div>
             <button type="submit" class="btn-primary">Criar</button>
         </form>`;
     document.getElementById('modal-overlay').style.display = 'flex';
+}
+
+async function importKnowledgeFile(event) {
+    const input = event.target;
+    const file = input.files && input.files[0];
+    input.value = ''; // permite re-importar o mesmo arquivo
+    if (!file) return;
+    const lower = (file.name || '').toLowerCase();
+    if (!lower.endsWith('.md') && !lower.endsWith('.txt')) {
+        toast('Sólo se permiten archivos .md o .txt', 'error');
+        return;
+    }
+    try {
+        const content = await file.text();
+        // Abre el modal pre-rellenado para revisar / añadir descripcion antes de indexar
+        showKnowledgeForm({ filename: file.name, content: content });
+        toast('Arquivo cargado, revisa y pulsa Criar', 'info');
+    } catch (e) {
+        toast('Erro ao ler o arquivo', 'error');
+    }
 }
 
 async function createKnowledge(e) {
