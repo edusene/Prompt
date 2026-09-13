@@ -1440,7 +1440,9 @@ function showTagForm(tag = null) {
             <div class="form-group"><label>Cor</label><input type="color" name="color" value="${tag?.color || '#6366f1'}"></div>
             <button type="submit" class="btn-primary">Salvar</button>
         </form>`;
-    document.getElementById('modal-overlay').style.display = 'flex';
+    requestAnimationFrame(() => {
+        document.getElementById('modal-overlay').style.display = 'flex';
+    });
 }
 
 async function saveTag(e, id) {
@@ -1508,7 +1510,9 @@ function showTemplateForm(tpl = null) {
             <div class="form-group"><label>Corpo</label><textarea name="body" rows="5" required>${esc(tpl?.body || '')}</textarea></div>
             <button type="submit" class="btn-primary">Salvar</button>
         </form>`;
-    document.getElementById('modal-overlay').style.display = 'flex';
+    requestAnimationFrame(() => {
+        document.getElementById('modal-overlay').style.display = 'flex';
+    });
 }
 
 async function saveTemplate(e, id) {
@@ -1653,7 +1657,9 @@ function showKnowledgeForm(prefill = {}) {
             <div class="form-group"><label>Conteudo</label><textarea name="content" rows="10" required>${esc(prefill.content || '')}</textarea></div>
             <button type="submit" class="btn-primary">Criar</button>
         </form>`;
-    document.getElementById('modal-overlay').style.display = 'flex';
+    requestAnimationFrame(() => {
+        document.getElementById('modal-overlay').style.display = 'flex';
+    });
 }
 
 async function importKnowledgeFile(event) {
