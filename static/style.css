@@ -2175,27 +2175,103 @@ select option {
 
 /* Telas mobile / tablets */
 @media (max-width: 768px) {
-    :root {
-        --sidebar-width: 60px;
-    }
-    .sidebar { width: var(--sidebar-width); }
-    .logo h2 { display: none; }
-    .logo { justify-content: center; }
-    .nav-item span:not(.icon):not(.badge) { display: none; }
-    .nav-item { justify-content: center; padding: 10px; }
-    .conv-list-panel { width: 100%; }
-    .conv-chat-panel { display: none; }
-    .conv-info-panel { display: none; }
-    .main-content { padding: 16px; }
+    /* ── Layout geral ── */
+    .main-content { padding: 16px; padding-left: 16px; }
     .main-content:has(#view-conversations.active) { padding: 0; }
+
+    /* ── Sidebar drawer ── */
+    .sidebar-hamburger { display: flex; }
+    .sidebar {
+        position: fixed;
+        left: -280px;
+        top: 0;
+        bottom: 0;
+        width: 260px;
+        z-index: 1000;
+        transition: left 0.3s ease;
+        background: var(--bg-sidebar);
+    }
+    .sidebar.open { left: 0; }
+    .sidebar.open ~ .sidebar-hamburger { left: 274px; }
+    .nav-item span:not(.icon):not(.badge) { display: inline !important; }
+    .nav-item { justify-content: flex-start !important; padding: 12px 18px !important; min-height: 48px; }
+    .logo h2 { display: block !important; }
+    .logo { justify-content: flex-start !important; }
+    .sidebar-agent, .sidebar-footer { padding: 12px 18px; }
+
+    /* ── Dashboard ── */
     .stats-grid {
-        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
         gap: 10px;
     }
-    .stat-card { padding: 16px; }
-    .stat-value { font-size: 24px; }
+    .stat-card { padding: 14px; }
+    .stat-value { font-size: 22px; }
+
+    /* ── Conversas / Chat ── */
+    .conv-layout {
+        position: relative;
+        overflow: hidden;
+        height: 100dvh;
+    }
+    .conv-list-panel {
+        width: 100% !important;
+        border-right: none !important;
+        position: absolute;
+        inset: 0;
+        z-index: 1;
+        transition: transform 0.3s ease, opacity 0.3s ease;
+    }
+    .conv-chat-panel {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        flex: none;
+        background: var(--bg-body);
+        transform: translateX(100%);
+        transition: transform 0.3s ease;
+        z-index: 2;
+        display: flex;
+        flex-direction: column;
+    }
+    .conv-layout.chat-open .conv-list-panel {
+        transform: translateX(-20%);
+        opacity: 0;
+        pointer-events: none;
+    }
+    .conv-layout.chat-open .conv-chat-panel {
+        transform: translateX(0);
+    }
+    .chat-back-btn { display: flex; }
+    .chat-header { padding-left: 8px; gap: 6px; }
+    .chat-messages { flex: 1; overflow-y: auto; }
+    .chat-input-area { border-top: 1px solid var(--border); }
+
+    /* ── Tabelas ── */
+    .table-container td { min-height: 44px; vertical-align: middle; }
+
+    /* ── Knowledge ── */
     .knowledge-layout { flex-direction: column; height: auto; }
-    .knowledge-list-panel { width: 100%; border-right: none; border-bottom: 1px solid var(--border); max-height: 200px; }
+    .knowledge-list-panel {
+        width: 100% !important;
+        border-right: none;
+        border-bottom: 1px solid var(--border);
+        max-height: 200px;
+    }
+
+    /* ── Touch targets ── */
+    .btn-sm { padding: 8px 14px; min-height: 44px; }
+    .knowledge-file { padding: 14px 16px; min-height: 48px; }
+
+    /* ── Modal ── */
+    .modal {
+        max-width: calc(100vw - 24px);
+        max-height: 85vh;
+        margin: 12px;
+    }
+    .modal-overlay { padding: 0; align-items: flex-end; }
+    .form-group input,
+    .form-group textarea,
+    .form-group select { font-size: 16px !important; }
 }
 
 /* Telas muito pequenas */
@@ -2283,120 +2359,12 @@ select option {
     background: var(--bg-card-hover);
 }
 
-@media (max-width: 768px) {
-    .sidebar-hamburger {
-        display: flex;
-    }
-    .sidebar {
-        position: fixed;
-        left: -260px;
-        top: 0;
-        bottom: 0;
-        width: 260px;
-        z-index: 1000;
-        transition: left 0.3s ease;
-    }
-    .sidebar.open {
-        left: 0;
-    }
-    .sidebar.open ~ .sidebar-hamburger {
-        left: 274px;
-    }
-    .nav-item span:not(.icon):not(.badge) {
-        display: inline !important;
-    }
-    .nav-item {
-        justify-content: flex-start !important;
-        padding: 12px 18px !important;
-    }
-    .logo h2 {
-        display: block !important;
-    }
-    .logo {
-        justify-content: flex-start !important;
-    }
-    .sidebar-agent,
-    .sidebar-footer {
-        padding: 12px 18px;
-    }
-    .main-content {
-        padding-left: 62px;
-    }
-    .main-content:has(#view-conversations.active) {
-        padding-left: 0;
-    }
-
-    /* Chat mobile */
-    .conv-layout {
-        position: relative;
-        overflow: hidden;
-    }
-    .conv-list-panel {
-        width: 100% !important;
-        transition: transform 0.25s ease;
-    }
-    .conv-chat-panel {
-        position: absolute;
-        inset: 0;
-        width: 100%;
-        background: var(--bg-body);
-        transform: translateX(100%);
-        transition: transform 0.25s ease;
-        z-index: 5;
-    }
-    .conv-layout.chat-open .conv-list-panel {
-        transform: translateX(-30%);
-        opacity: 0.5;
-        pointer-events: none;
-    }
-    .conv-layout.chat-open .conv-chat-panel {
-        transform: translateX(0);
-    }
-    .chat-back-btn {
-        display: flex;
-    }
-    .chat-header {
-        padding-left: 8px;
-        gap: 6px;
-    }
-
-    /* Touch targets - min 44px */
-    .btn-sm {
-        padding: 8px 14px;
-        min-height: 44px;
-    }
-    .nav-item {
-        min-height: 48px;
-    }
-    .knowledge-file {
-        padding: 14px 16px;
-        min-height: 48px;
-    }
-    .table-container td {
-        min-height: 44px;
-        vertical-align: middle;
-    }
-
-    /* Modal mobile */
-    .modal {
-        max-width: calc(100vw - 24px);
-        max-height: 85vh;
-        margin: 12px;
-    }
-    .modal-overlay {
-        padding: 0;
-    }
-    .form-group input,
-    .form-group textarea,
-    .form-group select {
-        font-size: 16px !important;
-    }
-}
-
 /* ═══ Mejoras de UX: loaders, media y animaciones (mantiene el funcionamiento) ═══ */
 
 /* ── Carregamento minimalista ao abrir conversa (barra fina no topo) ─────── */
-.conv-chat-panel { position: relative; }
+@media (min-width: 769px) {
+    .conv-chat-panel { position: relative; }
+}
 .conv-chat-panel.chat-loading::before {
     content: '';
     position: absolute;
