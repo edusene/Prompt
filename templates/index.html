@@ -71,6 +71,10 @@
                 </a>
             </div>
         </aside>
+        <div class="sidebar-overlay" id="sidebar-overlay" onclick="toggleSidebar()"></div>
+        <button class="sidebar-hamburger" id="sidebar-hamburger" onclick="toggleSidebar()">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+        </button>
 
         <main class="main-content">
             <!-- Dashboard -->
@@ -148,6 +152,9 @@
                     </div>
                     <div class="conv-chat-panel">
                         <div id="chat-header" class="chat-header">
+                            <button class="chat-back-btn" onclick="closeChatMobile()">
+                                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+                            </button>
                             <span>Selecione uma conversa</span>
                         </div>
                         <div id="chat-messages" class="chat-messages"></div>

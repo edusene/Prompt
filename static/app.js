@@ -80,6 +80,8 @@ function switchView(view) {
     currentView = view;
     animateViewIn(view);
     loadView(view);
+    closeSidebar();
+    closeChatMobile();
 }
 
 function loadView(view) {
@@ -269,6 +271,9 @@ async function selectConversation(convId) {
         autoResizeChatInput();
 
         renderInfoPanel(conv, contact, tags, allTags || []);
+
+        // Abre o chat no mobile
+        openChatMobile();
 
         // Mark as read
         await api(`/api/conversations/${convId}/read`, { method: 'PUT' });
@@ -619,7 +624,9 @@ function renderChatHeader(conv, contact) {
         ? `<img src="${esc(contact.avatar_url)}" alt="" class="conv-avatar-img" onerror="this.remove()">`
         : '';
     const initials = esc(name.slice(0, 2).toUpperCase());
+    const backBtn = `<button class="chat-back-btn" onclick="closeChatMobile()"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg></button>`;
     document.getElementById('chat-header').innerHTML = `
+        ${backBtn}
         <div class="chat-header-avatar" style="${avatarStyle}">${avatar}${initials}</div>
         <span>${esc(name)} (${esc(statusLabel(conv.status))})</span>
         <span class="auto-badge ${autoClass}">${autoMode}</span>
@@ -1603,6 +1610,45 @@ document.addEventListener('click', (e) => {
     const wrapper = document.querySelector('.knowledge-actions-wrapper');
     if (wrapper && !wrapper.contains(e.target)) {
         wrapper.classList.remove('open');
+    }
+});
+
+/* ── Sidebar Toggle (Mobile) ────────────────────────────────────────────── */
+function toggleSidebar() {
+    const sidebar = document.querySelector('.sidebar');
+    const overlay = document.getElementById('sidebar-overlay');
+    const isOpen = sidebar.classList.contains('open');
+    if (isOpen) {
+        sidebar.classList.remove('open');
+        overlay.classList.remove('visible');
+    } else {
+        sidebar.classList.add('open');
+        overlay.classList.add('visible');
+    }
+}
+
+function closeSidebar() {
+    const sidebar = document.querySelector('.sidebar');
+    const overlay = document.getElementById('sidebar-overlay');
+    sidebar.classList.remove('open');
+    overlay.classList.remove('visible');
+}
+
+/* ── Chat Mobile ────────────────────────────────────────────────────────── */
+function openChatMobile() {
+    const layout = document.querySelector('.conv-layout');
+    if (layout) layout.classList.add('chat-open');
+}
+
+function closeChatMobile() {
+    const layout = document.querySelector('.conv-layout');
+    if (layout) layout.classList.remove('chat-open');
+}
+
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        closeSidebar();
+        closeChatMobile();
     }
 });
 

@@ -978,7 +978,8 @@ h3 { font-size: 14px; font-weight: 600; }
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    overflow: hidden;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
     animation: fadeInUp 0.3s ease;
 }
 .table-container table {
@@ -2210,7 +2211,188 @@ select option {
     .table-container td { padding: 8px 10px; font-size: 12px; }
     .btn-group { flex-direction: column; }
     .card { padding: 18px; }
+    .modal {
+        max-width: calc(100vw - 16px);
+        max-height: 90vh;
+        margin: 8px;
+        border-radius: var(--radius-lg);
+    }
+    .modal-header { padding: 14px 16px; }
+    .modal-body { padding: 16px; }
+    .knowledge-desc-bar {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 4px;
+    }
+    .knowledge-desc-bar label { white-space: normal; }
+    .knowledge-actions-wrapper { width: 100%; }
+    .knowledge-actions-btn { width: 100%; justify-content: center; }
+    .knowledge-dropdown-menu { width: 100%; right: 0; left: 0; }
 }
+
+/* ── Sidebar Toggle (Mobile) ────────────────────────────────────────────── */
+.sidebar-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 999;
+    -webkit-tap-highlight-color: transparent;
+}
+.sidebar-overlay.visible {
+    display: block;
+}
+.sidebar-hamburger {
+    display: none;
+    position: fixed;
+    top: 14px;
+    left: 14px;
+    z-index: 1001;
+    width: 40px;
+    height: 40px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    color: var(--text);
+    cursor: pointer;
+    align-items: center;
+    justify-content: center;
+    transition: all var(--transition-fast);
+    -webkit-tap-highlight-color: transparent;
+}
+.sidebar-hamburger:active {
+    transform: scale(0.92);
+}
+
+/* ── Chat Back Button (Mobile) ──────────────────────────────────────────── */
+.chat-back-btn {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    background: none;
+    border: none;
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    cursor: pointer;
+    flex-shrink: 0;
+    -webkit-tap-highlight-color: transparent;
+}
+.chat-back-btn:active {
+    background: var(--bg-card-hover);
+}
+
+@media (max-width: 768px) {
+    .sidebar-hamburger {
+        display: flex;
+    }
+    .sidebar {
+        position: fixed;
+        left: -260px;
+        top: 0;
+        bottom: 0;
+        width: 260px;
+        z-index: 1000;
+        transition: left 0.3s ease;
+    }
+    .sidebar.open {
+        left: 0;
+    }
+    .sidebar.open ~ .sidebar-hamburger {
+        left: 274px;
+    }
+    .nav-item span:not(.icon):not(.badge) {
+        display: inline !important;
+    }
+    .nav-item {
+        justify-content: flex-start !important;
+        padding: 12px 18px !important;
+    }
+    .logo h2 {
+        display: block !important;
+    }
+    .logo {
+        justify-content: flex-start !important;
+    }
+    .sidebar-agent,
+    .sidebar-footer {
+        padding: 12px 18px;
+    }
+    .main-content {
+        padding-left: 62px;
+    }
+    .main-content:has(#view-conversations.active) {
+        padding-left: 0;
+    }
+
+    /* Chat mobile */
+    .conv-layout {
+        position: relative;
+        overflow: hidden;
+    }
+    .conv-list-panel {
+        width: 100% !important;
+        transition: transform 0.25s ease;
+    }
+    .conv-chat-panel {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        background: var(--bg-body);
+        transform: translateX(100%);
+        transition: transform 0.25s ease;
+        z-index: 5;
+    }
+    .conv-layout.chat-open .conv-list-panel {
+        transform: translateX(-30%);
+        opacity: 0.5;
+        pointer-events: none;
+    }
+    .conv-layout.chat-open .conv-chat-panel {
+        transform: translateX(0);
+    }
+    .chat-back-btn {
+        display: flex;
+    }
+    .chat-header {
+        padding-left: 8px;
+        gap: 6px;
+    }
+
+    /* Touch targets - min 44px */
+    .btn-sm {
+        padding: 8px 14px;
+        min-height: 44px;
+    }
+    .nav-item {
+        min-height: 48px;
+    }
+    .knowledge-file {
+        padding: 14px 16px;
+        min-height: 48px;
+    }
+    .table-container td {
+        min-height: 44px;
+        vertical-align: middle;
+    }
+
+    /* Modal mobile */
+    .modal {
+        max-width: calc(100vw - 24px);
+        max-height: 85vh;
+        margin: 12px;
+    }
+    .modal-overlay {
+        padding: 0;
+    }
+    .form-group input,
+    .form-group textarea,
+    .form-group select {
+        font-size: 16px !important;
+    }
+}
+
 /* ═══ Mejoras de UX: loaders, media y animaciones (mantiene el funcionamiento) ═══ */
 
 /* ── Carregamento minimalista ao abrir conversa (barra fina no topo) ─────── */
