@@ -127,9 +127,17 @@ def _build_knowledge_index() -> str:
     return "\n".join(lines)
 
 
-def _knowledge_tool_handler(filename: str) -> str:
-    content = knowledge_rag.get_file_content(filename)
+def _knowledge_tool_handler(filename: str = "") -> str:
+    if not filename or not filename.strip():
+        index = _build_knowledge_index()
+        if index:
+            return f"Escolha um arquivo valido:\n{index}"
+        return "Nenhum arquivo de conhecimento disponivel."
+    content = knowledge_rag.get_file_content(filename.strip())
     if not content:
+        index = _build_knowledge_index()
+        if index:
+            return f"Arquivo '{filename}' nao encontrado. Arquivos disponiveis:\n{index}"
         return f"Arquivo '{filename}' nao encontrado na base de conhecimento."
     return content
 
