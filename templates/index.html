@@ -30,8 +30,17 @@
                 </a>
                 <a href="#" class="nav-item" data-view="conversations">
                     <span class="icon"><svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span>
-                    <span>Atendimento</span>
+                    <span>Geral</span>
                     <span class="badge" id="unread-badge" style="display:none">0</span>
+                </a>
+                <a href="#" class="nav-item" data-view="bot">
+                    <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/><circle cx="12" cy="16" r="1" fill="currentColor"/></svg></span>
+                    <span>Bot</span>
+                </a>
+                <a href="#" class="nav-item" data-view="human-queue">
+                    <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
+                    <span>Fila Humana</span>
+                    <span class="badge badge-warning" id="human-queue-badge" style="display:none">0</span>
                 </a>
                 <a href="#" class="nav-item" data-view="contacts">
                     <span class="icon"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
@@ -352,6 +361,17 @@
                     </div>
 
                     <!-- Linha 2: Configuracao (largura total) -->
+                    <div class="wa-card wa-config-card">
+                        <h3>Mensagem de Transferencia</h3>
+                        <p class="muted" style="font-size:12px;margin:0 0 12px 0">Mensagem enviada ao cliente quando a conversa e transferida para um atendente humano.</p>
+                        <div style="display:flex;gap:8px;align-items:flex-start">
+                            <textarea id="wa-transfer-msg" class="wa-config-input" rows="3" style="flex:1;resize:vertical" placeholder="Mensagem de transferencia..."></textarea>
+                        </div>
+                        <div class="wa-config-actions" style="margin-top:8px">
+                            <button type="button" class="btn-primary" onclick="saveTransferMessage()">Salvar Mensagem</button>
+                        </div>
+                    </div>
+
                     <div class="wa-card wa-config-card">
                         <h3>Configuracao da API</h3>
                         <p class="muted" style="font-size:12px;margin:0 0 16px 0">Atualize as variaveis de ambiente direto pelo painel.</p>

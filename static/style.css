@@ -348,6 +348,9 @@ h3 { font-size: 14px; font-weight: 600; }
     box-sizing: border-box;
     animation: pulse 2s ease-in-out infinite;
 }
+.badge-warning {
+    background: var(--warning);
+}
 
 /* ── Main ────────────────────────────────────────────────────────────────── */
 .main-content {
@@ -972,6 +975,27 @@ h3 { font-size: 14px; font-weight: 600; }
 }
 .msg-in .msg-time { color: var(--text-muted); }
 .msg-out .msg-time { color: rgba(255, 255, 255, 0.8); }
+
+.msg-internal {
+    text-align: center;
+    padding: 6px 16px;
+    margin: 10px auto;
+    max-width: 80%;
+}
+.msg-internal .msg-body {
+    font-style: italic;
+    color: var(--text-muted);
+    font-size: 12px;
+    background: none;
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    padding: 6px 0;
+    border-radius: 0;
+}
+.msg-internal .msg-time {
+    color: var(--text-muted);
+    font-size: 11px;
+}
 
 /* ── Tables ──────────────────────────────────────────────────────────────── */
 .table-container {

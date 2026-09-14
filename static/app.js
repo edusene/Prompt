@@ -102,7 +102,9 @@ function switchView(view) {
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
     document.querySelector(`.nav-item[data-view="${view}"]`).classList.add('active');
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-    document.getElementById(`view-${view}`).classList.add('active');
+    // Bot e Fila Humana reutilizam a view-conversations
+    const domView = (view === 'bot' || view === 'human-queue') ? 'conversations' : view;
+    document.getElementById(`view-${domView}`).classList.add('active');
     currentView = view;
     animateViewIn(view);
     loadView(view);
@@ -125,6 +127,17 @@ function loadView(view) {
             if (currentConvId) refreshConversationPanel(currentConvId);
             pollTimers.push(setInterval(loadConversations, 10000));
             break;
+        case 'bot':
+            loadConversations(1);
+            if (currentConvId) refreshConversationPanel(currentConvId);
+            pollTimers.push(setInterval(() => loadConversations(1), 10000));
+            break;
+        case 'human-queue':
+            loadConversations(0);
+            if (currentConvId) refreshConversationPanel(currentConvId);
+            pollTimers.push(setInterval(() => loadConversations(0), 10000));
+            updateHumanQueueBadge();
+            break;
         case 'contacts': loadContacts(); break;
         case 'tags': loadTags(); break;
         case 'templates': loadTemplates(); break;
@@ -134,6 +147,7 @@ function loadView(view) {
         case 'whatsapp':
             loadWAConnection();
             loadWAConfig();
+            loadTransferMessage();
             startWAConnectionPolling();
             break;
     }
@@ -192,16 +206,17 @@ async function loadDashboard() {
 }
 
 /* ── Conversations ────────────────────────────────────────────────────────── */
-document.getElementById('conv-filter').addEventListener('change', loadConversations);
+document.getElementById('conv-filter').addEventListener('change', () => loadConversations());
 
-async function loadConversations() {
+async function loadConversations(autoMode = null) {
     const status = document.getElementById('conv-filter').value;
     const list = document.getElementById('conv-list');
     const archivedParam = status === 'archived' ? '&archived=1' : '';
     const statusParam = status === 'archived' ? '' : status;
+    const autoModeParam = autoMode !== null ? `&auto_mode=${autoMode}` : '';
     if (!list.dataset.loaded) list.innerHTML = skeletonRows(5);
     const scrollPos = list.scrollTop;
-    conversations = await api(`/api/conversations?status=${statusParam}${archivedParam}`);
+    conversations = await api(`/api/conversations?status=${statusParam}${archivedParam}${autoModeParam}`);
     if (!conversations) return;
     list.dataset.loaded = '1';
     if (conversations.length === 0) {
@@ -691,6 +706,15 @@ function msgMediaHTML(m) {
 
 function msgHTML(m, isNew) {
     const timeStr = m.created_at ? new Date(m.created_at.endsWith('Z') ? m.created_at : m.created_at + 'Z').toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
+
+    // Mensagens internas do sistema (transferência, etc.)
+    if (m.direction === 'internal') {
+        return `<div class="msg msg-internal">
+            <div class="msg-body">${esc(m.body)}</div>
+            <div class="msg-time">${timeStr}</div>
+        </div>`;
+    }
+
     const senderName = m.sender || (m.direction === 'in' ? 'Contato' : 'Atendente');
     const msgId = m.uazapi_id || m.id || '';
     const type = (m.msg_type || 'text').toLowerCase();
@@ -1074,6 +1098,11 @@ function renderInfoPanel(conv, contact, tags, allTags) {
                     ${contact?.auto_mode ? 'Agente Auto' : 'Humano'}
                 </button>
             </div>
+            ${conv.transferred_at ? `
+            <div style="margin-top:8px">
+                <strong>Transferido em:</strong> ${new Date(conv.transferred_at + 'Z').toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+            </div>
+            ` : ''}
         </div>
     `;
 }
@@ -2005,6 +2034,29 @@ function toggleSecretVisibility(inputId) {
     input.type = input.type === 'password' ? 'text' : 'password';
 }
 
+async function loadTransferMessage() {
+    const data = await api('/api/settings/transfer-message');
+    if (!data) return;
+    const textarea = document.getElementById('wa-transfer-msg');
+    if (textarea) textarea.value = data.transfer_message || '';
+}
+
+async function saveTransferMessage() {
+    const textarea = document.getElementById('wa-transfer-msg');
+    if (!textarea) return;
+    const msg = textarea.value.trim();
+    if (!msg) { toast('Mensagem nao pode ser vazia', 'error'); return; }
+    const res = await api('/api/settings/transfer-message', {
+        method: 'PUT',
+        body: JSON.stringify({ transfer_message: msg }),
+    });
+    if (res?.ok) {
+        toast('Mensagem de transferencia salva', 'success');
+    } else {
+        toast(res?.error || 'Erro ao salvar', 'error');
+    }
+}
+
 function copyWebhookUrl() {
     const el = document.getElementById('wa-webhook-url');
     if (!el || el.textContent === '-') return;
@@ -2095,6 +2147,8 @@ function debouncedLoadConversations() {
     clearTimeout(_convDebounce);
     _convDebounce = setTimeout(() => {
         if (currentView === 'conversations') loadConversations();
+        else if (currentView === 'bot') loadConversations(1);
+        else if (currentView === 'human-queue') { loadConversations(0); updateHumanQueueBadge(); }
     }, 500);
 }
 function debouncedLoadDashboard() {
@@ -2114,7 +2168,7 @@ function connectSSE() {
         if (e.data === ': keepalive') return;
         const { event, data } = JSON.parse(e.data);
         if (event === 'new_message') {
-            if (currentView === 'conversations') {
+            if (currentView === 'conversations' || currentView === 'bot' || currentView === 'human-queue') {
                 if (currentConvId === data.conversation_id) {
                     refreshConversationPanel(data.conversation_id);
                     const d = await api(`/api/conversations/${data.conversation_id}`);
@@ -2142,7 +2196,7 @@ function connectSSE() {
             if (currentView === 'dashboard') debouncedLoadDashboard();
         } else if (event === 'message_sent') {
             lastSentBody = '';
-            if (currentView === 'conversations' && currentConvId === data.conversation_id) {
+            if ((currentView === 'conversations' || currentView === 'bot' || currentView === 'human-queue') && currentConvId === data.conversation_id) {
                 refreshConversationPanel(data.conversation_id);
                 const d = await api(`/api/conversations/${data.conversation_id}`);
                 if (d?.messages?.length) {
@@ -2155,6 +2209,7 @@ function connectSSE() {
             if (currentView === 'dashboard') debouncedLoadDashboard();
         } else if (event === 'conversation_updated') {
             debouncedLoadConversations();
+            updateHumanQueueBadge();
         } else if (event === 'tags_updated') {
             refreshTagsUI();
         } else if (event === 'wa_status') {
@@ -2176,6 +2231,19 @@ async function updateUnreadBadge() {
     const badge = document.getElementById('unread-badge');
     if (stats.unread_messages > 0) {
         badge.textContent = stats.unread_messages;
+        badge.style.display = 'inline-flex';
+    } else {
+        badge.style.display = 'none';
+    }
+    updateHumanQueueBadge();
+}
+
+async function updateHumanQueueBadge() {
+    const data = await api('/api/conversations/human-queue/count');
+    if (!data) return;
+    const badge = document.getElementById('human-queue-badge');
+    if (data.count > 0) {
+        badge.textContent = data.count;
         badge.style.display = 'inline-flex';
     } else {
         badge.style.display = 'none';

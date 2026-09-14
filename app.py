@@ -11,6 +11,7 @@ import time
 import threading
 import hmac
 import hashlib
+from datetime import datetime
 
 from dotenv import load_dotenv
 
@@ -57,6 +58,13 @@ FULL_SYSTEM_PROMPT = _BASE_PROMPT + (
     "Quando receber uma imagem, descreva o que ve e responda de acordo. "
     "Quando receber um audio, transcreva mentalmente o conteudo e responda ao que foi dito. "
     "Seja util e objetivo ao lidar com midias."
+    "\n\nVoce tem acesso a uma tool 'transfer_to_human' para transferir o atendimento a um humano. "
+    "USE essa tool quando: o cliente pedir explicitamente para falar com um atendente ou humano; "
+    "a situacao envolver reclamacao grave, cancelamento, reembolso ou devolucao; "
+    "voce nao souber responder adequadamente; "
+    "a solicitacao estiver fora do seu escopo; "
+    "ou quando perceber que o cliente esta frustrado ou insatisfeito. "
+    "Ao transferir, informe brevemente o motivo no parametro 'reason'."
 )
 
 # ── Knowledge Tool (busca seletiva via function calling) ──────────────────────
@@ -105,6 +113,82 @@ def _knowledge_tool_handler(filename: str) -> str:
     if not content:
         return f"Arquivo '{filename}' nao encontrado na base de conhecimento."
     return content
+
+
+# ── Transfer Tool (transferência para humano via function calling) ─────────────
+
+# Palavras-chave fixas que disparam transferência automática ANTES de chamar o LLM
+TRANSFER_KEYWORDS = [
+    "falar com atendente",
+    "falar com humano",
+    "falar com pessoa",
+    "quero atendente",
+    "quero humano",
+    "preciso de atendente",
+    "atendimento humano",
+    "atendente humano",
+    "falar com alguem",
+    "falar com alguém",
+    "reclamacao",
+    "reclamação",
+    "cancelar",
+    "cancelamento",
+    "reembolso",
+    "devolver",
+    "devolucao",
+    "devolução",
+    "gerente",
+    "supervisor",
+    "ouvidoria",
+]
+
+TRANSFER_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "transfer_to_human",
+        "description": (
+            "Transfere a conversa para um atendente humano. "
+            "Use quando: o cliente pedir para falar com um humano ou atendente; "
+            "a situação envolver reclamação grave, cancelamento ou reembolso; "
+            "você não souber responder adequadamente; "
+            "ou quando a solicitação estiver fora do seu escopo de atuação."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "reason": {
+                    "type": "string",
+                    "description": "Breve motivo da transferência (ex: 'cliente solicitou atendente', 'reclamação sobre pedido')",
+                },
+            },
+            "required": ["reason"],
+        },
+    },
+}
+
+
+def _transfer_tool_handler(phone: str):
+    """Retorna uma closure que chama perform_transfer com o phone correto."""
+    def _handler(reason: str = "") -> str:
+        performed = perform_transfer(phone, reason)
+        if performed:
+            return "Transferência realizada com sucesso. O atendente humano continuará o atendimento."
+        return "O cliente já está sendo atendido por um humano."
+    return _handler
+
+
+def _check_transfer_keywords(items: list[dict]) -> str | None:
+    """Verifica se alguma mensagem contém palavras-chave de transferência.
+    Retorna a keyword encontrada ou None."""
+    full_text = " ".join(
+        item.get("text", "").lower()
+        for item in items
+        if item.get("text")
+    )
+    for kw in TRANSFER_KEYWORDS:
+        if kw in full_text:
+            return kw
+    return None
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -298,6 +382,84 @@ def _build_user_parts(items: list[dict]) -> list[dict]:
     return parts
 
 
+# ── Transfer ──────────────────────────────────────────────────────────────────
+
+def perform_transfer(phone: str, reason: str = "") -> bool:
+    """Transfere a conversa de um usuário para atendimento humano.
+
+    - Muda auto_mode do contato para 0
+    - Registra transferred_at na conversa
+    - Salva mensagem interna de sistema no chat
+    - Envia mensagem configurável ao cliente
+    - Emite evento SSE para atualizar o painel em tempo real
+
+    Retorna True se a transferência foi feita, False se já estava em modo humano.
+    """
+    contact = database.get_contact(phone)
+    if contact and not contact.get("auto_mode", 1):
+        print(f"[transfer] user={phone} já está em modo humano, ignorando")
+        return False
+
+    now = datetime.utcnow().isoformat()
+    now_fmt = datetime.utcnow().strftime("%d/%m %H:%M")
+
+    # Muda para modo humano
+    if contact:
+        database.update_contact(contact["id"], auto_mode=0)
+    else:
+        # Cria contato se não existir
+        contact = database.upsert_contact(phone)
+        database.update_contact(contact["id"], auto_mode=0)
+
+    # Busca ou cria conversa
+    conv = database.get_or_create_conversation(phone)
+    database.update_conversation(conv["id"], transferred_at=now)
+
+    reason_log = f" Motivo: {reason}" if reason else ""
+    print(f"[transfer] user={phone} transferido para humano.{reason_log}")
+
+    # Mensagem interna no chat (não visível ao cliente)
+    internal_body = f"Transferido pelo agente em {now_fmt}"
+    if reason:
+        internal_body += f" — {reason}"
+    database.save_message(
+        conversation_id=conv["id"],
+        phone=phone,
+        direction="internal",
+        body=internal_body,
+        sender="system",
+        msg_type="system",
+    )
+
+    # Busca mensagem de transferência configurável
+    transfer_msg = database.get_setting("transfer_message", "") or _DEFAULT_TRANSFER_MESSAGE
+
+    # Envia mensagem ao cliente
+    res = send_text(phone, transfer_msg)
+    if res.get("ok"):
+        database.save_message(
+            conversation_id=conv["id"],
+            phone=phone,
+            direction="out",
+            body=transfer_msg,
+            sender="agent",
+            msg_type="text",
+        )
+        database.update_conversation(conv["id"], last_message_at=time.strftime("%Y-%m-%dT%H:%M:%S"))
+    else:
+        print(f"[transfer] WARN: falha ao enviar msg de transferência p/ {phone}: {res.get('error')}")
+
+    # Emite evento SSE para o painel atualizar em tempo real
+    events.emit("conversation_updated", {
+        "conversation_id": conv["id"],
+        "auto_mode": 0,
+        "transferred": True,
+        "transferred_at": now,
+    })
+
+    return True
+
+
 # ── Flush handler ─────────────────────────────────────────────────────────────
 
 def handle_flush(user: str, items: list[dict]) -> None:
@@ -313,6 +475,13 @@ def handle_flush(user: str, items: list[dict]) -> None:
             return
         if not contact:
             print(f"[flush] user={user} sem contato no banco (auto_mode=1 por padrao)")
+
+        # ── Detecção de palavras-chave de transferência (antes do LLM) ──────────
+        matched_kw = _check_transfer_keywords(items)
+        if matched_kw:
+            print(f"[flush] user={user} keyword de transferência detectada: '{matched_kw}'")
+            perform_transfer(user, reason=f"cliente mencionou '{matched_kw}'")
+            return
 
         # Typing indicator (Meta: combinado com mark_read via typing_indicator)
         last_wa_msg_id = items[-1].get("wa_message_id", "") if items else ""
@@ -332,16 +501,36 @@ def handle_flush(user: str, items: list[dict]) -> None:
                 + knowledge_index
             )
 
+        # Verifica se a IA transferiu durante a chamada (via tool)
+        _transfer_done = False
+
+        def _transfer_handler(reason: str = "") -> str:
+            nonlocal _transfer_done
+            performed = perform_transfer(user, reason)
+            _transfer_done = True
+            if performed:
+                return "Transferência realizada com sucesso. O atendente humano continuará o atendimento."
+            return "O cliente já está sendo atendido por um humano."
+
         try:
             reply = llm.generate_reply(
                 history=memory.get(user),
                 system=dynamic_prompt,
-                tools=[KNOWLEDGE_TOOL],
-                tool_handlers={"search_knowledge": _knowledge_tool_handler},
+                tools=[KNOWLEDGE_TOOL, TRANSFER_TOOL],
+                tool_handlers={
+                    "search_knowledge": _knowledge_tool_handler,
+                    "transfer_to_human": _transfer_handler,
+                },
             )
         except Exception as e:
             print(f"[flush] ERRO llm p/ {user}: {e}")
             return
+
+        # Se a IA transferiu, não envia a resposta final do LLM (a msg de transferência já foi enviada)
+        if _transfer_done:
+            print(f"[flush] user={user} transferido pela IA, suprimindo resposta do LLM")
+            return
+
         memory.append(user, "assistant", reply)
         print(f"[flush] user={user} reply_len={len(reply)}")
 
@@ -741,7 +930,10 @@ def api_conversations_list():
     if status == "archived":
         status = ""
         archived = True
-    convs = database.list_conversations(status=status, archived=archived, limit=limit, offset=offset)
+    # Filtro por modo: auto_mode=1 (bot) ou auto_mode=0 (fila humana)
+    auto_mode_param = request.args.get("auto_mode", "")
+    auto_mode = int(auto_mode_param) if auto_mode_param in ("0", "1") else None
+    convs = database.list_conversations(status=status, archived=archived, auto_mode=auto_mode, limit=limit, offset=offset)
     return jsonify(convs)
 
 
@@ -988,6 +1180,38 @@ def api_set_agent_mode():
     auto = 1 if data.get("auto_mode", True) else 0
     database.set_setting("agent_mode", str(auto))
     return jsonify({"ok": True, "auto_mode": auto})
+
+
+_DEFAULT_TRANSFER_MESSAGE = os.getenv(
+    "TRANSFER_MESSAGE",
+    "Estou transferindo você para um atendente humano. Aguarde um momento, logo alguém irá te atender. 😊"
+)
+
+
+@app.get("/api/settings/transfer-message")
+@login_required
+def api_get_transfer_message():
+    msg = database.get_setting("transfer_message", "") or _DEFAULT_TRANSFER_MESSAGE
+    return jsonify({"transfer_message": msg})
+
+
+@app.put("/api/settings/transfer-message")
+@login_required
+def api_set_transfer_message():
+    data = request.get_json(silent=True) or {}
+    msg = data.get("transfer_message", "").strip()
+    if not msg:
+        return jsonify({"error": "transfer_message não pode ser vazio"}), 400
+    database.set_setting("transfer_message", msg)
+    return jsonify({"ok": True, "transfer_message": msg})
+
+
+@app.get("/api/conversations/human-queue/count")
+@login_required
+def api_human_queue_count():
+    """Retorna a contagem de conversas na fila humana (auto_mode=0)."""
+    convs = database.list_conversations(auto_mode=0, limit=500)
+    return jsonify({"count": len(convs)})
 
 
 # ── Messages ──────────────────────────────────────────────────────────────────

@@ -83,6 +83,15 @@ def init_db() -> None:
         except Exception:
             pass
 
+    # Migração: adiciona transferred_at na tabela conversations
+    cvcols = db.table_columns("conversations")
+    if "transferred_at" not in cvcols:
+        try:
+            db.execute("ALTER TABLE conversations ADD COLUMN transferred_at TEXT DEFAULT NULL")
+            print("[db] coluna transferred_at adicionada em conversations")
+        except Exception:
+            pass
+
     _ensure_indexes()
 
 
@@ -182,6 +191,7 @@ CREATE TABLE IF NOT EXISTS conversations (
     muted INTEGER DEFAULT 0,
     pinned INTEGER DEFAULT 0,
     favorite INTEGER DEFAULT 0,
+    transferred_at TEXT DEFAULT NULL,
     created_at TEXT DEFAULT NOW(),
     updated_at TEXT DEFAULT NOW()
 );
@@ -355,8 +365,10 @@ def get_conversation(conv_id: int) -> dict | None:
 
 
 def list_conversations(status: str = "", archived: bool | None = None,
+                       auto_mode: int | None = None,
                        limit: int = 100, offset: int = 0) -> list[dict]:
-    """Lista conversas. Por padrão esconde arquivadas; `archived=True` mostra só arquivadas."""
+    """Lista conversas. Por padrão esconde arquivadas; `archived=True` mostra só arquivadas.
+    `auto_mode=1` filtra apenas conversas do bot; `auto_mode=0` apenas fila humana."""
     if status == "archived":
         status = ""
         archived = True
@@ -370,9 +382,14 @@ def list_conversations(status: str = "", archived: bool | None = None,
         where.append("c.archived=1")
     else:
         where.append("c.archived=0")
+    if auto_mode is not None:
+        where.append("ct.auto_mode=?")
+        params.append(auto_mode)
     where_sql = ("WHERE " + " AND ".join(where)) if where else ""
     rows = db.fetch_all(
-        "SELECT c.*, ct.name as contact_name, ct.phone as contact_phone, ct.avatar_url as contact_avatar, ct.avatar_color as contact_avatar_color "
+        "SELECT c.*, ct.name as contact_name, ct.phone as contact_phone, "
+        "ct.avatar_url as contact_avatar, ct.avatar_color as contact_avatar_color, "
+        "ct.auto_mode as contact_auto_mode "
         "FROM conversations c LEFT JOIN contacts ct ON c.contact_id=ct.id "
         f"{where_sql} ORDER BY c.pinned DESC, c.last_message_at DESC, c.id DESC "
         "LIMIT ? OFFSET ?",
@@ -404,7 +421,7 @@ def list_conversations(status: str = "", archived: bool | None = None,
 
 def update_conversation(conv_id: int, **fields: Any) -> None:
     allowed = ("status", "assigned_to", "priority", "unread_count", "last_message_at",
-               "archived", "muted", "pinned", "favorite")
+               "archived", "muted", "pinned", "favorite", "transferred_at")
     sets = []
     vals = []
     for k, v in fields.items():
