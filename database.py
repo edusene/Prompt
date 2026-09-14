@@ -457,6 +457,16 @@ def mark_unread(conv_id: int) -> None:
     )
 
 
+def count_unread_human_conversations() -> int:
+    """Conta conversas em modo humano (auto_mode=0) que não foram lidas (unread_count > 0)."""
+    row = db.fetch_one(
+        "SELECT COUNT(*) as cnt FROM conversations c "
+        "JOIN contacts ct ON c.contact_id=ct.id "
+        "WHERE ct.auto_mode=0 AND c.unread_count>0 AND c.archived=0"
+    )
+    return row["cnt"] if row else 0
+
+
 def clear_conversation(conv_id: int) -> None:
     """Remove todas as mensagens da conversa (mantém o chat/contato)."""
     db.execute("DELETE FROM messages WHERE conversation_id=?", (conv_id,))

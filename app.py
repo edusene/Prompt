@@ -1209,9 +1209,9 @@ def api_set_transfer_message():
 @app.get("/api/conversations/human-queue/count")
 @login_required
 def api_human_queue_count():
-    """Retorna a contagem de conversas na fila humana (auto_mode=0)."""
-    convs = database.list_conversations(auto_mode=0, limit=500)
-    return jsonify({"count": len(convs)})
+    """Retorna a contagem de conversas não lidas em modo humano (auto_mode=0 e unread_count > 0)."""
+    count = database.count_unread_human_conversations()
+    return jsonify({"count": count})
 
 
 # ── Messages ──────────────────────────────────────────────────────────────────
