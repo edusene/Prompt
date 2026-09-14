@@ -756,7 +756,8 @@ app.secret_key = SECRET_KEY
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
 limiter = Limiter(get_remote_address, app=app, default_limits=["200 per minute"])
-csrf = CSRF(app)
+csrf = CSRF()
+csrf.init_app(app)
 
 # Excluir webhook e rotas de API JSON do CSRF (usam autenticação própria)
 csrf.exempt("webhook")
