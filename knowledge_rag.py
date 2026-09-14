@@ -37,8 +37,8 @@ def embed_batch(texts: list[str]) -> list[list[float]]:
 # ── Chunking ─────────────────────────────────────────────────────────────────
 
 
-def chunk_text(text: str, max_len: int = 500) -> list[str]:
-    """Divide texto em chunks para embedding.
+def chunk_text(text: str, max_len: int = 500, overlap: int = 50) -> list[str]:
+    """Divide texto em chunks para embedding com sobreposição entre chunks.
     Prioridade: paragrafo duplo (\\n\\n) > sentenca (.\\s) > corte bruto por max_len.
     """
     text = text.strip()
@@ -48,10 +48,10 @@ def chunk_text(text: str, max_len: int = 500) -> list[str]:
     # 1) Quebra por parágrafo duplo
     paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
 
-    chunks = []
+    raw_chunks = []
     for para in paragraphs:
         if len(para) <= max_len:
-            chunks.append(para)
+            raw_chunks.append(para)
         else:
             # 2) Quebra por sentença dentro do parágrafo grande
             sentences = []
@@ -68,17 +68,28 @@ def chunk_text(text: str, max_len: int = 500) -> list[str]:
             buffer = ""
             for sent in sentences:
                 if buffer and len(buffer) + len(sent) + 1 > max_len:
-                    chunks.append(buffer)
+                    raw_chunks.append(buffer)
                     buffer = sent
                 else:
                     buffer = f"{buffer} {sent}".strip() if buffer else sent
             if buffer:
-                chunks.append(buffer)
+                raw_chunks.append(buffer)
 
     # 3) Remove chunks muito curtos (< 10 chars) — provavelmente lixo
-    chunks = [c for c in chunks if len(c) >= 10]
+    raw_chunks = [c for c in raw_chunks if len(c) >= 10]
 
-    return chunks if chunks else [text[:max_len]]
+    if not raw_chunks:
+        return [text[:max_len]]
+
+    # 4) Adiciona sobreposição entre chunks para preservar contexto nas fronteiras
+    if overlap > 0 and len(raw_chunks) > 1:
+        chunks = [raw_chunks[0]]
+        for i in range(1, len(raw_chunks)):
+            prev_tail = raw_chunks[i - 1][-overlap:]
+            chunks.append(prev_tail + " " + raw_chunks[i])
+        return chunks
+
+    return raw_chunks
 
 
 # ── Knowledge CRUD ───────────────────────────────────────────────────────────

@@ -61,12 +61,19 @@ FULL_SYSTEM_PROMPT = _BASE_PROMPT + (
     "Quando receber um audio, transcreva mentalmente o conteudo e responda ao que foi dito. "
     "Seja util e objetivo ao lidar com midias."
     "\n\nREGRAS OBRIGATORIAS SOBRE BASE DE CONHECIMENTO: "
-    "CONTEUDO RELEVANTE da empresa ja esta incluso nesta mensagem como referencia. "
-    "Voce DEVE seguir esse conteudo a risca ao responder. "
-    "NUNCA invente, assuma ou responda coisas diferentes do que esta no conteudo fornecido. "
-    "Se o conteudo nao cobrir a pergunta do cliente, diga que nao encontrou a informacao. "
-    "Se precisar de mais detalhes de um arquivo especifico, use a tool 'search_knowledge'. "
-    "Trate o conteudo como verdade absoluta da empresa."
+    "SISTEMA DE DOIS NIVEIS:\n"
+    "NIVEL 1 - CONTEXTO INJETADO: Trechos relevantes da empresa ja estao nesta mensagem. "
+    "Voce DEVE usa-los como referencia PRIMARIA. NUNCA ignore este conteudo.\n"
+    "NIVEL 2 - BUSCA COMPLETA (search_knowledge): "
+    "Quando o contexto injetado nao for SUFICIENTE para responder com precisao "
+    "(preco exato, politica especifica, procedimento detalhado), voce DEVE "
+    "chamar search_knowledge com o nome do arquivo correto.\n\n"
+    "REGRAS ABSOLUTAS:\n"
+    "1. NUNCA invente, assuma ou responda coisas diferentes do que esta no conteudo.\n"
+    "2. Se o conteudo injetado cobre a pergunta, responda com ele.\n"
+    "3. Se duvidar ou precisar de mais detalhes, CHAME search_knowledge.\n"
+    "4. Se o conteudo nao cobrir a pergunta, diga que nao encontrou.\n"
+    "5. Trate o conteudo como VERDADE ABSOLUTA da empresa."
     "\n\nVoce tem acesso a uma tool 'transfer_to_human' para transferir o atendimento a um humano. "
     "USE essa tool quando: o cliente pedir explicitamente para falar com um atendente ou humano; "
     "a situacao envolver reclamacao grave, cancelamento, reembolso ou devolucao; "
@@ -85,10 +92,12 @@ KNOWLEDGE_TOOL = {
         "name": "search_knowledge",
         "description": (
             "Busca informacoes na base de conhecimento da empresa. "
-            "OBRIGATORIO usar esta tool para qualquer pergunta sobre: produtos, precos, "
-            "servicos, horarios, politicas, regras, normas, procedimentos, ou qualquer "
-            "informacao que esteja na base de conhecimento. NUNCA responda sobre esses "
-            "temas sem antes buscar aqui. Retorna o conteudo completo do arquivo solicitado."
+            "USE ESTA TOOL SEMPRE que o cliente fizer qualquer pergunta sobre: "
+            "produtos, precos, servicos, horarios, politicas, regras, normas, "
+            "procedimentos, devolucoes, trocas, cancelamentos, garantias, "
+            "ou qualquer informacao que possa estar na base de conhecimento. "
+            "Chame esta tool ANTES de responder sobre esses temas. "
+            "Retorna o conteudo relevante do arquivo solicitado."
         ),
         "parameters": {
             "type": "object",
@@ -526,8 +535,8 @@ def handle_flush(user: str, items: list[dict]) -> None:
         knowledge_context = knowledge_rag.search_context(text_only, top_k=5)
         if knowledge_context:
             dynamic_prompt += (
-                "\n\nCONTEUDO RELEVANTE DA BASE DE CONHECIMENTO "
-                "(use como referencia principal para responder):\n"
+                "\n\n⚠️ CONTEUDO RELEVANTE DA BASE DE CONHECIMENTO "
+                "(OBRIGATORIO seguir este conteudo como fonte unica de verdade):\n"
                 + knowledge_context
             )
 

@@ -89,7 +89,7 @@ def generate_reply(
     }
     if tools:
         kwargs["tools"] = tools
-        kwargs["tool_choice"] = "auto"
+        kwargs["tool_choice"] = "required"
 
     response = _client.chat.completions.create(**kwargs)
     choice = response.choices[0]
