@@ -60,21 +60,14 @@ FULL_SYSTEM_PROMPT = _BASE_PROMPT + (
     "Quando receber uma imagem, descreva o que ve e responda de acordo. "
     "Quando receber um audio, transcreva mentalmente o conteudo e responda ao que foi dito. "
     "Seja util e objetivo ao lidar com midias."
-    "\n\nREGRAS OBRIGATORIAS SOBRE BASE DE CONHECIMENTO: "
-    "SISTEMA DE DOIS NIVEIS:\n"
-    "NIVEL 1 - CONTEXTO INJETADO: Trechos relevantes da empresa ja estao nesta mensagem. "
-    "Voce DEVE usa-los como referencia PRIMARIA. NUNCA ignore este conteudo.\n"
-    "NIVEL 2 - BUSCA COMPLETA (search_knowledge): "
-    "Quando o contexto injetado nao for SUFICIENTE para responder com precisao "
-    "(preco exato, politica especifica, procedimento detalhado), voce DEVE "
-    "chamar search_knowledge com o nome do arquivo correto.\n\n"
-    "REGRAS ABSOLUTAS:\n"
-    "1. NUNCA invente, assuma ou responda coisas diferentes do que esta no conteudo.\n"
-    "2. Se o conteudo injetado cobre a pergunta, responda com ele.\n"
-    "3. Se duvidar ou precisar de mais detalhes, CHAME search_knowledge.\n"
-    "4. Se o conteudo nao cobrir a pergunta, diga que nao encontrou.\n"
-    "5. Trate o conteudo como VERDADE ABSOLUTA da empresa."
-    "\n\nVoce tem acesso a uma tool 'transfer_to_human' para transferir o atendimento a um humano. "
+    "\n\nBASE DE CONHECIMENTO DA EMPRESA:\n"
+    "Para responder QUALQUER pergunta sobre produtos, precos, servicos, politicas, "
+    "regras, normas, procedimentos, devolucoes, trocas, cancelamentos ou garantias:\n"
+    "1. PRIMEIRO, chame a tool search_knowledge com uma busca sobre o tema.\n"
+    "2. Use o conteudo retornado pela tool como UNICA fonte de verdade.\n"
+    "3. NUNCA invente ou assuma informacoes que nao estejam no conteudo da tool.\n"
+    "4. Se a tool nao retornar informacao relevante, diga que nao encontrou.\n"
+    "\nVoce tem acesso a uma tool 'transfer_to_human' para transferir o atendimento a um humano. "
     "USE essa tool quando: o cliente pedir explicitamente para falar com um atendente ou humano; "
     "a situacao envolver reclamacao grave, cancelamento, reembolso ou devolucao; "
     "voce nao souber responder adequadamente; "
@@ -92,22 +85,20 @@ KNOWLEDGE_TOOL = {
         "name": "search_knowledge",
         "description": (
             "Busca informacoes na base de conhecimento da empresa. "
-            "USE ESTA TOOL SEMPRE que o cliente fizer qualquer pergunta sobre: "
-            "produtos, precos, servicos, horarios, politicas, regras, normas, "
-            "procedimentos, devolucoes, trocas, cancelamentos, garantias, "
-            "ou qualquer informacao que possa estar na base de conhecimento. "
-            "Chame esta tool ANTES de responder sobre esses temas. "
-            "Retorna o conteudo relevante do arquivo solicitado."
+            "USE ESTA TOOL para qualquer pergunta sobre produtos, precos, servicos, "
+            "horarios, politicas, regras, normas, procedimentos, devolucoes, trocas, "
+            "cancelamentos, garantias. "
+            "Envie uma busca descritiva sobre o tema (ex: 'preco do produto X')."
         ),
         "parameters": {
             "type": "object",
             "properties": {
-                "filename": {
+                "query": {
                     "type": "string",
-                    "description": "Nome do arquivo knowledge a buscar (ex: 01-produtos.md)",
+                    "description": "Busca descritiva sobre o tema desejado (ex: 'preco produto X', 'politica devolucao')",
                 },
             },
-            "required": ["filename"],
+            "required": ["query"],
         },
     },
 }
@@ -127,18 +118,12 @@ def _build_knowledge_index() -> str:
     return "\n".join(lines)
 
 
-def _knowledge_tool_handler(filename: str = "") -> str:
-    if not filename or not filename.strip():
-        index = _build_knowledge_index()
-        if index:
-            return f"Escolha um arquivo valido:\n{index}"
-        return "Nenhum arquivo de conhecimento disponivel."
-    content = knowledge_rag.get_file_content(filename.strip())
+def _knowledge_tool_handler(query: str = "") -> str:
+    if not query or not query.strip():
+        return "Forneça uma busca descritiva sobre o tema desejado."
+    content = knowledge_rag.search_context(query.strip(), top_k=8)
     if not content:
-        index = _build_knowledge_index()
-        if index:
-            return f"Arquivo '{filename}' nao encontrado. Arquivos disponiveis:\n{index}"
-        return f"Arquivo '{filename}' nao encontrado na base de conhecimento."
+        return "Nenhuma informacao encontrada para essa busca."
     return content
 
 
@@ -534,18 +519,9 @@ def handle_flush(user: str, items: list[dict]) -> None:
         knowledge_index = _build_knowledge_index()
         if knowledge_index:
             dynamic_prompt += (
-                "\n\nBase de conhecimento disponivel (use a tool search_knowledge "
-                "para buscar mais detalhes quando precisar):\n"
+                "\n\nBase de conhecimento disponivel (SEMPRE use a tool search_knowledge "
+                "para responder sobre estes temas):\n"
                 + knowledge_index
-            )
-
-        # Busca vetorial: injeta chunks relevantes direto no prompt
-        knowledge_context = knowledge_rag.search_context(text_only, top_k=5)
-        if knowledge_context:
-            dynamic_prompt += (
-                "\n\n⚠️ CONTEUDO RELEVANTE DA BASE DE CONHECIMENTO "
-                "(OBRIGATORIO seguir este conteudo como fonte unica de verdade):\n"
-                + knowledge_context
             )
 
         # Injeta nome do cliente no prompt

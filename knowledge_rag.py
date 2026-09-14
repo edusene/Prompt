@@ -128,7 +128,7 @@ def save_knowledge(filename: str, content: str, description: str = "") -> None:
 
 def search_context(query: str, top_k: int = 3) -> str:
     """Busca os chunks mais relevantes para a query do usuario.
-    Retorna texto concatenado pronto para injetar no system prompt.
+    Retorna texto concatenado com labels de arquivo para injetar no system prompt.
     Se embedding falhar, retorna os chunks mais recentes como fallback.
     """
     if not query or not query.strip():
@@ -139,7 +139,7 @@ def search_context(query: str, top_k: int = 3) -> str:
         query_embedding = embed_text(query)
         results = database.search_knowledge(query_embedding, top_k=top_k, query_text=query)
         if results:
-            parts = [r["content"] for r in results]
+            parts = [f"[{r['filename']}] {r['content']}" for r in results]
             joined = "\n\n---\n\n".join(parts)
             print(f"[rag] search vectorial query_len={len(query)} results={len(results)} context_len={len(joined)}")
             return joined
@@ -150,7 +150,7 @@ def search_context(query: str, top_k: int = 3) -> str:
     try:
         results = database.search_knowledge([], top_k=top_k, query_text=query)
         if results:
-            parts = [r["content"] for r in results]
+            parts = [f"[{r['filename']}] {r['content']}" for r in results]
             joined = "\n\n---\n\n".join(parts)
             print(f"[rag] search fallback query_len={len(query)} results={len(results)} context_len={len(joined)}")
             return joined
