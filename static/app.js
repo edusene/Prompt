@@ -105,6 +105,15 @@ function switchView(view) {
     // Bot e Fila Humana reutilizam a view-conversations
     const domView = (view === 'bot' || view === 'human-queue') ? 'conversations' : view;
     document.getElementById(`view-${domView}`).classList.add('active');
+    // Limpa lista de conversas ao trocar de view (evita flash de conteúdo antigo)
+    if (domView === 'conversations') {
+        const list = document.getElementById('conv-list');
+        if (list) {
+            list.dataset.sig = '';
+            list.dataset.loaded = '';
+            list.innerHTML = skeletonRows(5);
+        }
+    }
     currentView = view;
     animateViewIn(view);
     loadView(view);
@@ -208,16 +217,24 @@ async function loadDashboard() {
 /* ── Conversations ────────────────────────────────────────────────────────── */
 document.getElementById('conv-filter').addEventListener('change', () => loadConversations());
 
+let _loadConvToken = 0;
+
 async function loadConversations(autoMode = null) {
+    const myToken = ++_loadConvToken;
     const status = document.getElementById('conv-filter').value;
     const list = document.getElementById('conv-list');
     const archivedParam = status === 'archived' ? '&archived=1' : '';
     const statusParam = status === 'archived' ? '' : status;
     const autoModeParam = autoMode !== null ? `&auto_mode=${autoMode}` : '';
+    // Reset assinatura se autoMode mudou (evita mostrar conteúdo da view errada)
+    if (list.dataset.lastAutoMode !== String(autoMode)) {
+        list.dataset.sig = '';
+        list.dataset.lastAutoMode = autoMode;
+    }
     if (!list.dataset.loaded) list.innerHTML = skeletonRows(5);
     const scrollPos = list.scrollTop;
     conversations = await api(`/api/conversations?status=${statusParam}${archivedParam}${autoModeParam}`);
-    if (!conversations) return;
+    if (!conversations || myToken !== _loadConvToken) return;
     list.dataset.loaded = '1';
     if (conversations.length === 0) {
         if (list.dataset.sig !== 'empty') {
