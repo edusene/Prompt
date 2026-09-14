@@ -1274,7 +1274,7 @@ def api_knowledge_create():
     filename = data.get("filename", "").strip()
     content = data.get("content", "")
     description = data.get("description", "").strip()
-    skip_embed = data.get("skip_embed", False)
+    skip_embed = data.get("skip_embed", True)
     if not filename:
         return jsonify({"error": "filename obrigatorio"}), 400
     if not filename.endswith(('.md', '.txt')):
@@ -1282,10 +1282,7 @@ def api_knowledge_create():
     existing = knowledge_rag.get_file(filename)
     if existing:
         return jsonify({"error": "Arquivo ja existe"}), 409
-    if skip_embed:
-        knowledge_rag.save_knowledge_raw(filename, content, description=description)
-    else:
-        knowledge_rag.save_knowledge(filename, content, description=description)
+    knowledge_rag.save_knowledge_raw(filename, content, description=description)
     print(f"[knowledge] criado: {filename}")
     return jsonify({"ok": True, "filename": filename})
 
@@ -1296,7 +1293,7 @@ def api_knowledge_update(filename):
     data = request.get_json(silent=True) or {}
     content = data.get("content", "")
     description = data.get("description", "").strip()
-    knowledge_rag.save_knowledge(filename, content, description=description)
+    knowledge_rag.save_knowledge_raw(filename, content, description=description)
     print(f"[knowledge] salvo: {filename}")
     return jsonify({"ok": True})
 

@@ -1694,7 +1694,7 @@ async function saveKnowledge() {
     if (data?.error) {
         toast(friendlyError(data.error), 'error');
     } else {
-        toast('Knowledge salvo e indexado', 'success');
+        toast('Knowledge salvo (pendente de embedding)', 'success');
         loadKnowledge();
     }
 }
@@ -1744,7 +1744,7 @@ async function createKnowledge(e) {
     if (res?.error) {
         toast(friendlyError(res.error), 'error');
     } else {
-        toast('Arquivo criado e indexado', 'success');
+        toast('Arquivo criado (pendente de embedding)', 'success');
         closeModal();
         currentKnowledgeFile = data.filename;
         loadKnowledge();
