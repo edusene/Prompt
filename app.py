@@ -60,19 +60,9 @@ FULL_SYSTEM_PROMPT = _BASE_PROMPT + (
     "Quando receber uma imagem, descreva o que ve e responda de acordo. "
     "Quando receber um audio, transcreva mentalmente o conteudo e responda ao que foi dito. "
     "Seja util e objetivo ao lidar com midias."
-    "\n\nBASE DE CONHECIMENTO DA EMPRESA:\n"
-    "Para responder QUALQUER pergunta sobre produtos, precos, servicos, politicas, "
-    "regras, normas, procedimentos, devolucoes, trocas, cancelamentos ou garantias:\n"
-    "1. PRIMEIRO, chame a tool search_knowledge com uma busca sobre o tema.\n"
-    "2. Use o conteudo retornado pela tool como UNICA fonte de verdade.\n"
-    "3. NUNCA invente ou assuma informacoes que nao estejam no conteudo da tool.\n"
-    "4. Se a tool nao retornar informacao relevante, diga que nao encontrou.\n"
-    "\n⚠️ REGRA OBRIGATORIA PARA PEDIDOS:\n"
-    "SEMPRE que o cliente mencionar um produto, prato, item de cardapio, sabor, "
-    "quantidade ou fizer um pedido (ex: 'quero 3 panquecas', 'me da 2 coxinhas'), "
-    "voce DEVE chamar search_knowledge ANTES de responder. "
-    "NUNCA responda sobre produtos sem antes buscar na knowledge base. "
-    "NUNCA ofereça opcoes que nao estejam no conteudo retornado pela tool."
+    "\n\nVoce tem acesso a uma tool 'search_knowledge' para buscar informacoes "
+    "na base de conhecimento. Chame essa tool sempre que precisar consultar "
+    "produtos, precos, politicas ou qualquer informacao da empresa."
     "\n\nVoce tem acesso a uma tool 'transfer_to_human' para transferir o atendimento a um humano. "
     "USE essa tool quando: o cliente pedir explicitamente para falar com um atendente ou humano; "
     "a situacao envolver reclamacao grave, cancelamento, reembolso ou devolucao; "
@@ -94,7 +84,7 @@ KNOWLEDGE_TOOL = {
             "USE ESTA TOOL para qualquer pergunta sobre produtos, precos, servicos, "
             "horarios, politicas, regras, normas, procedimentos, devolucoes, trocas, "
             "cancelamentos, garantias. "
-            "Envie uma busca descritiva sobre o tema (ex: 'preco do produto X')."
+            "Pode buscar por nome de arquivo OU por palavra-chave do tema."
         ),
         "parameters": {
             "type": "object",
@@ -103,8 +93,11 @@ KNOWLEDGE_TOOL = {
                     "type": "string",
                     "description": "Busca descritiva sobre o tema desejado (ex: 'preco produto X', 'politica devolucao')",
                 },
+                "filename": {
+                    "type": "string",
+                    "description": "Nome exato do arquivo knowledge (ex: '02_cardapio_produtos_precos.md'). Use quando souber qual arquivo consultar.",
+                },
             },
-            "required": ["query"],
         },
     },
 }
@@ -124,14 +117,22 @@ def _build_knowledge_index() -> str:
     return "\n".join(lines)
 
 
-def _knowledge_tool_handler(query: str = "") -> str:
-    print(f"[knowledge] TOOL CHAMADA com query='{query}'")
+def _knowledge_tool_handler(query: str = "", filename: str = "") -> str:
+    print(f"[knowledge] TOOL CHAMADA query='{query}' filename='{filename}'")
+    # Se filename foi informado, retorna o conteúdo completo do arquivo
+    if filename:
+        content = knowledge_rag.get_file_content(filename.strip())
+        if content:
+            print(f"[knowledge] RESULTADO (filename): {len(content)} chars")
+            return content
+        return f"Arquivo '{filename}' nao encontrado."
+    # Senão, busca por query (busca vetorial)
     if not query or not query.strip():
         return "Forneça uma busca descritiva sobre o tema desejado."
     content = knowledge_rag.search_context(query.strip(), top_k=8)
     if not content:
         return "Nenhuma informacao encontrada para essa busca."
-    print(f"[knowledge] RESULTADO: {len(content)} chars")
+    print(f"[knowledge] RESULTADO (query): {len(content)} chars")
     return content
 
 
@@ -527,11 +528,9 @@ def handle_flush(user: str, items: list[dict]) -> None:
         knowledge_index = _build_knowledge_index()
         if knowledge_index:
             dynamic_prompt += (
-                "\n\nBase de conhecimento disponivel (SEMPRE use a tool search_knowledge "
-                "para responder sobre estes temas):\n"
+                "\n\nBase de conhecimento disponivel (use a tool search_knowledge "
+                "para buscar mais detalhes quando precisar):\n"
                 + knowledge_index
-                + "\n\n⚠️ REGRA: Se o cliente fizer um PEDIDO ou mencionar qualquer "
-                "produto, item ou prato, voce DEVE chamar search_knowledge PRIMEIRO."
             )
 
         # Injeta nome do cliente no prompt
