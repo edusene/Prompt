@@ -549,11 +549,30 @@ def handle_flush(user: str, items: list[dict]) -> None:
 
         # Injeta regra de saudação contextual baseada no histórico
         history = memory.get(user)
-        if len(history) > 2:
+        has_name = bool(contact and contact.get("name"))
+        has_greeting = any(
+            "sandrinha" in (m.get("parts", [{}])[0].get("text", "").lower() or "")
+            for m in history if m.get("role") == "assistant"
+        )
+        if len(history) > 2 or has_greeting or has_name:
             dynamic_prompt += (
-                "\n\n⚠️ CONTEXTO: Esta conversa ja tem historico. "
-                "Se ja houve saudacao anterior, NAO repita a saudacao. "
-                "Responda de forma contextual a mensagem do cliente."
+                "\n\n⚠️ REGRAS DE SAUDACAO - LEIA COM ATENCAO:\n"
+                "Este cliente JA conversou com voce anteriormente.\n"
+            )
+            if has_name:
+                dynamic_prompt += (
+                    f"O nome do cliente ja e conhecido: {contact['name']}.\n"
+                    "NAO pergunte 'Qual e o seu nome?'. Ja tem o nome.\n"
+                    f"Responda: 'Oi, {contact['name']}! 😊 Em que posso te ajudar?'\n"
+                )
+            else:
+                dynamic_prompt += (
+                    "Ja houve interacao anterior. NAO repita a mensagem de boas-vindas "
+                    "'Oi! Eu sou a Sandrinha da BALBS...' nem pergunte o nome.\n"
+                    "Responda de forma contextual a mensagem do cliente.\n"
+                )
+            dynamic_prompt += (
+                "Essa regra tem PRIORITATE ABSOLUTA sobre qualquer outra instrucao.\n"
             )
 
         # Injeta nome do cliente no prompt
