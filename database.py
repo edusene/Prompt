@@ -787,10 +787,8 @@ def search_knowledge(query_embedding: list[float], top_k: int = 5, query_text: s
                 )
                 if rows:
                     return rows
-        # Último recurso: retorna os primeiros chunks
-        return db.fetch_all(
-            "SELECT * FROM knowledge ORDER BY filename, chunk_index LIMIT ?", (top_k,)
-        )
+    # Último recurso: retorna vazio em vez de chunks aleatórios
+    return []
 
     emb_str = "[" + ",".join(str(x) for x in query_embedding) + "]"
     try:
@@ -823,10 +821,8 @@ def search_knowledge(query_embedding: list[float], top_k: int = 5, query_text: s
             except Exception:
                 pass
 
-    # Último recurso
-    return db.fetch_all(
-        "SELECT * FROM knowledge ORDER BY filename, chunk_index LIMIT %s", (top_k,)
-    )
+    # Último recurso: retorna vazio em vez de chunks aleatórios
+    return []
 
 
 def list_knowledge_files() -> list[dict]:

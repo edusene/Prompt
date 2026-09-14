@@ -67,7 +67,13 @@ FULL_SYSTEM_PROMPT = _BASE_PROMPT + (
     "2. Use o conteudo retornado pela tool como UNICA fonte de verdade.\n"
     "3. NUNCA invente ou assuma informacoes que nao estejam no conteudo da tool.\n"
     "4. Se a tool nao retornar informacao relevante, diga que nao encontrou.\n"
-    "\nVoce tem acesso a uma tool 'transfer_to_human' para transferir o atendimento a um humano. "
+    "\n⚠️ REGRA OBRIGATORIA PARA PEDIDOS:\n"
+    "SEMPRE que o cliente mencionar um produto, prato, item de cardapio, sabor, "
+    "quantidade ou fizer um pedido (ex: 'quero 3 panquecas', 'me da 2 coxinhas'), "
+    "voce DEVE chamar search_knowledge ANTES de responder. "
+    "NUNCA responda sobre produtos sem antes buscar na knowledge base. "
+    "NUNCA ofereça opcoes que nao estejam no conteudo retornado pela tool."
+    "\n\nVoce tem acesso a uma tool 'transfer_to_human' para transferir o atendimento a um humano. "
     "USE essa tool quando: o cliente pedir explicitamente para falar com um atendente ou humano; "
     "a situacao envolver reclamacao grave, cancelamento, reembolso ou devolucao; "
     "voce nao souber responder adequadamente; "
@@ -119,11 +125,13 @@ def _build_knowledge_index() -> str:
 
 
 def _knowledge_tool_handler(query: str = "") -> str:
+    print(f"[knowledge] TOOL CHAMADA com query='{query}'")
     if not query or not query.strip():
         return "Forneça uma busca descritiva sobre o tema desejado."
     content = knowledge_rag.search_context(query.strip(), top_k=8)
     if not content:
         return "Nenhuma informacao encontrada para essa busca."
+    print(f"[knowledge] RESULTADO: {len(content)} chars")
     return content
 
 
@@ -522,6 +530,8 @@ def handle_flush(user: str, items: list[dict]) -> None:
                 "\n\nBase de conhecimento disponivel (SEMPRE use a tool search_knowledge "
                 "para responder sobre estes temas):\n"
                 + knowledge_index
+                + "\n\n⚠️ REGRA: Se o cliente fizer um PEDIDO ou mencionar qualquer "
+                "produto, item ou prato, voce DEVE chamar search_knowledge PRIMEIRO."
             )
 
         # Injeta nome do cliente no prompt
