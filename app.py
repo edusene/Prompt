@@ -58,6 +58,13 @@ FULL_SYSTEM_PROMPT = _BASE_PROMPT + (
     "Quando receber uma imagem, descreva o que ve e responda de acordo. "
     "Quando receber um audio, transcreva mentalmente o conteudo e responda ao que foi dito. "
     "Seja util e objetivo ao lidar com midias."
+    "\n\nREGRAS IMPORTANTES SOBRE BASE DE CONHECIMENTO: "
+    "Voce tem acesso a uma base de conhecimento da empresa com arquivos de referencia. "
+    "Antes de responder QUALQUER pergunta sobre produtos, precos, servicos, horarios, "
+    "politicas, regras, ou qualquer informacao da empresa, voce DEVE usar a tool "
+    "'search_knowledge' para buscar o conteudo correto. NUNCA invente ou assuma informacoes. "
+    "Se a tool nao retornar o que precisa, diga que nao encontrou a informacao. "
+    "Sempre busque knowledge primeiro, mesmo que acredite que ja sabe a resposta."
     "\n\nVoce tem acesso a uma tool 'transfer_to_human' para transferir o atendimento a um humano. "
     "USE essa tool quando: o cliente pedir explicitamente para falar com um atendente ou humano; "
     "a situacao envolver reclamacao grave, cancelamento, reembolso ou devolucao; "
@@ -76,9 +83,10 @@ KNOWLEDGE_TOOL = {
         "name": "search_knowledge",
         "description": (
             "Busca informacoes na base de conhecimento da empresa. "
-            "Use quando o usuario perguntar sobre produtos, precos, servicos, "
-            "horarios, politicas, ou qualquer informacao que esteja na base. "
-            "Retorna o conteudo do arquivo solicitado."
+            "OBRIGATORIO usar esta tool para qualquer pergunta sobre: produtos, precos, "
+            "servicos, horarios, politicas, regras, normas, procedimentos, ou qualquer "
+            "informacao que esteja na base de conhecimento. NUNCA responda sobre esses "
+            "temas sem antes buscar aqui. Retorna o conteudo completo do arquivo solicitado."
         ),
         "parameters": {
             "type": "object",

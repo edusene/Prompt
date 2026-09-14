@@ -94,8 +94,17 @@ def generate_reply(
     response = _client.chat.completions.create(**kwargs)
     choice = response.choices[0]
 
-    # Verifica se o modelo quer chamar alguma tool
-    if tools and tool_handlers and choice.finish_reason == "tool_calls" and choice.message.tool_calls:
+    # Loop de tool calling: permite múltiplos rounds de tools
+    max_tool_rounds = 5
+    rounds = 0
+    while (
+        tools
+        and tool_handlers
+        and choice.finish_reason == "tool_calls"
+        and choice.message.tool_calls
+        and rounds < max_tool_rounds
+    ):
+        rounds += 1
         # Adiciona a mensagem do assistente (com as chamadas de tool) ao histórico
         messages.append(choice.message.model_dump())
 
@@ -108,7 +117,7 @@ def generate_reply(
             else:
                 result = f"Função {fn_name} não encontrada"
 
-            print(f"[llm] tool_call={fn_name} args={fn_args} result_len={len(str(result))}")
+            print(f"[llm] tool_call={fn_name} args={fn_args} result_len={len(str(result))} round={rounds}")
 
             # Adiciona resultado da tool ao histórico
             messages.append({
@@ -117,7 +126,7 @@ def generate_reply(
                 "content": str(result),
             })
 
-        # Gera resposta final com o resultado da tool
+        # Gera resposta final (ou próxima tool call) com o resultado da tool
         response = _client.chat.completions.create(
             model=OPENAI_MODEL,
             messages=messages,
