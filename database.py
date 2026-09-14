@@ -58,6 +58,12 @@ def init_db() -> None:
     if "knowledge_files" not in _get_tables():
         db.executescript(KNOWLEDGE_FILES_SCHEMA)
         print("[db] tabela knowledge_files criada")
+    elif "status" not in db.table_columns("knowledge_files"):
+        try:
+            db.execute("ALTER TABLE knowledge_files ADD COLUMN status TEXT DEFAULT 'indexed'")
+            print("[db] coluna status adicionada em knowledge_files")
+        except Exception:
+            pass
 
     # Migração: adiciona wa_media_id na tabela messages
     mcols = db.table_columns("messages")
@@ -142,6 +148,7 @@ KNOWLEDGE_FILES_SCHEMA = """
 CREATE TABLE IF NOT EXISTS knowledge_files (
     filename TEXT PRIMARY KEY,
     description TEXT DEFAULT '',
+    status TEXT DEFAULT 'indexed',
     created_at TEXT DEFAULT NOW(),
     updated_at TEXT DEFAULT NOW()
 );
@@ -846,3 +853,104 @@ def get_all_knowledge_descriptions() -> list[dict]:
 def delete_knowledge_file_meta(filename: str) -> None:
     """Deleta apenas os metadados (descrição) de um arquivo."""
     db.execute("DELETE FROM knowledge_files WHERE filename=?", (filename,))
+
+
+# ── Knowledge Batch Operations ────────────────────────────────────────────────
+
+def list_knowledge_files_with_status() -> list[dict]:
+    """Lista arquivos com status (pending/indexed/error)."""
+    rows = db.fetch_all(
+        "SELECT kf.filename, kf.description, kf.status, "
+        "COALESCE(COUNT(k.id), 0) as chunks "
+        "FROM knowledge_files kf "
+        "LEFT JOIN knowledge k ON k.filename = kf.filename "
+        "GROUP BY kf.filename, kf.description, kf.status "
+        "ORDER BY kf.filename"
+    )
+    return rows
+
+
+def update_knowledge_file_status(filename: str, status: str) -> None:
+    """Atualiza o status de um arquivo (pending/indexed/error)."""
+    now = datetime.utcnow().isoformat()
+    db.execute(
+        "UPDATE knowledge_files SET status=?, updated_at=? WHERE filename=?",
+        (status, now, filename),
+    )
+
+
+def upsert_knowledge_file_with_status(filename: str, description: str = "", status: str = "pending") -> None:
+    """Insere ou atualiza arquivo knowledge com status."""
+    now = datetime.utcnow().isoformat()
+    db.execute(
+        "INSERT INTO knowledge_files (filename, description, status, created_at, updated_at) "
+        "VALUES (?,?,?,?,?) "
+        "ON CONFLICT(filename) DO UPDATE SET "
+        "description=EXCLUDED.description, status=EXCLUDED.status, updated_at=EXCLUDED.updated_at",
+        (filename, description, status, now, now),
+    )
+
+
+def clear_knowledge_embeddings() -> int:
+    """Remove todos os embeddings, mantendo conteúdo. Retorna qtd de chunks afetados."""
+    if db.DB_DRIVER != "postgresql":
+        return 0
+    rows = db.fetch_all("SELECT id FROM knowledge WHERE embedding IS NOT NULL")
+    db.execute("UPDATE knowledge SET embedding = NULL")
+    print(f"[db] embeddings limpos: {len(rows)} chunks")
+    return len(rows)
+
+
+def set_all_knowledge_pending() -> None:
+    """Marca todos os knowledge_files como pending (após limpar embeddings)."""
+    now = datetime.utcnow().isoformat()
+    db.execute("UPDATE knowledge_files SET status='pending', updated_at=?", (now,))
+
+
+def delete_all_knowledge() -> int:
+    """Deleta todos os chunks e metadados. Retorna qtd de arquivos deletados."""
+    files = db.fetch_all("SELECT DISTINCT filename FROM knowledge")
+    db.execute("DELETE FROM knowledge")
+    db.execute("DELETE FROM knowledge_files")
+    print(f"[db] todo knowledge deletado: {len(files)} arquivos")
+    return len(files)
+
+
+def get_pending_knowledge_files() -> list[dict]:
+    """Retorna arquivos com status='pending'."""
+    return db.fetch_all(
+        "SELECT filename, description FROM knowledge_files WHERE status='pending' ORDER BY filename"
+    )
+
+
+def get_knowledge_chunks_without_embeddings() -> list[dict]:
+    """Retorna chunks sem embeddings (para re-embed)."""
+    return db.fetch_all(
+        "SELECT filename, chunk_index, content FROM knowledge WHERE embedding IS NULL "
+        "ORDER BY filename, chunk_index"
+    )
+
+
+def delete_knowledge_chunks_by_filename(filename: str) -> None:
+    """Deleta apenas os chunks (não os metadados)."""
+    db.execute("DELETE FROM knowledge WHERE filename=?", (filename,))
+
+
+def insert_knowledge_chunks_batch(records: list[dict]) -> None:
+    """Insere múltiplos chunks em lote. Cada record: {filename, chunk_index, content, embedding, created_at, updated_at}"""
+    now = datetime.utcnow().isoformat()
+    for rec in records:
+        emb = rec.get("embedding")
+        if db.DB_DRIVER == "postgresql" and emb is not None:
+            emb_str = "[" + ",".join(str(x) for x in emb) + "]"
+            db.execute(
+                "INSERT INTO knowledge (filename, chunk_index, content, embedding, created_at, updated_at) "
+                "VALUES (?,?,?,?,?,?)",
+                (rec["filename"], rec["chunk_index"], rec["content"], emb_str, now, now),
+            )
+        else:
+            db.execute(
+                "INSERT INTO knowledge (filename, chunk_index, content, created_at, updated_at) "
+                "VALUES (?,?,?, ?,?)",
+                (rec["filename"], rec["chunk_index"], rec["content"], now, now),
+            )

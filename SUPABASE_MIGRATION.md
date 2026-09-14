@@ -207,6 +207,7 @@ CREATE TABLE IF NOT EXISTS knowledge (
 CREATE TABLE IF NOT EXISTS knowledge_files (
     filename TEXT PRIMARY KEY,
     description TEXT DEFAULT '',
+    status TEXT DEFAULT 'indexed',
     created_at TEXT DEFAULT NOW(),
     updated_at TEXT DEFAULT NOW()
 );

@@ -1249,7 +1249,7 @@ def api_search():
 @app.get("/api/knowledge")
 @login_required
 def api_knowledge_list():
-    return jsonify(knowledge_rag.list_files())
+    return jsonify(knowledge_rag.list_files_with_status())
 
 
 @app.get("/api/knowledge/descriptions")
@@ -1274,6 +1274,7 @@ def api_knowledge_create():
     filename = data.get("filename", "").strip()
     content = data.get("content", "")
     description = data.get("description", "").strip()
+    skip_embed = data.get("skip_embed", False)
     if not filename:
         return jsonify({"error": "filename obrigatorio"}), 400
     if not filename.endswith(('.md', '.txt')):
@@ -1281,7 +1282,10 @@ def api_knowledge_create():
     existing = knowledge_rag.get_file(filename)
     if existing:
         return jsonify({"error": "Arquivo ja existe"}), 409
-    knowledge_rag.save_knowledge(filename, content, description=description)
+    if skip_embed:
+        knowledge_rag.save_knowledge_raw(filename, content, description=description)
+    else:
+        knowledge_rag.save_knowledge(filename, content, description=description)
     print(f"[knowledge] criado: {filename}")
     return jsonify({"ok": True, "filename": filename})
 
@@ -1306,6 +1310,63 @@ def api_knowledge_delete(filename):
     knowledge_rag.delete_file(filename)
     print(f"[knowledge] deletado: {filename}")
     return jsonify({"ok": True})
+
+
+@app.post("/api/knowledge/upload")
+@login_required
+def api_knowledge_upload():
+    """Upload de múltiplos arquivos (multipart). Salva como pending."""
+    files = request.files.getlist("files")
+    if not files:
+        return jsonify({"error": "Nenhum arquivo enviado"}), 400
+
+    saved = []
+    errors = []
+    for f in files:
+        filename = f.filename or ""
+        if not filename:
+            continue
+        if not filename.endswith(('.md', '.txt')):
+            errors.append({"filename": filename, "error": "Extensao invalida"})
+            continue
+        existing = knowledge_rag.get_file(filename)
+        if existing:
+            errors.append({"filename": filename, "error": "Arquivo ja existe"})
+            continue
+        try:
+            content = f.read().decode("utf-8", errors="replace")
+            knowledge_rag.save_knowledge_raw(filename, content)
+            saved.append(filename)
+        except Exception as e:
+            errors.append({"filename": filename, "error": str(e)})
+
+    print(f"[knowledge] upload: {len(saved)} salvos, {len(errors)} erros")
+    return jsonify({"ok": True, "saved": saved, "errors": errors})
+
+
+@app.post("/api/knowledge/embed-all")
+@login_required
+def api_knowledge_embed_all():
+    """Gera embeddings para todos os arquivos pendentes."""
+    result = knowledge_rag.embed_pending_files()
+    print(f"[knowledge] embed-all: {result}")
+    return jsonify(result)
+
+
+@app.post("/api/knowledge/clear-embeddings")
+@login_required
+def api_knowledge_clear_embeddings():
+    """Remove todos os embeddings, mantém conteúdo, marca como pending."""
+    count = knowledge_rag.clear_all_embeddings()
+    return jsonify({"ok": True, "cleared": count})
+
+
+@app.delete("/api/knowledge/all")
+@login_required
+def api_knowledge_delete_all():
+    """Deleta todo o knowledge (chunks + metadados)."""
+    count = knowledge_rag.delete_all()
+    return jsonify({"ok": True, "deleted": count})
 
 
 # ── WhatsApp Cloud API (Meta) ────────────────────────────────────────────────

@@ -1565,17 +1565,22 @@ async function loadKnowledge() {
         list.innerHTML = '<div class="empty-state">Nenhum arquivo</div>';
         return;
     }
-    list.innerHTML = files.map(f => `
+    list.innerHTML = files.map(f => {
+        const status = f.status || 'indexed';
+        return `
         <div class="knowledge-file ${f.filename === currentKnowledgeFile ? 'active' : ''}" onclick="selectKnowledgeFile('${esc(f.filename)}')">
             <div class="knowledge-file-info">
                 <div class="knowledge-file-name">${esc(f.filename)}</div>
-                <div class="knowledge-file-size">${f.chunks} chunks</div>
+                <div class="knowledge-file-meta">
+                    <span class="knowledge-file-size">${f.chunks} chunks</span>
+                    <span class="knowledge-status-badge ${status}">${status === 'pending' ? 'Pendente' : status === 'indexed' ? 'Indexado' : 'Erro'}</span>
+                </div>
             </div>
             <button class="btn-icon btn-danger" onclick="event.stopPropagation();deleteKnowledge('${esc(f.filename)}')" title="Deletar">
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
             </button>
         </div>
-    `).join('');
+    `}).join('');
 }
 
 /* ── Knowledge Dropdown ─────────────────────────────────────────────────── */
@@ -1760,6 +1765,118 @@ async function deleteKnowledge(filename) {
             document.getElementById('knowledge-editor-header').innerHTML = '<span>Selecione um arquivo</span>';
             document.getElementById('knowledge-actions').style.display = 'none';
         }
+        loadKnowledge();
+    }
+}
+
+/* ── Knowledge Multi-Upload ─────────────────────────────────────────────── */
+function handleKnowledgeImportMultiple(e) {
+    e.stopPropagation();
+    closeKnowledgeDropdown();
+    document.getElementById('knowledge-import-multi-input').click();
+}
+
+async function importKnowledgeMultiple(event) {
+    const input = event.target;
+    const files = input.files;
+    input.value = '';
+    if (!files || files.length === 0) return;
+
+    const formData = new FormData();
+    let validCount = 0;
+    for (const file of files) {
+        const lower = (file.name || '').toLowerCase();
+        if (!lower.endsWith('.md') && !lower.endsWith('.txt')) {
+            toast(`Arquivo ignorado: ${file.name} (só .md/.txt)`, 'error');
+            continue;
+        }
+        formData.append('files', file);
+        validCount++;
+    }
+
+    if (validCount === 0) {
+        toast('Nenhum arquivo válido selecionado', 'error');
+        return;
+    }
+
+    toast(`Enviando ${validCount} arquivo(s)...`, 'info');
+
+    try {
+        const res = await fetch('/api/knowledge/upload', {
+            method: 'POST',
+            body: formData,
+        });
+        const data = await res.json();
+
+        if (data.saved && data.saved.length > 0) {
+            toast(`${data.saved.length} arquivo(s) salvo(s) como pendente`, 'success');
+        }
+        if (data.errors && data.errors.length > 0) {
+            data.errors.forEach(err => {
+                toast(`${err.filename}: ${err.error}`, 'error');
+            });
+        }
+        loadKnowledge();
+    } catch (e) {
+        toast('Erro ao enviar arquivos', 'error');
+    }
+}
+
+/* ── Knowledge Embed All ─────────────────────────────────────────────── */
+async function handleEmbedAll(e) {
+    e.stopPropagation();
+    closeKnowledgeDropdown();
+
+    toast('Gerando embeddings para arquivos pendentes...', 'info');
+
+    const res = await api('/api/knowledge/embed-all', { method: 'POST' });
+    if (res?.error) {
+        toast(friendlyError(res.error), 'error');
+    } else {
+        const msg = res.processed > 0
+            ? `${res.processed} arquivo(s) indexado(s)`
+            : 'Nenhum arquivo pendente para indexar';
+        if (res.errors > 0) {
+            toast(`${msg} (${res.errors} erro(s))`, 'warning');
+        } else {
+            toast(msg, 'success');
+        }
+        loadKnowledge();
+    }
+}
+
+/* ── Knowledge Clear Embeddings ─────────────────────────────────────── */
+async function handleClearEmbeddings(e) {
+    e.stopPropagation();
+    closeKnowledgeDropdown();
+
+    if (!confirm('Limpar todos os embeddings? O conteúdo será mantido mas os arquivos voltarão ao status "pendente".')) return;
+
+    const res = await api('/api/knowledge/clear-embeddings', { method: 'POST' });
+    if (res?.error) {
+        toast(friendlyError(res.error), 'error');
+    } else {
+        toast(`${res.cleared} embeddings limpos`, 'success');
+        loadKnowledge();
+    }
+}
+
+/* ── Knowledge Delete All ─────────────────────────────────────────────── */
+async function handleDeleteAll(e) {
+    e.stopPropagation();
+    closeKnowledgeDropdown();
+
+    if (!confirm('Deletar TODO o knowledge? Essa ação não pode ser desfeita.')) return;
+
+    const res = await api('/api/knowledge/all', { method: 'DELETE' });
+    if (res?.error) {
+        toast(friendlyError(res.error), 'error');
+    } else {
+        toast(`${res.deleted} arquivo(s) deletado(s)`, 'success');
+        currentKnowledgeFile = null;
+        document.getElementById('knowledge-editor').value = '';
+        document.getElementById('knowledge-editor-header').innerHTML = '<span>Selecione um arquivo</span>';
+        document.getElementById('knowledge-actions').style.display = 'none';
         loadKnowledge();
     }
 }

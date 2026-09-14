@@ -185,3 +185,90 @@ def get_file_content(filename: str) -> str:
         return ""
     chunks.sort(key=lambda c: c["chunk_index"])
     return "\n\n".join(c["content"] for c in chunks)
+
+
+# ── Knowledge Batch Operations ────────────────────────────────────────────────
+
+
+def save_knowledge_raw(filename: str, content: str, description: str = "") -> None:
+    """Salva knowledge SEM embeddings (status=pending). Para upload em lote."""
+    content = (content or "").strip()
+    if not content:
+        return
+
+    database.delete_knowledge_file(filename)
+
+    chunks = chunk_text(content)
+    if not chunks:
+        return
+
+    database.insert_knowledge_chunks(filename, chunks, [None] * len(chunks))
+    database.upsert_knowledge_file_with_status(filename, description, status="pending")
+    print(f"[rag] salvo (raw) {filename}: {len(chunks)} chunks (pendente de embedding)")
+
+
+def embed_pending_files() -> dict:
+    """Processa todos os arquivos com status='pending': gera embeddings e atualiza status.
+    Retorna {processed: int, errors: int, files: list[str]}.
+    """
+    pending = database.get_pending_knowledge_files()
+    if not pending:
+        return {"processed": 0, "errors": 0, "files": []}
+
+    processed = 0
+    errors = 0
+    processed_files = []
+
+    for file_info in pending:
+        filename = file_info["filename"]
+        try:
+            chunks = database.get_knowledge_chunks(filename)
+            if not chunks:
+                database.update_knowledge_file_status(filename, "error")
+                errors += 1
+                continue
+
+            chunks.sort(key=lambda c: c["chunk_index"])
+            texts = [c["content"] for c in chunks]
+
+            try:
+                embeddings = embed_batch(texts)
+            except Exception as e:
+                print(f"[rag] ERRO embedding {filename}: {e}")
+                database.update_knowledge_file_status(filename, "error")
+                errors += 1
+                continue
+
+            database.delete_knowledge_chunks_by_filename(filename)
+            database.insert_knowledge_chunks(filename, texts, embeddings)
+            database.update_knowledge_file_status(filename, "indexed")
+            processed += 1
+            processed_files.append(filename)
+            print(f"[rag] embedado {filename}: {len(chunks)} chunks")
+
+        except Exception as e:
+            print(f"[rag] ERRO processando {filename}: {e}")
+            database.update_knowledge_file_status(filename, "error")
+            errors += 1
+
+    return {"processed": processed, "errors": errors, "files": processed_files}
+
+
+def clear_all_embeddings() -> int:
+    """Remove todos os embeddings, mantém conteúdo e marca como pending."""
+    count = database.clear_knowledge_embeddings()
+    database.set_all_knowledge_pending()
+    print(f"[rag] embeddings limpos: {count} chunks marcados como pending")
+    return count
+
+
+def delete_all() -> int:
+    """Deleta todo o knowledge (chunks + metadados)."""
+    count = database.delete_all_knowledge()
+    print(f"[rag] todo knowledge deletado: {count} arquivos")
+    return count
+
+
+def list_files_with_status() -> list[dict]:
+    """Lista arquivos com status (pending/indexed/error)."""
+    return database.list_knowledge_files_with_status()

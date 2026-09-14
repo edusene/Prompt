@@ -237,8 +237,26 @@
                                         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
                                         Importar Arquivo
                                     </button>
+                                    <button class="knowledge-dropdown-item" onclick="handleKnowledgeImportMultiple(event)">
+                                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/><line x1="8" y1="21" x2="16" y2="21"/></svg>
+                                        Importar Múltiplos
+                                    </button>
+                                    <div class="knowledge-dropdown-divider"></div>
+                                    <button class="knowledge-dropdown-item knowledge-dropdown-action" onclick="handleEmbedAll(event)">
+                                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M2 12h20"/><circle cx="12" cy="12" r="10"/></svg>
+                                        Gerar Embeddings
+                                    </button>
+                                    <button class="knowledge-dropdown-item knowledge-dropdown-action" onclick="handleClearEmbeddings(event)">
+                                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                        Limpar Embeddings
+                                    </button>
+                                    <button class="knowledge-dropdown-item knowledge-dropdown-danger" onclick="handleDeleteAll(event)">
+                                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                        Deletar Tudo
+                                    </button>
                                 </div>
                                 <input type="file" id="knowledge-import-input" accept=".md,.txt,text/markdown,text/plain" style="display:none" onchange="importKnowledgeFile(event)">
+                                <input type="file" id="knowledge-import-multi-input" accept=".md,.txt,text/markdown,text/plain" multiple style="display:none" onchange="importKnowledgeMultiple(event)">
                             </div>
                         </div>
                         <div id="knowledge-list"></div>
