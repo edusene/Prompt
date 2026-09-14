@@ -304,6 +304,9 @@ async function selectConversation(convId) {
 
     // Render completo (header + mensagens + painel) — usado ao abrir uma conversa
     currentConvId = convId;
+    // Mostra painel do chat no desktop
+    const layout = document.querySelector('.conv-layout');
+    if (layout) layout.classList.remove('chat-closed');
     document.querySelectorAll('.conv-item').forEach(el => {
         el.classList.toggle('active', Number(el.dataset.convId) === convId);
     });
@@ -377,6 +380,9 @@ function _btnFromEvent() {
 
 function deselectConversation() {
     currentConvId = null;
+    // Esconde painel do chat no desktop
+    const layout = document.querySelector('.conv-layout');
+    if (layout) layout.classList.add('chat-closed');
     document.querySelectorAll('.conv-item').forEach(el => el.classList.remove('active'));
     const header = document.getElementById('chat-header');
     if (header) header.innerHTML = '<span>Selecione uma conversa</span>';

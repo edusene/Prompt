@@ -496,6 +496,16 @@ h3 { font-size: 14px; font-weight: 600; }
     min-height: 0;
 }
 
+/* Desktop: esconde chat e detalhes quando nenhuma conversa está selecionada */
+.conv-layout.chat-closed .conv-chat-panel,
+.conv-layout.chat-closed .conv-info-panel {
+    display: none;
+}
+.conv-layout.chat-closed .conv-list-panel {
+    width: 100%;
+    border-right: none;
+}
+
 .panel-header {
     display: flex;
     align-items: center;
