@@ -389,7 +389,8 @@ def list_conversations(status: str = "", archived: bool | None = None,
     rows = db.fetch_all(
         "SELECT c.*, ct.name as contact_name, ct.phone as contact_phone, "
         "ct.avatar_url as contact_avatar, ct.avatar_color as contact_avatar_color, "
-        "ct.auto_mode as contact_auto_mode "
+        "ct.auto_mode as contact_auto_mode, "
+        "(SELECT m.body FROM messages m WHERE m.conversation_id=c.id ORDER BY m.created_at DESC LIMIT 1) as last_message_body "
         "FROM conversations c LEFT JOIN contacts ct ON c.contact_id=ct.id "
         f"{where_sql} ORDER BY c.pinned DESC, c.last_message_at DESC, c.id DESC "
         "LIMIT ? OFFSET ?",

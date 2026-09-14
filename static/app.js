@@ -267,7 +267,7 @@ async function loadConversations(autoMode = null) {
                 <div class="conv-avatar" style="${avatarStyle}">${avatar}${initials}</div>
                 <div class="conv-meta">
                     <div class="conv-name">${esc(name)} ${badges.join('')}</div>
-                    <div class="conv-preview"><span class="status-dot status-${c.status}"></span>${esc(statusLabel(c.status))}</div>
+                    <div class="conv-preview"><span class="status-dot status-${c.status}"></span>${esc(statusLabel(c.status))}${c.last_message_body ? ' · ' + esc(c.last_message_body.length > 40 ? c.last_message_body.slice(0, 40) + '…' : c.last_message_body) : ''}</div>
                     ${tagChips ? `<div class="conv-tags">${tagChips}</div>` : ''}
                 </div>
                 <div style="text-align:right">
