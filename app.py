@@ -25,6 +25,9 @@ for _s in (sys.stdout, sys.stderr):
         pass
 
 from flask import Flask, request, jsonify, Response, redirect, url_for, render_template, session
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from flask_wtf.csrf import CSRF
 
 import memory
 import llm
@@ -752,6 +755,19 @@ app = Flask(__name__)
 app.secret_key = SECRET_KEY
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
+limiter = Limiter(get_remote_address, app=app, default_limits=["200 per minute"])
+csrf = CSRF(app)
+
+# Excluir webhook e rotas de API JSON do CSRF (usam autenticação própria)
+csrf.exempt("webhook")
+csrf.exempt("webhook_verify")
+
+# Excluir todas as rotas de API JSON do CSRF (usam autenticação via sessão)
+@app.before_request
+def _csrf_exempt_api():
+    if request.path.startswith("/api/"):
+        return None  # isenta do CSRF
+
 buffer = MessageBuffer(wait_seconds=BUFFER_SECONDS, on_flush=handle_flush)
 
 database.init_db()
@@ -769,6 +785,7 @@ def login_page():
 
 
 @app.post("/login")
+@limiter.limit("5 per minute")
 def login_action():
     username = request.form.get("username", "")
     password = request.form.get("password", "")
@@ -781,6 +798,17 @@ def login_action():
 def logout_action():
     do_logout()
     return redirect(url_for("login_page"))
+
+
+# ── Security Headers ─────────────────────────────────────────────────────────
+
+@app.after_request
+def add_security_headers(response):
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    return response
 
 
 # ── Webhook ──────────────────────────────────────────────────────────────────
@@ -975,8 +1003,8 @@ def api_dashboard():
 @login_required
 def api_conversations_list():
     status = request.args.get("status", "")
-    limit = int(request.args.get("limit", "100"))
-    offset = int(request.args.get("offset", "0"))
+    limit = min(int(request.args.get("limit", "100")), 500)
+    offset = max(int(request.args.get("offset", "0")), 0)
     arch = request.args.get("archived", "")
     archived = None if arch == "" else (arch == "1" or arch.lower() == "true")
     if status == "archived":
@@ -1333,8 +1361,8 @@ def api_messages_media(msg_id):
 @app.get("/api/contacts")
 @login_required
 def api_contacts_list():
-    limit = int(request.args.get("limit", "100"))
-    offset = int(request.args.get("offset", "0"))
+    limit = min(int(request.args.get("limit", "100")), 500)
+    offset = max(int(request.args.get("offset", "0")), 0)
     return jsonify(database.list_contacts(limit=limit, offset=offset))
 
 
