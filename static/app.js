@@ -1187,8 +1187,22 @@ async function toggleMode(convId) {
         modeBtn.lastChild.textContent = res.auto_mode ? 'Agente Auto' : 'Humano';
     }
 
-    // Sincroniza a lista de conversas
-    loadConversations();
+    // Auto-switch: navega para a view de destino e abre a conversa
+    const targetView = res.auto_mode ? 'bot' : 'human-queue';
+    if (currentView === targetView) {
+        loadConversations();
+        selectConversation(convId);
+    } else {
+        switchView(targetView);
+        const _waitAndSelect = (tries = 0) => {
+            if (conversations.some(c => c.id === convId) || tries > 10) {
+                selectConversation(convId);
+            } else {
+                setTimeout(() => _waitAndSelect(tries + 1), 200);
+            }
+        };
+        setTimeout(() => _waitAndSelect(), 600);
+    }
 }
 
 async function addConvTag(convId, tagId) {
