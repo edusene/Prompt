@@ -758,10 +758,6 @@ app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 limiter = Limiter(get_remote_address, app=app, default_limits=["200 per minute"])
 csrf = CSRFProtect(app)
 
-# Excluir webhook e rotas de API JSON do CSRF (usam autenticação própria)
-csrf.exempt(webhook_verify)
-csrf.exempt(webhook)
-
 # Excluir todas as rotas de API JSON do CSRF (usam autenticação via sessão)
 @app.before_request
 def _csrf_exempt_api():
@@ -814,12 +810,14 @@ def add_security_headers(response):
 # ── Webhook ──────────────────────────────────────────────────────────────────
 
 @app.get("/webhook")
+@csrf.exempt
 def webhook_verify():
     """Para a Datafy API essa rota não é chamada da mesma maneira que a Meta chama com GET."""
     return "Datafy API endpoint", 200
 
 
 @app.post("/webhook")
+@csrf.exempt
 def webhook():
     # Validação Datafy
     signature = request.headers.get("x-datafy-signature-256", "")
