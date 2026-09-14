@@ -37,6 +37,8 @@ async function toggleGlobalAgent(checked) {
 }
 
 /* ── Toast Notifications ─────────────────────────────────────────────────── */
+let _toastCounter = 0;
+
 function toast(message, type = 'info') {
     const container = document.getElementById('toast-container');
     const el = document.createElement('div');
@@ -47,10 +49,34 @@ function toast(message, type = 'info') {
         info: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#6366f1" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>',
     };
     el.innerHTML = `${icons[type] || icons.info}<span>${message}</span><button class="toast-close" onclick="event.stopPropagation(); this.parentElement.remove()">&times;</button>`;
-    // O clic em qualquer parte do toast (ou do seu botão de cerrar) não deve
-    // propagarse al handler de "clic fuera" que deselecciona la conversación.
     el.addEventListener('click', e => e.stopPropagation());
     container.appendChild(el);
+    setTimeout(() => { el.classList.add('toast-exit'); }, 3000);
+    setTimeout(() => { el.remove(); }, 3400);
+}
+
+function toastLoading(message) {
+    const container = document.getElementById('toast-container');
+    const id = `toast-${++_toastCounter}`;
+    const el = document.createElement('div');
+    el.id = id;
+    el.className = 'toast toast-loading';
+    el.innerHTML = `<span class="spinner toast-spinner"></span><span>${message}</span>`;
+    el.addEventListener('click', e => e.stopPropagation());
+    container.appendChild(el);
+    return id;
+}
+
+function toastDone(id, message, type = 'success') {
+    const el = document.getElementById(id);
+    if (!el) { toast(message, type); return; }
+    const icons = {
+        success: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#22c55e" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>',
+        error: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#ef4444" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>',
+        warning: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#f59e0b" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+    };
+    el.className = `toast toast-${type}`;
+    el.innerHTML = `${icons[type] || icons.success}<span>${message}</span><button class="toast-close" onclick="event.stopPropagation(); this.parentElement.remove()">&times;</button>`;
     setTimeout(() => { el.classList.add('toast-exit'); }, 3000);
     setTimeout(() => { el.remove(); }, 3400);
 }
@@ -1827,19 +1853,19 @@ async function handleEmbedAll(e) {
     e.stopPropagation();
     closeKnowledgeDropdown();
 
-    toast('Gerando embeddings para arquivos pendentes...', 'info');
+    const toastId = toastLoading('Gerando embeddings para arquivos pendentes...');
 
     const res = await api('/api/knowledge/embed-all', { method: 'POST' });
     if (res?.error) {
-        toast(friendlyError(res.error), 'error');
+        toastDone(toastId, friendlyError(res.error), 'error');
     } else {
         const msg = res.processed > 0
             ? `${res.processed} arquivo(s) indexado(s)`
             : 'Nenhum arquivo pendente para indexar';
         if (res.errors > 0) {
-            toast(`${msg} (${res.errors} erro(s))`, 'warning');
+            toastDone(toastId, `${msg} (${res.errors} erro(s))`, 'warning');
         } else {
-            toast(msg, 'success');
+            toastDone(toastId, msg, 'success');
         }
         loadKnowledge();
     }
@@ -1852,11 +1878,13 @@ async function handleClearEmbeddings(e) {
 
     if (!confirm('Limpar todos os embeddings? O conteúdo será mantido mas os arquivos voltarão ao status "pendente".')) return;
 
+    const toastId = toastLoading('Limpando embeddings...');
+
     const res = await api('/api/knowledge/clear-embeddings', { method: 'POST' });
     if (res?.error) {
-        toast(friendlyError(res.error), 'error');
+        toastDone(toastId, friendlyError(res.error), 'error');
     } else {
-        toast(`${res.cleared} embeddings limpos`, 'success');
+        toastDone(toastId, `${res.cleared} embeddings limpos`, 'success');
         loadKnowledge();
     }
 }
@@ -1868,11 +1896,13 @@ async function handleDeleteAll(e) {
 
     if (!confirm('Deletar TODO o knowledge? Essa ação não pode ser desfeita.')) return;
 
+    const toastId = toastLoading('Deletando todo o knowledge...');
+
     const res = await api('/api/knowledge/all', { method: 'DELETE' });
     if (res?.error) {
-        toast(friendlyError(res.error), 'error');
+        toastDone(toastId, friendlyError(res.error), 'error');
     } else {
-        toast(`${res.deleted} arquivo(s) deletado(s)`, 'success');
+        toastDone(toastId, `${res.deleted} arquivo(s) deletado(s)`, 'success');
         currentKnowledgeFile = null;
         document.getElementById('knowledge-editor').value = '';
         document.getElementById('knowledge-editor-header').innerHTML = '<span>Selecione um arquivo</span>';

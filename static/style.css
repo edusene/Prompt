@@ -1946,6 +1946,16 @@ select option {
     line-height: 1;
 }
 .toast-close:hover { opacity: 1; }
+.toast-loading {
+    border-left: 3px solid var(--accent);
+    background: var(--bg-card);
+}
+.toast-loading .toast-spinner {
+    width: 16px;
+    height: 16px;
+    border-width: 2px;
+}
+.toast-warning { border-left: 3px solid #f59e0b; }
 
 /* ── Skeleton Loading ────────────────────────────────────────────────────── */
 .skeleton {
