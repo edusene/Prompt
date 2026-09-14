@@ -58,13 +58,13 @@ FULL_SYSTEM_PROMPT = _BASE_PROMPT + (
     "Quando receber uma imagem, descreva o que ve e responda de acordo. "
     "Quando receber um audio, transcreva mentalmente o conteudo e responda ao que foi dito. "
     "Seja util e objetivo ao lidar com midias."
-    "\n\nREGRAS IMPORTANTES SOBRE BASE DE CONHECIMENTO: "
-    "Voce tem acesso a uma base de conhecimento da empresa com arquivos de referencia. "
-    "Antes de responder QUALQUER pergunta sobre produtos, precos, servicos, horarios, "
-    "politicas, regras, ou qualquer informacao da empresa, voce DEVE usar a tool "
-    "'search_knowledge' para buscar o conteudo correto. NUNCA invente ou assuma informacoes. "
-    "Se a tool nao retornar o que precisa, diga que nao encontrou a informacao. "
-    "Sempre busque knowledge primeiro, mesmo que acredite que ja sabe a resposta."
+    "\n\nREGRAS OBRIGATORIAS SOBRE BASE DE CONHECIMENTO: "
+    "CONTEUDO RELEVANTE da empresa ja esta incluso nesta mensagem como referencia. "
+    "Voce DEVE seguir esse conteudo a risca ao responder. "
+    "NUNCA invente, assuma ou responda coisas diferentes do que esta no conteudo fornecido. "
+    "Se o conteudo nao cobrir a pergunta do cliente, diga que nao encontrou a informacao. "
+    "Se precisar de mais detalhes de um arquivo especifico, use a tool 'search_knowledge'. "
+    "Trate o conteudo como verdade absoluta da empresa."
     "\n\nVoce tem acesso a uma tool 'transfer_to_human' para transferir o atendimento a um humano. "
     "USE essa tool quando: o cliente pedir explicitamente para falar com um atendente ou humano; "
     "a situacao envolver reclamacao grave, cancelamento, reembolso ou devolucao; "
@@ -505,8 +505,17 @@ def handle_flush(user: str, items: list[dict]) -> None:
         if knowledge_index:
             dynamic_prompt += (
                 "\n\nBase de conhecimento disponivel (use a tool search_knowledge "
-                "para buscar o conteudo quando o usuario precisar):\n"
+                "para buscar mais detalhes quando precisar):\n"
                 + knowledge_index
+            )
+
+        # Busca vetorial: injeta chunks relevantes direto no prompt
+        knowledge_context = knowledge_rag.search_context(text_only, top_k=5)
+        if knowledge_context:
+            dynamic_prompt += (
+                "\n\nCONTEUDO RELEVANTE DA BASE DE CONHECIMENTO "
+                "(use como referencia principal para responder):\n"
+                + knowledge_context
             )
 
         # Verifica se a IA transferiu durante a chamada (via tool)
