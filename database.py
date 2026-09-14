@@ -49,7 +49,7 @@ def init_db() -> None:
         print("[db] tabela knowledge criada")
     elif "embedding" not in kcols and db.DB_DRIVER == "postgresql":
         try:
-            db.execute("ALTER TABLE knowledge ADD COLUMN embedding vector(768)")
+            db.execute("ALTER TABLE knowledge ADD COLUMN embedding vector(1536)")
             print("[db] coluna embedding adicionada")
         except Exception:
             pass

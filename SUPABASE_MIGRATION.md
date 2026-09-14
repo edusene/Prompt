@@ -198,7 +198,7 @@ CREATE TABLE IF NOT EXISTS knowledge (
     content TEXT DEFAULT '',
     created_at TEXT DEFAULT NOW(),
     updated_at TEXT DEFAULT NOW(),
-    embedding vector(768)
+    embedding vector(1536)
 );
 
 -- ============================================================
