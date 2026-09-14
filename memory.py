@@ -6,6 +6,7 @@ Suporta parts multimodais (text + inline_data para imagens).
 
 import threading
 import os
+import database
 
 MAX_HISTORY = int(os.getenv("MAX_HISTORY", "20"))
 
@@ -35,9 +36,23 @@ def _append_entry(user: str, entry: dict) -> None:
 
 
 def get(user: str) -> list[dict]:
-    """Retorna o histórico pronto para enviar ao LLM."""
+    """Retorna o histórico pronto para enviar ao LLM.
+    Se o histórico em memória estiver vazio, carrega do banco de dados.
+    """
     with _lock:
+        if user not in _store or not _store[user]:
+            _load_from_database(user)
         return list(_store.get(user, []))
+
+
+def _load_from_database(user: str) -> None:
+    """Carrega últimas mensagens do banco para a memória (após restart)."""
+    try:
+        messages = database.get_recent_messages(user, limit=MAX_HISTORY)
+        if messages:
+            _store[user] = messages
+    except Exception:
+        pass
 
 
 def reset(user: str) -> None:

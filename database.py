@@ -978,3 +978,21 @@ def insert_knowledge_chunks_batch(records: list[dict]) -> None:
                 "VALUES (?,?,?, ?,?)",
                 (rec["filename"], rec["chunk_index"], rec["content"], now, now),
             )
+
+
+# ── Memory Recovery (load history from DB into memory on restart) ────────────
+
+
+def get_recent_messages(phone: str, limit: int = 20) -> list[dict]:
+    """Retorna últimas mensagens no formato para memory.py."""
+    rows = db.fetch_all(
+        "SELECT direction, body FROM messages WHERE phone=? ORDER BY created_at DESC LIMIT ?",
+        (phone, limit),
+    )
+    if not rows:
+        return []
+    messages = []
+    for r in reversed(rows):
+        role = "user" if r["direction"] == "in" else "assistant"
+        messages.append({"role": role, "parts": [{"text": r["body"]}]})
+    return messages

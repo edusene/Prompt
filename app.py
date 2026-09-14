@@ -533,6 +533,15 @@ def handle_flush(user: str, items: list[dict]) -> None:
                 + knowledge_index
             )
 
+        # Injeta regra de saudação contextual baseada no histórico
+        history = memory.get(user)
+        if len(history) > 2:
+            dynamic_prompt += (
+                "\n\n⚠️ CONTEXTO: Esta conversa ja tem historico. "
+                "Se ja houve saudacao anterior, NAO repita a saudacao. "
+                "Responda de forma contextual a mensagem do cliente."
+            )
+
         # Injeta nome do cliente no prompt
         if contact and contact.get("name"):
             dynamic_prompt += (
