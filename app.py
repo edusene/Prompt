@@ -533,6 +533,20 @@ def handle_flush(user: str, items: list[dict]) -> None:
                 + knowledge_index
             )
 
+        # Injeta regras de fluxo de pedido (reforço das regras do SYSTEM_PROMPT)
+        dynamic_prompt += (
+            "\n\n⚠️ FLUXO OBRIGATORIO PARA PEDIDOS:\n"
+            "1. Ao receber um pedido, PRIMEIRO chame search_knowledge para buscar "
+            "o produto e preco no arquivo 02_cardapio_produtos_precos.md.\n"
+            "2. Apos confirmar itens e precos, pergunte 'Sera para entrega ou retirada na fabrica? 😊'\n"
+            "3. Se o cliente escolher ENTREGA, chame search_knowledge(query='taxa entrega [bairro]') "
+            "para consultar 04_deliveryfee_bairros.md e informe a taxa.\n"
+            "4. Se o cliente escolher RETIRADA, nao cobre frete.\n"
+            "5. So entao apresente o total com frete incluso (se entrega).\n"
+            "6. NUNCA finalize um pedido sem ter perguntado entrega ou retirada.\n"
+            "7. NUNCA informe frete ZERO sem consultar o knowledge."
+        )
+
         # Injeta regra de saudação contextual baseada no histórico
         history = memory.get(user)
         if len(history) > 2:
