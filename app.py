@@ -392,13 +392,13 @@ def _build_user_parts(items: list[dict]) -> list[dict]:
 
 # ── Transfer ──────────────────────────────────────────────────────────────────
 
-def perform_transfer(phone: str, reason: str = "") -> bool:
+def perform_transfer(phone: str, reason: str = "", send_message: bool = True) -> bool:
     """Transfere a conversa de um usuário para atendimento humano.
 
     - Muda auto_mode do contato para 0
     - Registra transferred_at na conversa
     - Salva mensagem interna de sistema no chat
-    - Envia mensagem configurável ao cliente
+    - Envia mensagem configurável ao cliente (se send_message=True)
     - Emite evento SSE para atualizar o painel em tempo real
 
     Retorna True se a transferência foi feita, False se já estava em modo humano.
@@ -442,9 +442,23 @@ def perform_transfer(phone: str, reason: str = "") -> bool:
     # Busca mensagem de transferência configurável
     transfer_msg = database.get_setting("transfer_message", "") or _DEFAULT_TRANSFER_MESSAGE
 
-    # Envia mensagem ao cliente
-    res = send_text(phone, transfer_msg)
-    if res.get("ok"):
+    # Envia mensagem ao cliente (somente se send_message=True)
+    if send_message:
+        res = send_text(phone, transfer_msg)
+        if res.get("ok"):
+            database.save_message(
+                conversation_id=conv["id"],
+                phone=phone,
+                direction="out",
+                body=transfer_msg,
+                sender="agent",
+                msg_type="text",
+            )
+            database.update_conversation(conv["id"], last_message_at=time.strftime("%Y-%m-%dT%H:%M:%S"))
+        else:
+            print(f"[transfer] WARN: falha ao enviar msg de transferência p/ {phone}: {res.get('error')}")
+    else:
+        # Salva a mensagem de transferência no banco para envio posterior
         database.save_message(
             conversation_id=conv["id"],
             phone=phone,
@@ -453,9 +467,6 @@ def perform_transfer(phone: str, reason: str = "") -> bool:
             sender="agent",
             msg_type="text",
         )
-        database.update_conversation(conv["id"], last_message_at=time.strftime("%Y-%m-%dT%H:%M:%S"))
-    else:
-        print(f"[transfer] WARN: falha ao enviar msg de transferência p/ {phone}: {res.get('error')}")
 
     # Emite evento SSE para o painel atualizar em tempo real
     events.emit("conversation_updated", {
@@ -523,7 +534,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
 
         def _transfer_handler(reason: str = "") -> str:
             nonlocal _transfer_done
-            performed = perform_transfer(user, reason)
+            performed = perform_transfer(user, reason, send_message=False)
             _transfer_done = True
             if performed:
                 return "Transferência realizada com sucesso. O atendente humano continuará o atendimento."
@@ -543,9 +554,26 @@ def handle_flush(user: str, items: list[dict]) -> None:
             print(f"[flush] ERRO llm p/ {user}: {e}")
             return
 
-        # Se a IA transferiu, não envia a resposta final do LLM (a msg de transferência já foi enviada)
+        # Se a IA transferiu, envia a resposta do LLM (knowledge/explicação) e depois a msg de transferência
         if _transfer_done:
-            print(f"[flush] user={user} transferido pela IA, suprimindo resposta do LLM")
+            print(f"[flush] user={user} transferido pela IA, enviando resposta do LLM antes da transferência")
+            # Envia a resposta do LLM (pode conter info do knowledge)
+            if reply:
+                memory.append(user, "assistant", reply)
+                chunks = split_reply(reply)
+                for chunk in chunks:
+                    time.sleep(1 + len(chunk) / 200)
+                    send_text(user, chunk)
+                    send_msg_out_to_panel(user, chunk)
+            # Agora envia a mensagem de transferência
+            transfer_msg = database.get_setting("transfer_message", "") or _DEFAULT_TRANSFER_MESSAGE
+            time.sleep(1)
+            send_text(user, transfer_msg)
+            try:
+                conv = database.get_or_create_conversation(user)
+                database.update_conversation(conv["id"], last_message_at=time.strftime("%Y-%m-%dT%H:%M:%S"))
+            except Exception:
+                pass
             return
 
         memory.append(user, "assistant", reply)
