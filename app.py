@@ -563,7 +563,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
                 dynamic_prompt += (
                     f"O nome do cliente ja e conhecido: {contact['name']}.\n"
                     "NAO pergunte 'Qual e o seu nome?'. Ja tem o nome.\n"
-                    f"Responda: 'Oi, {contact['name']}! 😊 Em que posso te ajudar?'\n"
+                    f"Responda exatamente: 'Prazer, {contact['name']}! Dá uma olhada no nosso cardápio completo: https://balbssalgados.ocardapio.net/ — quais delícias vamos pedir hoje?'\n"
                 )
             else:
                 dynamic_prompt += (
