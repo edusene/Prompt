@@ -529,6 +529,13 @@ def handle_flush(user: str, items: list[dict]) -> None:
                 + knowledge_context
             )
 
+        # Injeta nome do cliente no prompt
+        if contact and contact.get("name"):
+            dynamic_prompt += (
+                f"\n\nO nome do cliente e: {contact['name']}. "
+                f"Use o nome dele ao conversar, mas de forma natural."
+            )
+
         # Verifica se a IA transferiu durante a chamada (via tool)
         _transfer_done = False
 
