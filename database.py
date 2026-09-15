@@ -978,9 +978,9 @@ def search_knowledge(query_embedding: list[float], top_k: int = 5, query_text: s
                 )
                 if rows:
                     return rows
-    # Último recurso: retorna vazio em vez de chunks aleatórios
-    return []
+        return []
 
+    # PostgreSQL: busca vetorial com pgvector
     emb_str = "[" + ",".join(str(x) for x in query_embedding) + "]"
     try:
         rows = db.fetch_all(
@@ -1012,7 +1012,6 @@ def search_knowledge(query_embedding: list[float], top_k: int = 5, query_text: s
             except Exception:
                 pass
 
-    # Último recurso: retorna vazio em vez de chunks aleatórios
     return []
 
 

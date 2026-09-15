@@ -771,10 +771,15 @@ def handle_flush(user: str, items: list[dict]) -> None:
             "5. So entao apresente o total com frete incluso (se entrega).\n"
             "6. Pergunte a forma de pagamento.\n"
             "7. Chame calculate_order para validar o pedido (itens, quantidades, frete).\n"
-            "8. Apos validacao, pergunte ao cliente se confirma o pedido.\n"
-            "9. Somente apos CONFIRMACAO EXPLICITA do cliente, chame send_order_to_cardapio.\n"
+            "8. Apos validacao, apresente o RESUMO COMPLETO do pedido (itens, quantidade, "
+            "endereco/bairro se entrega, forma de pagamento, total) e peça confirmação "
+            "em UMA UNICA mensagem. Exemplo: 'Pedido: 3x Panqueca, retirada, R$ 45,00. "
+            "Confirma?'. NÃO separe em duas mensagens.\n"
+            "9. Quando o cliente responder 'sim', 'ok', 'pode ser', 'manda', 'confirmo' "
+            "ou qualquer afirmação, CHAME send_order_to_cardapio IMEDIATAMENTE. "
+            "NÃO peça confirmação novamente. NÃO faça mais de uma pergunta de confirmação.\n"
             "10. Informe o cliente que o pedido foi enviado com sucesso e o numero do pedido.\n"
-            "11. NUNCA envie o pedido sem confirmacao explicita do cliente.\n"
+            "11. NUNCA envie o pedido sem confirmação explicita do cliente.\n"
             "12. NUNCA informe frete ZERO sem consultar o knowledge."
         )
 
