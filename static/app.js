@@ -2116,6 +2116,15 @@ function toggleWAConfig() {
     arrow.style.transform = open ? 'rotate(180deg)' : '';
 }
 
+function toggleWATransfer() {
+    const body = document.getElementById('wa-transfer-body');
+    const arrow = document.getElementById('wa-transfer-arrow');
+    if (!body || !arrow) return;
+    const open = body.style.display === 'none';
+    body.style.display = open ? 'block' : 'none';
+    arrow.style.transform = open ? 'rotate(180deg)' : '';
+}
+
 /* ── WhatsApp Meta Templates ──────────────────────────────────────────────── */
 async function loadWATemplates() {
     const list = document.getElementById('wa-templates-list');

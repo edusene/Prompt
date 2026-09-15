@@ -366,13 +366,20 @@
 
                     <!-- Linha 2: Configuracao (largura total) -->
                     <div class="wa-card wa-config-card">
-                        <h3>Mensagem de Transferencia</h3>
-                        <p class="muted" style="font-size:12px;margin:0 0 12px 0">Mensagem enviada ao cliente quando a conversa e transferida para um atendente humano.</p>
-                        <div style="display:flex;gap:8px;align-items:flex-start">
-                            <textarea id="wa-transfer-msg" class="wa-config-input" rows="3" style="flex:1;resize:vertical" placeholder="Mensagem de transferencia..."></textarea>
+                        <div class="wa-config-header" onclick="toggleWATransfer()" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center">
+                            <div>
+                                <h3 style="margin:0">Mensagem de Transferencia</h3>
+                                <p class="muted" style="font-size:12px;margin:4px 0 0 0">Mensagem enviada ao cliente quando a conversa e transferida para um atendente humano.</p>
+                            </div>
+                            <svg id="wa-transfer-arrow" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" style="transition:transform .2s;flex-shrink:0"><polyline points="6 9 12 15 18 9"/></svg>
                         </div>
-                        <div class="wa-config-actions" style="margin-top:8px">
-                            <button type="button" class="btn-primary" onclick="saveTransferMessage()">Salvar Mensagem</button>
+                        <div id="wa-transfer-body" style="display:none;overflow:hidden">
+                            <div style="display:flex;gap:8px;align-items:flex-start;margin-top:12px">
+                                <textarea id="wa-transfer-msg" class="wa-config-input" rows="3" style="flex:1;resize:vertical" placeholder="Mensagem de transferencia..."></textarea>
+                            </div>
+                            <div class="wa-config-actions" style="margin-top:8px">
+                                <button type="button" class="btn-primary" onclick="saveTransferMessage()">Salvar Mensagem</button>
+                            </div>
                         </div>
                     </div>
 
