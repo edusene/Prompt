@@ -359,20 +359,34 @@ def _send_order_handler(
     except Exception:
         pass
 
-    result = cardapio.criar_pedido(
-        customer_name=customer_name,
-        customer_phone=customer_phone,
-        items=items,
-        total=total,
-        customer_confirmed=True,
-        delivery_address=delivery_address,
-        payment_method=payment_method,
-        subtotal=subtotal,
-        delivery_fee=delivery_fee,
-        return_fee=return_fee,
-        notes=notes,
-        whatsapp_message_id=whatsapp_message_id,
-    )
+    if test_mode:
+        # Modo teste: simula resposta sem enviar para o cardápio real
+        import random as _rnd
+        _test_id = f"TEST-{__import__('uuid').uuid4().hex[:8]}"
+        _test_display = f"T{_rnd.randint(100, 999)}"
+        result = {
+            "success": True,
+            "order_id": _test_id,
+            "display_id": _test_display,
+            "status": "pendente",
+        }
+        print(f"[cardápio] MODO TESTE - pedido simulado: {_test_display} (nenhum envio à API real)")
+    else:
+        # Modo produção: envia para o cardápio real
+        result = cardapio.criar_pedido(
+            customer_name=customer_name,
+            customer_phone=customer_phone,
+            items=items,
+            total=total,
+            customer_confirmed=True,
+            delivery_address=delivery_address,
+            payment_method=payment_method,
+            subtotal=subtotal,
+            delivery_fee=delivery_fee,
+            return_fee=return_fee,
+            notes=notes,
+            whatsapp_message_id=whatsapp_message_id,
+        )
 
     # Salva log no banco
     try:
