@@ -2457,8 +2457,9 @@ function loadCrmView(view) {
 async function loadCrmDashboard() {
     const grid = document.getElementById('crm-stats-grid');
     grid.innerHTML = skeletonCards(6);
-    const stats = await api('/api/crm/dashboard');
-    if (!stats) { grid.innerHTML = '<p class="muted">Erro ao carregar</p>'; return; }
+    let stats;
+    try { stats = await api('/api/crm/dashboard'); } catch(e) { stats = null; }
+    if (!stats || stats.error) { grid.innerHTML = '<p class="muted">Erro ao carregar</p>'; return; }
     const fu = stats.follow_ups || {};
     grid.innerHTML = `
         <div class="stat-card">

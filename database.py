@@ -1264,8 +1264,10 @@ def cancel_follow_ups_for_contact(contact_id: int) -> int:
 def get_follow_ups_stats() -> dict:
     pending = db.fetch_one("SELECT COUNT(*) as cnt FROM crm_follow_ups WHERE status='pendente'")["cnt"]
     sent = db.fetch_one("SELECT COUNT(*) as cnt FROM crm_follow_ups WHERE status='enviado'")["cnt"]
+    today = datetime.utcnow().strftime("%Y-%m-%d")
     sent_today = db.fetch_one(
-        "SELECT COUNT(*) as cnt FROM crm_follow_ups WHERE status='enviado' AND sent_at >= date('now')"
+        "SELECT COUNT(*) as cnt FROM crm_follow_ups WHERE status='enviado' AND sent_at >= ?",
+        (today,),
     )["cnt"]
     cancelled = db.fetch_one("SELECT COUNT(*) as cnt FROM crm_follow_ups WHERE status='cancelado'")["cnt"]
     errors = db.fetch_one("SELECT COUNT(*) as cnt FROM crm_follow_ups WHERE status='erro'")["cnt"]
@@ -1322,9 +1324,11 @@ def list_contacts_crm(status: str = "", tag_id: int = 0, days_without: int = 0,
         params.append(tag_id)
 
     if days_without > 0:
+        cutoff = (datetime.utcnow() - timedelta(days=days_without)).strftime("%Y-%m-%dT%H:%M:%S")
         where.append(
-            f"ct.last_interaction_at IS NOT NULL AND ct.last_interaction_at < datetime('now', '-{days_without} days')"
+            "ct.last_interaction_at IS NOT NULL AND ct.last_interaction_at < ?"
         )
+        params.append(cutoff)
 
     if has_follow_up == "sim":
         where.append("ct.id IN (SELECT contact_id FROM crm_follow_ups WHERE status='pendente')")
