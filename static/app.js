@@ -2562,7 +2562,7 @@ async function openCrmContactProfile(contactId) {
     document.getElementById('crm-profile-name').textContent = data.name || data.phone || 'Contato';
 
     const tags = (data.tags || []).map(t =>
-        `<span class="conv-tag-chip" style="background:${t.color}">${esc(t.name)}</span>`
+        `<span class="conv-tag-chip" style="background:${t.color}">${esc(t.name)} <button class="tag-chip-remove" onclick="event.stopPropagation();crmRemoveTag(${data.id},${t.id})" title="Remover">&times;</button></span>`
     ).join(' ');
     const lastInt = data.last_interaction_at
         ? new Date(data.last_interaction_at + 'Z').toLocaleString('pt-BR')
@@ -2571,6 +2571,9 @@ async function openCrmContactProfile(contactId) {
         ? new Date(data.created_at + 'Z').toLocaleString('pt-BR')
         : '-';
     const daysW = data.days_without_interaction != null ? data.days_without_interaction : '-';
+
+    const allTags = await api('/api/tags');
+    const tagOptions = (allTags || []).filter(t => !(data.tags || []).some(tg => tg.id === t.id));
 
     document.getElementById('crm-profile-info').innerHTML = `
         <div class="crm-profile-card">
@@ -2591,6 +2594,13 @@ async function openCrmContactProfile(contactId) {
             <div class="crm-profile-field">
                 <strong>Tags:</strong>
                 <div class="tag-chips">${tags || '<span class="muted">nenhuma</span>'}</div>
+                <div style="margin-top:4px;display:flex;gap:4px">
+                    <select class="select-sm" id="crm-tag-select-${data.id}">
+                        <option value="">Adicionar tag...</option>
+                        ${tagOptions.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('')}
+                    </select>
+                    <button class="btn-sm btn-primary" onclick="crmAddTag(${data.id})">+</button>
+                </div>
             </div>
             <div class="crm-profile-field">
                 <strong>Observacoes:</strong>
@@ -2643,12 +2653,12 @@ function closeCrmContactProfile() {
     const profile = document.getElementById('crm-contact-profile');
     if (profile) profile.style.display = 'none';
     if (list) list.style.display = 'block';
+    loadCrmContacts();
 }
 
 async function updateCrmContactStatus(contactId, status) {
     await api(`/api/crm/contacts/${contactId}/status`, { method: 'PUT', body: JSON.stringify({ status }) });
     toast('Status atualizado', 'success');
-    loadCrmContacts();
 }
 
 async function saveCrmNotes(contactId) {
@@ -2657,6 +2667,18 @@ async function saveCrmNotes(contactId) {
     const notes = textarea.value;
     await api(`/api/crm/contacts/${contactId}/notes`, { method: 'PUT', body: JSON.stringify({ notes }) });
     toast('Observacoes salvas', 'success');
+}
+
+async function crmAddTag(contactId) {
+    const sel = document.getElementById(`crm-tag-select-${contactId}`);
+    if (!sel || !sel.value) return;
+    await api(`/api/contacts/${contactId}/tags`, { method: 'POST', body: JSON.stringify({ tag_id: parseInt(sel.value) }) });
+    openCrmContactProfile(contactId);
+}
+
+async function crmRemoveTag(contactId, tagId) {
+    await api(`/api/contacts/${contactId}/tags/${tagId}`, { method: 'DELETE' });
+    openCrmContactProfile(contactId);
 }
 
 /* ── CRM Automations ───────────────────────────────────────────────────────── */

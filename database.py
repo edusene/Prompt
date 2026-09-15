@@ -425,7 +425,7 @@ def list_contacts(limit: int = 100, offset: int = 0) -> list[dict]:
 
 
 def update_contact(contact_id: int, **fields: Any) -> None:
-    allowed = ("name", "email", "company", "notes", "avatar_url", "avatar_color", "assigned_to", "auto_mode")
+    allowed = ("name", "email", "company", "notes", "avatar_url", "avatar_color", "assigned_to", "auto_mode", "crm_status", "last_interaction_at")
     sets = []
     vals = []
     for k, v in fields.items():
