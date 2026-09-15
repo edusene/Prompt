@@ -582,10 +582,16 @@ def reset_unread_bulk(conv_ids: list[int]) -> None:
 
 def mark_unread(conv_id: int) -> None:
     """Marca como não lida (garante unread_count >= 1)."""
-    db.execute(
-        "UPDATE conversations SET unread_count=MAX(unread_count,1), updated_at=? WHERE id=?",
-        (datetime.utcnow().isoformat(), conv_id),
-    )
+    if db.DB_DRIVER == "postgresql":
+        db.execute(
+            "UPDATE conversations SET unread_count=GREATEST(unread_count,1), updated_at=? WHERE id=?",
+            (datetime.utcnow().isoformat(), conv_id),
+        )
+    else:
+        db.execute(
+            "UPDATE conversations SET unread_count=MAX(unread_count,1), updated_at=? WHERE id=?",
+            (datetime.utcnow().isoformat(), conv_id),
+        )
 
 
 def mark_unread_bulk(conv_ids: list[int]) -> None:
@@ -594,10 +600,16 @@ def mark_unread_bulk(conv_ids: list[int]) -> None:
         return
     now = datetime.utcnow().isoformat()
     placeholders = ",".join("?" * len(conv_ids))
-    db.execute(
-        f"UPDATE conversations SET unread_count=MAX(unread_count,1), updated_at=? WHERE id IN ({placeholders})",
-        (now, *conv_ids),
-    )
+    if db.DB_DRIVER == "postgresql":
+        db.execute(
+            f"UPDATE conversations SET unread_count=GREATEST(unread_count,1), updated_at=? WHERE id IN ({placeholders})",
+            (now, *conv_ids),
+        )
+    else:
+        db.execute(
+            f"UPDATE conversations SET unread_count=MAX(unread_count,1), updated_at=? WHERE id IN ({placeholders})",
+            (now, *conv_ids),
+        )
 
 
 def count_unread_human_conversations() -> int:
