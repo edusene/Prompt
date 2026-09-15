@@ -1449,10 +1449,11 @@ def create_follow_ups_for_contact(contact_id: int) -> int:
     for auto in automations:
         total_seconds = auto["days"] * 86400 + auto["hours"] * 3600
         if total_seconds <= 0:
-            continue
-        scheduled_for = li_dt + timedelta(seconds=total_seconds)
-        if scheduled_for < datetime.utcnow():
             scheduled_for = datetime.utcnow() + timedelta(minutes=1)
+        else:
+            scheduled_for = li_dt + timedelta(seconds=total_seconds)
+            if scheduled_for < datetime.utcnow():
+                scheduled_for = datetime.utcnow() + timedelta(minutes=1)
         fu = create_follow_up(auto["id"], contact_id, scheduled_for.isoformat())
         if fu:
             created += 1
