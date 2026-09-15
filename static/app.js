@@ -2246,6 +2246,12 @@ async function deleteWATemplate(templateName) {
 }
 
 /* ── Modal ────────────────────────────────────────────────────────────────── */
+function showModal(title, bodyHtml) {
+    document.getElementById('modal-title').textContent = title;
+    document.getElementById('modal-body').innerHTML = bodyHtml;
+    document.getElementById('modal-overlay').style.display = 'flex';
+}
+
 function closeModal() {
     const overlay = document.getElementById('modal-overlay');
     if (!overlay) return;
