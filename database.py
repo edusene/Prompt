@@ -1654,7 +1654,7 @@ def cardapio_orders_stats() -> dict:
         "SELECT COUNT(*) as cnt FROM cardapio_orders WHERE is_test = 1"
     )["cnt"]
     total_value_row = db.fetch_one(
-        "SELECT COALESCE(SUM(total), 0) as val FROM cardapio_orders WHERE is_test = 0 AND status != 'erro'"
+        "SELECT COALESCE(SUM(total), 0) as val FROM cardapio_orders WHERE status != 'erro'"
     )
     total_value = float(total_value_row["val"]) if total_value_row else 0
     return {
