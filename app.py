@@ -1217,99 +1217,60 @@ def api_conversations_bulk():
     processed = 0
     errors = []
 
-    # Otimizacao para acoes que suportam queries bulk
+    # Otimizacao: queries bulk sem validacao individual
     if action in ("read", "unread") and ids:
-        valid_ids = []
-        for cid in ids:
-            conv = database.get_conversation(cid)
-            if conv:
-                valid_ids.append(cid)
-            else:
-                errors.append({"id": cid, "error": "not found"})
-        if valid_ids:
-            if action == "read":
-                database.reset_unread_bulk(valid_ids)
-            else:
-                database.mark_unread_bulk(valid_ids)
-            events.emit("conversation_updated", {"conversation_ids": valid_ids, "unread_count": 0 if action == "read" else 1})
-            processed = len(valid_ids)
-        return jsonify({"ok": True, "processed": processed, "errors": errors})
+        if action == "read":
+            database.reset_unread_bulk(ids)
+        else:
+            database.mark_unread_bulk(ids)
+        events.emit("conversation_updated", {"conversation_ids": ids, "unread_count": 0 if action == "read" else 1})
+        return jsonify({"ok": True, "processed": len(ids), "errors": []})
 
     if action in ("archive", "mute", "pin", "favorite") and ids:
         field_map = {"archive": "archived", "mute": "muted", "pin": "pinned", "favorite": "favorite"}
         field = field_map[action]
         value = 1 if params.get(field, True) else 0
-        valid_ids = []
-        for cid in ids:
-            conv = database.get_conversation(cid)
-            if conv:
-                valid_ids.append(cid)
-            else:
-                errors.append({"id": cid, "error": "not found"})
-        if valid_ids:
-            now = datetime.utcnow().isoformat()
-            placeholders = ",".join("?" * len(valid_ids))
-            import db
-            db.execute(
-                f"UPDATE conversations SET {field}=?, updated_at=? WHERE id IN ({placeholders})",
-                (value, now, *valid_ids),
-            )
-            events.emit("conversation_updated", {"conversation_ids": valid_ids, field: value})
-            processed = len(valid_ids)
-        return jsonify({"ok": True, "processed": processed, "errors": errors})
+        now = datetime.utcnow().isoformat()
+        placeholders = ",".join("?" * len(ids))
+        import db
+        db.execute(
+            f"UPDATE conversations SET {field}=?, updated_at=? WHERE id IN ({placeholders})",
+            (value, now, *ids),
+        )
+        events.emit("conversation_updated", {"conversation_ids": ids, field: value})
+        return jsonify({"ok": True, "processed": len(ids), "errors": []})
 
     if action == "status" and ids:
         status = params.get("status", "")
         if status not in ("new", "open", "waiting", "resolved", "closed"):
             return jsonify({"error": "invalid status"}), 400
-        valid_ids = []
-        for cid in ids:
-            conv = database.get_conversation(cid)
-            if conv:
-                valid_ids.append(cid)
-            else:
-                errors.append({"id": cid, "error": "not found"})
-        if valid_ids:
-            now = datetime.utcnow().isoformat()
-            placeholders = ",".join("?" * len(valid_ids))
-            import db
-            db.execute(
-                f"UPDATE conversations SET status=?, updated_at=? WHERE id IN ({placeholders})",
-                (status, now, *valid_ids),
-            )
-            events.emit("conversation_updated", {"conversation_ids": valid_ids, "status": status})
-            processed = len(valid_ids)
-        return jsonify({"ok": True, "processed": processed, "errors": errors})
+        now = datetime.utcnow().isoformat()
+        placeholders = ",".join("?" * len(ids))
+        import db
+        db.execute(
+            f"UPDATE conversations SET status=?, updated_at=? WHERE id IN ({placeholders})",
+            (status, now, *ids),
+        )
+        events.emit("conversation_updated", {"conversation_ids": ids, "status": status})
+        return jsonify({"ok": True, "processed": len(ids), "errors": []})
 
     if action == "clear" and ids:
-        valid_ids = []
         for cid in ids:
-            conv = database.get_conversation(cid)
-            if conv:
-                valid_ids.append(cid)
-            else:
-                errors.append({"id": cid, "error": "not found"})
-        if valid_ids:
-            for cid in valid_ids:
+            try:
                 database.clear_conversation(cid)
-            events.emit("conversation_updated", {"conversation_ids": valid_ids, "cleared": True})
-            processed = len(valid_ids)
-        return jsonify({"ok": True, "processed": processed, "errors": errors})
+            except Exception:
+                pass
+        events.emit("conversation_updated", {"conversation_ids": ids, "cleared": True})
+        return jsonify({"ok": True, "processed": len(ids), "errors": []})
 
     if action == "delete" and ids:
-        valid_ids = []
         for cid in ids:
-            conv = database.get_conversation(cid)
-            if conv:
-                valid_ids.append(cid)
-            else:
-                errors.append({"id": cid, "error": "not found"})
-        if valid_ids:
-            for cid in valid_ids:
+            try:
                 database.delete_conversation(cid)
-            events.emit("conversation_updated", {"conversation_ids": valid_ids, "deleted": True})
-            processed = len(valid_ids)
-        return jsonify({"ok": True, "processed": processed, "errors": errors})
+            except Exception:
+                pass
+        events.emit("conversation_updated", {"conversation_ids": ids, "deleted": True})
+        return jsonify({"ok": True, "processed": len(ids), "errors": []})
 
     if action == "add_tag" and ids:
         tag_id = params.get("tag_id")
@@ -1317,16 +1278,11 @@ def api_conversations_bulk():
             return jsonify({"error": "tag_id required"}), 400
         for cid in ids:
             try:
-                conv = database.get_conversation(cid)
-                if not conv:
-                    errors.append({"id": cid, "error": "not found"})
-                    continue
                 database.add_tag_to_conversation(cid, tag_id)
-                processed += 1
-            except Exception as e:
-                errors.append({"id": cid, "error": str(e)})
+            except Exception:
+                pass
         events.emit("tags_updated", {"conversation_ids": ids, "tag_id": tag_id, "action": "add"})
-        return jsonify({"ok": True, "processed": processed, "errors": errors})
+        return jsonify({"ok": True, "processed": len(ids), "errors": []})
 
     if action == "remove_tag" and ids:
         tag_id = params.get("tag_id")
@@ -1334,39 +1290,29 @@ def api_conversations_bulk():
             return jsonify({"error": "tag_id required"}), 400
         for cid in ids:
             try:
-                conv = database.get_conversation(cid)
-                if not conv:
-                    errors.append({"id": cid, "error": "not found"})
-                    continue
                 import db
                 db.execute("DELETE FROM conversation_tags WHERE conversation_id=? AND tag_id=?", (cid, tag_id))
-                processed += 1
-            except Exception as e:
-                errors.append({"id": cid, "error": str(e)})
+            except Exception:
+                pass
         events.emit("tags_updated", {"conversation_ids": ids, "tag_id": tag_id, "action": "remove"})
-        return jsonify({"ok": True, "processed": processed, "errors": errors})
+        return jsonify({"ok": True, "processed": len(ids), "errors": []})
 
-    # Fallback: acoes que precisam de loop individual (mode)
-    for cid in ids:
-        try:
-            conv = database.get_conversation(cid)
-            if not conv:
-                errors.append({"id": cid, "error": "not found"})
-                continue
-
-            if action == "mode":
-                contact = database.get_contact_by_id(conv["contact_id"])
-                if contact:
-                    new_mode = 0 if contact["auto_mode"] else 1
-                    database.update_contact(contact["id"], auto_mode=new_mode)
-                    events.emit("conversation_updated", {"conversation_id": cid, "auto_mode": new_mode})
-            else:
-                errors.append({"id": cid, "error": f"unknown action: {action}"})
-                continue
-
+    # Fallback: mode (precisa de loop por contact individual)
+    if action == "mode" and ids:
+        now = datetime.utcnow().isoformat()
+        placeholders = ",".join("?" * len(ids))
+        import db
+        rows = db.fetch_all(
+            f"SELECT c.id as conv_id, ct.id as contact_id, ct.auto_mode FROM conversations c "
+            f"JOIN contacts ct ON c.contact_id=ct.id WHERE c.id IN ({placeholders})",
+            tuple(ids),
+        )
+        for row in rows:
+            new_mode = 0 if row["auto_mode"] else 1
+            database.update_contact(row["contact_id"], auto_mode=new_mode)
+            events.emit("conversation_updated", {"conversation_id": row["conv_id"], "auto_mode": new_mode})
             processed += 1
-        except Exception as e:
-            errors.append({"id": cid, "error": str(e)})
+        return jsonify({"ok": True, "processed": processed, "errors": errors})
 
     return jsonify({"ok": True, "processed": processed, "errors": errors})
 

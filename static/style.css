@@ -1999,6 +1999,8 @@ select option {
     width: 16px;
     height: 16px;
     border-width: 2px;
+    border-color: rgba(0,0,0,0.15);
+    border-top-color: var(--accent);
 }
 .toast-warning { border-left: 3px solid #f59e0b; }
 
