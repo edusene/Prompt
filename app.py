@@ -370,7 +370,7 @@ def _send_order_handler(
             "success": True,
             "order_id": _test_id,
             "display_id": _test_display,
-            "status": "pendente",
+            "status": "enviado",
         }
         print(f"[cardápio] MODO TESTE - pedido simulado: {_test_display} (nenhum envio à API real)")
     else:
@@ -417,7 +417,7 @@ def _send_order_handler(
         is_test=is_test,
         order_id_externo=result.get("order_id", ""),
         display_id=result.get("display_id", ""),
-        status=result.get("status", "pendente") if result.get("success") else "erro",
+        status=result.get("status", "enviado") if result.get("success") else "erro",
         api_response=result,
         error_message=result.get("error", "") if not result.get("success") else "",
     )
@@ -435,7 +435,7 @@ def _send_order_handler(
 
     if result.get("success"):
         display_id = result.get("display_id", "")
-        return f"Pedido enviado com sucesso para o cardapio digital. Numero do pedido: {display_id}. Status: {result.get('status', 'pendente')}."
+        return f"Pedido enviado com sucesso para o cardapio digital. Numero do pedido: {display_id}. Status: {result.get('status', 'enviado')}."
     else:
         return f"Erro ao enviar pedido para o cardapio: {result.get('error', 'desconhecido')}"
 

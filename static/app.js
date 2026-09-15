@@ -3083,7 +3083,7 @@ async function loadCardapioOrders() {
         const dt = o.created_at ? new Date(o.created_at + 'Z').toLocaleString('pt-BR') : '-';
         const items = Array.isArray(o.items) ? o.items : [];
         const itemsSummary = items.map(i => `${i.quantity}x ${i.name}`).join(', ');
-        const statusClass = o.status === 'erro' ? 'cardapio-status-erro' : o.status === 'pendente' ? 'cardapio-status-pendente' : 'cardapio-status-ok';
+        const statusClass = o.status === 'erro' ? 'cardapio-status-erro' : o.status === 'enviado' ? 'cardapio-status-ok' : 'cardapio-status-pendente';
         const modeClass = o.is_test ? 'cardapio-mode-test' : 'cardapio-mode-prod';
         return `<tr>
             <td>${o.id}</td>
@@ -3117,7 +3117,7 @@ async function viewCardapioOrder(id) {
 
     const apiResp = order.api_response || {};
     const dt = order.created_at ? new Date(order.created_at + 'Z').toLocaleString('pt-BR') : '-';
-    const statusClass = order.status === 'erro' ? 'cardapio-status-erro' : order.status === 'pendente' ? 'cardapio-status-pendente' : 'cardapio-status-ok';
+    const statusClass = order.status === 'erro' ? 'cardapio-status-erro' : order.status === 'enviado' ? 'cardapio-status-ok' : 'cardapio-status-pendente';
 
     const body = `
         <div class="cardapio-detail">
