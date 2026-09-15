@@ -761,6 +761,14 @@ def handle_flush(user: str, items: list[dict]) -> None:
                 + knowledge_index
             )
 
+        # Injeta data e hora atual para o agente saber o horario
+        _now = datetime.utcnow().strftime("%d/%m/%Y %H:%M")
+        dynamic_prompt += (
+            f"\n\nData e hora atual (UTC): {_now}. "
+            "Use esta informacao para responder sobre horarios, funcionamento, "
+            "se esta aberto/fechado, e regras baseadas em horario."
+        )
+
         # Injeta regras de fluxo de pedido (reforço das regras do SYSTEM_PROMPT)
         dynamic_prompt += (
             "\n\n⚠️ FLUXO OBRIGATORIO PARA PEDIDOS:\n"
