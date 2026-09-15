@@ -777,8 +777,9 @@ def handle_flush(user: str, items: list[dict]) -> None:
             "So CHAME calculate_order DEPOIS de ter todos os dados (itens, precos, bairro, frete).\n"
             "8. DEPOIS que calculate_order retornar, apresente o RESUMO COMPLETO em UMA "
             "UNICA mensagem: itens, quantidade, endereco/bairro se entrega, forma de pagamento, "
-            "subtotal, frete e total. Exemplo: 'Pedido: 3x Panqueca de Frango R$45 + "
-            "frete R$8 = R$53. Pagamento: Débito. Confirma?'\n"
+            "subtotal, frete e TOTAL GERAL. Inclua SEMPRE o valor total. "
+            "Exemplo: 'Pedido: 3x Panqueca de Frango R$45 + frete R$8 = TOTAL R$53. "
+            "Pagamento: Débito. Confirma?'\n"
             "9. Quando o cliente responder 'sim', 'ok', 'pode ser', 'manda', 'confirmo' "
             "ou qualquer afirmação, CHAME send_order_to_cardapio IMEDIATAMENTE SEM CHAMAR "
             "calculate_order NOVAMENTE. NÃO peça confirmação duas vezes. NÃO recalcule.\n"
@@ -794,7 +795,15 @@ def handle_flush(user: str, items: list[dict]) -> None:
             "sandrinha" in (m.get("parts", [{}])[0].get("text", "").lower() or "")
             for m in history if m.get("role") == "assistant"
         )
-        if len(history) > 2 or has_greeting or has_name:
+        # Detecta se ha fluxo de pedido ativo (ultima mensagem do agente pediu confirmacao)
+        _last_assistant = ""
+        for m in reversed(history):
+            if m.get("role") == "assistant":
+                _last_assistant = (m.get("parts", [{}])[0].get("text", "") or "").lower()
+                break
+        _order_flow_active = any(kw in _last_assistant for kw in ("confirma?", "confirma?", "total:", "pedido:", "forma de pagamento"))
+
+        if (len(history) > 2 or has_greeting or has_name) and not _order_flow_active:
             dynamic_prompt += (
                 "\n\n⚠️ REGRAS DE SAUDACAO - LEIA COM ATENCAO:\n"
                 "Este cliente JA conversou com voce anteriormente.\n"
@@ -821,6 +830,12 @@ def handle_flush(user: str, items: list[dict]) -> None:
                 f"\n\nO nome do cliente e: {contact['name']}. "
                 f"Use o nome dele ao conversar, mas de forma natural."
             )
+
+        # Injeta telefone do cliente no prompt (necessario para send_order_to_cardapio)
+        dynamic_prompt += (
+            f"\n\nO telefone (numero WhatsApp) do cliente e: {user}. "
+            f"Use este numero ao enviar pedidos com send_order_to_cardapio."
+        )
 
         # Verifica se a IA transferiu durante a chamada (via tool)
         _transfer_done = False
@@ -2477,6 +2492,15 @@ def api_cardapio_order_detail(order_id):
         except Exception:
             order["api_response"] = {}
     return jsonify(order)
+
+
+@app.delete("/api/cardapio/orders/<int:order_id>")
+@login_required
+def api_cardapio_order_delete(order_id):
+    ok = database.deletar_cardapio_order(order_id)
+    if not ok:
+        return jsonify({"error": "Pedido nao encontrado"}), 404
+    return jsonify({"ok": True})
 
 
 @app.get("/api/cardapio/stats")

@@ -3169,9 +3169,25 @@ async function viewCardapioOrder(id) {
                 <pre class="cardapio-detail-json">${esc(JSON.stringify(apiResp, null, 2))}</pre>
             </div>
             ` : ''}
+            <div style="margin-top:16px;text-align:right">
+                <button onclick="deleteCardapioOrder(${order.id})" style="background:#ef4444;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:13px">Excluir Pedido</button>
+            </div>
         </div>
     `;
     showModal('Detalhes do Pedido #' + order.id, body);
+}
+
+async function deleteCardapioOrder(id) {
+    if (!confirm('Tem certeza que deseja excluir este pedido?')) return;
+    const res = await api(`/api/cardapio/orders/${id}`, { method: 'DELETE' });
+    if (res && res.ok) {
+        toast('Pedido excluido com sucesso', 'success');
+        loadCardapioOrders();
+        loadCardapioStats();
+        document.getElementById('modal')?.classList.add('hidden');
+    } else {
+        toast('Erro ao excluir pedido', 'error');
+    }
 }
 
 async function toggleCardapioTestMode(checked) {

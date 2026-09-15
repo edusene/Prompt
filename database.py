@@ -1616,6 +1616,15 @@ def obter_cardapio_order(order_db_id: int) -> dict | None:
     return db.fetch_one("SELECT * FROM cardapio_orders WHERE id=?", (order_db_id,))
 
 
+def deletar_cardapio_order(order_db_id: int) -> bool:
+    """Deleta um pedido do cardápio. Retorna True se deletou."""
+    row = db.fetch_one("SELECT id FROM cardapio_orders WHERE id=?", (order_db_id,))
+    if not row:
+        return False
+    db.execute("DELETE FROM cardapio_orders WHERE id=?", (order_db_id,))
+    return True
+
+
 def contar_cardapio_orders(test_only: int | None = None) -> int:
     """Conta total de pedidos."""
     where = []
