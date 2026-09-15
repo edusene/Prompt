@@ -33,6 +33,7 @@ import llm
 import database
 import events
 import meta
+import cardapio
 import scheduler as crm_scheduler
 
 from meta import send_text, mark_read, send_typing, get_media_url, download_media_bytes
@@ -71,6 +72,12 @@ FULL_SYSTEM_PROMPT = _BASE_PROMPT + (
     "a solicitacao estiver fora do seu escopo; "
     "ou quando perceber que o cliente esta frustrado ou insatisfeito. "
     "Ao transferir, informe brevemente o motivo no parametro 'reason'."
+    "\n\nVoce tem acesso a uma tool 'calculate_order' para validar pedidos no cardapio. "
+    "Chame essa tool ANTES de confirmar o pedido com o cliente, informando os itens e o bairro de entrega. "
+    "Ela valida produtos, quantidades, calcula subtotal, frete e total."
+    "\n\nVoce tem acesso a uma tool 'send_order_to_cardapio' para enviar pedidos confirmados para o cardapio digital. "
+    "USE essa tool SOMENTE apos o cliente ter confirmado o pedido completo e voce ter validado com calculate_order. "
+    "Nunca envie sem confirmacao explicita do cliente."
 )
 
 # ── Knowledge Tool (busca seletiva via function calling) ──────────────────────
@@ -189,6 +196,103 @@ TRANSFER_TOOL = {
 }
 
 
+# ── Cardápio Tools (validação e envio de pedidos via function calling) ───────
+
+CALCULATE_ORDER_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "calculate_order",
+        "description": (
+            "Valida um pedido no cardapio: verifica se os produtos existem, "
+            "calcula subtotal, taxa de entrega e total. Chame ANTES de confirmar "
+            "o pedido com o cliente."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "description": "Lista de itens do pedido",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string", "description": "Nome exato do produto cadastrado"},
+                            "quantity": {"type": "integer", "description": "Quantidade do item"},
+                        },
+                        "required": ["name", "quantity"],
+                    },
+                },
+                "bairro": {
+                    "type": "string",
+                    "description": "Bairro de entrega (necessario para calcular frete)",
+                },
+            },
+            "required": ["items"],
+        },
+    },
+}
+
+SEND_ORDER_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "send_order_to_cardapio",
+        "description": (
+            "Envia um pedido confirmado para o cardapio digital da BALBS. "
+            "Use SOMENTE apos o cliente ter confirmado o pedido completo (itens, "
+            "quantidades, forma de pagamento, endereco se entrega) e apos validacao "
+            "via calculate_order."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "customer_name": {
+                    "type": "string",
+                    "description": "Nome completo do cliente",
+                },
+                "customer_phone": {
+                    "type": "string",
+                    "description": "Telefone do cliente com DDD e codigo do pais (ex: 5569999999999)",
+                },
+                "delivery_address": {
+                    "type": "string",
+                    "description": "Endereco completo de entrega (rua, numero, bairro, cidade). Opcional se for retirada.",
+                },
+                "payment_method": {
+                    "type": "string",
+                    "description": "Forma de pagamento: 'pix', 'cartao_debito', 'cartao_credito', 'dinheiro'",
+                },
+                "items": {
+                    "type": "array",
+                    "description": "Lista de itens do pedido",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string", "description": "Nome exato do produto cadastrado no cardapio"},
+                            "quantity": {"type": "integer", "description": "Quantidade do item"},
+                            "price": {"type": "number", "description": "Preco unitario do item"},
+                            "notes": {"type": "string", "description": "Observacao especifica deste item"},
+                            "selected_flavors": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Sabores selecionados (se aplicavel)",
+                            },
+                        },
+                        "required": ["name", "quantity", "price"],
+                    },
+                },
+                "subtotal": {"type": "number", "description": "Subtotal dos itens"},
+                "delivery_fee": {"type": "number", "description": "Taxa de entrega"},
+                "return_fee": {"type": "number", "description": "Taxa de retorno"},
+                "total": {"type": "number", "description": "Total do pedido (itens + frete)"},
+                "notes": {"type": "string", "description": "Observacoes gerais do pedido"},
+                "whatsapp_message_id": {"type": "string", "description": "ID da mensagem WhatsApp que confirmou o pedido (para idempotencia)"},
+            },
+            "required": ["customer_name", "customer_phone", "items", "total"],
+        },
+    },
+}
+
+
 def _transfer_tool_handler(phone: str):
     """Retorna uma closure que chama perform_transfer com o phone correto."""
     def _handler(reason: str = "") -> str:
@@ -211,6 +315,113 @@ def _check_transfer_keywords(items: list[dict]) -> str | None:
         if kw in full_text:
             return kw
     return None
+
+
+# ── Cardápio Tool Handlers ──────────────────────────────────────────────────
+
+def _calculate_order_handler(items: list[dict], bairro: str = "") -> str:
+    """Handler para a tool calculate_order."""
+    print(f"[cardápio] TOOL calculate_order items={items} bairro={bairro}")
+    result = cardapio.calcular_pedido(items, bairro)
+    if result.get("success"):
+        return json.dumps(result, ensure_ascii=False)
+    return json.dumps(result, ensure_ascii=False)
+
+
+def _send_order_handler(
+    customer_name: str,
+    customer_phone: str,
+    items: list[dict],
+    total: float,
+    delivery_address: str = "",
+    payment_method: str = "",
+    subtotal: float = 0,
+    delivery_fee: float = 0,
+    return_fee: float = 0,
+    notes: str = "",
+    whatsapp_message_id: str = "",
+    **kwargs,
+) -> str:
+    """Handler para a tool send_order_to_cardapio."""
+    print(f"[cardápio] TOOL send_order customer={customer_name} phone={customer_phone} total={total}")
+
+    test_mode = os.getenv("CARDÁPIO_TEST_MODE", "true").lower() == "true"
+    is_test = 1 if test_mode else 0
+
+    # Detecta phone do contexto da conversa (user variable do escopo pai)
+    conv_phone = ""
+    try:
+        conv = database.get_or_create_conversation(customer_phone)
+        if conv:
+            contact = database.get_contact_by_id(conv.get("contact_id", 0))
+            if contact:
+                conv_phone = contact.get("phone", "")
+    except Exception:
+        pass
+
+    result = cardapio.criar_pedido(
+        customer_name=customer_name,
+        customer_phone=customer_phone,
+        items=items,
+        total=total,
+        customer_confirmed=True,
+        delivery_address=delivery_address,
+        payment_method=payment_method,
+        subtotal=subtotal,
+        delivery_fee=delivery_fee,
+        return_fee=return_fee,
+        notes=notes,
+        whatsapp_message_id=whatsapp_message_id,
+    )
+
+    # Salva log no banco
+    try:
+        conv = database.get_or_create_conversation(customer_phone)
+        conv_id = conv["id"] if conv else 0
+        contact = database.get_contact(customer_phone)
+        contact_id = contact["id"] if contact else 0
+    except Exception:
+        conv_id = 0
+        contact_id = 0
+
+    database.criar_cardapio_order(
+        conversation_id=conv_id,
+        contact_id=contact_id,
+        customer_name=customer_name,
+        customer_phone=customer_phone,
+        delivery_address=delivery_address,
+        payment_method=payment_method,
+        items=items,
+        subtotal=subtotal,
+        delivery_fee=delivery_fee,
+        return_fee=return_fee,
+        total=total,
+        notes=notes,
+        whatsapp_message_id=whatsapp_message_id,
+        is_test=is_test,
+        order_id_externo=result.get("order_id", ""),
+        display_id=result.get("display_id", ""),
+        status=result.get("status", "pendente") if result.get("success") else "erro",
+        api_response=result,
+        error_message=result.get("error", "") if not result.get("success") else "",
+    )
+
+    # Emite evento SSE para atualizar o painel em tempo real
+    try:
+        events.emit("cardapio_order", {
+            "customer_name": customer_name,
+            "total": total,
+            "is_test": is_test,
+            "status": result.get("status", "erro"),
+        })
+    except Exception:
+        pass
+
+    if result.get("success"):
+        display_id = result.get("display_id", "")
+        return f"Pedido enviado com sucesso para o cardapio digital. Numero do pedido: {display_id}. Status: {result.get('status', 'pendente')}."
+    else:
+        return f"Erro ao enviar pedido para o cardapio: {result.get('error', 'desconhecido')}"
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -539,13 +750,18 @@ def handle_flush(user: str, items: list[dict]) -> None:
             "\n\n⚠️ FLUXO OBRIGATORIO PARA PEDIDOS:\n"
             "1. Ao receber um pedido, PRIMEIRO chame search_knowledge para buscar "
             "o produto e preco no arquivo 02_cardapio_produtos_precos.md.\n"
-            "2. Apos confirmar itens e precos, pergunte 'Sera para entrega ou retirada na fabrica? 😊'\n"
+            "2. Apos confirmar itens e precos, pergunte 'Sera para entrega ou retirada na fabrica?'\n"
             "3. Se o cliente escolher ENTREGA, chame search_knowledge(query='taxa entrega [bairro]') "
             "para consultar 04_deliveryfee_bairros.md e informe a taxa.\n"
             "4. Se o cliente escolher RETIRADA, nao cobre frete.\n"
             "5. So entao apresente o total com frete incluso (se entrega).\n"
-            "6. NUNCA finalize um pedido sem ter perguntado entrega ou retirada.\n"
-            "7. NUNCA informe frete ZERO sem consultar o knowledge."
+            "6. Pergunte a forma de pagamento.\n"
+            "7. Chame calculate_order para validar o pedido (itens, quantidades, frete).\n"
+            "8. Apos validacao, pergunte ao cliente se confirma o pedido.\n"
+            "9. Somente apos CONFIRMACAO EXPLICITA do cliente, chame send_order_to_cardapio.\n"
+            "10. Informe o cliente que o pedido foi enviado com sucesso e o numero do pedido.\n"
+            "11. NUNCA envie o pedido sem confirmacao explicita do cliente.\n"
+            "12. NUNCA informe frete ZERO sem consultar o knowledge."
         )
 
         # Injeta regra de saudação contextual baseada no histórico
@@ -598,10 +814,12 @@ def handle_flush(user: str, items: list[dict]) -> None:
             reply = llm.generate_reply(
                 history=memory.get(user),
                 system=dynamic_prompt,
-                tools=[KNOWLEDGE_TOOL, TRANSFER_TOOL],
+                tools=[KNOWLEDGE_TOOL, TRANSFER_TOOL, CALCULATE_ORDER_TOOL, SEND_ORDER_TOOL],
                 tool_handlers={
                     "search_knowledge": _knowledge_tool_handler,
                     "transfer_to_human": _transfer_handler,
+                    "calculate_order": _calculate_order_handler,
+                    "send_order_to_cardapio": _send_order_handler,
                 },
             )
         except Exception as e:
@@ -2186,6 +2404,84 @@ def api_crm_logs_list():
     limit = min(int(request.args.get("limit", "100")), 500)
     offset = max(int(request.args.get("offset", "0")), 0)
     return jsonify(database.list_crm_logs(limit=limit, offset=offset))
+
+
+# ── Cardápio: API Routes ───────────────────────────────────────────────────
+
+@app.get("/api/cardapio/orders")
+@login_required
+def api_cardapio_orders_list():
+    limit = min(int(request.args.get("limit", "50")), 500)
+    offset = max(int(request.args.get("offset", "0")), 0)
+    test = request.args.get("test", "")
+    test_only = int(test) if test != "" else None
+    orders = database.listar_cardapio_orders(limit=limit, offset=offset, test_only=test_only)
+    # Desserializa items JSON para objetos Python
+    for o in orders:
+        if isinstance(o.get("items"), str):
+            try:
+                o["items"] = json.loads(o["items"])
+            except Exception:
+                o["items"] = []
+        if isinstance(o.get("api_response"), str):
+            try:
+                o["api_response"] = json.loads(o["api_response"])
+            except Exception:
+                o["api_response"] = {}
+    return jsonify(orders)
+
+
+@app.get("/api/cardapio/orders/<int:order_id>")
+@login_required
+def api_cardapio_order_detail(order_id):
+    order = database.obter_cardapio_order(order_id)
+    if not order:
+        return jsonify({"error": "Pedido nao encontrado"}), 404
+    if isinstance(order.get("items"), str):
+        try:
+            order["items"] = json.loads(order["items"])
+        except Exception:
+            order["items"] = []
+    if isinstance(order.get("api_response"), str):
+        try:
+            order["api_response"] = json.loads(order["api_response"])
+        except Exception:
+            order["api_response"] = {}
+    return jsonify(order)
+
+
+@app.get("/api/cardapio/stats")
+@login_required
+def api_cardapio_stats():
+    return jsonify(database.cardapio_orders_stats())
+
+
+@app.get("/api/cardapio/settings")
+@login_required
+def api_cardapio_settings_get():
+    api_key = os.getenv("BALBS_AGENTE_API_KEY", "")
+    masked_key = (api_key[:4] + "****" + api_key[-4:]) if len(api_key) > 8 else "****"
+    return jsonify({
+        "cardapio_test_mode": os.getenv("CARDÁPIO_TEST_MODE", "true"),
+        "cardapio_api_url": os.getenv("CARDÁPIO_API_URL", ""),
+        "cardapio_api_url_test": os.getenv("CARDÁPIO_API_URL_TEST", ""),
+        "balbs_agente_api_key_masked": masked_key,
+    })
+
+
+@app.put("/api/cardapio/settings")
+@login_required
+def api_cardapio_settings_save():
+    data = request.get_json(silent=True) or {}
+    if "cardapio_test_mode" in data:
+        database.set_setting("CARDÁPIO_TEST_MODE", str(data["cardapio_test_mode"]).lower())
+    if "cardapio_api_url" in data:
+        database.set_setting("CARDÁPIO_API_URL", data["cardapio_api_url"])
+    if "cardapio_api_url_test" in data:
+        database.set_setting("CARDÁPIO_API_URL_TEST", data["cardapio_api_url_test"])
+    if "balbs_agente_api_key" in data and data["balbs_agente_api_key"]:
+        database.set_setting("BALBS_AGENTE_API_KEY", data["balbs_agente_api_key"])
+    return jsonify({"ok": True})
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

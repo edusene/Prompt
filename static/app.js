@@ -163,6 +163,11 @@ function loadView(view) {
         case 'crm':
             switchCrmView('dashboard');
             break;
+        case 'cardapio':
+            loadCardapioStats();
+            loadCardapioOrders();
+            pollTimers.push(setInterval(loadCardapioOrders, 30000));
+            break;
     }
 }
 
@@ -3008,4 +3013,164 @@ async function loadCrmLogs() {
             </tbody>
         </table>
     `;
+}
+
+/* ── Cardápio Digital ──────────────────────────────────────────────────────── */
+
+let _cardapioTestMode = true;
+
+async function loadCardapioStats() {
+    const grid = document.getElementById('cardapio-stats');
+    if (!grid) return;
+    const stats = await api('/api/cardapio/stats');
+    if (!stats) {
+        grid.innerHTML = '<p class="muted">Erro ao carregar estatisticas</p>';
+        return;
+    }
+    grid.innerHTML = `
+        <div class="stat-card">
+            <div class="stat-value">${stats.total}</div>
+            <div class="stat-label">Total Pedidos</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">${stats.today}</div>
+            <div class="stat-label">Pedidos Hoje</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">R$ ${stats.total_value.toFixed(2)}</div>
+            <div class="stat-label">Valor Total</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" style="color:#22c55e">${stats.success}</div>
+            <div class="stat-label">Sucesso</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" style="color:#ef4444">${stats.errors}</div>
+            <div class="stat-label">Erros</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" style="color:#f59e0b">${stats.test_count}</div>
+            <div class="stat-label">Modo Teste</div>
+        </div>
+    `;
+}
+
+async function loadCardapioOrders() {
+    const tbody = document.getElementById('cardapio-orders-body');
+    if (!tbody) return;
+    tbody.innerHTML = skeletonRows(5);
+    const orders = await api('/api/cardapio/orders?limit=100');
+    if (!orders || orders.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="9" class="empty-state">Nenhum pedido registrado</td></tr>';
+        return;
+    }
+    tbody.innerHTML = orders.map(o => {
+        const dt = o.created_at ? new Date(o.created_at + 'Z').toLocaleString('pt-BR') : '-';
+        const items = Array.isArray(o.items) ? o.items : [];
+        const itemsSummary = items.map(i => `${i.quantity}x ${i.name}`).join(', ');
+        const statusClass = o.status === 'erro' ? 'cardapio-status-erro' : o.status === 'pendente' ? 'cardapio-status-pendente' : 'cardapio-status-ok';
+        const modeClass = o.is_test ? 'cardapio-mode-test' : 'cardapio-mode-prod';
+        return `<tr>
+            <td>${o.id}</td>
+            <td>${esc(o.customer_name)}</td>
+            <td>${esc(o.customer_phone)}</td>
+            <td title="${esc(itemsSummary)}">${esc(itemsSummary.length > 30 ? itemsSummary.substring(0, 30) + '...' : itemsSummary)}</td>
+            <td>R$ ${parseFloat(o.total || 0).toFixed(2)}</td>
+            <td><span class="cardapio-status-badge ${statusClass}">${esc(o.status)}</span></td>
+            <td><span class="cardapio-mode-badge ${modeClass}">${o.is_test ? 'Teste' : 'Prod'}</span></td>
+            <td>${dt}</td>
+            <td><button class="btn-sm btn-secondary" onclick="viewCardapioOrder(${o.id})">Ver</button></td>
+        </tr>`;
+    }).join('');
+}
+
+async function viewCardapioOrder(id) {
+    const order = await api(`/api/cardapio/orders/${id}`);
+    if (!order || order.error) {
+        toast('Erro ao carregar pedido', 'error');
+        return;
+    }
+    const items = Array.isArray(order.items) ? order.items : [];
+    const itemsHtml = items.map(i => `
+        <div class="cardapio-detail-item">
+            <span>${esc(i.quantity)}x ${esc(i.name)}</span>
+            <span>R$ ${(parseFloat(i.price || 0) * parseInt(i.quantity || 1)).toFixed(2)}</span>
+            ${i.notes ? `<span class="cardapio-detail-notes">${esc(i.notes)}</span>` : ''}
+            ${i.selected_flavors ? `<span class="cardapio-detail-flavors">${esc(i.selected_flavors.join(', '))}</span>` : ''}
+        </div>
+    `).join('');
+
+    const apiResp = order.api_response || {};
+    const dt = order.created_at ? new Date(order.created_at + 'Z').toLocaleString('pt-BR') : '-';
+    const statusClass = order.status === 'erro' ? 'cardapio-status-erro' : order.status === 'pendente' ? 'cardapio-status-pendente' : 'cardapio-status-ok';
+
+    const body = `
+        <div class="cardapio-detail">
+            <div class="cardapio-detail-header">
+                <span class="cardapio-status-badge ${statusClass}" style="font-size:14px">${esc(order.status)}</span>
+                <span class="cardapio-mode-badge ${order.is_test ? 'cardapio-mode-test' : 'cardapio-mode-prod'}">${order.is_test ? 'MODO TESTE' : 'PRODUCAO'}</span>
+            </div>
+            <div class="cardapio-detail-grid">
+                <div class="cardapio-detail-field">
+                    <label>Cliente</label>
+                    <span>${esc(order.customer_name)}</span>
+                </div>
+                <div class="cardapio-detail-field">
+                    <label>Telefone</label>
+                    <span>${esc(order.customer_phone)}</span>
+                </div>
+                <div class="cardapio-detail-field">
+                    <label>Forma de Pagamento</label>
+                    <span>${esc(order.payment_method || '-')}</span>
+                </div>
+                <div class="cardapio-detail-field">
+                    <label>Data</label>
+                    <span>${dt}</span>
+                </div>
+            </div>
+            ${order.delivery_address ? `
+            <div class="cardapio-detail-field" style="margin-top:12px">
+                <label>Endereco de Entrega</label>
+                <span>${esc(order.delivery_address)}</span>
+            </div>
+            ` : ''}
+            <div class="cardapio-detail-items" style="margin-top:16px">
+                <label>Itens</label>
+                ${itemsHtml || '<span class="muted">Nenhum item</span>'}
+            </div>
+            <div class="cardapio-detail-totals" style="margin-top:12px">
+                <div class="cardapio-total-row"><span>Subtotal:</span><span>R$ ${parseFloat(order.subtotal || 0).toFixed(2)}</span></div>
+                <div class="cardapio-total-row"><span>Taxa Entrega:</span><span>R$ ${parseFloat(order.delivery_fee || 0).toFixed(2)}</span></div>
+                ${parseFloat(order.return_fee || 0) > 0 ? `<div class="cardapio-total-row"><span>Taxa Retorno:</span><span>R$ ${parseFloat(order.return_fee || 0).toFixed(2)}</span></div>` : ''}
+                <div class="cardapio-total-row cardapio-total-final"><span>Total:</span><span>R$ ${parseFloat(order.total || 0).toFixed(2)}</span></div>
+            </div>
+            ${order.notes ? `<div class="cardapio-detail-field" style="margin-top:12px"><label>Observacoes:</label><span>${esc(order.notes)}</span></div>` : ''}
+            ${order.order_id_externo ? `<div class="cardapio-detail-field" style="margin-top:12px"><label>ID Externo:</label><span>${esc(order.order_id_externo)}</span></div>` : ''}
+            ${order.display_id ? `<div class="cardapio-detail-field"><label>Display ID:</label><span>${esc(order.display_id)}</span></div>` : ''}
+            ${order.error_message ? `<div class="cardapio-detail-field" style="margin-top:12px"><label>Erro:</label><span style="color:#ef4444">${esc(order.error_message)}</span></div>` : ''}
+            ${apiResp && Object.keys(apiResp).length > 0 ? `
+            <div class="cardapio-detail-field" style="margin-top:12px">
+                <label>Resposta da API:</label>
+                <pre class="cardapio-detail-json">${esc(JSON.stringify(apiResp, null, 2))}</pre>
+            </div>
+            ` : ''}
+        </div>
+    `;
+    showModal('Detalhes do Pedido #' + order.id, body);
+}
+
+async function toggleCardapioTestMode(checked) {
+    const res = await api('/api/cardapio/settings', {
+        method: 'PUT',
+        body: JSON.stringify({ cardapio_test_mode: checked ? 'true' : 'false' })
+    });
+    if (res && res.ok) {
+        _cardapioTestMode = checked;
+        toast(checked ? 'Modo teste ativado - pedidos NAO serao enviados ao cardapio real' : 'Modo producao ativado - pedidos serao enviados ao cardapio real', checked ? 'warning' : 'success');
+    }
+}
+
+function formatCardapioItems(items) {
+    if (!Array.isArray(items)) return '-';
+    return items.map(i => `${i.quantity}x ${i.name}`).join(', ');
 }

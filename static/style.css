@@ -3192,3 +3192,273 @@ select option {
         align-items: flex-start;
     }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   Cardápio Digital Styles
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* Stats grid for cardápio view */
+.cardapio-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+/* Table */
+.cardapio-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.cardapio-table th {
+    text-align: left;
+    padding: 10px 12px;
+    border-bottom: 2px solid var(--border);
+    color: var(--text-muted);
+    font-weight: 600;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+}
+
+.cardapio-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+}
+
+.cardapio-table tr:hover {
+    background: var(--bg-card-hover);
+}
+
+/* Status badges */
+.cardapio-status-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.cardapio-status-ok {
+    background: rgba(34, 197, 94, 0.15);
+    color: #22c55e;
+}
+
+.cardapio-status-pendente {
+    background: rgba(245, 158, 11, 0.15);
+    color: #f59e0b;
+}
+
+.cardapio-status-erro {
+    background: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+}
+
+/* Mode badges */
+.cardapio-mode-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 8px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.cardapio-mode-test {
+    background: rgba(245, 158, 11, 0.15);
+    color: #f59e0b;
+}
+
+.cardapio-mode-prod {
+    background: rgba(34, 197, 94, 0.15);
+    color: #22c55e;
+}
+
+/* Test mode toggle */
+.cardapio-test-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.cardapio-test-toggle input {
+    display: none;
+}
+
+.cardapio-toggle-slider {
+    width: 36px;
+    height: 20px;
+    background: #475569;
+    border-radius: 10px;
+    position: relative;
+    transition: background 0.2s;
+}
+
+.cardapio-toggle-slider::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+    background: #fff;
+    border-radius: 50%;
+    transition: transform 0.2s;
+}
+
+.cardapio-test-toggle input:checked + .cardapio-toggle-slider {
+    background: #f59e0b;
+}
+
+.cardapio-test-toggle input:checked + .cardapio-toggle-slider::after {
+    transform: translateX(16px);
+}
+
+.cardapio-toggle-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+}
+
+/* Detail modal */
+.cardapio-detail {
+    font-size: 14px;
+}
+
+.cardapio-detail-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.cardapio-detail-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+
+.cardapio-detail-field {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.cardapio-detail-field label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.cardapio-detail-field span {
+    font-size: 14px;
+    color: var(--text);
+}
+
+.cardapio-detail-items label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    display: block;
+    margin-bottom: 8px;
+}
+
+.cardapio-detail-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 12px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    margin-bottom: 6px;
+    font-size: 13px;
+}
+
+.cardapio-detail-item span:first-child {
+    flex: 1;
+}
+
+.cardapio-detail-item span:nth-child(2) {
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.cardapio-detail-notes {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.cardapio-detail-flavors {
+    font-size: 11px;
+    color: var(--accent);
+}
+
+.cardapio-detail-totals {
+    border-top: 1px solid var(--border);
+    padding-top: 12px;
+}
+
+.cardapio-total-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 4px 0;
+    font-size: 13px;
+    color: var(--text-muted);
+}
+
+.cardapio-total-final {
+    border-top: 1px solid var(--border);
+    margin-top: 8px;
+    padding-top: 8px;
+    font-weight: 700;
+    font-size: 15px;
+    color: var(--text);
+}
+
+.cardapio-detail-json {
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 12px;
+    font-size: 11px;
+    font-family: 'Fira Code', 'Consolas', monospace;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+    max-height: 200px;
+    overflow-y: auto;
+    color: var(--text-muted);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .cardapio-stats {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+    }
+
+    .cardapio-detail-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .cardapio-table th:nth-child(4),
+    .cardapio-table td:nth-child(4) {
+        display: none;
+    }
+}

@@ -5,6 +5,7 @@ O agente Gemini continua usando memory.py (in-memory) para seu histórico.
 """
 
 import db
+import json
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -116,6 +117,12 @@ def init_db() -> None:
     if "crm_automations" not in crm_tables:
         db.executescript(CRM_SCHEMA)
         print("[db] tabelas CRM criadas")
+
+    # Migração Cardápio: cria tabela de logs de pedidos
+    all_tables = _get_tables()
+    if "cardapio_orders" not in all_tables:
+        db.executescript(CARDÁPIO_ORDERS_SCHEMA)
+        print("[db] tabela cardapio_orders criada")
 
     _ensure_indexes()
 
@@ -233,6 +240,36 @@ CREATE INDEX IF NOT EXISTS idx_follow_ups_scheduled ON crm_follow_ups(scheduled_
 CREATE INDEX IF NOT EXISTS idx_follow_ups_contact ON crm_follow_ups(contact_id);
 CREATE INDEX IF NOT EXISTS idx_automations_active ON crm_automations(is_active);
 """
+
+CARDÁPIO_ORDERS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS cardapio_orders (
+    id SERIAL PRIMARY KEY,
+    conversation_id INTEGER REFERENCES conversations(id),
+    contact_id INTEGER REFERENCES contacts(id),
+    order_id_externo TEXT DEFAULT '',
+    display_id TEXT DEFAULT '',
+    status TEXT DEFAULT 'pendente',
+    customer_name TEXT DEFAULT '',
+    customer_phone TEXT DEFAULT '',
+    delivery_address TEXT DEFAULT '',
+    payment_method TEXT DEFAULT '',
+    items JSONB DEFAULT '[]',
+    subtotal NUMERIC DEFAULT 0,
+    delivery_fee NUMERIC DEFAULT 0,
+    return_fee NUMERIC DEFAULT 0,
+    total NUMERIC DEFAULT 0,
+    notes TEXT DEFAULT '',
+    whatsapp_message_id TEXT DEFAULT '',
+    is_test INTEGER DEFAULT 0,
+    api_response JSONB DEFAULT '{}',
+    error_message TEXT DEFAULT '',
+    created_at TEXT DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_cardapio_orders_created ON cardapio_orders(created_at);
+CREATE INDEX IF NOT EXISTS idx_cardapio_orders_status ON cardapio_orders(status);
+CREATE INDEX IF NOT EXISTS idx_cardapio_orders_conversation ON cardapio_orders(conversation_id);
+"""
+
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS contacts (
@@ -1494,3 +1531,130 @@ def create_follow_ups_for_contact(contact_id: int) -> int:
         if fu:
             created += 1
     return created
+
+
+# ── Cardápio: Orders ────────────────────────────────────────────────────────
+
+def criar_cardapio_order(
+    conversation_id: int = 0,
+    contact_id: int = 0,
+    customer_name: str = "",
+    customer_phone: str = "",
+    delivery_address: str = "",
+    payment_method: str = "",
+    items: list = None,
+    subtotal: float = 0,
+    delivery_fee: float = 0,
+    return_fee: float = 0,
+    total: float = 0,
+    notes: str = "",
+    whatsapp_message_id: str = "",
+    is_test: int = 0,
+    order_id_externo: str = "",
+    display_id: str = "",
+    status: str = "pendente",
+    api_response: dict = None,
+    error_message: str = "",
+) -> dict:
+    """Insere um log de pedido enviado ao cardápio digital."""
+    now = datetime.utcnow().isoformat()
+    items_json = json.dumps(items or [], ensure_ascii=False)
+    api_resp_json = json.dumps(api_response or {}, ensure_ascii=False)
+    log_id = db.execute_returning(
+        "INSERT INTO cardapio_orders "
+        "(conversation_id, contact_id, order_id_externo, display_id, status, "
+        "customer_name, customer_phone, delivery_address, payment_method, "
+        "items, subtotal, delivery_fee, return_fee, total, notes, "
+        "whatsapp_message_id, is_test, api_response, error_message, created_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            conversation_id, contact_id, order_id_externo, display_id, status,
+            customer_name, customer_phone, delivery_address, payment_method,
+            items_json, subtotal, delivery_fee, return_fee, total, notes,
+            whatsapp_message_id, is_test, api_resp_json, error_message, now,
+        ),
+    )
+    if log_id:
+        return db.fetch_one("SELECT * FROM cardapio_orders WHERE id=?", (log_id,))
+    return {}
+
+
+def atualizar_cardapio_order(order_db_id: int, **fields) -> None:
+    """Atualiza um log de pedido (status, api_response, error_message, etc)."""
+    allowed = (
+        "order_id_externo", "display_id", "status", "api_response",
+        "error_message",
+    )
+    sets, vals = [], []
+    for k, v in fields.items():
+        if k in allowed:
+            if k in ("api_response",) and isinstance(v, dict):
+                v = json.dumps(v, ensure_ascii=False)
+            sets.append(f"{k}=?")
+            vals.append(v)
+    if sets:
+        vals.append(order_db_id)
+        db.execute(f"UPDATE cardapio_orders SET {','.join(sets)} WHERE id=?", tuple(vals))
+
+
+def listar_cardapio_orders(limit: int = 50, offset: int = 0, test_only: int | None = None) -> list[dict]:
+    """Lista logs de pedidos do cardápio."""
+    where = []
+    params: list = []
+    if test_only is not None:
+        where.append("is_test=?")
+        params.append(test_only)
+    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+    params.extend([limit, offset])
+    return db.fetch_all(
+        f"SELECT * FROM cardapio_orders {where_sql} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+        tuple(params),
+    )
+
+
+def obter_cardapio_order(order_db_id: int) -> dict | None:
+    """Retorna detalhe de um pedido do cardápio."""
+    return db.fetch_one("SELECT * FROM cardapio_orders WHERE id=?", (order_db_id,))
+
+
+def contar_cardapio_orders(test_only: int | None = None) -> int:
+    """Conta total de pedidos."""
+    where = []
+    params: list = []
+    if test_only is not None:
+        where.append("is_test=?")
+        params.append(test_only)
+    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+    row = db.fetch_one(f"SELECT COUNT(*) as cnt FROM cardapio_orders {where_sql}", tuple(params))
+    return row["cnt"] if row else 0
+
+
+def cardapio_orders_stats() -> dict:
+    """Estatísticas dos pedidos do cardápio."""
+    total = db.fetch_one("SELECT COUNT(*) as cnt FROM cardapio_orders")["cnt"]
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    today_count = db.fetch_one(
+        "SELECT COUNT(*) as cnt FROM cardapio_orders WHERE created_at >= ?", (today,)
+    )["cnt"]
+    success = db.fetch_one(
+        "SELECT COUNT(*) as cnt FROM cardapio_orders WHERE status != 'erro'"
+    )["cnt"]
+    errors = db.fetch_one(
+        "SELECT COUNT(*) as cnt FROM cardapio_orders WHERE status = 'erro'"
+    )["cnt"]
+    test_count = db.fetch_one(
+        "SELECT COUNT(*) as cnt FROM cardapio_orders WHERE is_test = 1"
+    )["cnt"]
+    total_value_row = db.fetch_one(
+        "SELECT COALESCE(SUM(total), 0) as val FROM cardapio_orders WHERE is_test = 0 AND status != 'erro'"
+    )
+    total_value = float(total_value_row["val"]) if total_value_row else 0
+    return {
+        "total": total,
+        "today": today_count,
+        "success": success,
+        "errors": errors,
+        "test_count": test_count,
+        "production_count": total - test_count,
+        "total_value": total_value,
+    }
