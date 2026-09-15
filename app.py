@@ -761,10 +761,10 @@ def handle_flush(user: str, items: list[dict]) -> None:
                 + knowledge_index
             )
 
-        # Injeta data e hora atual para o agente saber o horario
-        _now = datetime.utcnow().strftime("%d/%m/%Y %H:%M")
+        # Injeta data e hora atual para o agente saber o horario (fuso de Cuiaba = UTC-4)
+        _now = (datetime.utcnow() - timedelta(hours=4)).strftime("%d/%m/%Y %H:%M")
         dynamic_prompt += (
-            f"\n\nData e hora atual (UTC): {_now}. "
+            f"\n\nData e hora atual (Cuiaba): {_now}. "
             "Use esta informacao para responder sobre horarios, funcionamento, "
             "se esta aberto/fechado, e regras baseadas em horario."
         )
