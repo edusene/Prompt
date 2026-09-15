@@ -204,20 +204,22 @@ CALCULATE_ORDER_TOOL = {
         "name": "calculate_order",
         "description": (
             "Valida um pedido no cardapio: verifica se os produtos existem, "
-            "calcula subtotal, taxa de entrega e total. Chame ANTES de confirmar "
-            "o pedido com o cliente."
+            "calcula subtotal, taxa de entrega e total. Chame ANTES de apresentar "
+            "o resumo do pedido ao cliente. Inclua o price (preco unitario) de cada "
+            "item obtido do knowledge para calcular o subtotal corretamente."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "items": {
                     "type": "array",
-                    "description": "Lista de itens do pedido",
+                    "description": "Lista de itens do pedido com precos",
                     "items": {
                         "type": "object",
                         "properties": {
                             "name": {"type": "string", "description": "Nome exato do produto cadastrado"},
                             "quantity": {"type": "integer", "description": "Quantidade do item"},
+                            "price": {"type": "number", "description": "Preco unitario do item (obtido do knowledge)"},
                         },
                         "required": ["name", "quantity"],
                     },
@@ -345,7 +347,7 @@ def _send_order_handler(
     """Handler para a tool send_order_to_cardapio."""
     print(f"[cardápio] TOOL send_order customer={customer_name} phone={customer_phone} total={total}")
 
-    test_mode = os.getenv("CARDÁPIO_TEST_MODE", "true").lower() == "true"
+    test_mode = database.get_setting("CARDÁPIO_TEST_MODE", "true").lower() == "true"
     is_test = 1 if test_mode else 0
 
     # Detecta phone do contexto da conversa (user variable do escopo pai)
@@ -768,16 +770,18 @@ def handle_flush(user: str, items: list[dict]) -> None:
             "3. Se o cliente escolher ENTREGA, chame search_knowledge(query='taxa entrega [bairro]') "
             "para consultar 04_deliveryfee_bairros.md e informe a taxa.\n"
             "4. Se o cliente escolher RETIRADA, nao cobre frete.\n"
-            "5. So entao apresente o total com frete incluso (se entrega).\n"
+            "5. Calcule o total: soma(sub quantity * price) + frete (se entrega).\n"
             "6. Pergunte a forma de pagamento.\n"
-            "7. Chame calculate_order para validar o pedido (itens, quantidades, frete).\n"
-            "8. Apos validacao, apresente o RESUMO COMPLETO do pedido (itens, quantidade, "
-            "endereco/bairro se entrega, forma de pagamento, total) e peça confirmação "
-            "em UMA UNICA mensagem. Exemplo: 'Pedido: 3x Panqueca, retirada, R$ 45,00. "
-            "Confirma?'. NÃO separe em duas mensagens.\n"
+            "7. CHAME calculate_order COM price de cada item (obtido do knowledge) PARA VALIDAR. "
+            "Exemplo: items=[{name: 'Panqueca de Frango', quantity: 3, price: 15.00}]. "
+            "So CHAME calculate_order DEPOIS de ter todos os dados (itens, precos, bairro, frete).\n"
+            "8. DEPOIS que calculate_order retornar, apresente o RESUMO COMPLETO em UMA "
+            "UNICA mensagem: itens, quantidade, endereco/bairro se entrega, forma de pagamento, "
+            "subtotal, frete e total. Exemplo: 'Pedido: 3x Panqueca de Frango R$45 + "
+            "frete R$8 = R$53. Pagamento: Débito. Confirma?'\n"
             "9. Quando o cliente responder 'sim', 'ok', 'pode ser', 'manda', 'confirmo' "
-            "ou qualquer afirmação, CHAME send_order_to_cardapio IMEDIATAMENTE. "
-            "NÃO peça confirmação novamente. NÃO faça mais de uma pergunta de confirmação.\n"
+            "ou qualquer afirmação, CHAME send_order_to_cardapio IMEDIATAMENTE SEM CHAMAR "
+            "calculate_order NOVAMENTE. NÃO peça confirmação duas vezes. NÃO recalcule.\n"
             "10. Informe o cliente que o pedido foi enviado com sucesso e o numero do pedido.\n"
             "11. NUNCA envie o pedido sem confirmação explicita do cliente.\n"
             "12. NUNCA informe frete ZERO sem consultar o knowledge."
@@ -1041,6 +1045,12 @@ limiter = Limiter(get_remote_address, app=app, default_limits=["200 per minute"]
 buffer = MessageBuffer(wait_seconds=BUFFER_SECONDS, on_flush=handle_flush)
 
 database.init_db()
+
+# Carrega configurações do cardápio salvas no banco para os.environ
+for _key in ("CARDÁPIO_TEST_MODE", "CARDÁPIO_API_URL", "CARDÁPIO_API_URL_TEST", "BALBS_AGENTE_API_KEY"):
+    _val = database.get_setting(_key, "")
+    if _val:
+        os.environ[_key] = _val
 
 # Inicia o scheduler de follow-ups CRM
 try:
@@ -2478,12 +2488,12 @@ def api_cardapio_stats():
 @app.get("/api/cardapio/settings")
 @login_required
 def api_cardapio_settings_get():
-    api_key = os.getenv("BALBS_AGENTE_API_KEY", "")
+    api_key = database.get_setting("BALBS_AGENTE_API_KEY", os.getenv("BALBS_AGENTE_API_KEY", ""))
     masked_key = (api_key[:4] + "****" + api_key[-4:]) if len(api_key) > 8 else "****"
     return jsonify({
-        "cardapio_test_mode": os.getenv("CARDÁPIO_TEST_MODE", "true"),
-        "cardapio_api_url": os.getenv("CARDÁPIO_API_URL", ""),
-        "cardapio_api_url_test": os.getenv("CARDÁPIO_API_URL_TEST", ""),
+        "cardapio_test_mode": database.get_setting("CARDÁPIO_TEST_MODE", os.getenv("CARDÁPIO_TEST_MODE", "true")),
+        "cardapio_api_url": database.get_setting("CARDÁPIO_API_URL", os.getenv("CARDÁPIO_API_URL", "")),
+        "cardapio_api_url_test": database.get_setting("CARDÁPIO_API_URL_TEST", os.getenv("CARDÁPIO_API_URL_TEST", "")),
         "balbs_agente_api_key_masked": masked_key,
     })
 
@@ -2493,13 +2503,18 @@ def api_cardapio_settings_get():
 def api_cardapio_settings_save():
     data = request.get_json(silent=True) or {}
     if "cardapio_test_mode" in data:
-        database.set_setting("CARDÁPIO_TEST_MODE", str(data["cardapio_test_mode"]).lower())
+        val = str(data["cardapio_test_mode"]).lower()
+        database.set_setting("CARDÁPIO_TEST_MODE", val)
+        os.environ["CARDÁPIO_TEST_MODE"] = val
     if "cardapio_api_url" in data:
         database.set_setting("CARDÁPIO_API_URL", data["cardapio_api_url"])
+        os.environ["CARDÁPIO_API_URL"] = data["cardapio_api_url"]
     if "cardapio_api_url_test" in data:
         database.set_setting("CARDÁPIO_API_URL_TEST", data["cardapio_api_url_test"])
+        os.environ["CARDÁPIO_API_URL_TEST"] = data["cardapio_api_url_test"]
     if "balbs_agente_api_key" in data and data["balbs_agente_api_key"]:
         database.set_setting("BALBS_AGENTE_API_KEY", data["balbs_agente_api_key"])
+        os.environ["BALBS_AGENTE_API_KEY"] = data["balbs_agente_api_key"]
     return jsonify({"ok": True})
 
 

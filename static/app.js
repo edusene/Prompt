@@ -164,6 +164,7 @@ function loadView(view) {
             switchCrmView('dashboard');
             break;
         case 'cardapio':
+            loadCardapioSettings();
             loadCardapioStats();
             loadCardapioOrders();
             pollTimers.push(setInterval(loadCardapioOrders, 30000));
@@ -3024,6 +3025,14 @@ async function loadCrmLogs() {
 /* ── Cardápio Digital ──────────────────────────────────────────────────────── */
 
 let _cardapioTestMode = true;
+
+async function loadCardapioSettings() {
+    const data = await api('/api/cardapio/settings');
+    if (!data) return;
+    _cardapioTestMode = data.cardapio_test_mode === 'true';
+    const toggle = document.getElementById('cardapio-test-toggle');
+    if (toggle) toggle.checked = _cardapioTestMode;
+}
 
 async function loadCardapioStats() {
     const grid = document.getElementById('cardapio-stats');
