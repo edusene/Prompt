@@ -3052,7 +3052,7 @@ async function loadCardapioStats() {
             <div class="stat-label">Pedidos Hoje</div>
         </div>
         <div class="stat-card">
-            <div class="stat-value">R$ ${stats.total_value.toFixed(2)}</div>
+            <div class="stat-value">R$\u00A0${stats.total_value.toFixed(2)}</div>
             <div class="stat-label">Valor Total</div>
         </div>
         <div class="stat-card">
