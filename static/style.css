@@ -1591,6 +1591,17 @@ h3 { font-size: 14px; font-weight: 600; }
     border-color: var(--accent);
     box-shadow: 0 0 0 3px var(--accent-glow);
 }
+.form-group label:has(input[type="checkbox"]) {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+}
+.form-group input[type="checkbox"] {
+    width: auto;
+    padding: 0;
+    accent-color: var(--accent);
+}
 .form-group input[type="color"] {
     width: 40px;
     height: 36px;
