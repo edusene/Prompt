@@ -377,9 +377,15 @@
                     </div>
 
                     <div class="wa-card wa-config-card">
-                        <h3>Configuracao da API</h3>
-                        <p class="muted" style="font-size:12px;margin:0 0 16px 0">Atualize as variaveis de ambiente direto pelo painel.</p>
-                        <form id="wa-config-form" class="wa-config-form" onsubmit="saveWAConfig(event)">
+                        <div class="wa-config-header" onclick="toggleWAConfig()" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center">
+                            <div>
+                                <h3 style="margin:0">Configuracao da API</h3>
+                                <p class="muted" style="font-size:12px;margin:4px 0 0 0">Atualize as variaveis de ambiente direto pelo painel.</p>
+                            </div>
+                            <svg id="wa-config-arrow" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" style="transition:transform .2s;flex-shrink:0"><polyline points="6 9 12 15 18 9"/></svg>
+                        </div>
+                        <div id="wa-config-body" style="display:none;overflow:hidden">
+                            <form id="wa-config-form" class="wa-config-form" onsubmit="saveWAConfig(event)">
                             <div class="wa-config-field">
                                 <label for="wa-cfg-token">Token Datafy</label>
                                 <div class="wa-secret-wrap">
@@ -414,6 +420,7 @@
                                 <button type="submit" class="btn-primary" id="wa-config-save-btn">Salvar Configuracao</button>
                             </div>
                         </form>
+                        </div>
                     </div>
 
                     <!-- Linha 3: Templates Meta -->

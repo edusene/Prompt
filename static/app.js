@@ -2107,6 +2107,15 @@ function copyWebhookUrl() {
     );
 }
 
+function toggleWAConfig() {
+    const body = document.getElementById('wa-config-body');
+    const arrow = document.getElementById('wa-config-arrow');
+    if (!body || !arrow) return;
+    const open = body.style.display === 'none';
+    body.style.display = open ? 'block' : 'none';
+    arrow.style.transform = open ? 'rotate(180deg)' : '';
+}
+
 /* ── WhatsApp Meta Templates ──────────────────────────────────────────────── */
 async function loadWATemplates() {
     const list = document.getElementById('wa-templates-list');
