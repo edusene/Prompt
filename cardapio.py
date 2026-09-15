@@ -36,6 +36,20 @@ def calcular_pedido(items: list[dict], bairro: str = "") -> dict:
     Returns:
         dict com success, subtotal, delivery_fee, total ou error
     """
+    test_mode = os.getenv("CARDÁPIO_TEST_MODE", "true").lower() == "true"
+
+    if test_mode:
+        # Modo teste: simula cálculo sem chamar API
+        subtotal = sum(item.get("quantity", 0) * item.get("price", 0) for item in items)
+        print(f"[cardápio] MODO TESTE - calculateOrder simulado: subtotal={subtotal}")
+        return {
+            "success": True,
+            "subtotal": subtotal,
+            "delivery_fee": 0,
+            "return_fee": 0,
+            "total": subtotal,
+        }
+
     base_url = _get_base_url()
     if not base_url:
         return {"success": False, "error": "CARDÁPIO_API_URL nao configurada"}
