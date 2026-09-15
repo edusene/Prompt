@@ -568,11 +568,35 @@ def reset_unread(conv_id: int) -> None:
     )
 
 
+def reset_unread_bulk(conv_ids: list[int]) -> None:
+    """Marca N conversas como lidas em uma unica query."""
+    if not conv_ids:
+        return
+    now = datetime.utcnow().isoformat()
+    placeholders = ",".join("?" * len(conv_ids))
+    db.execute(
+        f"UPDATE conversations SET unread_count=0, updated_at=? WHERE id IN ({placeholders})",
+        (now, *conv_ids),
+    )
+
+
 def mark_unread(conv_id: int) -> None:
     """Marca como não lida (garante unread_count >= 1)."""
     db.execute(
         "UPDATE conversations SET unread_count=MAX(unread_count,1), updated_at=? WHERE id=?",
         (datetime.utcnow().isoformat(), conv_id),
+    )
+
+
+def mark_unread_bulk(conv_ids: list[int]) -> None:
+    """Marca N conversas como nao lidas em uma unica query."""
+    if not conv_ids:
+        return
+    now = datetime.utcnow().isoformat()
+    placeholders = ",".join("?" * len(conv_ids))
+    db.execute(
+        f"UPDATE conversations SET unread_count=MAX(unread_count,1), updated_at=? WHERE id IN ({placeholders})",
+        (now, *conv_ids),
     )
 
 

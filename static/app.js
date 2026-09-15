@@ -522,10 +522,13 @@ async function bulkAction(action, params = {}) {
     const ids = [...selectedConvIds];
     if (!ids.length) return;
     _hideBulkMenus();
+    const actionLabels = { read: 'Marcando como lido...', unread: 'Marcando como nao lido...', archive: 'Arquivando...', delete: 'Excluindo...', clear: 'Limpando...' };
+    const loadingToast = toastLoading(actionLabels[action] || 'Processando...');
     const res = await api('/api/conversations/bulk', {
         method: 'POST',
         body: JSON.stringify({ ids, action, params })
     });
+    toastDone(loadingToast);
     if (res && !res.error) {
         const n = res.processed || ids.length;
         toast(`${n} conversa${n > 1 ? 's' : ''} atualizada${n > 1 ? 's' : ''}`, 'success');
