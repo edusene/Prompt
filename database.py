@@ -106,6 +106,10 @@ def init_db() -> None:
             print("[db] coluna last_interaction_at adicionada em contacts")
         except Exception:
             pass
+    try:
+        db.execute("CREATE INDEX IF NOT EXISTS idx_contacts_crm_status ON contacts(crm_status)")
+    except Exception:
+        pass
 
     # Migração CRM: cria tabelas de automações, follow-ups e logs
     crm_tables = _get_tables()
@@ -371,7 +375,6 @@ CREATE INDEX IF NOT EXISTS idx_follow_ups_status ON crm_follow_ups(status);
 CREATE INDEX IF NOT EXISTS idx_follow_ups_scheduled ON crm_follow_ups(scheduled_for);
 CREATE INDEX IF NOT EXISTS idx_follow_ups_contact ON crm_follow_ups(contact_id);
 CREATE INDEX IF NOT EXISTS idx_automations_active ON crm_automations(is_active);
-CREATE INDEX IF NOT EXISTS idx_contacts_crm_status ON contacts(crm_status);
 """
 
 
