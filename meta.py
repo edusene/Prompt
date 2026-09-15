@@ -310,6 +310,42 @@ def delete_template(template_name: str) -> dict:
     return _request("DELETE", url, params=params)
 
 
+def create_template(name: str, category: str, language: str, body: str,
+                    header_text: str = "", buttons: list | None = None) -> dict:
+    """Cria um template na WABA via Meta Graph API.
+    category: MARKETING | UTILITY | AUTHENTICATION
+    language: ex 'pt_BR'
+    body: texto do template, use {{1}}, {{2}} etc para variaveis
+    header_text: (opcional) texto do header
+    buttons: (opcional) lista de botoes, ex [{"type": "QUICK_REPLY", "text": "Sim"}]
+    """
+    components = []
+    if header_text:
+        components.append({
+            "type": "HEADER",
+            "format": "TEXT",
+            "text": header_text,
+        })
+    if body:
+        components.append({
+            "type": "BODY",
+            "text": body,
+        })
+    if buttons:
+        components.append({
+            "type": "BUTTONS",
+            "buttons": buttons,
+        })
+    payload = {
+        "name": name,
+        "category": category.upper(),
+        "language": language,
+        "components": components,
+    }
+    url = f"{_BASE}/{_WABA_ID}/message_templates"
+    return _request("POST", url, body=payload)
+
+
 # ── Business Profile / Phone Info ────────────────────────────────────────────
 
 

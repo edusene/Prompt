@@ -157,6 +157,7 @@ function loadView(view) {
             loadWAConnection();
             loadWAConfig();
             loadTransferMessage();
+            loadWATemplates();
             startWAConnectionPolling();
             break;
         case 'crm':
@@ -2106,6 +2107,117 @@ function copyWebhookUrl() {
     );
 }
 
+/* ── WhatsApp Meta Templates ──────────────────────────────────────────────── */
+async function loadWATemplates() {
+    const list = document.getElementById('wa-templates-list');
+    if (!list) return;
+    list.innerHTML = skeletonRows(3);
+    const data = await api('/api/whatsapp/templates');
+    if (!data || data.error) {
+        list.innerHTML = `<p class="muted">${esc(data?.error || 'Erro ao carregar templates')}</p>`;
+        return;
+    }
+    const templates = data.data || data;
+    const items = Array.isArray(templates) ? templates : (templates.data || []);
+    if (items.length === 0) {
+        list.innerHTML = '<p class="muted">Nenhum template encontrado na WABA.</p>';
+        return;
+    }
+    const statusColors = { APPROVED: '#22c55e', PENDING: '#f59e0b', REJECTED: '#ef4444', DISABLED: '#94a3b8' };
+    list.innerHTML = items.map(t => {
+        const st = t.status || 'PENDING';
+        const color = statusColors[st] || '#94a3b8';
+        const lang = t.language || '-';
+        const cat = t.category || '-';
+        const body = t.components?.find(c => c.type === 'BODY');
+        const bodyText = body?.text || '-';
+        return `<div style="display:flex;align-items:flex-start;justify-content:space-between;padding:10px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px">
+            <div style="flex:1;min-width:0">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+                    <strong style="font-size:13px">${esc(t.name)}</strong>
+                    <span style="font-size:11px;padding:2px 8px;border-radius:10px;background:${color}22;color:${color};font-weight:600">${esc(st)}</span>
+                    <span style="font-size:11px;color:var(--muted)">${esc(lang)} &middot; ${esc(cat)}</span>
+                </div>
+                <div style="font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:600px">${esc(bodyText)}</div>
+            </div>
+            <div style="display:flex;gap:4px;flex-shrink:0;margin-left:8px">
+                <button class="btn-sm btn-secondary" onclick="viewWATemplate('${esc(t.id)}')" title="Detalhes">Ver</button>
+                <button class="btn-sm btn-danger" onclick="deleteWATemplate('${esc(t.name)}')" title="Deletar">X</button>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+async function viewWATemplate(templateId) {
+    const data = await api(`/api/whatsapp/templates/${templateId}`);
+    if (!data || data.error) { toast(data?.error || 'Erro ao carregar', 'error'); return; }
+    const t = data.data || data;
+    const body = t.components?.find(c => c.type === 'BODY');
+    const header = t.components?.find(c => c.type === 'HEADER');
+    document.getElementById('modal-title').textContent = t.name || 'Template';
+    document.getElementById('modal-body').innerHTML = `
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+            <span style="font-size:12px;padding:2px 8px;border-radius:10px;background:${t.status === 'APPROVED' ? '#22c55e22' : '#f59e0b22'};color:${t.status === 'APPROVED' ? '#22c55e' : '#f59e0b'};font-weight:600">${esc(t.status)}</span>
+            <span style="font-size:12px;color:var(--muted)">${esc(t.language)} &middot; ${esc(t.category)}</span>
+        </div>
+        ${header ? `<div style="margin-bottom:8px"><strong>Header:</strong><div style="font-size:13px;margin-top:4px">${esc(header.text || '-')}</div></div>` : ''}
+        <div style="margin-bottom:8px"><strong>Body:</strong><div style="font-size:13px;margin-top:4px;white-space:pre-wrap">${esc(body?.text || '-')}</div></div>
+        <div style="margin-top:12px"><button class="btn-secondary" onclick="closeModal()">Fechar</button></div>`;
+    document.getElementById('modal-overlay').style.display = 'flex';
+}
+
+function showCreateWATemplateForm() {
+    document.getElementById('modal-title').textContent = 'Criar Template Meta';
+    document.getElementById('modal-body').innerHTML = `
+        <form onsubmit="saveWATemplate(event)">
+            <div class="form-group"><label>Nome (sem espacos)</label><input name="name" required placeholder="ex: lembrete_3d"></div>
+            <div class="form-row">
+                <div class="form-group"><label>Categoria</label>
+                    <select name="category">
+                        <option value="UTILITY">Utility</option>
+                        <option value="MARKETING">Marketing</option>
+                        <option value="AUTHENTICATION">Authentication</option>
+                    </select>
+                </div>
+                <div class="form-group"><label>Idioma</label><input name="language" value="pt_BR"></div>
+            </div>
+            <div class="form-group"><label>Header (opcional)</label><input name="header_text" placeholder="Texto do cabecalho"></div>
+            <div class="form-group"><label>Body (use {{1}}, {{2}} etc para variaveis)</label><textarea name="body" rows="4" required placeholder="Ola {{1}}, tudo bem?"></textarea></div>
+            <button type="submit" class="btn-primary">Criar Template</button>
+        </form>`;
+    document.getElementById('modal-overlay').style.display = 'flex';
+}
+
+async function saveWATemplate(e) {
+    e.preventDefault();
+    const form = e.target;
+    const btn = form.querySelector('button[type="submit"]');
+    const fd = new FormData(form);
+    const data = {};
+    fd.forEach((v, k) => { if (v) data[k] = v; });
+    setBtnLoading(btn, true, 'Criando...');
+    const r = await api('/api/whatsapp/templates', { method: 'POST', body: JSON.stringify(data) });
+    setBtnLoading(btn, false);
+    if (r && r.ok) {
+        toast('Template criado! Aguardando aprovacao da Meta.', 'success');
+        closeModal();
+        loadWATemplates();
+    } else {
+        toast(r?.error || 'Erro ao criar template', 'error');
+    }
+}
+
+async function deleteWATemplate(templateName) {
+    if (!confirm(`Deletar template "${templateName}"?`)) return;
+    const r = await api(`/api/whatsapp/templates/${encodeURIComponent(templateName)}`, { method: 'DELETE' });
+    if (r && r.ok) {
+        toast('Template deletado', 'success');
+        loadWATemplates();
+    } else {
+        toast(r?.error || 'Erro ao deletar', 'error');
+    }
+}
+
 /* ── Modal ────────────────────────────────────────────────────────────────── */
 function closeModal() {
     const overlay = document.getElementById('modal-overlay');
@@ -2727,9 +2839,27 @@ async function toggleCrmAutomation(autoId) {
     loadCrmAutomations();
 }
 
-function showCrmAutomationForm(auto = null) {
+async function showCrmAutomationForm(auto = null) {
     const title = auto ? 'Editar Automacao' : 'Nova Automacao';
     document.getElementById('modal-title').textContent = title;
+
+    let metaTemplatesHtml = `<input name="meta_template_name" value="${esc(auto?.meta_template_name || '')}" placeholder="ex: follow_up_30d">`;
+    try {
+        const tplData = await api('/api/whatsapp/templates');
+        if (tplData && !tplData.error) {
+            const raw = tplData.data || tplData;
+            const items = Array.isArray(raw) ? raw : (raw.data || []);
+            const approved = items.filter(t => t.status === 'APPROVED');
+            if (approved.length > 0) {
+                metaTemplatesHtml = `<select name="meta_template_name">
+                    <option value="">Selecione um template...</option>
+                    ${approved.map(t => `<option value="${esc(t.name)}" ${auto?.meta_template_name === t.name ? 'selected' : ''}>${esc(t.name)} (${esc(t.language)})</option>`).join('')}
+                </select>
+                <p style="font-size:11px;color:var(--muted);margin:4px 0 0 0">Templates aprovados pela Meta. Crie novos em WhatsApp > Templates Meta.</p>`;
+            }
+        }
+    } catch(e) {}
+
     document.getElementById('modal-body').innerHTML = `
         <form onsubmit="saveCrmAutomation(event, ${auto?.id || 'null'})">
             <div class="form-group"><label>Nome</label><input name="name" value="${esc(auto?.name || '')}" required></div>
@@ -2741,7 +2871,7 @@ function showCrmAutomationForm(auto = null) {
             <div class="form-group">
                 <label><input type="checkbox" name="use_meta_template" value="1" ${auto?.use_meta_template ? 'checked' : ''}> Usar template aprovado pela Meta</label>
             </div>
-            <div class="form-group"><label>Nome do template Meta</label><input name="meta_template_name" value="${esc(auto?.meta_template_name || '')}" placeholder="ex: follow_up_30d"></div>
+            <div class="form-group"><label>Template Meta</label>${metaTemplatesHtml}</div>
             <div class="form-row">
                 <div class="form-group"><label>Horario inicio</label><input name="send_window_start" value="${esc(auto?.send_window_start || '08:00')}"></div>
                 <div class="form-group"><label>Horario fim</label><input name="send_window_end" value="${esc(auto?.send_window_end || '18:00')}"></div>

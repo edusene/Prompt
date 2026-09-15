@@ -415,6 +415,24 @@
                             </div>
                         </form>
                     </div>
+
+                    <!-- Linha 3: Templates Meta -->
+                    <div class="wa-card" style="grid-column:1/-1">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+                            <div>
+                                <h3 style="margin:0">Templates Meta (Aprovados)</h3>
+                                <p class="muted" style="font-size:12px;margin:4px 0 0 0">Templates aprovados pela Meta para envio de mensagens fora da janela de 24h.</p>
+                            </div>
+                            <div style="display:flex;gap:6px">
+                                <button class="btn-secondary btn-sm" onclick="loadWATemplates()">
+                                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                                    Atualizar
+                                </button>
+                                <button class="btn-primary btn-sm" onclick="showCreateWATemplateForm()">+ Criar Template</button>
+                            </div>
+                        </div>
+                        <div id="wa-templates-list"><p class="muted">Clique em Atualizar para carregar.</p></div>
+                    </div>
                 </div>
             </div>
 

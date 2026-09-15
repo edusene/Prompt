@@ -36,7 +36,7 @@ import meta
 import scheduler as crm_scheduler
 
 from meta import send_text, mark_read, send_typing, get_media_url, download_media_bytes
-from meta import get_phone_info, list_templates, get_template, delete_template
+from meta import get_phone_info, list_templates, get_template, delete_template, create_template
 from meta import get_business_profile, update_business_profile, get_phone_id, get_waba_id
 from meta import get_webhook_media_url
 from buffer import MessageBuffer
@@ -1768,6 +1768,27 @@ def api_whatsapp_template_delete(template_name):
     if not r.get("ok"):
         return jsonify({"error": r.get("error", "Erro ao deletar template")}), 500
     return jsonify({"ok": True})
+
+
+@app.post("/api/whatsapp/templates")
+@login_required
+def api_whatsapp_template_create():
+    """Cria um template na WABA."""
+    problem = meta.config_problem()
+    if problem:
+        return jsonify({"error": problem}), 400
+    data = request.get_json(silent=True) or {}
+    name = data.get("name", "").strip()
+    category = data.get("category", "UTILITY").strip()
+    language = data.get("language", "pt_BR").strip()
+    body = data.get("body", "").strip()
+    header_text = data.get("header_text", "").strip()
+    if not name or not body:
+        return jsonify({"error": "name e body sao obrigatorios"}), 400
+    r = create_template(name, category, language, body, header_text=header_text)
+    if not r.get("ok"):
+        return jsonify({"error": r.get("error", "Erro ao criar template")}), 500
+    return jsonify({"ok": True, "data": r.get("data", {})})
 
 
 @app.get("/api/whatsapp/profile")
