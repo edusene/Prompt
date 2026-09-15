@@ -528,7 +528,8 @@ async function bulkAction(action, params = {}) {
         method: 'POST',
         body: JSON.stringify({ ids, action, params })
     });
-    toastDone(loadingToast);
+    const loadingEl = document.getElementById(loadingToast);
+    if (loadingEl) loadingEl.remove();
     if (res && !res.error) {
         const n = res.processed || ids.length;
         toast(`${n} conversa${n > 1 ? 's' : ''} atualizada${n > 1 ? 's' : ''}`, 'success');
