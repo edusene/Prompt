@@ -345,6 +345,11 @@ def _send_order_handler(
     **kwargs,
 ) -> str:
     """Handler para a tool send_order_to_cardapio."""
+    if items:
+        if not subtotal or subtotal == 0:
+            subtotal = sum(item.get("quantity", 0) * item.get("price", 0) for item in items)
+        if not total or total == 0:
+            total = subtotal + delivery_fee - return_fee
     print(f"[cardápio] TOOL send_order customer={customer_name} phone={customer_phone} total={total}")
 
     test_mode = database.get_setting("CARDÁPIO_TEST_MODE", "true").lower() == "true"
