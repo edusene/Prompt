@@ -159,6 +159,9 @@ function loadView(view) {
             loadTransferMessage();
             startWAConnectionPolling();
             break;
+        case 'crm':
+            switchCrmView('dashboard');
+            break;
     }
 }
 
@@ -2249,6 +2252,12 @@ function connectSSE() {
             updateHumanQueueBadge();
         } else if (event === 'tags_updated') {
             refreshTagsUI();
+        } else if (event === 'crm_follow_up_sent') {
+            if (currentView === 'crm') {
+                if (crmCurrentView === 'dashboard') loadCrmDashboard();
+                else if (crmCurrentView === 'followups') loadCrmFollowUps();
+                else if (crmCurrentView === 'logs') loadCrmLogs();
+            }
         } else if (event === 'wa_status') {
             if (currentView === 'whatsapp') {
                 loadWAConnection();
@@ -2393,7 +2402,435 @@ document.addEventListener('keydown', e => {
         closeTemplateMenu();
         return;
     }
+    if (currentView === 'crm') {
+        const profile = document.getElementById('crm-contact-profile');
+        if (profile && profile.style.display !== 'none') {
+            closeCrmContactProfile();
+            return;
+        }
+    }
     if (currentConvId != null) {
         deselectConversation();
     }
 });
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   CRM
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+let crmCurrentView = 'dashboard';
+let crmContactProfileId = null;
+
+/* ── CRM Status Labels ─────────────────────────────────────────────────────── */
+const CRM_STATUS = {
+    novo: 'Novo', em_atendimento: 'Em Atendimento', cliente: 'Cliente',
+    inativo: 'Inativo', nao_interessado: 'Nao Interessado'
+};
+const CRM_FOLLOWUP_STATUS = {
+    pendente: 'Pendente', enviado: 'Enviado', cancelado: 'Cancelado', erro: 'Erro'
+};
+function crmStatusLabel(s) { return CRM_STATUS[s] || s || '-'; }
+function crmFollowUpLabel(s) { return CRM_FOLLOWUP_STATUS[s] || s || '-'; }
+
+/* ── CRM Navigation ────────────────────────────────────────────────────────── */
+function switchCrmView(view) {
+    document.querySelectorAll('.crm-nav-item').forEach(n => n.classList.remove('active'));
+    document.querySelector(`.crm-nav-item[data-crm-view="${view}"]`).classList.add('active');
+    document.querySelectorAll('.crm-subview').forEach(v => v.classList.remove('active'));
+    document.getElementById(`crm-view-${view}`).classList.add('active');
+    closeCrmContactProfile();
+    crmCurrentView = view;
+    loadCrmView(view);
+}
+
+function loadCrmView(view) {
+    switch (view) {
+        case 'dashboard': loadCrmDashboard(); break;
+        case 'contacts': loadCrmContacts(); break;
+        case 'automations': loadCrmAutomations(); break;
+        case 'followups': loadCrmFollowUps(); break;
+        case 'logs': loadCrmLogs(); break;
+    }
+}
+
+/* ── CRM Dashboard ─────────────────────────────────────────────────────────── */
+async function loadCrmDashboard() {
+    const grid = document.getElementById('crm-stats-grid');
+    grid.innerHTML = skeletonCards(6);
+    const stats = await api('/api/crm/dashboard');
+    if (!stats) { grid.innerHTML = '<p class="muted">Erro ao carregar</p>'; return; }
+    const fu = stats.follow_ups || {};
+    grid.innerHTML = `
+        <div class="stat-card">
+            <div class="stat-icon"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></div>
+            <div class="stat-value">${stats.total_contacts}</div>
+            <div class="stat-label">Total Contatos</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon" style="color:#22c55e"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg></div>
+            <div class="stat-value">${stats.novo}</div>
+            <div class="stat-label">Novos</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon" style="color:#6366f1"><svg viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72"/></svg></div>
+            <div class="stat-value">${stats.cliente}</div>
+            <div class="stat-label">Clientes</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon" style="color:#94a3b8"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg></div>
+            <div class="stat-value">${stats.inativo}</div>
+            <div class="stat-label">Inativos</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon" style="color:#f59e0b"><svg viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg></div>
+            <div class="stat-value">${fu.pending || 0}</div>
+            <div class="stat-label">Follow-ups Pendentes</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon" style="color:#22c55e"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>
+            <div class="stat-value">${fu.sent_today || 0}</div>
+            <div class="stat-label">Enviados Hoje</div>
+        </div>
+    `;
+}
+
+/* ── CRM Contacts ──────────────────────────────────────────────────────────── */
+let crmContactsList = [];
+
+async function loadCrmContacts() {
+    const list = document.getElementById('crm-contacts-list');
+    const profile = document.getElementById('crm-contact-profile');
+    if (profile) profile.style.display = 'none';
+    list.style.display = 'block';
+    list.innerHTML = skeletonRows(5);
+
+    const search = document.getElementById('crm-contact-search')?.value || '';
+    const status = document.getElementById('crm-contact-status-filter')?.value || '';
+    const days = document.getElementById('crm-contact-days-filter')?.value || '';
+    const followUp = document.getElementById('crm-contact-followup-filter')?.value || '';
+
+    let url = '/api/crm/contacts?limit=200';
+    if (search) url += `&search=${encodeURIComponent(search)}`;
+    if (status) url += `&status=${encodeURIComponent(status)}`;
+    if (days) url += `&days_without=${days}`;
+    if (followUp) url += `&has_follow_up=${followUp}`;
+
+    crmContactsList = await api(url);
+    if (!crmContactsList || crmContactsList.length === 0) {
+        list.innerHTML = '<div class="empty-state">Nenhum contato encontrado</div>';
+        return;
+    }
+
+    list.innerHTML = `
+        <table>
+            <thead><tr><th>Nome</th><th>Telefone</th><th>Status</th><th>Tags</th><th>Ultima Interacao</th><th>Dias s/ Interacao</th></tr></thead>
+            <tbody>
+            ${crmContactsList.map(c => {
+                const name = c.name || c.phone || '-';
+                const tags = (c.tags || []).map(t =>
+                    `<span class="conv-tag-chip" style="background:${t.color}">${esc(t.name)}</span>`
+                ).join(' ');
+                const lastInt = c.last_interaction_at
+                    ? new Date(c.last_interaction_at + 'Z').toLocaleDateString('pt-BR')
+                    : '-';
+                const daysW = c.days_without_interaction != null ? c.days_without_interaction : '-';
+                return `<tr class="crm-contact-row" onclick="openCrmContactProfile(${c.id})">
+                    <td><strong>${esc(name)}</strong></td>
+                    <td>${esc(c.phone)}</td>
+                    <td><span class="crm-status-badge crm-status-${c.crm_status || 'novo'}">${esc(crmStatusLabel(c.crm_status))}</span></td>
+                    <td>${tags || '<span class="muted">-</span>'}</td>
+                    <td>${lastInt}</td>
+                    <td>${daysW}</td>
+                </tr>`;
+            }).join('')}
+            </tbody>
+        </table>
+    `;
+}
+
+async function openCrmContactProfile(contactId) {
+    crmContactProfileId = contactId;
+    const list = document.getElementById('crm-contacts-list');
+    const profile = document.getElementById('crm-contact-profile');
+    list.style.display = 'none';
+    profile.style.display = 'block';
+
+    const data = await api(`/api/crm/contacts/${contactId}`);
+    if (!data) { toast('Erro ao carregar contato', 'error'); return; }
+
+    document.getElementById('crm-profile-name').textContent = data.name || data.phone || 'Contato';
+
+    const tags = (data.tags || []).map(t =>
+        `<span class="conv-tag-chip" style="background:${t.color}">${esc(t.name)}</span>`
+    ).join(' ');
+    const lastInt = data.last_interaction_at
+        ? new Date(data.last_interaction_at + 'Z').toLocaleString('pt-BR')
+        : '-';
+    const created = data.created_at
+        ? new Date(data.created_at + 'Z').toLocaleString('pt-BR')
+        : '-';
+    const daysW = data.days_without_interaction != null ? data.days_without_interaction : '-';
+
+    document.getElementById('crm-profile-info').innerHTML = `
+        <div class="crm-profile-card">
+            <div class="crm-profile-field"><strong>Telefone:</strong> ${esc(data.phone)}</div>
+            <div class="crm-profile-field"><strong>Email:</strong> ${esc(data.email || '-')}</div>
+            <div class="crm-profile-field"><strong>Empresa:</strong> ${esc(data.company || '-')}</div>
+            <div class="crm-profile-field"><strong>Primeiro contato:</strong> ${created}</div>
+            <div class="crm-profile-field"><strong>Ultima interacao:</strong> ${lastInt}</div>
+            <div class="crm-profile-field"><strong>Dias sem interacao:</strong> <span class="crm-days-badge">${daysW}</span></div>
+            <div class="crm-profile-field">
+                <strong>Status:</strong>
+                <select class="select-sm" onchange="updateCrmContactStatus(${data.id}, this.value)">
+                    ${Object.entries(CRM_STATUS).map(([k, v]) =>
+                        `<option value="${k}" ${data.crm_status === k ? 'selected' : ''}>${v}</option>`
+                    ).join('')}
+                </select>
+            </div>
+            <div class="crm-profile-field">
+                <strong>Tags:</strong>
+                <div class="tag-chips">${tags || '<span class="muted">nenhuma</span>'}</div>
+            </div>
+            <div class="crm-profile-field">
+                <strong>Observacoes:</strong>
+                <textarea class="crm-notes-input" id="crm-notes-${data.id}" rows="3" placeholder="Observacoes internas...">${esc(data.notes || '')}</textarea>
+                <button class="btn-sm btn-primary" style="margin-top:4px" onclick="saveCrmNotes(${data.id})">Salvar</button>
+            </div>
+        </div>
+        ${(data.follow_ups || []).length > 0 ? `
+        <div class="crm-profile-card">
+            <h3>Follow-ups</h3>
+            <table class="crm-mini-table">
+                <thead><tr><th>Automacao</th><th>Previsto</th><th>Status</th></tr></thead>
+                <tbody>
+                ${data.follow_ups.map(fu => `
+                    <tr>
+                        <td>${esc(fu.automation_name)}</td>
+                        <td>${new Date(fu.scheduled_for + 'Z').toLocaleString('pt-BR')}</td>
+                        <td><span class="crm-fu-status-badge crm-fu-${fu.status}">${esc(crmFollowUpLabel(fu.status))}</span></td>
+                    </tr>
+                `).join('')}
+                </tbody>
+            </table>
+        </div>` : ''}
+    `;
+
+    // Carregar historico de mensagens
+    const conv = await api(`/api/conversations?limit=50`);
+    if (conv && conv.length > 0) {
+        const contactConv = conv.find(c => c.contact_id === data.id);
+        if (contactConv) {
+            const msgData = await api(`/api/conversations/${contactConv.id}`);
+            if (msgData && msgData.messages) {
+                const msgDiv = document.getElementById('crm-profile-messages');
+                msgDiv.innerHTML = `<h3>Historico de Mensagens</h3><div class="crm-messages-list">${
+                    msgData.messages.map(m => {
+                        const time = m.created_at ? new Date(m.created_at + 'Z').toLocaleString('pt-BR', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
+                        const dir = m.direction === 'in' ? 'Recebido' : m.direction === 'out' ? 'Enviado' : 'Sistema';
+                        const dirClass = m.direction === 'in' ? 'crm-msg-in' : m.direction === 'out' ? 'crm-msg-out' : 'crm-msg-internal';
+                        return `<div class="crm-msg ${dirClass}"><div class="crm-msg-body">${esc(m.body)}</div><div class="crm-msg-meta">${dir} · ${time}</div></div>`;
+                    }).join('')
+                }</div>`;
+            }
+        }
+    }
+}
+
+function closeCrmContactProfile() {
+    crmContactProfileId = null;
+    const list = document.getElementById('crm-contacts-list');
+    const profile = document.getElementById('crm-contact-profile');
+    if (profile) profile.style.display = 'none';
+    if (list) list.style.display = 'block';
+}
+
+async function updateCrmContactStatus(contactId, status) {
+    await api(`/api/crm/contacts/${contactId}/status`, { method: 'PUT', body: JSON.stringify({ status }) });
+    toast('Status atualizado', 'success');
+    loadCrmContacts();
+}
+
+async function saveCrmNotes(contactId) {
+    const textarea = document.getElementById(`crm-notes-${contactId}`);
+    if (!textarea) return;
+    const notes = textarea.value;
+    await api(`/api/crm/contacts/${contactId}/notes`, { method: 'PUT', body: JSON.stringify({ notes }) });
+    toast('Observacoes salvas', 'success');
+}
+
+/* ── CRM Automations ───────────────────────────────────────────────────────── */
+let crmAutomationsList = [];
+
+async function loadCrmAutomations() {
+    const list = document.getElementById('crm-automations-list');
+    list.innerHTML = skeletonRows(3);
+    crmAutomationsList = await api('/api/crm/automations');
+    if (!crmAutomationsList || crmAutomationsList.length === 0) {
+        list.innerHTML = '<div class="empty-state">Nenhuma automacao criada</div>';
+        return;
+    }
+    list.innerHTML = crmAutomationsList.map(a => {
+        const timeDesc = [];
+        if (a.days > 0) timeDesc.push(`${a.days} dia(s)`);
+        if (a.hours > 0) timeDesc.push(`${a.hours} hora(s)`);
+        return `
+        <div class="crm-automation-card">
+            <div class="crm-automation-header">
+                <div>
+                    <h3>${esc(a.name)}</h3>
+                    <span class="crm-auto-time">Apos ${timeDesc.join(' e ') || '0'} sem interacao</span>
+                </div>
+                <label class="agent-toggle">
+                    <input type="checkbox" ${a.is_active ? 'checked' : ''} onchange="toggleCrmAutomation(${a.id})">
+                    <span class="agent-toggle-slider"></span>
+                </label>
+            </div>
+            <div class="crm-automation-body">
+                <div class="crm-auto-field"><strong>Mensagem:</strong> <span class="crm-auto-msg">${esc(a.message_template || '(template Meta)')}</span></div>
+                <div class="crm-auto-field"><strong>Janela:</strong> ${esc(a.send_window_start)} - ${esc(a.send_window_end)}</div>
+                ${a.action_tag_add ? `<div class="crm-auto-field"><strong>Ao enviar:</strong> Adicionar tag #${esc(a.action_tag_add)}</div>` : ''}
+                ${a.action_status_change ? `<div class="crm-auto-field"><strong>Ao enviar:</strong> Status -> ${esc(crmStatusLabel(a.action_status_change))}</div>` : ''}
+            </div>
+            <div class="crm-automation-actions">
+                <button class="btn-sm btn-secondary" onclick="editCrmAutomation(${a.id})">Editar</button>
+                <button class="btn-sm btn-danger" onclick="deleteCrmAutomation(${a.id})">Excluir</button>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+async function toggleCrmAutomation(autoId) {
+    await api(`/api/crm/automations/${autoId}/toggle`, { method: 'PUT' });
+    loadCrmAutomations();
+}
+
+function showCrmAutomationForm(auto = null) {
+    const title = auto ? 'Editar Automacao' : 'Nova Automacao';
+    document.getElementById('modal-title').textContent = title;
+    document.getElementById('modal-body').innerHTML = `
+        <form onsubmit="saveCrmAutomation(event, ${auto?.id || 'null'})">
+            <div class="form-group"><label>Nome</label><input name="name" value="${esc(auto?.name || '')}" required></div>
+            <div class="form-row">
+                <div class="form-group"><label>Dias</label><input type="number" name="days" value="${auto?.days || 0}" min="0"></div>
+                <div class="form-group"><label>Horas</label><input type="number" name="hours" value="${auto?.hours || 0}" min="0" max="23"></div>
+            </div>
+            <div class="form-group"><label>Mensagem (use {{nome}} e {{numero}})</label><textarea name="message_template" rows="4" placeholder="Ola, {{nome}}! Tudo bem?">${esc(auto?.message_template || '')}</textarea></div>
+            <div class="form-group">
+                <label><input type="checkbox" name="use_meta_template" value="1" ${auto?.use_meta_template ? 'checked' : ''}> Usar template aprovado pela Meta</label>
+            </div>
+            <div class="form-group"><label>Nome do template Meta</label><input name="meta_template_name" value="${esc(auto?.meta_template_name || '')}" placeholder="ex: follow_up_30d"></div>
+            <div class="form-row">
+                <div class="form-group"><label>Horario inicio</label><input name="send_window_start" value="${esc(auto?.send_window_start || '08:00')}"></div>
+                <div class="form-group"><label>Horario fim</label><input name="send_window_end" value="${esc(auto?.send_window_end || '18:00')}"></div>
+            </div>
+            <div class="form-group"><label>Ao enviar: Adicionar tag (ID)</label><input name="action_tag_add" value="${esc(auto?.action_tag_add || '')}" placeholder="ID da tag (opcional)"></div>
+            <div class="form-group"><label>Ao enviar: Alterar status para</label>
+                <select name="action_status_change">
+                    <option value="">Nao alterar</option>
+                    ${Object.entries(CRM_STATUS).map(([k, v]) =>
+                        `<option value="${k}" ${auto?.action_status_change === k ? 'selected' : ''}>${v}</option>`
+                    ).join('')}
+                </select>
+            </div>
+            <button type="submit" class="btn-primary">Salvar</button>
+        </form>`;
+    document.getElementById('modal-overlay').style.display = 'flex';
+}
+
+async function saveCrmAutomation(e, id) {
+    e.preventDefault();
+    const form = e.target;
+    const btn = form.querySelector('button[type="submit"]');
+    const fd = new FormData(form);
+    const data = {};
+    fd.forEach((v, k) => {
+        if (k === 'use_meta_template') data[k] = 1;
+        else if (k === 'days' || k === 'hours') data[k] = parseInt(v) || 0;
+        else data[k] = v;
+    });
+    setBtnLoading(btn, true, 'Salvando...');
+    if (id) {
+        await api(`/api/crm/automations/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+        toast('Automacao atualizada', 'success');
+    } else {
+        await api('/api/crm/automations', { method: 'POST', body: JSON.stringify(data) });
+        toast('Automacao criada', 'success');
+    }
+    setBtnLoading(btn, false);
+    closeModal();
+    loadCrmAutomations();
+}
+
+async function editCrmAutomation(autoId) {
+    const auto = crmAutomationsList.find(a => a.id === autoId);
+    if (auto) showCrmAutomationForm(auto);
+}
+
+async function deleteCrmAutomation(autoId) {
+    if (!confirm('Excluir esta automacao? Follow-ups pendentes serao cancelados.')) return;
+    await api(`/api/crm/automations/${autoId}`, { method: 'DELETE' });
+    toast('Automacao excluida', 'success');
+    loadCrmAutomations();
+}
+
+/* ── CRM Follow-ups ────────────────────────────────────────────────────────── */
+async function loadCrmFollowUps() {
+    const list = document.getElementById('crm-followups-list');
+    list.innerHTML = skeletonRows(4);
+    const status = document.getElementById('crm-followup-status-filter')?.value || '';
+    let url = '/api/crm/follow-ups?limit=200';
+    if (status) url += `&status=${status}`;
+    const followUps = await api(url);
+    if (!followUps || followUps.length === 0) {
+        list.innerHTML = '<div class="empty-state">Nenhum follow-up encontrado</div>';
+        return;
+    }
+    list.innerHTML = `
+        <table>
+            <thead><tr><th>Contato</th><th>Automacao</th><th>Data Prevista</th><th>Mensagem</th><th>Status</th></tr></thead>
+            <tbody>
+            ${followUps.map(fu => {
+                const sched = fu.scheduled_for ? new Date(fu.scheduled_for + 'Z').toLocaleString('pt-BR') : '-';
+                const msg = (fu.message_sent || fu.message_template || '').substring(0, 60);
+                return `<tr>
+                    <td><strong>${esc(fu.contact_name || fu.contact_phone)}</strong><br><span class="muted">${esc(fu.contact_phone)}</span></td>
+                    <td>${esc(fu.automation_name)}</td>
+                    <td>${sched}</td>
+                    <td style="max-width:250px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(msg)}</td>
+                    <td><span class="crm-fu-status-badge crm-fu-${fu.status}">${esc(crmFollowUpLabel(fu.status))}</span></td>
+                </tr>`;
+            }).join('')}
+            </tbody>
+        </table>
+    `;
+}
+
+/* ── CRM Logs ──────────────────────────────────────────────────────────────── */
+async function loadCrmLogs() {
+    const list = document.getElementById('crm-logs-list');
+    list.innerHTML = skeletonRows(4);
+    const logs = await api('/api/crm/logs?limit=200');
+    if (!logs || logs.length === 0) {
+        list.innerHTML = '<div class="empty-state">Nenhum log registrado</div>';
+        return;
+    }
+    list.innerHTML = `
+        <table>
+            <thead><tr><th>Data/Hora</th><th>Contato</th><th>Automacao</th><th>Acao</th><th>Mensagem</th><th>Resultado</th><th>Erro</th></tr></thead>
+            <tbody>
+            ${logs.map(l => {
+                const dt = l.created_at ? new Date(l.created_at + 'Z').toLocaleString('pt-BR') : '-';
+                return `<tr>
+                    <td>${dt}</td>
+                    <td>${esc(l.contact_name || l.contact_phone || '-')}</td>
+                    <td>${esc(l.automation_name || '-')}</td>
+                    <td>${esc(l.action)}</td>
+                    <td style="max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(l.message)}</td>
+                    <td><span class="crm-fu-status-badge crm-fu-${l.result === 'enviado' ? 'enviado' : l.result === 'erro' ? 'erro' : ''}">${esc(l.result)}</span></td>
+                    <td style="max-width:150px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#ef4444">${esc(l.error)}</td>
+                </tr>`;
+            }).join('')}
+            </tbody>
+        </table>
+    `;
+}

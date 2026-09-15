@@ -62,6 +62,10 @@
                     <span class="icon"><svg viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg></span>
                     <span>WhatsApp</span>
                 </a>
+                <a href="#" class="nav-item" data-view="crm">
+                    <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/><path d="M16 21v-2a4 4 0 0 0-1.5-3"/><circle cx="19" cy="4" r="2"/><path d="M19 8v1"/></svg></span>
+                    <span>CRM</span>
+                </a>
             </nav>
             <div class="sidebar-agent">
                 <div class="agent-label">
@@ -410,6 +414,120 @@
                                 <button type="submit" class="btn-primary" id="wa-config-save-btn">Salvar Configuracao</button>
                             </div>
                         </form>
+                    </div>
+                </div>
+            </div>
+
+            <!-- CRM -->
+            <div id="view-crm" class="view">
+                <div class="crm-layout">
+                    <div class="crm-sidebar">
+                        <div class="crm-sidebar-header">
+                            <h2>CRM</h2>
+                        </div>
+                        <nav class="crm-nav">
+                            <a href="#" class="crm-nav-item active" data-crm-view="dashboard" onclick="switchCrmView('dashboard')">
+                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+                                Visao Geral
+                            </a>
+                            <a href="#" class="crm-nav-item" data-crm-view="contacts" onclick="switchCrmView('contacts')">
+                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                                Contatos
+                            </a>
+                            <a href="#" class="crm-nav-item" data-crm-view="automations" onclick="switchCrmView('automations')">
+                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                                Automacoes
+                            </a>
+                            <a href="#" class="crm-nav-item" data-crm-view="followups" onclick="switchCrmView('followups')">
+                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                                Follow-ups
+                            </a>
+                            <a href="#" class="crm-nav-item" data-crm-view="logs" onclick="switchCrmView('logs')">
+                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                                Logs
+                            </a>
+                        </nav>
+                    </div>
+                    <div class="crm-content">
+                        <!-- CRM Dashboard -->
+                        <div id="crm-view-dashboard" class="crm-subview active">
+                            <h1>Visao Geral</h1>
+                            <div class="crm-stats-grid" id="crm-stats-grid"></div>
+                        </div>
+                        <!-- CRM Contacts -->
+                        <div id="crm-view-contacts" class="crm-subview">
+                            <div class="crm-contacts-header">
+                                <h1>Contatos</h1>
+                                <div class="crm-contacts-filters">
+                                    <input type="text" id="crm-contact-search" placeholder="Buscar nome ou telefone..." oninput="loadCrmContacts()">
+                                    <select id="crm-contact-status-filter" onchange="loadCrmContacts()">
+                                        <option value="">Todos os status</option>
+                                        <option value="novo">Novo</option>
+                                        <option value="em_atendimento">Em Atendimento</option>
+                                        <option value="cliente">Cliente</option>
+                                        <option value="inativo">Inativo</option>
+                                        <option value="nao_interessado">Nao Interessado</option>
+                                    </select>
+                                    <select id="crm-contact-days-filter" onchange="loadCrmContacts()">
+                                        <option value="">Qualquer tempo</option>
+                                        <option value="7">7+ dias sem interacao</option>
+                                        <option value="15">15+ dias sem interacao</option>
+                                        <option value="30">30+ dias sem interacao</option>
+                                        <option value="60">60+ dias sem interacao</option>
+                                        <option value="90">90+ dias sem interacao</option>
+                                    </select>
+                                    <select id="crm-contact-followup-filter" onchange="loadCrmContacts()">
+                                        <option value="">Todos</option>
+                                        <option value="sim">Com follow-up pendente</option>
+                                        <option value="nao">Sem follow-up pendente</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div id="crm-contacts-list" class="crm-contacts-list"></div>
+                            <!-- Perfil do contato -->
+                            <div id="crm-contact-profile" class="crm-contact-profile" style="display:none">
+                                <div class="crm-profile-header">
+                                    <button class="btn-back" onclick="closeCrmContactProfile()">&larr; Voltar</button>
+                                    <h2 id="crm-profile-name"></h2>
+                                </div>
+                                <div class="crm-profile-body">
+                                    <div class="crm-profile-info" id="crm-profile-info"></div>
+                                    <div class="crm-profile-messages" id="crm-profile-messages"></div>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- CRM Automations -->
+                        <div id="crm-view-automations" class="crm-subview">
+                            <div class="crm-automations-header">
+                                <h1>Automacoes</h1>
+                                <button class="btn-primary" onclick="showCrmAutomationForm()">
+                                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" style="margin-right:4px;vertical-align:-2px"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                    Nova Automacao
+                                </button>
+                            </div>
+                            <div id="crm-automations-list" class="crm-automations-list"></div>
+                        </div>
+                        <!-- CRM Follow-ups -->
+                        <div id="crm-view-followups" class="crm-subview">
+                            <div class="crm-followups-header">
+                                <h1>Follow-ups</h1>
+                                <div class="crm-followups-filters">
+                                    <select id="crm-followup-status-filter" onchange="loadCrmFollowUps()">
+                                        <option value="">Todos</option>
+                                        <option value="pendente">Pendentes</option>
+                                        <option value="enviado">Enviados</option>
+                                        <option value="cancelado">Cancelados</option>
+                                        <option value="erro">Com Erro</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div id="crm-followups-list" class="crm-followups-list"></div>
+                        </div>
+                        <!-- CRM Logs -->
+                        <div id="crm-view-logs" class="crm-subview">
+                            <h1>Logs</h1>
+                            <div id="crm-logs-list" class="crm-logs-list"></div>
+                        </div>
                     </div>
                 </div>
             </div>

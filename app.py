@@ -33,6 +33,7 @@ import llm
 import database
 import events
 import meta
+import scheduler as crm_scheduler
 
 from meta import send_text, mark_read, send_typing, get_media_url, download_media_bytes
 from meta import get_phone_info, list_templates, get_template, delete_template
@@ -804,6 +805,12 @@ buffer = MessageBuffer(wait_seconds=BUFFER_SECONDS, on_flush=handle_flush)
 
 database.init_db()
 
+# Inicia o scheduler de follow-ups CRM
+try:
+    crm_scheduler.start_scheduler()
+except Exception as e:
+    print(f"[crm] WARN: scheduler nao iniciado: {e}")
+
 print(f"[config] Datafy API: PHONE_ID={os.getenv('DATAFY_PHONE_NUMBER_ID', '') or 'N/A'}")
 print(f"[config] Datafy API: WABA_ID={os.getenv('DATAFY_WABA_ID', '') or 'N/A'}")
 
@@ -958,6 +965,13 @@ def webhook():
             if saved:
                 database.update_conversation(conv["id"], last_message_at=time.strftime("%Y-%m-%dT%H:%M:%S"))
                 database.increment_unread(conv["id"])
+                # CRM: atualizar última interação e cancelar/recriar follow-ups
+                database.update_contact(contact["id"], last_interaction_at=time.strftime("%Y-%m-%dT%H:%M:%S"))
+                database.cancel_follow_ups_for_contact(contact["id"])
+                try:
+                    database.create_follow_ups_for_contact(contact["id"])
+                except Exception as e:
+                    print(f"[crm] WARN: falha ao recriar follow-ups: {e}")
                 events.emit("new_message", {
                     "conversation_id": conv["id"],
                     "contact_name": contact.get("name", ""),
@@ -1990,6 +2004,140 @@ def api_whatsapp_config_post():
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ── CRM API ─────────────────────────────────────────────────────────────────
+
+@app.get("/api/crm/dashboard")
+@login_required
+def api_crm_dashboard():
+    return jsonify(database.get_crm_dashboard_stats())
+
+
+@app.get("/api/crm/contacts")
+@login_required
+def api_crm_contacts_list():
+    status = request.args.get("status", "")
+    tag_id = int(request.args.get("tag_id", "0"))
+    days_without = int(request.args.get("days_without", "0"))
+    has_follow_up = request.args.get("has_follow_up", "")
+    search = request.args.get("search", "")
+    limit = min(int(request.args.get("limit", "100")), 500)
+    offset = max(int(request.args.get("offset", "0")), 0)
+    contacts = database.list_contacts_crm(
+        status=status, tag_id=tag_id, days_without=days_without,
+        has_follow_up=has_follow_up, search=search, limit=limit, offset=offset,
+    )
+    return jsonify(contacts)
+
+
+@app.get("/api/crm/contacts/<int:contact_id>")
+@login_required
+def api_crm_contact_detail(contact_id):
+    detail = database.get_crm_contact_detail(contact_id)
+    if not detail:
+        return jsonify({"error": "not found"}), 404
+    return jsonify(detail)
+
+
+@app.put("/api/crm/contacts/<int:contact_id>/status")
+@login_required
+def api_crm_contact_update_status(contact_id):
+    data = request.get_json(silent=True) or {}
+    status = data.get("status", "")
+    if status not in ("novo", "em_atendimento", "cliente", "inativo", "nao_interessado", ""):
+        return jsonify({"error": "invalid status"}), 400
+    database.update_contact(contact_id, crm_status=status)
+    return jsonify({"ok": True})
+
+
+@app.put("/api/crm/contacts/<int:contact_id>/notes")
+@login_required
+def api_crm_contact_update_notes(contact_id):
+    data = request.get_json(silent=True) or {}
+    notes = data.get("notes", "")
+    database.update_contact(contact_id, notes=notes)
+    return jsonify({"ok": True})
+
+
+@app.get("/api/crm/automations")
+@login_required
+def api_crm_automations_list():
+    return jsonify(database.list_automations())
+
+
+@app.post("/api/crm/automations")
+@login_required
+def api_crm_automations_create():
+    data = request.get_json(silent=True) or {}
+    name = data.get("name", "").strip()
+    if not name:
+        return jsonify({"error": "name required"}), 400
+    auto = database.create_automation(
+        name=name,
+        days=int(data.get("days", 0)),
+        hours=int(data.get("hours", 0)),
+        message_template=data.get("message_template", ""),
+        use_meta_template=int(data.get("use_meta_template", 0)),
+        meta_template_name=data.get("meta_template_name", ""),
+        meta_template_language=data.get("meta_template_language", "pt_BR"),
+        action_tag_add=data.get("action_tag_add", ""),
+        action_tag_remove=data.get("action_tag_remove", ""),
+        action_status_change=data.get("action_status_change", ""),
+        is_active=int(data.get("is_active", 1)),
+        send_window_start=data.get("send_window_start", "08:00"),
+        send_window_end=data.get("send_window_end", "18:00"),
+    )
+    return jsonify(auto)
+
+
+@app.put("/api/crm/automations/<int:auto_id>")
+@login_required
+def api_crm_automations_update(auto_id):
+    data = request.get_json(silent=True) or {}
+    database.update_automation(auto_id, **data)
+    return jsonify({"ok": True})
+
+
+@app.delete("/api/crm/automations/<int:auto_id>")
+@login_required
+def api_crm_automations_delete(auto_id):
+    database.delete_automation(auto_id)
+    return jsonify({"ok": True})
+
+
+@app.put("/api/crm/automations/<int:auto_id>/toggle")
+@login_required
+def api_crm_automations_toggle(auto_id):
+    auto = database.get_automation(auto_id)
+    if not auto:
+        return jsonify({"error": "not found"}), 404
+    new_val = 0 if auto["is_active"] else 1
+    database.update_automation(auto_id, is_active=new_val)
+    return jsonify({"ok": True, "is_active": new_val})
+
+
+@app.get("/api/crm/follow-ups")
+@login_required
+def api_crm_follow_ups_list():
+    status = request.args.get("status", "")
+    limit = min(int(request.args.get("limit", "100")), 500)
+    offset = max(int(request.args.get("offset", "0")), 0)
+    return jsonify(database.list_follow_ups(status=status, limit=limit, offset=offset))
+
+
+@app.get("/api/crm/follow-ups/pending")
+@login_required
+def api_crm_follow_ups_pending():
+    return jsonify(database.get_pending_follow_ups())
+
+
+@app.get("/api/crm/logs")
+@login_required
+def api_crm_logs_list():
+    limit = min(int(request.args.get("limit", "100")), 500)
+    offset = max(int(request.args.get("offset", "0")), 0)
+    return jsonify(database.list_crm_logs(limit=limit, offset=offset))
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

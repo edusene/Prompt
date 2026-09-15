@@ -5,7 +5,7 @@ O agente Gemini continua usando memory.py (in-memory) para seu histórico.
 """
 
 import db
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 
@@ -92,6 +92,27 @@ def init_db() -> None:
         except Exception:
             pass
 
+    # Migração CRM: adiciona crm_status e last_interaction_at na tabela contacts
+    ccols2 = db.table_columns("contacts")
+    if "crm_status" not in ccols2:
+        try:
+            db.execute("ALTER TABLE contacts ADD COLUMN crm_status TEXT DEFAULT 'novo'")
+            print("[db] coluna crm_status adicionada em contacts")
+        except Exception:
+            pass
+    if "last_interaction_at" not in ccols2:
+        try:
+            db.execute("ALTER TABLE contacts ADD COLUMN last_interaction_at TEXT")
+            print("[db] coluna last_interaction_at adicionada em contacts")
+        except Exception:
+            pass
+
+    # Migração CRM: cria tabelas de automações, follow-ups e logs
+    crm_tables = _get_tables()
+    if "crm_automations" not in crm_tables:
+        db.executescript(CRM_SCHEMA)
+        print("[db] tabelas CRM criadas")
+
     _ensure_indexes()
 
 
@@ -161,6 +182,52 @@ CREATE TABLE IF NOT EXISTS knowledge_files (
     created_at TEXT DEFAULT NOW(),
     updated_at TEXT DEFAULT NOW()
 );
+"""
+
+CRM_SCHEMA = """
+CREATE TABLE IF NOT EXISTS crm_automations (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    days INTEGER DEFAULT 0,
+    hours INTEGER DEFAULT 0,
+    message_template TEXT DEFAULT '',
+    use_meta_template INTEGER DEFAULT 0,
+    meta_template_name TEXT DEFAULT '',
+    meta_template_language TEXT DEFAULT 'pt_BR',
+    action_tag_add TEXT DEFAULT '',
+    action_tag_remove TEXT DEFAULT '',
+    action_status_change TEXT DEFAULT '',
+    is_active INTEGER DEFAULT 1,
+    send_window_start TEXT DEFAULT '08:00',
+    send_window_end TEXT DEFAULT '18:00',
+    created_at TEXT DEFAULT NOW(),
+    updated_at TEXT DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS crm_follow_ups (
+    id SERIAL PRIMARY KEY,
+    automation_id INTEGER NOT NULL REFERENCES crm_automations(id),
+    contact_id INTEGER NOT NULL REFERENCES contacts(id),
+    scheduled_for TEXT NOT NULL,
+    status TEXT DEFAULT 'pendente',
+    message_sent TEXT DEFAULT '',
+    error_message TEXT DEFAULT '',
+    sent_at TEXT,
+    created_at TEXT DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS crm_logs (
+    id SERIAL PRIMARY KEY,
+    automation_id INTEGER REFERENCES crm_automations(id),
+    contact_id INTEGER REFERENCES contacts(id),
+    action TEXT DEFAULT 'send',
+    message TEXT DEFAULT '',
+    result TEXT DEFAULT '',
+    error TEXT DEFAULT '',
+    created_at TEXT DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_follow_ups_status ON crm_follow_ups(status);
+CREATE INDEX IF NOT EXISTS idx_follow_ups_scheduled ON crm_follow_ups(scheduled_for);
+CREATE INDEX IF NOT EXISTS idx_follow_ups_contact ON crm_follow_ups(contact_id);
+CREATE INDEX IF NOT EXISTS idx_automations_active ON crm_automations(is_active);
 """
 
 SCHEMA = """
@@ -257,6 +324,54 @@ CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
 CREATE INDEX IF NOT EXISTS idx_conversations_contact ON conversations(contact_id);
 CREATE INDEX IF NOT EXISTS idx_conversations_status ON conversations(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_contact ON tasks(contact_id);
+
+CREATE TABLE IF NOT EXISTS crm_automations (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    days INTEGER DEFAULT 0,
+    hours INTEGER DEFAULT 0,
+    message_template TEXT DEFAULT '',
+    use_meta_template INTEGER DEFAULT 0,
+    meta_template_name TEXT DEFAULT '',
+    meta_template_language TEXT DEFAULT 'pt_BR',
+    action_tag_add TEXT DEFAULT '',
+    action_tag_remove TEXT DEFAULT '',
+    action_status_change TEXT DEFAULT '',
+    is_active INTEGER DEFAULT 1,
+    send_window_start TEXT DEFAULT '08:00',
+    send_window_end TEXT DEFAULT '18:00',
+    created_at TEXT DEFAULT NOW(),
+    updated_at TEXT DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS crm_follow_ups (
+    id SERIAL PRIMARY KEY,
+    automation_id INTEGER NOT NULL REFERENCES crm_automations(id),
+    contact_id INTEGER NOT NULL REFERENCES contacts(id),
+    scheduled_for TEXT NOT NULL,
+    status TEXT DEFAULT 'pendente',
+    message_sent TEXT DEFAULT '',
+    error_message TEXT DEFAULT '',
+    sent_at TEXT,
+    created_at TEXT DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS crm_logs (
+    id SERIAL PRIMARY KEY,
+    automation_id INTEGER REFERENCES crm_automations(id),
+    contact_id INTEGER REFERENCES contacts(id),
+    action TEXT DEFAULT 'send',
+    message TEXT DEFAULT '',
+    result TEXT DEFAULT '',
+    error TEXT DEFAULT '',
+    created_at TEXT DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_follow_ups_status ON crm_follow_ups(status);
+CREATE INDEX IF NOT EXISTS idx_follow_ups_scheduled ON crm_follow_ups(scheduled_for);
+CREATE INDEX IF NOT EXISTS idx_follow_ups_contact ON crm_follow_ups(contact_id);
+CREATE INDEX IF NOT EXISTS idx_automations_active ON crm_automations(is_active);
+CREATE INDEX IF NOT EXISTS idx_contacts_crm_status ON contacts(crm_status);
 """
 
 
@@ -996,3 +1111,342 @@ def get_recent_messages(phone: str, limit: int = 20) -> list[dict]:
         role = "user" if r["direction"] == "in" else "assistant"
         messages.append({"role": role, "parts": [{"text": r["body"]}]})
     return messages
+
+
+# ── CRM: Automações ─────────────────────────────────────────────────────────
+
+def list_automations() -> list[dict]:
+    return db.fetch_all("SELECT * FROM crm_automations ORDER BY created_at DESC")
+
+
+def get_automation(automation_id: int) -> dict | None:
+    return db.fetch_one("SELECT * FROM crm_automations WHERE id=?", (automation_id,))
+
+
+def create_automation(**fields) -> dict:
+    now = datetime.utcnow().isoformat()
+    db.execute(
+        "INSERT INTO crm_automations (name, days, hours, message_template, use_meta_template, "
+        "meta_template_name, meta_template_language, action_tag_add, action_tag_remove, "
+        "action_status_change, is_active, send_window_start, send_window_end, created_at, updated_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            fields.get("name", ""),
+            fields.get("days", 0),
+            fields.get("hours", 0),
+            fields.get("message_template", ""),
+            fields.get("use_meta_template", 0),
+            fields.get("meta_template_name", ""),
+            fields.get("meta_template_language", "pt_BR"),
+            fields.get("action_tag_add", ""),
+            fields.get("action_tag_remove", ""),
+            fields.get("action_status_change", ""),
+            fields.get("is_active", 1),
+            fields.get("send_window_start", "08:00"),
+            fields.get("send_window_end", "18:00"),
+            now,
+            now,
+        ),
+    )
+    return db.fetch_one("SELECT * FROM crm_automations WHERE created_at=?", (now,))
+
+
+def update_automation(automation_id: int, **fields) -> None:
+    allowed = (
+        "name", "days", "hours", "message_template", "use_meta_template",
+        "meta_template_name", "meta_template_language", "action_tag_add",
+        "action_tag_remove", "action_status_change", "is_active",
+        "send_window_start", "send_window_end",
+    )
+    sets, vals = [], []
+    for k, v in fields.items():
+        if k in allowed:
+            sets.append(f"{k}=?")
+            vals.append(v)
+    if sets:
+        sets.append("updated_at=?")
+        vals.append(datetime.utcnow().isoformat())
+        vals.append(automation_id)
+        db.execute(f"UPDATE crm_automations SET {','.join(sets)} WHERE id=?", tuple(vals))
+
+
+def delete_automation(automation_id: int) -> None:
+    db.execute("DELETE FROM crm_follow_ups WHERE automation_id=?", (automation_id,))
+    db.execute("DELETE FROM crm_automations WHERE id=?", (automation_id,))
+
+
+# ── CRM: Follow-ups ─────────────────────────────────────────────────────────
+
+def create_follow_up(automation_id: int, contact_id: int, scheduled_for: str) -> dict | None:
+    """Cria follow-up pendente. Retorna None se já existir um pendente para esta automação+contato."""
+    existing = db.fetch_one(
+        "SELECT id FROM crm_follow_ups WHERE automation_id=? AND contact_id=? AND status='pendente'",
+        (automation_id, contact_id),
+    )
+    if existing:
+        return None
+    now = datetime.utcnow().isoformat()
+    fu_id = db.execute_returning(
+        "INSERT INTO crm_follow_ups (automation_id, contact_id, scheduled_for, created_at) VALUES (?,?,?,?)",
+        (automation_id, contact_id, scheduled_for, now),
+    )
+    if fu_id:
+        return db.fetch_one("SELECT * FROM crm_follow_ups WHERE id=?", (fu_id,))
+    return None
+
+
+def get_pending_follow_ups() -> list[dict]:
+    """Retorna follow-ups pendentes com dados da automação e contato."""
+    return db.fetch_all(
+        "SELECT fu.*, "
+        "a.name as automation_name, a.message_template, a.use_meta_template, "
+        "a.meta_template_name, a.meta_template_language, a.action_tag_add, "
+        "a.action_tag_remove, a.action_status_change, a.send_window_start, a.send_window_end, "
+        "c.name as contact_name, c.phone as contact_phone "
+        "FROM crm_follow_ups fu "
+        "JOIN crm_automations a ON fu.automation_id=a.id "
+        "JOIN contacts c ON fu.contact_id=c.id "
+        "WHERE fu.status='pendente' AND a.is_active=1 "
+        "ORDER BY fu.scheduled_for ASC"
+    )
+
+
+def list_follow_ups(status: str = "", limit: int = 100, offset: int = 0) -> list[dict]:
+    where = []
+    params: list = []
+    if status:
+        where.append("fu.status=?")
+        params.append(status)
+    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+    params.extend([limit, offset])
+    return db.fetch_all(
+        f"SELECT fu.*, a.name as automation_name, c.name as contact_name, c.phone as contact_phone "
+        f"FROM crm_follow_ups fu "
+        f"JOIN crm_automations a ON fu.automation_id=a.id "
+        f"JOIN contacts c ON fu.contact_id=c.id "
+        f"{where_sql} ORDER BY fu.created_at DESC LIMIT ? OFFSET ?",
+        tuple(params),
+    )
+
+
+def update_follow_up_status(fu_id: int, status: str, sent_at: str = "", error_message: str = "", message_sent: str = "") -> None:
+    sets = ["status=?"]
+    vals: list = [status]
+    if sent_at:
+        sets.append("sent_at=?")
+        vals.append(sent_at)
+    if error_message:
+        sets.append("error_message=?")
+        vals.append(error_message)
+    if message_sent:
+        sets.append("message_sent=?")
+        vals.append(message_sent)
+    vals.append(fu_id)
+    db.execute(f"UPDATE crm_follow_ups SET {','.join(sets)} WHERE id=?", tuple(vals))
+
+
+def update_follow_up_scheduled(fu_id: int, new_scheduled_for: str) -> None:
+    db.execute("UPDATE crm_follow_ups SET scheduled_for=? WHERE id=?", (new_scheduled_for, fu_id))
+
+
+def cancel_follow_ups_for_contact(contact_id: int) -> int:
+    """Cancela todos os follow-ups pendentes de um contato. Retorna qtd cancelada."""
+    result = db.execute(
+        "UPDATE crm_follow_ups SET status='cancelado' WHERE contact_id=? AND status='pendente'",
+        (contact_id,),
+    )
+    return 0
+
+
+def get_follow_ups_stats() -> dict:
+    pending = db.fetch_one("SELECT COUNT(*) as cnt FROM crm_follow_ups WHERE status='pendente'")["cnt"]
+    sent = db.fetch_one("SELECT COUNT(*) as cnt FROM crm_follow_ups WHERE status='enviado'")["cnt"]
+    sent_today = db.fetch_one(
+        "SELECT COUNT(*) as cnt FROM crm_follow_ups WHERE status='enviado' AND sent_at >= date('now')"
+    )["cnt"]
+    cancelled = db.fetch_one("SELECT COUNT(*) as cnt FROM crm_follow_ups WHERE status='cancelado'")["cnt"]
+    errors = db.fetch_one("SELECT COUNT(*) as cnt FROM crm_follow_ups WHERE status='erro'")["cnt"]
+    return {
+        "pending": pending,
+        "sent": sent,
+        "sent_today": sent_today,
+        "cancelled": cancelled,
+        "errors": errors,
+    }
+
+
+# ── CRM: Logs ───────────────────────────────────────────────────────────────
+
+def create_crm_log(automation_id: int = 0, contact_id: int = 0, action: str = "send",
+                   message: str = "", result: str = "", error: str = "") -> dict:
+    now = datetime.utcnow().isoformat()
+    log_id = db.execute_returning(
+        "INSERT INTO crm_logs (automation_id, contact_id, action, message, result, error, created_at) "
+        "VALUES (?,?,?,?,?,?,?)",
+        (automation_id, contact_id, action, message, result, error, now),
+    )
+    if log_id:
+        return db.fetch_one("SELECT * FROM crm_logs WHERE id=?", (log_id,))
+    return {}
+
+
+def list_crm_logs(limit: int = 100, offset: int = 0) -> list[dict]:
+    return db.fetch_all(
+        "SELECT l.*, a.name as automation_name, c.name as contact_name, c.phone as contact_phone "
+        "FROM crm_logs l "
+        "LEFT JOIN crm_automations a ON l.automation_id=a.id "
+        "LEFT JOIN contacts c ON l.contact_id=c.id "
+        "ORDER BY l.created_at DESC LIMIT ? OFFSET ?",
+        (limit, offset),
+    )
+
+
+# ── CRM: Contatos ───────────────────────────────────────────────────────────
+
+def list_contacts_crm(status: str = "", tag_id: int = 0, days_without: int = 0,
+                      has_follow_up: str = "", search: str = "",
+                      limit: int = 100, offset: int = 0) -> list[dict]:
+    """Lista contatos CRM com filtros."""
+    where = []
+    params: list = []
+
+    if status:
+        where.append("ct.crm_status=?")
+        params.append(status)
+
+    if tag_id:
+        where.append("ct.id IN (SELECT contact_id FROM contact_tags WHERE tag_id=?)")
+        params.append(tag_id)
+
+    if days_without > 0:
+        where.append(
+            f"ct.last_interaction_at IS NOT NULL AND ct.last_interaction_at < datetime('now', '-{days_without} days')"
+        )
+
+    if has_follow_up == "sim":
+        where.append("ct.id IN (SELECT contact_id FROM crm_follow_ups WHERE status='pendente')")
+    elif has_follow_up == "nao":
+        where.append("ct.id NOT IN (SELECT contact_id FROM crm_follow_ups WHERE status='pendente')")
+
+    if search:
+        where.append("(ct.name LIKE ? OR ct.phone LIKE ?)")
+        params.extend([f"%{search}%", f"%{search}%"])
+
+    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+    params.extend([limit, offset])
+
+    rows = db.fetch_all(
+        f"SELECT ct.*, "
+        f"(SELECT c.last_message_at FROM conversations c WHERE c.contact_id=ct.id ORDER BY c.id DESC LIMIT 1) as last_message_at "
+        f"FROM contacts ct "
+        f"{where_sql} ORDER BY ct.last_interaction_at DESC NULLS LAST LIMIT ? OFFSET ?",
+        tuple(params),
+    )
+
+    # Adicionar tags e dias sem interação
+    result = []
+    now = datetime.utcnow()
+    for r in rows:
+        item = dict(r)
+        item["tags"] = get_contact_tags(item["id"])
+        # Calcular dias sem interação
+        lia = item.get("last_interaction_at")
+        if lia:
+            try:
+                li_dt = datetime.fromisoformat(lia.replace("Z", "+00:00").replace("+00:00", ""))
+                delta = now - li_dt
+                item["days_without_interaction"] = delta.days
+            except Exception:
+                item["days_without_interaction"] = None
+        else:
+            item["days_without_interaction"] = None
+        result.append(item)
+
+    return result
+
+
+def get_crm_contact_detail(contact_id: int) -> dict | None:
+    """Retorna detalhe completo do contato CRM."""
+    contact = get_contact_by_id(contact_id)
+    if not contact:
+        return None
+    item = dict(contact)
+    item["tags"] = get_contact_tags(contact_id)
+    item["follow_ups"] = db.fetch_all(
+        "SELECT fu.*, a.name as automation_name "
+        "FROM crm_follow_ups fu JOIN crm_automations a ON fu.automation_id=a.id "
+        "WHERE fu.contact_id=? ORDER BY fu.created_at DESC",
+        (contact_id,),
+    )
+    item["logs"] = db.fetch_all(
+        "SELECT l.*, a.name as automation_name "
+        "FROM crm_logs l LEFT JOIN crm_automations a ON l.automation_id=a.id "
+        "WHERE l.contact_id=? ORDER BY l.created_at DESC LIMIT 50",
+        (contact_id,),
+    )
+    lia = item.get("last_interaction_at")
+    now = datetime.utcnow()
+    if lia:
+        try:
+            li_dt = datetime.fromisoformat(lia.replace("Z", "+00:00").replace("+00:00", ""))
+            item["days_without_interaction"] = (now - li_dt).days
+        except Exception:
+            item["days_without_interaction"] = None
+    else:
+        item["days_without_interaction"] = None
+    return item
+
+
+def get_crm_dashboard_stats() -> dict:
+    """Estatísticas do dashboard CRM."""
+    total = db.fetch_one("SELECT COUNT(*) as cnt FROM contacts")["cnt"]
+    novo = db.fetch_one("SELECT COUNT(*) as cnt FROM contacts WHERE crm_status='novo'")["cnt"]
+    em_atendimento = db.fetch_one("SELECT COUNT(*) as cnt FROM contacts WHERE crm_status='em_atendimento'")["cnt"]
+    cliente = db.fetch_one("SELECT COUNT(*) as cnt FROM contacts WHERE crm_status='cliente'")["cnt"]
+    inativo = db.fetch_one("SELECT COUNT(*) as cnt FROM contacts WHERE crm_status='inativo'")["cnt"]
+    nao_interessado = db.fetch_one("SELECT COUNT(*) as cnt FROM contacts WHERE crm_status='nao_interessado'")["cnt"]
+    follow_ups = get_follow_ups_stats()
+    return {
+        "total_contacts": total,
+        "novo": novo,
+        "em_atendimento": em_atendimento,
+        "cliente": cliente,
+        "inativo": inativo,
+        "nao_interessado": nao_interessado,
+        "follow_ups": follow_ups,
+    }
+
+
+def create_follow_ups_for_contact(contact_id: int) -> int:
+    """Cria follow-ups pendentes para um contato baseado nas automações ativas. Retorna qtd criada."""
+    contact = get_contact_by_id(contact_id)
+    if not contact:
+        return 0
+    last_interaction = contact.get("last_interaction_at")
+    if not last_interaction:
+        conv = db.fetch_one(
+            "SELECT last_message_at FROM conversations WHERE contact_id=? ORDER BY id DESC LIMIT 1",
+            (contact_id,),
+        )
+        last_interaction = conv["last_message_at"] if conv else None
+    if not last_interaction:
+        return 0
+
+    try:
+        li_dt = datetime.fromisoformat(last_interaction.replace("Z", "+00:00").replace("+00:00", ""))
+    except Exception:
+        return 0
+
+    automations = db.fetch_all("SELECT * FROM crm_automations WHERE is_active=1")
+    created = 0
+    for auto in automations:
+        total_seconds = auto["days"] * 86400 + auto["hours"] * 3600
+        if total_seconds <= 0:
+            continue
+        scheduled_for = li_dt + timedelta(seconds=total_seconds)
+        if scheduled_for < datetime.utcnow():
+            scheduled_for = datetime.utcnow() + timedelta(minutes=1)
+        fu = create_follow_up(auto["id"], contact_id, scheduled_for.isoformat())
+        if fu:
+            created += 1
+    return created
