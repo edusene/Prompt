@@ -52,7 +52,7 @@ Nunca misture sabores na mesma porcao."""
         queries = []
 
         msg_lower = message.lower()
-        for sabor in ["coxinha", "esfirra", "empadinha", "quibe", "pastel", "rissole", "canudinho", " enroladinho"]:
+        for sabor in ["coxinha", "esfirra", "empadinha", "quibe", "pastel", "rissole", "canudinho", "enroladinho", "quiche", "saltenha", "panqueca", "bomba", "empada"]:
             if sabor in msg_lower:
                 queries.append(sabor)
                 break
