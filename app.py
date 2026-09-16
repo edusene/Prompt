@@ -34,6 +34,7 @@ import database
 import events
 import meta
 import cardapio
+import parse_knowledge
 import scheduler as crm_scheduler
 
 from meta import send_text, mark_read, send_typing, get_media_url, download_media_bytes
@@ -51,31 +52,36 @@ DATAFY_WEBHOOK_SECRET = os.getenv("DATAFY_WEBHOOK_SECRET", "")
 
 _BASE_PROMPT = os.getenv(
     "SYSTEM_PROMPT",
-    "Voce e um assistente util que responde no WhatsApp. "
-    "Seja breve, natural, use quebras de paragrafo (\\n\\n) quando fizer sentido dividir ideias.",
+    "Voce e a Sandrinha da BALBS SALGADOS, em Porto Velho - RO. "
+    "Responda usando a estrutura de blocos definida no prompt operacional.",
 )
 
-FULL_SYSTEM_PROMPT = _BASE_PROMPT + (
-    "\n\nVoce pode receber e analisar midias enviadas pelo cliente: "
-    "imagens (fotos, prints, documentos escaneados), audios (mensagens de voz), "
-    "videos e figurinhas. "
-    "Quando receber uma imagem, descreva o que ve e responda de acordo. "
-    "Quando receber um audio, transcreva mentalmente o conteudo e responda ao que foi dito. "
-    "Seja util e objetivo ao lidar com midias."
-    "\n\nVoce tem acesso a uma tool 'search_knowledge' para buscar informacoes "
+# Carrega o system prompt do arquivo .docx (com adapted rules)
+_PROMPT_FROM_DOCX = parse_knowledge.get_prompt_cached()
+
+# Se o docx foi carregado, usa ele; senao, usa o fallback
+if _PROMPT_FROM_DOCX:
+    FULL_SYSTEM_PROMPT = _PROMPT_FROM_DOCX
+else:
+    FULL_SYSTEM_PROMPT = _BASE_PROMPT
+
+# Tools description (sempre injetada)
+FULL_SYSTEM_PROMPT += (
+    "\n\n=== TOOLS DISPONIVEIS ==="
+    "\nVoce tem acesso a uma tool 'search_knowledge' para buscar informacoes "
     "na base de conhecimento. Chame essa tool sempre que precisar consultar "
     "produtos, precos, politicas ou qualquer informacao da empresa."
-    "\n\nVoce tem acesso a uma tool 'transfer_to_human' para transferir o atendimento a um humano. "
+    "\nVoce tem acesso a uma tool 'transfer_to_human' para transferir o atendimento a um humano. "
     "USE essa tool quando: o cliente pedir explicitamente para falar com um atendente ou humano; "
     "a situacao envolver reclamacao grave, cancelamento, reembolso ou devolucao; "
     "voce nao souber responder adequadamente; "
     "a solicitacao estiver fora do seu escopo; "
     "ou quando perceber que o cliente esta frustrado ou insatisfeito. "
     "Ao transferir, informe brevemente o motivo no parametro 'reason'."
-    "\n\nVoce tem acesso a uma tool 'calculate_order' para validar pedidos no cardapio. "
+    "\nVoce tem acesso a uma tool 'calculate_order' para validar pedidos no cardapio. "
     "Chame essa tool ANTES de confirmar o pedido com o cliente, informando os itens e o bairro de entrega. "
     "Ela valida produtos, quantidades, calcula subtotal, frete e total."
-    "\n\nVoce tem acesso a uma tool 'send_order_to_cardapio' para enviar pedidos confirmados para o cardapio digital. "
+    "\nVoce tem acesso a uma tool 'send_order_to_cardapio' para enviar pedidos confirmados para o cardapio digital. "
     "USE essa tool SOMENTE apos o cliente ter confirmado o pedido completo e voce ter validado com calculate_order. "
     "Nunca envie sem confirmacao explicita do cliente."
 )
@@ -795,202 +801,23 @@ def handle_flush(user: str, items: list[dict]) -> None:
                 "Se o cliente disse algo como '1 de 25 mesmo', ele está confirmando a porção de 25 que você ofereceu, NÃO pedindo 1 unidade individual.\n"
             )
         # --- FIM DETECÇÃO DE CONFIRMAÇÃO ---
-        knowledge_index = _build_knowledge_index()
-        if knowledge_index:
+
+        # Injeta dados do xlsx (cardapio, bairros, horarios, pagamentos)
+        knowledge_dados = parse_knowledge.get_knowledge_dados()
+        if knowledge_dados:
             dynamic_prompt += (
-                "\n\nBase de conhecimento disponivel (use a tool search_knowledge "
-                "para buscar mais detalhes quando precisar):\n"
-                + knowledge_index
+                "\n\n=== BASE DE DADOS OFICIAL ===\n"
+                "Use estes dados como FONTE VERDADEIRA para precos, taxas de frete, "
+                "horarios de funcionamento e formas de pagamento.\n\n"
+                + knowledge_dados
             )
-
-        # Injeta TODO o conteudo do knowledge para o LLM ter acesso completo
-        full_knowledge = knowledge_rag.get_full_knowledge_content()
-        if full_knowledge:
-            dynamic_prompt += (
-                "\n\n⚠️ CONTEUDO COMPLETO DA BASE DE CONHECIMENTO:\n"
-                "Leia TODO o conteudo abaixo antes de responder. "
-                "Use estas informacoes como FONTE VERDADEIRA para precos, produtos, horarios, regras.\n\n"
-                + full_knowledge
-            )
-
-        # Injeta regras de porcao e NAO PRESUMIR (antes do fluxo de pedido)
-        dynamic_prompt += (
-            "\n\n⚠️ REGRAS DE PORCAO — SALGADOS DE FESTA:\n"
-            "1. Salgados de festa sao vendidos em porcoes de 25 unidades POR SABOR.\n"
-            "2. Se o cliente pedir uma quantidade que NAO e multiplo de 25, ARREDONDE "
-            "para o proximo multiplo de 25:\n"
-            "   - 1 a 25 unidades → 25 unidades (1 porcao)\n"
-            "   - 26 a 50 unidades → 50 unidades (2 porcoes)\n"
-            "   - 51 a 75 unidades → 75 unidades (3 porcoes)\n"
-            "   Exemplo: cliente pede 30 coxinhas → voce oferece 50 coxinhas.\n"
-            "3. IMPORTANTE: Se o cliente ja diz uma quantidade que E MULTIPLO DE 25 "
-            "(25, 50, 75, 100, etc), NAO MUDE a quantidade. 50 unidades ja sao 2 porcoes de 25. "
-            "NAO converta 50 para 25+25. Confirme a quantidade pedida.\n"
-            "   Exemplo: cliente pede '50 coxinhas' → confirme '50 coxinhas de frango?'\n"
-            "4. NUNCA ofereca quantidades intermediarias (30, 40, 60, etc).\n"
-            "5. Se o cliente ja informou o sabor (ex: 'coxinha de frango'), NAO pergunte qual sabor.\n"
-            "6. Se o produto tem SABORES (ex: rissole de carne ou queijo e presunto), "
-            "SEMPRE pergunte qual sabor, mesmo que o cliente tenha pedido o produto. "
-            "So pule essa pergunta se o knowledge retornar apenas UM sabor para o produto.\n"
-            "   Exemplo: 'Rissoles sao de carne ou de queijo e presunto?'\n"
-            "7. So ofereca opcao de dois sabores SE o cliente pedir expressamente.\n"
-            "8. Confirme a quantidade correta COM O CLIENTE antes de prosseguir.\n"
-            "   Exemplo: 'Voce quer 50 coxinhas de frango e 50 rissoles? "
-            "Os rissoles serao de carne ou de queijo e presunto?'\n"
-            "9. PRECO — Use SEMPRE o preco EXATO retornado pelo search_knowledge. "
-            "Para salgados de festa, o preco no knowledge ja e da PORCAO (25 unidades). "
-            "NAO multiplique quantidade x preco se o preco ja for da porcao. "
-            "Exemplo: knowledge retorna 'Coxinha de Frango - R$20,00 (porcao de 25)'. "
-            "Cliente pede 50 → sao 2 porcoes → total R$40,00. "
-            "Cliente pede 25 → 1 porcao → total R$20,00.\n"
-            "Se o knowledge retornar preco POR UNIDADE, ai multiplique: quantidade x preco.\n"
-            "NUNCA informe apenas o preco SEM calcular e mostrar o total ao cliente.\n"
-            "\n\n⚠️ NAO PRESUMA NADA — O CLIENTE QUE DIZ:\n"
-            "1. NAO diga 'amanha' ou 'para amanha' sem o cliente ter informado a data.\n"
-            "2. NAO presuma ENTREGA — so assuma se o cliente disse 'entrega' ou 'entregar'.\n"
-            "3. NAO presuma RETIRADA — so assuma se o cliente disse 'retirada' ou 'retirar'.\n"
-            "4. NAO presuma BAIRRO — so assuma se o cliente informou o bairro.\n"
-            "5. NAO presuma PAGAMENTO — so assuma se o cliente informou a forma.\n"
-            "6. NAO presuma DATA — so assuma se o cliente informou a data.\n"
-            "7. NAO introduza opcoes de sabores ou quantidades diferentes do que o cliente pediu.\n"
-            "8. So ofereca UPSELL (outro sabor, mais unidades) DEPOIS de confirmar o item principal.\n"
-            "\n\n⚠️ NAO INVENTE CATEGORIAS:\n"
-            "- Use sempre o NOME EXATO do produto como retornado pelo search_knowledge.\n"
-            "- NAO reclassifique produtos em categorias (ex: NAO diga 'Salgados Grandes').\n"
-            "- Se o knowledge diz 'Coxinha de Frango', use 'Coxinha de Frango'.\n"
-            "- NAO crie nomes de produtos que nao existem no knowledge.\n"
-            "\n\n⚠️ NAO ESQUECA O CONTEXTO:\n"
-            "- Leia o HISTORICO DA CONVERSA antes de responder.\n"
-            "- Se o cliente ja confirmou itens, quantidades, sabores, NAO peça para confirmar novamente.\n"
-            "- Se o ultimo pedido ja foi confirmado, NAO recomece o fluxo do zero.\n"
-            "- Mantenha TODAS as informacoes do pedido ate o envio final.\n"
-            "\n\n⚠️ NAO INVENTE PRECOS:\n"
-            "- NUNCA informe um preco que NAO tenha vindo do search_knowledge NESTA CONVERSA.\n"
-            "- Se o search_knowledge nao retornou preco do produto, CHAME search_knowledge NOVAMENTE.\n"
-            "- NUNCA adivinhe ou calcule precos de cabeca — SEMPRE busque no knowledge.\n"
-            "- O preco retornado pelo search_knowledge e a FONTE VERDADEIRA de preco.\n"
-        )
-
-        # Injeta regras de fluxo de pedido (reforco das regras do SYSTEM_PROMPT)
-        dynamic_prompt += (
-            "\n\n⚠️ FLUXO OBRIGATORIO PARA PEDIDOS:\n"
-            "1. Ao receber um pedido, CHAME search_knowledge DUAS VEZES:\n"
-            "   a) search_knowledge(query='horario funcionamento') — para saber o horario.\n"
-            "   b) search_knowledge(query='[nome do produto] preco porcao') — para buscar o preco.\n"
-            "   NAO prossiba SEM AMBAS as buscas. Se o produto tem sabores, inclua no query.\n"
-            "   Exemplo: 'coxinha de frango preco porcao'.\n"
-            "2. Aplique a REGRAS DE PORCAO: se nao for multiplo de 25, arredonde. "
-            "Se JA for multiplo de 25, NAO mude a quantidade.\n"
-            "3. Se o produto tem sabores (ex: rissole), pergunte qual sabor.\n"
-            "4. Calcule e informe o TOTAL usando o preco do knowledge. "
-            "Para salgados de festa: 25 unidades = 1 porcao = preco da porcao. "
-            "Exemplo: knowledge retorna 'Coxinha de Frango R$20,00 porcao de 25'. "
-            "Cliente pede 50 → '50 Coxinhas de Frango (2 porcoes) = R$40,00'.\n"
-            "5. Confirme com o cliente: 'Voce quer [X] unidades de [sabor]? Total: R$XX,XX'.\n"
-            "6. DEPOIS da confirmacao, ofereca UPSELL (outro sabor, mais unidades). "
-            "So depois que o cliente responder sobre o upsell, continue.\n"
-            "7. PERGUNTE: 'Sera para entrega ou retirada na fabrica?'\n"
-            "8. SE O CLIENTE ESCOLHER ENTREGA:\n"
-            "   a) Pergunte o bairro.\n"
-            "   b) Pergunte: 'Qual horario de entrega voce prefere? Funcionamos das Xh as Yh.'\n"
-            "9. SE O CLIENTE ESCOLHER RETIRADA:\n"
-            "   a) Nao cobre frete.\n"
-            "   b) Pergunte: 'Qual horario de retirada voce prefere? Funcionamos das Xh as Yh.'\n"
-            "10. Se o cliente pedir um horario que JA PASSOU ou esta muito proximo do fechamento, "
-            "sugira o proximo horario disponivel.\n"
-            "11. Pergunte a forma de pagamento.\n"
-            "12. SE PAGAMENTO FOR EM DINHEIRO: Pergunte 'Vai precisar de troco? Para quanto?'\n"
-            "   Registre a resposta e inclua no notes do pedido.\n"
-            "13. DEPOIS de ter TODOS os dados (itens, quantidades, sabores, bairro se entrega, "
-            "horario, pagamento, troco se dinheiro), CHAME calculate_order para validar. "
-            "Exemplo: items=[{name: 'Coxinha de Frango', quantity: 50, price: 20.00}] bairro='Aponia'.\n"
-            "14. DEPOIS que calculate_order retornar, apresente o RESUMO COMPLETO em UMA "
-            "UNICA mensagem: itens, quantidade (em porcoes se aplicavel), preco por porcao, "
-            "endereco/bairro se entrega, horario de entrega/retirada, "
-            "forma de pagamento, troco se dinheiro, subtotal, frete e TOTAL GERAL. "
-            "Exemplo: 'Pedido: 50 Coxinhas de Frango (2 porcoes de 25) R$40,00. "
-            "Retirada: 10h. Pagamento: Dinheiro (R$50, troco R$10). Confirma?'\n"
-            "15. Quando o cliente responder 'sim', 'ok', 'pode ser', 'manda', 'confirmo' "
-            "ou qualquer afirmacao, CHAME send_order_to_cardapio IMEDIATAMENTE SEM CHAMAR "
-            "calculate_order NOVAMENTE. NAO peca confirmacao duas vezes. NAO recalcule.\n"
-            "16. Informe o cliente que o pedido foi enviado com sucesso e o numero do pedido.\n"
-            "17. NUNCA envie o pedido sem confirmacao explicita do cliente.\n"
-            "18. NUNCA informe frete ZERO sem consultar o knowledge.\n"
-            "19. NUNCA envie o resumo sem incluir o horario de entrega/retirada.\n"
-            "20. NUNCA envie o resumo sem incluir o valor total.\n"
-            "\n⚠️ BLOQUEIO ANTES DE ENVIAR:\n"
-            "NAO chame calculate_order ou send_order_to_cardapio SEM TER:\n"
-            "- CHAMADO search_knowledge para o produto E RECEBIDO o preco do knowledge NESTA CONVERSA\n"
-            "- Confirmado itens e quantidades com o cliente\n"
-            "- Informado o preco unitario e o total de cada item ao cliente\n"
-            "- Perguntado e recebido: entrega ou retirada\n"
-            "- Se entrega: bairro E horario\n"
-            "- Se retirada: horario\n"
-            "- Perguntado e recebido: forma de pagamento\n"
-            "- Se dinheiro: perguntado e recebido se precisa de troco\n"
-            "Se faltar algum dado, PERGUNTE ANTES de enviar."
-        )
-
-        # Injeta regras de verificacao de horario (REGRAS estaticas - sem timestamp)
-        dynamic_prompt += (
-            "\n\n⚠️ VERIFICACAO OBRIGATORIA DE HORARIO — TEM PRIORIDADE SOBRE TUDO:\n"
-            "1. AO INICIAR QUALQUER CONVERSA ou RECEBER QUALQUER PEDIDO, PRIMEIRO CHAME "
-            "search_knowledge(query='horario funcionamento') para saber o horario de funcionamento.\n"
-            "2. Compare o horario atual (injetado abaixo no final deste prompt) com o horario retornado.\n"
-            "3. Se o horario atual ESTIVER FORA do horario de funcionamento (antes da abertura ou apos o fechamento):\n"
-            "   a) INFORME AO CLIENTE QUE A BALBS ESTA FECHADA NO MOMENTO — isso e PRIORITARIO.\n"
-            "   b) Informe o horario de funcionamento completo.\n"
-            "   c) NAO processe nenhum pedido. NAO envie mensagem de boas-vindas antes disso.\n"
-            "   d) Pergunte: 'Posso agendar seu pedido para amanha no primeiro horario?'\n"
-            "   e) Se o cliente concordar, recolha os itens do pedido normalmente, e ao enviar com "
-            "send_order_to_cardapio, inclua a data de amanha em scheduled_date e is_scheduled=true.\n"
-            "   f) NAO envie o pedido para entrega imediata se estiver fechado.\n"
-            "4. Se o horario atual ESTIVER DENTRO do horario de funcionamento, continue o fluxo normalmente.\n"
-            "\n⚠️ REGRAS DE SAUDACAO:\n"
-            "A verificacao de horario acima TEM PRIORIDADE ABSOLUTA sobre qualquer saudacao.\n"
-            "Se o estabelecimento esta fechado, NAO envie saudacao — informe o fechamento primeiro.\n"
-        )
-
-        # Injeta regra de saudação contextual baseada no histórico
-        history = memory.get(user)
-        has_name = bool(contact and contact.get("name"))
-        has_greeting = any(
-            "sandrinha" in (m.get("parts", [{}])[0].get("text", "").lower() or "")
-            for m in history if m.get("role") == "assistant"
-        )
-        # Detecta se ha fluxo de pedido ativo (ultima mensagem do agente pediu confirmacao)
-        _last_assistant = ""
-        for m in reversed(history):
-            if m.get("role") == "assistant":
-                _last_assistant = (m.get("parts", [{}])[0].get("text", "") or "").lower()
-                break
-        _order_flow_active = any(kw in _last_assistant for kw in ("confirma?", "confirma?", "total:", "pedido:", "forma de pagamento"))
-
-        if (len(history) > 2 or has_greeting or has_name) and not _order_flow_active:
-            dynamic_prompt += (
-                "\n\n⚠️ REGRAS DE SAUDACAO - LEIA COM ATENCAO:\n"
-                "Este cliente JA conversou com voce anteriormente.\n"
-                "A VERIFICACAO DE HORARIO ja foi feita acima. Se esta aberto, continue normalmente.\n"
-            )
-            if has_name:
-                dynamic_prompt += (
-                    f"O nome do cliente ja e conhecido: {contact['name']}.\n"
-                    "NAO pergunte 'Qual e o seu nome?'. Ja tem o nome.\n"
-                    f"Responda exatamente: 'Prazer, {contact['name']}! Dá uma olhada no nosso cardápio completo: https://balbssalgados.ocardapio.net/ — quais delícias vamos pedir hoje?'\n"
-                )
-            else:
-                dynamic_prompt += (
-                    "Ja houve interacao anterior. NAO repita a mensagem de boas-vindas "
-                    "'Oi! Eu sou a Sandrinha da BALBS...' nem pergunte o nome.\n"
-                    "Responda de forma contextual a mensagem do cliente.\n"
-                )
 
         # ── CONTEUDO DINAMICO (no final para preservar cache do prefixo estatico) ──
-        # Injeta data e hora atual para o agente saber o horario (fuso de Cuiaba = UTC-4)
+        # Injeta data e hora atual para o agente saber o horario (fuso de Porto Velho = UTC-4)
         _now = (datetime.utcnow() - timedelta(hours=4)).strftime("%d/%m/%Y %H:%M")
         _tomorrow = (datetime.utcnow() - timedelta(hours=4) + timedelta(days=1)).strftime("%d/%m/%Y")
         dynamic_prompt += (
-            f"\n\nData e hora atual (Cuiaba): {_now}. "
+            f"\n\nData e hora atual (Porto Velho): {_now}. "
             f"Data de amanha (se agendar): {_tomorrow}."
         )
 
