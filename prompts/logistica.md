@@ -28,6 +28,13 @@ Gerencia entrega, retirada, endereco, frete e horarios.
 - Formato de data: "DD/MM" ou "hoje" ou "amanha"
 - Formato de horario: "HH:MM" ou "horario da manha/tarde"
 
+### INTERPRETACAO DE RESPOSTAS
+- Se o cliente ja informou o nome ANTES, NUNCA repita a pergunta sobre nome
+- Se o cliente responder "hoje, 18h" ou "hoje 18h" ou "amanha 14h", entenda como data E horario
+- Se o cliente responder apenas "hoje", confirme a data e pergunte o horario
+- Se o cliente responder apenas "18h", confirme o horario e pergunte a data
+- NUNCA assume que "hoje, 18h" e um pedido novo - e uma resposta sobre data/horario
+
 ### Pergunta Inicial
 "Será para entrega ou retirada na fabrica? 😊"
 

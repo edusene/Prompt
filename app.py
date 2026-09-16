@@ -341,6 +341,9 @@ def _check_transfer_keywords(items: list[dict]) -> str | None:
 
 # ── Cardápio Tool Handlers ──────────────────────────────────────────────────
 
+# Flag para controlar pedidos já enviados (evita duplicação)
+_orders_sent: set[str] = set()
+
 def _calculate_order_handler(items: list[dict], bairro: str = "", **kwargs) -> str:
     """Handler para a tool calculate_order."""
     print(f"[cardápio] TOOL calculate_order items={items} bairro={bairro}")
@@ -367,6 +370,12 @@ def _send_order_handler(
     **kwargs,
 ) -> str:
     """Handler para a tool send_order_to_cardapio."""
+    # Verifica se o pedido já foi enviado (evita duplicação)
+    order_key = f"{customer_phone}:{total}:{json.dumps(items, sort_keys=True)}"
+    if order_key in _orders_sent:
+        print(f"[cardápio] PEDIDO JÁ ENVIADO - ignorando chamada duplicada: {order_key[:50]}")
+        return "Este pedido ja foi enviado anteriormente. Nao e necessario enviar novamente."
+    
     if items:
         try:
             if not subtotal or float(subtotal) == 0:
@@ -467,6 +476,11 @@ def _send_order_handler(
 
     if result.get("success"):
         display_id = result.get("display_id", "")
+        # Marca o pedido como enviado para evitar duplicação
+        _orders_sent.add(order_key)
+        # Limita o tamanho do set para evitar memory leak
+        if len(_orders_sent) > 1000:
+            _orders_sent.clear()
         return f"Pedido enviado com sucesso para o cardapio digital. Numero do pedido: {display_id}. Status: {result.get('status', 'enviado')}."
     else:
         return f"Erro ao enviar pedido para o cardapio: {result.get('error', 'desconhecido')}"
@@ -819,8 +833,28 @@ def handle_flush(user: str, items: list[dict]) -> None:
         is_short_reply = len(text_only.strip()) <= 60
         confirmation_keywords = ["sim", "isso", "isso mesmo", "esse", "essa", "esse mesmo", "1 mesmo", "uma mesmo", "1 de 25", "1 de 25 mesmo", "pode ser", "correto", "exatamente", "é isso", "quero esse", "ok", "manda", "confirmo"]
         
+        # Padrões para detectar respostas sobre data/horário
+        date_time_patterns = ["hoje", "amanha", "agora", "daqui a pouco", "já", "já já"]
+        time_patterns = ["\d{1,2}h", "\d{1,2}:\d{2}", "manha", "tarde", "noite", "almoco"]
+        
         is_confirmation = False
+        is_date_time_reply = False
         text_lower = text_only.strip().lower()
+        
+        # Verifica se é uma resposta sobre data/horário
+        if is_short_reply:
+            for pattern in date_time_patterns:
+                if pattern in text_lower:
+                    is_date_time_reply = True
+                    break
+            if not is_date_time_reply:
+                import re
+                for pattern in time_patterns:
+                    if re.search(pattern, text_lower):
+                        is_date_time_reply = True
+                        break
+        
+        # Detecta confirmação
         if is_short_reply and (text_lower in confirmation_keywords or text_lower in last_assistant_text.lower() or "confirma" in last_assistant_text.lower() or "?" in last_assistant_text[-15:]):
             is_confirmation = True
             
@@ -837,6 +871,25 @@ def handle_flush(user: str, items: list[dict]) -> None:
                 "PRESERVE TODO o estado do pedido (produto, formato, quantidade em porções, preço da porção, etc) que já estava sendo discutido.\n"
                 "Se o cliente disse algo como '1 de 25 mesmo', ele está confirmando a porção de 25 que você ofereceu, NÃO pedindo 1 unidade individual.\n"
             )
+        
+        # Detecta se é uma resposta sobre data/horário
+        if is_date_time_reply and last_assistant_text:
+            # Verifica se a última mensagem do bot era sobre data/horário
+            perguntas_data_horario = ["data", "horario", "horário", "que dia", "que hora", "quando", "que dia"]
+            is_response_to_datetime = any(p in last_assistant_text.lower() for p in perguntas_data_horario)
+            
+            if is_response_to_datetime:
+                dynamic_prompt += (
+                    "\n\n⚠️ ATENÇÃO: RESPOSTA SOBRE DATA/HORÁRIO DETECTADA\n"
+                    "O cliente está respondendo à sua pergunta sobre data e/ou horário.\n"
+                    f"Sua última pergunta/mensagem foi: '{last_assistant_text[-250:]}'\n"
+                    "NÃO pergunte o nome do cliente novamente - você já tem essa informação.\n"
+                    "Interprete a resposta como data e/ou horário conforme o contexto.\n"
+                    "Exemplos:\n"
+                    "- 'hoje, 18h' = data é hoje, horário é 18h\n"
+                    "- 'hoje' = apenas data, pergunte o horário\n"
+                    "- '18h' = apenas horário, pergunte a data\n"
+                )
         # --- FIM DETECÇÃO DE CONFIRMAÇÃO ---
 
         # Injeta dados do xlsx (cardapio, bairros, horarios, pagamentos)
