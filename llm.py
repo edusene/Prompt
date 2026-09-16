@@ -85,7 +85,7 @@ def generate_reply(
     kwargs = {
         "model": OPENAI_MODEL,
         "messages": messages,
-        "max_tokens": 1024,
+        "max_completion_tokens": 1024,
     }
     if tools:
         kwargs["tools"] = tools
