@@ -19,7 +19,7 @@ if DB_DRIVER == "postgresql":
 
 # ── Conexão persistente (PostgreSQL) ─────────────────────────────────────────
 
-_pg_pool: psycopg2.pool.ThreadedConnectionPool | None = None
+_pg_pool: "psycopg2.pool.ThreadedConnectionPool | None" = None
 _pg_init_done = False
 
 
