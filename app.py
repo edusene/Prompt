@@ -125,7 +125,7 @@ def _build_knowledge_index() -> str:
     return "\n".join(lines)
 
 
-def _knowledge_tool_handler(query: str = "", filename: str = "") -> str:
+def _knowledge_tool_handler(query: str = "", filename: str = "", **kwargs) -> str:
     print(f"[knowledge] TOOL CHAMADA query='{query}' filename='{filename}'")
     # Se filename foi informado, retorna o conteúdo completo do arquivo
     if filename:
@@ -323,7 +323,7 @@ def _check_transfer_keywords(items: list[dict]) -> str | None:
 
 # ── Cardápio Tool Handlers ──────────────────────────────────────────────────
 
-def _calculate_order_handler(items: list[dict], bairro: str = "") -> str:
+def _calculate_order_handler(items: list[dict], bairro: str = "", **kwargs) -> str:
     """Handler para a tool calculate_order."""
     print(f"[cardápio] TOOL calculate_order items={items} bairro={bairro}")
     result = cardapio.calcular_pedido(items, bairro)
@@ -350,10 +350,13 @@ def _send_order_handler(
 ) -> str:
     """Handler para a tool send_order_to_cardapio."""
     if items:
-        if not subtotal or subtotal == 0:
-            subtotal = sum(item.get("quantity", 0) * item.get("price", 0) for item in items)
-        if not total or total == 0:
-            total = subtotal + delivery_fee - return_fee
+        try:
+            if not subtotal or float(subtotal) == 0:
+                subtotal = sum(float(item.get("quantity", 0)) * float(item.get("price", 0)) for item in items)
+            if not total or float(total) == 0:
+                total = float(subtotal) + float(delivery_fee) - float(return_fee)
+        except (ValueError, TypeError):
+            pass
     print(f"[cardápio] TOOL send_order customer={customer_name} phone={customer_phone} total={total}")
 
     test_mode = database.get_setting("CARDÁPIO_TEST_MODE", "true").lower() == "true"
@@ -997,7 +1000,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
         # Verifica se a IA transferiu durante a chamada (via tool)
         _transfer_done = False
 
-        def _transfer_handler(reason: str = "") -> str:
+        def _transfer_handler(reason: str = "", **kwargs) -> str:
             nonlocal _transfer_done
             performed = perform_transfer(user, reason, send_message=False)
             _transfer_done = True
@@ -1005,7 +1008,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
                 return "Transferência realizada com sucesso. O atendente humano continuará o atendimento."
             return "O cliente já está sendo atendido por um humano."
 
-        def _contextual_knowledge_handler(query: str = "", filename: str = "") -> str:
+        def _contextual_knowledge_handler(query: str = "", filename: str = "", **kwargs) -> str:
             if not filename and query and len(query.split()) <= 3 and last_assistant_text:
                 formats = ["porção", "porcao", "25", "festa", "individual", "unidade", "combo"]
                 found_formats = [f for f in formats if f in last_assistant_text.lower()]

@@ -117,10 +117,19 @@ def generate_reply(
 
         for tool_call in choice.message.tool_calls:
             fn_name = tool_call.function.name
-            fn_args = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
+            
+            try:
+                fn_args = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
+            except Exception as e:
+                print(f"[llm] erro ao parsear args da tool {fn_name}: {e}")
+                fn_args = {}
 
             if fn_name in tool_handlers:
-                result = tool_handlers[fn_name](**fn_args)
+                try:
+                    result = tool_handlers[fn_name](**fn_args)
+                except Exception as e:
+                    print(f"[llm] excecao ao executar tool {fn_name}: {e}")
+                    result = f"Erro ao executar a tool {fn_name}: {e}. Verifique se os parametros enviados estao corretos e aderem ao schema."
             else:
                 result = f"Função {fn_name} não encontrada"
 

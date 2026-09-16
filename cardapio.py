@@ -40,7 +40,14 @@ def calcular_pedido(items: list[dict], bairro: str = "") -> dict:
 
     if test_mode:
         # Modo teste: simula cálculo sem chamar API
-        subtotal = sum(item.get("quantity", 0) * item.get("price", 0) for item in items)
+        subtotal = 0
+        for item in items:
+            try:
+                q = float(item.get("quantity", 0))
+                p = float(item.get("price", 0))
+                subtotal += q * p
+            except (ValueError, TypeError):
+                pass
         print(f"[cardápio] MODO TESTE - calculateOrder simulado: subtotal={subtotal}")
         return {
             "success": True,
