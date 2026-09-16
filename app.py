@@ -934,6 +934,9 @@ def handle_flush(user: str, items: list[dict]) -> None:
             "\n4. Apos apresentar resumo, AGUARDE confirmacao do cliente"
             "\n5. So CHAME send_order_to_cardapio apos o cliente ter confirmado o resumo"
             "\n6. NUNCA assume que o cliente quer enviar o pedido sem confirmacao"
+            "\n7. NUNCA assuma que e entrega ou retirada SEM PERGUNTAR ao cliente"
+            "\n8. PRIMEIRA PERGUNTA sobre logistica: 'E para entrega ou retirada na fabrica?'"
+            "\n9. NAO pule esta pergunta - ela e OBRIGATORIA"
         )
 
         # Verifica se a IA transferiu durante a chamada (via tool)
