@@ -58,6 +58,7 @@ Posso confirmar o seu pedido? 💛
 3. NUNCA altere itens sem autorizacao do cliente
 4. Aguarde confirmacao EXPLICITA ("Sim", "Pode ser", "Confirma", "Ok")
 5. NUNCA envie o pedido sem confirmacao
+6. **VALIDACAO OBRIGATORIA:** Antes de apresentar o resumo, verifique se TEM data e horario confirmados. Se NAO tiver, solicite ao cliente ANTES de prosseguir. NUNCA apresente resumo sem data e horario.
 
 ## Apos Confirmacao
 1. Chame send_order_to_cardapio com todos os dados
