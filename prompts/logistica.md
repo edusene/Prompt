@@ -34,6 +34,8 @@ Gerencia entrega, retirada, endereco, frete e horarios.
 - Se o cliente responder apenas "hoje", confirme a data e pergunte o horario
 - Se o cliente responder apenas "18h", confirme o horario e pergunte a data
 - NUNCA assume que "hoje, 18h" e um pedido novo - e uma resposta sobre data/horario
+- **SEMPRE pergunte horario** - mesmo que o cliente diga "hoje", pergunte "E qual horario?"
+- **NAO prossiga sem horario** - horario e OBRIGATORIO para completar o pedido
 
 ### Pergunta Inicial
 "Será para entrega ou retirada na fabrica? 😊"

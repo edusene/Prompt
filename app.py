@@ -925,6 +925,17 @@ def handle_flush(user: str, items: list[dict]) -> None:
             f"Use este numero ao enviar pedidos com send_order_to_cardapio."
         )
 
+        # REGRAS CRITICAS DE CONTROLE DE FLUXO
+        dynamic_prompt += (
+            "\n\n⚠️ REGRAS CRITICAS DE CONTROLE DE FLUXO ⚠️"
+            "\n1. NUNCA chame send_order_to_cardapio SEM ter apresentado o resumo do pedido ANTES"
+            "\n2. NUNCA chame send_order_to_cardapio SEM o cliente ter confirmado EXPLICITAMENTE (sim, ok, pode ser, confirma)"
+            "\n3. Se o cliente disse 'sim' mas voce ainda NAO apresentou o resumo, APRESENTE o resumo PRIMEIRO"
+            "\n4. Apos apresentar resumo, AGUARDE confirmacao do cliente"
+            "\n5. So CHAME send_order_to_cardapio apos o cliente ter confirmado o resumo"
+            "\n6. NUNCA assume que o cliente quer enviar o pedido sem confirmacao"
+        )
+
         # Verifica se a IA transferiu durante a chamada (via tool)
         _transfer_done = False
 
