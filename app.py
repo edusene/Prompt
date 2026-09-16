@@ -915,7 +915,8 @@ def handle_flush(user: str, items: list[dict]) -> None:
         if contact and contact.get("name"):
             dynamic_prompt += (
                 f"\n\nO nome do cliente e: {contact['name']}. "
-                f"Use o nome dele ao conversar, mas de forma natural."
+                f"Use o nome dele ao conversar, mas de forma natural. "
+                f"NUNCA pergunte o nome novamente - ele ja foi coletado."
             )
             print(f"[flush] injetando nome: {contact['name']}")
 
@@ -952,6 +953,10 @@ def handle_flush(user: str, items: list[dict]) -> None:
             "\n  -> PERGUNTE: 'E qual horário?'"
             "\nSE tem tudo mas e entrega e NAO tem endereco:"
             "\n  -> PERGUNTE bairro, rua, numero, referencia"
+            "\nSE e entrega e tem bairro mas NAO calculou frete:"
+            "\n  -> CALCULE o frete com search_knowledge ANTES do resumo"
+            "\nNAO assuma 'hoje' para data - SEMPRE confirme com o cliente"
+            "\nNAO assuma horario - SEMPRE pergunte ao cliente"
             "\nAPENAS depois de ter TODOS os dados acima, apresente o resumo"
             "\nNUNCA pule etapas mesmo que o cliente responda de forma incompleta"
         )

@@ -63,6 +63,7 @@ APOS apresentar o resumo, AGUARDE a resposta do cliente.
 2. TEM data confirmada? SE NAO -> PERGUNTE
 3. TEM horario confirmado? SE NAO -> PERGUNTE
 4. Se entrega: TEM bairro + endereco? SE NAO -> PERGUNTE
+5. Se entrega: FRETE foi calculado? SE NAO -> CALCULE com search_knowledge antes de prosseguir
 
 NAO apresente resumo SEM TODOS os dados acima.
 
