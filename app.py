@@ -288,6 +288,8 @@ SEND_ORDER_TOOL = {
                 "total": {"type": "number", "description": "Total do pedido (itens + frete)"},
                 "notes": {"type": "string", "description": "Observacoes gerais do pedido"},
                 "whatsapp_message_id": {"type": "string", "description": "ID da mensagem WhatsApp que confirmou o pedido (para idempotencia)"},
+                "scheduled_date": {"type": "string", "description": "Data agendada para entrega/retirada (formato DD/MM/YYYY). Use apenas quando o pedido for agendado."},
+                "is_scheduled": {"type": "boolean", "description": "Se true, o pedido e agendado para a data em scheduled_date. Use quando o cliente pedir agendamento."},
             },
             "required": ["customer_name", "customer_phone", "items", "total"],
         },
@@ -342,6 +344,8 @@ def _send_order_handler(
     return_fee: float = 0,
     notes: str = "",
     whatsapp_message_id: str = "",
+    scheduled_date: str = "",
+    is_scheduled: bool = False,
     **kwargs,
 ) -> str:
     """Handler para a tool send_order_to_cardapio."""
@@ -393,6 +397,8 @@ def _send_order_handler(
             return_fee=return_fee,
             notes=notes,
             whatsapp_message_id=whatsapp_message_id,
+            scheduled_date=scheduled_date,
+            is_scheduled=is_scheduled,
         )
 
     # Salva log no banco
@@ -768,37 +774,29 @@ def handle_flush(user: str, items: list[dict]) -> None:
 
         # Injeta data e hora atual para o agente saber o horario (fuso de Cuiaba = UTC-4)
         _now = (datetime.utcnow() - timedelta(hours=4)).strftime("%d/%m/%Y %H:%M")
+        _tomorrow = (datetime.utcnow() - timedelta(hours=4) + timedelta(days=1)).strftime("%d/%m/%Y")
+        _today = (datetime.utcnow() - timedelta(hours=4)).strftime("%d/%m/%Y")
         dynamic_prompt += (
             f"\n\nData e hora atual (Cuiaba): {_now}. "
             "Use esta informacao para responder sobre horarios, funcionamento, "
             "se esta aberto/fechado, e regras baseadas em horario."
-        )
-
-        # Injeta regras de fluxo de pedido (reforço das regras do SYSTEM_PROMPT)
-        dynamic_prompt += (
-            "\n\n⚠️ FLUXO OBRIGATORIO PARA PEDIDOS:\n"
-            "1. Ao receber um pedido, PRIMEIRO chame search_knowledge para buscar "
-            "o produto e preco no arquivo 02_cardapio_produtos_precos.md.\n"
-            "2. Apos confirmar itens e precos, pergunte 'Sera para entrega ou retirada na fabrica?'\n"
-            "3. Se o cliente escolher ENTREGA, chame search_knowledge(query='taxa entrega [bairro]') "
-            "para consultar 04_deliveryfee_bairros.md e informe a taxa.\n"
-            "4. Se o cliente escolher RETIRADA, nao cobre frete.\n"
-            "5. Calcule o total: soma(sub quantity * price) + frete (se entrega).\n"
-            "6. Pergunte a forma de pagamento.\n"
-            "7. CHAME calculate_order COM price de cada item (obtido do knowledge) PARA VALIDAR. "
-            "Exemplo: items=[{name: 'Panqueca de Frango', quantity: 3, price: 15.00}]. "
-            "So CHAME calculate_order DEPOIS de ter todos os dados (itens, precos, bairro, frete).\n"
-            "8. DEPOIS que calculate_order retornar, apresente o RESUMO COMPLETO em UMA "
-            "UNICA mensagem: itens, quantidade, endereco/bairro se entrega, forma de pagamento, "
-            "subtotal, frete e TOTAL GERAL. Inclua SEMPRE o valor total. "
-            "Exemplo: 'Pedido: 3x Panqueca de Frango R$45 + frete R$8 = TOTAL R$53. "
-            "Pagamento: Débito. Confirma?'\n"
-            "9. Quando o cliente responder 'sim', 'ok', 'pode ser', 'manda', 'confirmo' "
-            "ou qualquer afirmação, CHAME send_order_to_cardapio IMEDIATAMENTE SEM CHAMAR "
-            "calculate_order NOVAMENTE. NÃO peça confirmação duas vezes. NÃO recalcule.\n"
-            "10. Informe o cliente que o pedido foi enviado com sucesso e o numero do pedido.\n"
-            "11. NUNCA envie o pedido sem confirmação explicita do cliente.\n"
-            "12. NUNCA informe frete ZERO sem consultar o knowledge."
+            "\n\n⚠️ VERIFICACAO OBRIGATORIA DE HORARIO — TEM PRIORIDADE SOBRE TUDO:\n"
+            "1. AO INICIAR QUALQUER CONVERSA ou RECEBER QUALQUER PEDIDO, PRIMEIRO CHAME "
+            "search_knowledge(query='horario funcionamento') para saber o horario de funcionamento.\n"
+            "2. Compare o horario atual injetado acima com o horario de funcionamento retornado.\n"
+            "3. Se o horario atual ESTIVER FORA do horario de funcionamento (antes da abertura ou apos o fechamento):\n"
+            "   a) INFORME AO CLIENTE QUE A BALBS ESTA FECHADA NO MOMENTO — isso e PRIORITARIO.\n"
+            "   b) Informe o horario de funcionamento completo.\n"
+            "   c) NAO processe nenhum pedido. NAO envie mensagem de boas-vindas antes disso.\n"
+            "   d) Pergunte: 'Posso agendar seu pedido para amanha no primeiro horario?'\n"
+            f"   e) Se o cliente concordar, recolha os itens do pedido normalmente, e ao enviar com "
+            f"send_order_to_cardapio, inclua scheduled_date='{_tomorrow}' "
+            "e is_scheduled=true.\n"
+            "   f) NAO envie o pedido para entrega imediata se estiver fechado.\n"
+            "4. Se o horario atual ESTIVER DENTRO do horario de funcionamento, continue o fluxo normalmente.\n"
+            "\n⚠️ REGRAS DE SAUDACAO:\n"
+            "A verificacao de horario acima TEM PRIORIDADE ABSOLUTA sobre qualquer saudacao.\n"
+            "Se o estabelecimento esta fechado, NAO envie saudacao — informe o fechamento primeiro.\n"
         )
 
         # Injeta regra de saudação contextual baseada no histórico
@@ -820,6 +818,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
             dynamic_prompt += (
                 "\n\n⚠️ REGRAS DE SAUDACAO - LEIA COM ATENCAO:\n"
                 "Este cliente JA conversou com voce anteriormente.\n"
+                "A VERIFICACAO DE HORARIO ja foi feita acima. Se esta aberto, continue normalmente.\n"
             )
             if has_name:
                 dynamic_prompt += (
@@ -833,9 +832,42 @@ def handle_flush(user: str, items: list[dict]) -> None:
                     "'Oi! Eu sou a Sandrinha da BALBS...' nem pergunte o nome.\n"
                     "Responda de forma contextual a mensagem do cliente.\n"
                 )
-            dynamic_prompt += (
-                "Essa regra tem PRIORITATE ABSOLUTA sobre qualquer outra instrucao.\n"
-            )
+
+        # Injeta regras de fluxo de pedido (reforço das regras do SYSTEM_PROMPT)
+        dynamic_prompt += (
+            "\n\n⚠️ FLUXO OBRIGATORIO PARA PEDIDOS:\n"
+            "1. Ao receber um pedido, PRIMEIRO chame search_knowledge para buscar "
+            "o produto e preco no arquivo 02_cardapio_produtos_precos.md.\n"
+            "2. Apos confirmar itens e precos, pergunte 'Sera para entrega ou retirada na fabrica?'\n"
+            "3. SE O CLIENTE ESCOLHER ENTREGA:\n"
+            "   a) Pergunte o bairro e chame search_knowledge(query='taxa entrega [bairro]') "
+            "para consultar 04_deliveryfee_bairros.md e informe a taxa.\n"
+            "   b) Pergunte: 'Qual horario de entrega voce prefere? Funcionamos das Xh as Yh.'\n"
+            "   c) Registre o horario solicitado.\n"
+            "4. SE O CLIENTE ESCOLHER RETIRADA:\n"
+            "   a) Nao cobre frete.\n"
+            "   b) Pergunte: 'Qual horario de retirada voce prefere? Funcionamos das Xh as Yh.'\n"
+            "   c) Registre o horario solicitado.\n"
+            "5. Se o cliente pedir um horario que JA PASSOU ou esta muito proximo do fechamento, "
+            "sugira o proximo horario disponivel ou agendamento para amanha.\n"
+            "6. Calcule o total: soma(sub quantity * price) + frete (se entrega).\n"
+            "7. Pergunte a forma de pagamento.\n"
+            "8. CHAME calculate_order COM price de cada item (obtido do knowledge) PARA VALIDAR. "
+            "Exemplo: items=[{name: 'Panqueca de Frango', quantity: 3, price: 15.00}]. "
+            "So CHAME calculate_order DEPOIS de ter todos os dados (itens, precos, bairro, frete).\n"
+            "9. DEPOIS que calculate_order retornar, apresente o RESUMO COMPLETO em UMA "
+            "UNICA mensagem: itens, quantidade, endereco/bairro se entrega, horario de entrega/retirada, "
+            "forma de pagamento, subtotal, frete e TOTAL GERAL. Inclua SEMPRE o valor total. "
+            "Exemplo: 'Pedido: 3x Panqueca de Frango R$45 + frete R$8 = TOTAL R$53. "
+            "Entrega: 15h. Pagamento: Debito. Confirma?'\n"
+            "10. Quando o cliente responder 'sim', 'ok', 'pode ser', 'manda', 'confirmo' "
+            "ou qualquer afirmacao, CHAME send_order_to_cardapio IMEDIATAMENTE SEM CHAMAR "
+            "calculate_order NOVAMENTE. NAO peca confirmacao duas vezes. NAO recalcule.\n"
+            "11. Informe o cliente que o pedido foi enviado com sucesso e o numero do pedido.\n"
+            "12. NUNCA envie o pedido sem confirmacao explicita do cliente.\n"
+            "13. NUNCA informe frete ZERO sem consultar o knowledge.\n"
+            "14. NUNCA envie o resumo sem incluir o horario de entrega/retirada solicitado pelo cliente."
+        )
 
         # Injeta nome do cliente no prompt
         if contact and contact.get("name"):
