@@ -959,6 +959,12 @@ def handle_flush(user: str, items: list[dict]) -> None:
             "\nNAO assuma horario - SEMPRE pergunte ao cliente"
             "\nAPENAS depois de ter TODOS os dados acima, apresente o resumo"
             "\nNUNCA pule etapas mesmo que o cliente responda de forma incompleta"
+            "\n\nAo chamar send_order_to_cardapio, envie:"
+            "\n- customer_name, customer_phone, items [{name, quantity, price}], total"
+            "\n- subtotal, payment_method ('pix'/'cartao_debito'/'cartao_credito'/'dinheiro')"
+            "\n- SE ENTREGA: delivery_address, delivery_fee, return_fee (2.00 dinheiro/cartao ou 0.00 pix)"
+            "\n- SE DATA != HOJE: scheduled_date ('DD/MM/YYYY') E is_scheduled=true"
+            "\n- TODOS valores numericos devem ser numeros, nao textos"
         )
 
         # Verifica se a IA transferiu durante a chamada (via tool)
