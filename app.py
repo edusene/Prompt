@@ -767,6 +767,8 @@ def handle_flush(user: str, items: list[dict]) -> None:
             return
         if not contact:
             print(f"[flush] user={user} sem contato no banco (auto_mode=1 por padrao)")
+        else:
+            print(f"[flush] user={user} contact_name='{contact.get('name', '')}'")
 
         # ── Sub-agentes (se habilitado) ──────────────────────────────────────
         if USE_SUB_AGENTS:
@@ -862,6 +864,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
                 f"\n\nO nome do cliente e: {contact['name']}. "
                 f"Use o nome dele ao conversar, mas de forma natural."
             )
+            print(f"[flush] injetando nome: {contact['name']}")
 
         # Injeta telefone do cliente no prompt (necessario para send_order_to_cardapio)
         dynamic_prompt += (
