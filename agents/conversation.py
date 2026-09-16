@@ -48,6 +48,9 @@ class ConversationState:
     pedido_confirmado: bool = False
     pedido_enviado: bool = False
 
+    # Tempo atual (injetado pelo ConversationManager)
+    current_time: str = ""
+
     # Historico
     history: list = field(default_factory=list)
     collected_data: dict = field(default_factory=dict)
@@ -141,6 +144,11 @@ class ConversationManager:
         # 1. Carrega ou cria estado
         state = ConversationState.load_from_db(phone)
         state.phone = phone
+
+        # 1.1 Injeta horario atual (fuso de Porto Velho = UTC-4)
+        from datetime import datetime, timedelta
+        _now = (datetime.utcnow() - timedelta(hours=4)).strftime("%d/%m/%Y %H:%M")
+        state.current_time = _now
 
         # 2. Adiciona mensagem ao historico
         state.history.append({

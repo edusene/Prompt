@@ -78,6 +78,9 @@ Apos finalizar, encerre sem perguntas."""
         if state.bairro:
             prompt += f"\nBairro: {state.bairro}"
 
+        if state.current_time:
+            prompt += f"\n\nData e hora atual (Porto Velho): {state.current_time}"
+
         return prompt
 
     def _build_history(self, state: ConversationState, message: str) -> list:

@@ -57,6 +57,9 @@ Transfira IMEDIATAMENTE para humano."""
             for item in state.items:
                 prompt += f"\n- {item.get('quantity', 0)} un - {item.get('name', '?')}"
 
+        if state.current_time:
+            prompt += f"\n\nData e hora atual (Porto Velho): {state.current_time}"
+
         return prompt
 
     def _build_history(self, state: ConversationState, message: str) -> list:

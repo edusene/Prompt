@@ -74,6 +74,9 @@ Aguarde confirmacao explicita."""
         if state.payment_method:
             prompt += f"\nPagamento: {state.payment_method}"
 
+        if state.current_time:
+            prompt += f"\n\nData e hora atual (Porto Velho): {state.current_time}"
+
         return prompt
 
     def _build_history(self, state: ConversationState, message: str) -> list:
