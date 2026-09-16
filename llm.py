@@ -138,6 +138,8 @@ def generate_reply(
             model=OPENAI_MODEL,
             messages=messages,
             max_completion_tokens=1024,
+            tools=tools,
+            tool_choice="auto",
         )
         choice = response.choices[0]
 

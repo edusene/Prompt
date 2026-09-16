@@ -761,9 +761,37 @@ def handle_flush(user: str, items: list[dict]) -> None:
 
         user_parts = _build_user_parts(items)
         text_only = "\n".join(it["text"] for it in items)
+        
+        # --- INÍCIO DETECÇÃO DE CONFIRMAÇÃO ---
+        history_before = memory.get(user)
+        last_assistant_text = ""
+        for m in reversed(history_before):
+            if m.get("role") == "assistant":
+                last_assistant_text = (m.get("parts", [{}])[0].get("text", "") or "")
+                break
+                
+        is_short_reply = len(text_only.strip()) <= 60
+        confirmation_keywords = ["sim", "isso", "isso mesmo", "esse", "essa", "esse mesmo", "1 mesmo", "uma mesmo", "1 de 25", "1 de 25 mesmo", "pode ser", "correto", "exatamente", "é isso", "quero esse", "ok", "manda", "confirmo"]
+        
+        is_confirmation = False
+        text_lower = text_only.strip().lower()
+        if is_short_reply and (text_lower in confirmation_keywords or text_lower in last_assistant_text.lower() or "confirma" in last_assistant_text.lower() or "?" in last_assistant_text[-15:]):
+            is_confirmation = True
+            
         memory.append_multimodal(user, "user", user_parts)
 
         dynamic_prompt = FULL_SYSTEM_PROMPT
+        
+        if is_confirmation and last_assistant_text:
+            dynamic_prompt += (
+                "\n\n⚠️ ATENÇÃO: CONTEXTO DE CONFIRMAÇÃO DETECTADO\n"
+                "A última mensagem do cliente parece ser uma confirmação ou resposta direta à sua última pergunta.\n"
+                f"Sua última pergunta/mensagem foi: '{last_assistant_text[-250:]}'\n"
+                "NÃO reinterprete a mensagem do cliente como uma nova intenção isolada.\n"
+                "PRESERVE TODO o estado do pedido (produto, formato, quantidade em porções, preço da porção, etc) que já estava sendo discutido.\n"
+                "Se o cliente disse algo como '1 de 25 mesmo', ele está confirmando a porção de 25 que você ofereceu, NÃO pedindo 1 unidade individual.\n"
+            )
+        # --- FIM DETECÇÃO DE CONFIRMAÇÃO ---
         knowledge_index = _build_knowledge_index()
         if knowledge_index:
             dynamic_prompt += (
@@ -977,13 +1005,25 @@ def handle_flush(user: str, items: list[dict]) -> None:
                 return "Transferência realizada com sucesso. O atendente humano continuará o atendimento."
             return "O cliente já está sendo atendido por um humano."
 
+        def _contextual_knowledge_handler(query: str = "", filename: str = "") -> str:
+            if not filename and query and len(query.split()) <= 3 and last_assistant_text:
+                formats = ["porção", "porcao", "25", "festa", "individual", "unidade", "combo"]
+                found_formats = [f for f in formats if f in last_assistant_text.lower()]
+                if found_formats:
+                    adds = [f for f in found_formats if f not in query.lower()]
+                    if adds:
+                        expanded_query = f"{query} {' '.join(adds)}"
+                        print(f"[rag] Query expandida por contexto: de '{query}' para '{expanded_query}'")
+                        return _knowledge_tool_handler(query=expanded_query, filename=filename)
+            return _knowledge_tool_handler(query=query, filename=filename)
+
         try:
             reply = llm.generate_reply(
                 history=memory.get(user),
                 system=dynamic_prompt,
                 tools=[KNOWLEDGE_TOOL, TRANSFER_TOOL, CALCULATE_ORDER_TOOL, SEND_ORDER_TOOL],
                 tool_handlers={
-                    "search_knowledge": _knowledge_tool_handler,
+                    "search_knowledge": _contextual_knowledge_handler,
                     "transfer_to_human": _transfer_handler,
                     "calculate_order": _calculate_order_handler,
                     "send_order_to_cardapio": _send_order_handler,
