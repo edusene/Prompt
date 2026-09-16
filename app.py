@@ -803,6 +803,16 @@ def handle_flush(user: str, items: list[dict]) -> None:
                 + knowledge_index
             )
 
+        # Injeta TODO o conteudo do knowledge para o LLM ter acesso completo
+        full_knowledge = knowledge_rag.get_full_knowledge_content()
+        if full_knowledge:
+            dynamic_prompt += (
+                "\n\n⚠️ CONTEUDO COMPLETO DA BASE DE CONHECIMENTO:\n"
+                "Leia TODO o conteudo abaixo antes de responder. "
+                "Use estas informacoes como FONTE VERDADEIRA para precos, produtos, horarios, regras.\n\n"
+                + full_knowledge
+            )
+
         # Injeta regras de porcao e NAO PRESUMIR (antes do fluxo de pedido)
         dynamic_prompt += (
             "\n\n⚠️ REGRAS DE PORCAO — SALGADOS DE FESTA:\n"

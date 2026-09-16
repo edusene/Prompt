@@ -1025,6 +1025,13 @@ def list_knowledge_files() -> list[dict]:
     return rows
 
 
+def get_all_knowledge_content() -> list[dict]:
+    """Retorna todos os chunks de todos os arquivos knowledge, ordenados por filename + chunk_index."""
+    return db.fetch_all(
+        "SELECT filename, chunk_index, content FROM knowledge ORDER BY filename, chunk_index"
+    )
+
+
 def get_knowledge_chunks(filename: str) -> list[dict]:
     """Retorna todos os chunks de um arquivo."""
     return db.fetch_all(

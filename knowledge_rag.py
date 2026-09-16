@@ -198,6 +198,29 @@ def get_file_content(filename: str) -> str:
     return "\n\n".join(c["content"] for c in chunks)
 
 
+def get_full_knowledge_content() -> str:
+    """Retorna TODO o conteúdo do knowledge concatenado, pronto para injetar no system prompt.
+    Organiza por arquivo com separadores para facilitar a leitura pelo LLM.
+    """
+    chunks = database.get_all_knowledge_content()
+    if not chunks:
+        return ""
+
+    parts = []
+    current_file = None
+    for c in chunks:
+        if c["filename"] != current_file:
+            current_file = c["filename"]
+            if parts:
+                parts.append("")  # linha em branco entre arquivos
+            parts.append(f"=== {current_file} ===")
+        parts.append(c["content"])
+
+    result = "\n\n".join(parts)
+    print(f"[rag] full knowledge content: {len(result)} chars, {len(chunks)} chunks")
+    return result
+
+
 # ── Knowledge Batch Operations ────────────────────────────────────────────────
 
 
