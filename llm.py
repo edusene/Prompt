@@ -138,7 +138,7 @@ def generate_reply(
         response = _client.chat.completions.create(
             model=OPENAI_MODEL,
             messages=messages,
-            max_tokens=1024,
+            max_completion_tokens=1024,
         )
         choice = response.choices[0]
 
