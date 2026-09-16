@@ -44,6 +44,18 @@ from meta import get_webhook_media_url
 from buffer import MessageBuffer
 from auth import login_required, do_login, do_logout
 
+# ── Sub-agentes (opcional) ───────────────────────────────────────────────────
+USE_SUB_AGENTS = os.getenv("USE_SUB_AGENTS", "false").lower() == "true"
+_conversation_manager = None
+
+def _get_conversation_manager():
+    """Lazy load do ConversationManager (so carrega se habilitado)."""
+    global _conversation_manager
+    if _conversation_manager is None and USE_SUB_AGENTS:
+        from agents.conversation import get_manager
+        _conversation_manager = get_manager()
+    return _conversation_manager
+
 # ── Config ──────────────────────────────────────────────────────────────────
 BUFFER_SECONDS = float(os.getenv("BUFFER_SECONDS", "8"))
 PORT = int(os.getenv("PORT", "5000"))
@@ -756,6 +768,29 @@ def handle_flush(user: str, items: list[dict]) -> None:
         if not contact:
             print(f"[flush] user={user} sem contato no banco (auto_mode=1 por padrao)")
 
+        # ── Sub-agentes (se habilitado) ──────────────────────────────────────
+        if USE_SUB_AGENTS:
+            manager = _get_conversation_manager()
+            if manager:
+                print(f"[flush] user={user} usando SUB-AGENTES")
+                # Extrai texto da mensagem
+                message_text = "\n".join(it.get("text", "") for it in items)
+                # Typing indicator
+                last_wa_msg_id = items[-1].get("wa_message_id", "") if items else ""
+                if last_wa_msg_id:
+                    send_typing(last_wa_msg_id)
+                # Processa via sub-agentes
+                reply = manager.handle_message(phone=user, message=message_text)
+                if reply:
+                    memory.append(user, "assistant", reply)
+                    chunks = split_reply(reply)
+                    for chunk in chunks:
+                        time.sleep(1 + len(chunk) / 200)
+                        send_text(user, chunk)
+                        send_msg_out_to_panel(user, chunk)
+                return
+
+        # ── Modo classico (prompt unico) ─────────────────────────────────────
         # ── Detecção de palavras-chave de transferência (antes do LLM) ──────────
         matched_kw = _check_transfer_keywords(items)
         if matched_kw:
@@ -1075,6 +1110,13 @@ for _key in ("CARDÁPIO_TEST_MODE", "CARDÁPIO_API_URL", "CARDÁPIO_API_URL_TEST
     _val = database.get_setting(_key, "")
     if _val:
         os.environ[_key] = _val
+
+# Carrega config de sub-agentes do banco (se disponivel)
+if os.getenv("USE_SUB_AGENTS", "").lower() not in ("true", "false"):
+    _sub_agents_db = database.get_setting("use_sub_agents", "false")
+    USE_SUB_AGENTS = _sub_agents_db.lower() == "true"
+
+print(f"[config] Sub-agentes: {'ATIVADOS' if USE_SUB_AGENTS else 'DESATIVADOS'}")
 
 # Inicia o scheduler de follow-ups CRM
 try:
@@ -1628,6 +1670,53 @@ def api_set_transfer_message():
         return jsonify({"error": "transfer_message não pode ser vazio"}), 400
     database.set_setting("transfer_message", msg)
     return jsonify({"ok": True, "transfer_message": msg})
+
+
+# ── Sub-agentes ──────────────────────────────────────────────────────────────
+
+@app.get("/api/settings/sub-agents")
+@login_required
+def api_get_sub_agents():
+    """Retorna status dos sub-agentes."""
+    return jsonify({
+        "enabled": USE_SUB_AGENTS,
+        "database_setting": database.get_setting("use_sub_agents", "false"),
+    })
+
+
+@app.put("/api/settings/sub-agents")
+@login_required
+def api_set_sub_agents():
+    """Ativa/desativa sub-agentes."""
+    global USE_SUB_AGENTS, _conversation_manager
+    data = request.get_json(silent=True) or {}
+    enabled = data.get("enabled", False)
+    USE_SUB_AGENTS = enabled
+    database.set_setting("use_sub_agents", str(enabled).lower())
+    if not enabled:
+        _conversation_manager = None
+    return jsonify({"ok": True, "enabled": enabled})
+
+
+@app.post("/api/conversations/<phone>/reset")
+@login_required
+def api_reset_conversation(phone: str):
+    """Reseta estado da conversa de um usuario (sub-agentes)."""
+    try:
+        database.delete_conversation_state(phone)
+        return jsonify({"ok": True, "message": f"Estado da conversa de {phone} resetado"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.get("/api/conversations/<phone>/state")
+@login_required
+def api_get_conversation_state(phone: str):
+    """Retorna estado da conversa de um usuario (sub-agentes)."""
+    state = database.get_conversation_state(phone)
+    if state:
+        return jsonify({"phone": phone, "state": state})
+    return jsonify({"phone": phone, "state": None})
 
 
 @app.get("/api/conversations/human-queue/count")

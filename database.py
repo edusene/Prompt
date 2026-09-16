@@ -412,6 +412,12 @@ CREATE INDEX IF NOT EXISTS idx_follow_ups_status ON crm_follow_ups(status);
 CREATE INDEX IF NOT EXISTS idx_follow_ups_scheduled ON crm_follow_ups(scheduled_for);
 CREATE INDEX IF NOT EXISTS idx_follow_ups_contact ON crm_follow_ups(contact_id);
 CREATE INDEX IF NOT EXISTS idx_automations_active ON crm_automations(is_active);
+
+CREATE TABLE IF NOT EXISTS conversation_states (
+    phone TEXT PRIMARY KEY,
+    state TEXT NOT NULL DEFAULT '{}',
+    updated_at TEXT DEFAULT NOW()
+);
 """
 
 
@@ -673,6 +679,44 @@ def delete_conversation(conv_id: int) -> None:
     db.execute("DELETE FROM messages WHERE conversation_id=?", (conv_id,))
     db.execute("DELETE FROM conversation_tags WHERE conversation_id=?", (conv_id,))
     db.execute("DELETE FROM conversations WHERE id=?", (conv_id,))
+
+
+# ── Conversation States (Sub-agentes) ────────────────────────────────────────
+
+def save_conversation_state(phone: str, state: dict) -> None:
+    """Salva estado da conversa (sub-agentes) pelo phone."""
+    now = datetime.utcnow().isoformat()
+    state_json = json.dumps(state, ensure_ascii=False, default=str)
+    existing = db.fetch_one("SELECT phone FROM conversation_states WHERE phone=?", (phone,))
+    if existing:
+        db.execute(
+            "UPDATE conversation_states SET state=?, updated_at=? WHERE phone=?",
+            (state_json, now, phone),
+        )
+    else:
+        db.execute(
+            "INSERT INTO conversation_states (phone, state, updated_at) VALUES (?,?,?)",
+            (phone, state_json, now),
+        )
+
+
+def get_conversation_state(phone: str) -> dict | None:
+    """Carrega estado da conversa (sub-agentes) pelo phone."""
+    row = db.fetch_one("SELECT state FROM conversation_states WHERE phone=?", (phone,))
+    if row:
+        raw = row["state"] if isinstance(row, dict) else row[0]
+        if isinstance(raw, str):
+            try:
+                return json.loads(raw)
+            except Exception:
+                return None
+        return raw
+    return None
+
+
+def delete_conversation_state(phone: str) -> None:
+    """Deleta estado da conversa pelo phone."""
+    db.execute("DELETE FROM conversation_states WHERE phone=?", (phone,))
 
 
 # ── Messages ──────────────────────────────────────────────────────────────────
