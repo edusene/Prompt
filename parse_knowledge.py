@@ -1,6 +1,7 @@
 """
 parse_knowledge.py — Le os arquivos .docx e .xlsx de conhecimento da BALBS
 e retorna o conteudo formatado para injetar no system prompt do agente.
+Busca primeiro no banco de dados, depois fallback para arquivos locais.
 """
 
 import os
@@ -11,9 +12,32 @@ _dir = Path(__file__).parent
 _PROMPT_DOCX = _dir / "PROMPTS EDUARDO 13.09.26.docx"
 _DADOS_XLSX = _dir / "PLANILHA CARDAPIO E BAIRROS EDUARDO.xlsx"
 
+# Nomes dos arquivos como serao salvos no knowledge DB
+_PROMPT_DB_NAME = "PROMPTS EDUARDO 13.09.26.docx"
+_DADOS_DB_NAME = "PLANILHA CARDAPIO E BAIRROS EDUARDO.xlsx"
+
+
+def _read_from_db(filename: str) -> str:
+    """Tenta ler conteudo de um arquivo knowledge do banco de dados."""
+    try:
+        import knowledge_rag
+        content = knowledge_rag.get_file_content(filename)
+        if content and content.strip():
+            print(f"[parse_knowledge] lido do DB: {filename} ({len(content)} chars)")
+            return content
+    except Exception as e:
+        print(f"[parse_knowledge] WARN nao conseguiu ler do DB: {e}")
+    return ""
+
 
 def _read_docx() -> str:
-    """Le o .docx e retorna o texto completo."""
+    """Le o .docx e retorna o texto completo. Tenta DB primeiro, depois local."""
+    # Tenta do banco de dados
+    content = _read_from_db(_PROMPT_DB_NAME)
+    if content:
+        return content
+
+    # Fallback: arquivo local
     try:
         from docx import Document
     except ImportError:
@@ -47,7 +71,15 @@ def _adaptar_prompt_docx(texto: str) -> str:
 
 
 def _read_xlsx() -> str:
-    """Le o .xlsx e converte cada aba para texto estruturado limpo."""
+    """Le o .xlsx e converte cada aba para texto estruturado limpo.
+    Tenta DB primeiro, depois local.
+    """
+    # Tenta do banco de dados
+    content = _read_from_db(_DADOS_DB_NAME)
+    if content:
+        return content
+
+    # Fallback: arquivo local
     try:
         import pandas as pd
     except ImportError:
@@ -110,7 +142,6 @@ def get_full_prompt_with_knowledge() -> str:
 
 # Cache em memoria para evitar re-leitura a cada chamada
 _cached_prompt = None
-_cached_dados = None
 
 
 def get_prompt_cached() -> str:
@@ -128,8 +159,7 @@ def get_prompt_cached() -> str:
 
 
 def reload_cache():
-    """Forca recarregamento do cache (util para atualizacoes)."""
-    global _cached_prompt, _cached_dados
+    """Forca recarregamento do cache (util para atualizacoes via aba Knowledge)."""
+    global _cached_prompt
     _cached_prompt = None
-    _cached_dados = None
     print("[parse_knowledge] cache recarregado")

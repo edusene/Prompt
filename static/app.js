@@ -1825,8 +1825,30 @@ async function importKnowledgeFile(event) {
     input.value = ''; // permite re-importar o mesmo arquivo
     if (!file) return;
     const lower = (file.name || '').toLowerCase();
-    if (!lower.endsWith('.md') && !lower.endsWith('.txt')) {
-        toast('Sólo se permiten archivos .md o .txt', 'error');
+    const isBinary = lower.endsWith('.docx') || lower.endsWith('.xlsx');
+    if (!lower.endsWith('.md') && !lower.endsWith('.txt') && !isBinary) {
+        toast('So sao permitidos arquivos .md, .txt, .docx ou .xlsx', 'error');
+        return;
+    }
+    if (isBinary) {
+        // .docx/.xlsx: envia direto ao server para parse
+        const formData = new FormData();
+        formData.append('files', file);
+        toast('Enviando arquivo...', 'info');
+        try {
+            const res = await fetch('/api/knowledge/upload', { method: 'POST', body: formData });
+            const data = await res.json();
+            if (data.saved && data.saved.length > 0) {
+                toast(`${data.saved.length} arquivo(s) salvo(s) como pendente`, 'success');
+                loadKnowledge();
+                selectKnowledgeFile(data.saved[0]);
+            }
+            if (data.errors && data.errors.length > 0) {
+                data.errors.forEach(err => toast(`${err.filename}: ${err.error}`, 'error'));
+            }
+        } catch (e) {
+            toast('Erro ao enviar arquivo', 'error');
+        }
         return;
     }
     try {
@@ -1892,8 +1914,8 @@ async function importKnowledgeMultiple(event) {
     let validCount = 0;
     for (const file of files) {
         const lower = (file.name || '').toLowerCase();
-        if (!lower.endsWith('.md') && !lower.endsWith('.txt')) {
-            toast(`Arquivo ignorado: ${file.name} (só .md/.txt)`, 'error');
+        if (!lower.endsWith('.md') && !lower.endsWith('.txt') && !lower.endsWith('.docx') && !lower.endsWith('.xlsx')) {
+            toast(`Arquivo ignorado: ${file.name} (so .md, .txt, .docx, .xlsx)`, 'error');
             continue;
         }
         formData.append('files', file);
@@ -1948,6 +1970,21 @@ async function handleEmbedAll(e) {
             toastDone(toastId, msg, 'success');
         }
         loadKnowledge();
+    }
+}
+
+/* ── Knowledge Reload Prompt ─────────────────────────────────────── */
+async function handleReloadPrompt(e) {
+    e.stopPropagation();
+    closeKnowledgeDropdown();
+
+    const toastId = toastLoading('Recarregando system prompt...');
+
+    const res = await api('/api/knowledge/reload', { method: 'POST' });
+    if (res?.error) {
+        toastDone(toastId, friendlyError(res.error), 'error');
+    } else {
+        toastDone(toastId, `Prompt recarregado (${res.prompt_chars} chars)`, 'success');
     }
 }
 

@@ -263,6 +263,10 @@
                                         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M2 12h20"/><circle cx="12" cy="12" r="10"/></svg>
                                         Gerar Embeddings
                                     </button>
+                                    <button class="knowledge-dropdown-item knowledge-dropdown-action" onclick="handleReloadPrompt(event)">
+                                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                                        Recarregar Prompt
+                                    </button>
                                     <button class="knowledge-dropdown-item knowledge-dropdown-action" onclick="handleClearEmbeddings(event)">
                                         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
                                         Limpar Embeddings
@@ -272,8 +276,8 @@
                                         Deletar Tudo
                                     </button>
                                 </div>
-                                <input type="file" id="knowledge-import-input" accept=".md,.txt,text/markdown,text/plain" style="display:none" onchange="importKnowledgeFile(event)">
-                                <input type="file" id="knowledge-import-multi-input" accept=".md,.txt,text/markdown,text/plain" multiple style="display:none" onchange="importKnowledgeMultiple(event)">
+                                <input type="file" id="knowledge-import-input" accept=".md,.txt,.docx,.xlsx,text/markdown,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="display:none" onchange="importKnowledgeFile(event)">
+                                <input type="file" id="knowledge-import-multi-input" accept=".md,.txt,.docx,.xlsx,text/markdown,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple style="display:none" onchange="importKnowledgeMultiple(event)">
                             </div>
                         </div>
                         <div id="knowledge-list"></div>

@@ -1925,8 +1925,8 @@ def api_knowledge_create():
     skip_embed = data.get("skip_embed", True)
     if not filename:
         return jsonify({"error": "filename obrigatorio"}), 400
-    if not filename.endswith(('.md', '.txt')):
-        return jsonify({"error": "Extensao invalida (.md ou .txt)"}), 400
+    if not filename.endswith(('.md', '.txt', '.docx', '.xlsx')):
+        return jsonify({"error": "Extensao invalida (.md, .txt, .docx ou .xlsx)"}), 400
     existing = knowledge_rag.get_file(filename)
     if existing:
         return jsonify({"error": "Arquivo ja existe"}), 409
@@ -1957,10 +1957,48 @@ def api_knowledge_delete(filename):
     return jsonify({"ok": True})
 
 
+def _parse_docx_upload(file_storage) -> str:
+    """Extrai texto de um arquivo .docx enviado via upload."""
+    try:
+        from docx import Document
+        import io
+        doc = Document(io.BytesIO(file_storage.read()))
+        lines = [p.text for p in doc.paragraphs if p.text.strip()]
+        return "\n".join(lines)
+    except Exception as e:
+        print(f"[knowledge] ERRO parse docx: {e}")
+        return ""
+
+
+def _parse_xlsx_upload(file_storage) -> str:
+    """Extrai texto de um arquivo .xlsx enviado via upload (todas as abas)."""
+    try:
+        import pandas as pd
+        import io
+        xls = pd.ExcelFile(io.BytesIO(file_storage.read()))
+        partes = []
+        for sheet in xls.sheet_names:
+            df = pd.read_excel(xls, sheet_name=sheet)
+            df = df.dropna(how="all")
+            df = df.dropna(axis=1, how="all")
+            if df.empty:
+                continue
+            df.columns = [
+                f"col{i}" if "Unnamed" in str(c) else str(c)
+                for i, c in enumerate(df.columns)
+            ]
+            texto = df.to_string(index=False, max_colwidth=120)
+            partes.append(f"=== {sheet} ===\n{texto}")
+        return "\n\n".join(partes)
+    except Exception as e:
+        print(f"[knowledge] ERRO parse xlsx: {e}")
+        return ""
+
+
 @app.post("/api/knowledge/upload")
 @login_required
 def api_knowledge_upload():
-    """Upload de múltiplos arquivos (multipart). Salva como pending."""
+    """Upload de múltiplos arquivos (multipart). Aceita .md, .txt, .docx, .xlsx."""
     files = request.files.getlist("files")
     if not files:
         return jsonify({"error": "Nenhum arquivo enviado"}), 400
@@ -1971,15 +2009,24 @@ def api_knowledge_upload():
         filename = f.filename or ""
         if not filename:
             continue
-        if not filename.endswith(('.md', '.txt')):
-            errors.append({"filename": filename, "error": "Extensao invalida"})
+        lower = filename.lower()
+        if not lower.endswith(('.md', '.txt', '.docx', '.xlsx')):
+            errors.append({"filename": filename, "error": "Extensao invalida (.md, .txt, .docx ou .xlsx)"})
             continue
         existing = knowledge_rag.get_file(filename)
         if existing:
             errors.append({"filename": filename, "error": "Arquivo ja existe"})
             continue
         try:
-            content = f.read().decode("utf-8", errors="replace")
+            if lower.endswith('.docx'):
+                content = _parse_docx_upload(f)
+            elif lower.endswith('.xlsx'):
+                content = _parse_xlsx_upload(f)
+            else:
+                content = f.read().decode("utf-8", errors="replace")
+            if not content or not content.strip():
+                errors.append({"filename": filename, "error": "Arquivo vazio ou nao parseado"})
+                continue
             knowledge_rag.save_knowledge_raw(filename, content)
             saved.append(filename)
         except Exception as e:
@@ -2012,6 +2059,37 @@ def api_knowledge_delete_all():
     """Deleta todo o knowledge (chunks + metadados)."""
     count = knowledge_rag.delete_all()
     return jsonify({"ok": True, "deleted": count})
+
+
+@app.post("/api/knowledge/reload")
+@login_required
+def api_knowledge_reload():
+    """Recarrega o cache do system prompt (util apos upload de .docx/.xlsx)."""
+    global FULL_SYSTEM_PROMPT
+    parse_knowledge.reload_cache()
+    _prompt_from_docx = parse_knowledge.get_prompt_cached()
+    if _prompt_from_docx:
+        FULL_SYSTEM_PROMPT = _prompt_from_docx + (
+            "\n\n=== TOOLS DISPONIVEIS ==="
+            "\nVoce tem acesso a uma tool 'search_knowledge' para buscar informacoes "
+            "na base de conhecimento. Chame essa tool sempre que precisar consultar "
+            "produtos, precos, politicas ou qualquer informacao da empresa."
+            "\nVoce tem acesso a uma tool 'transfer_to_human' para transferir o atendimento a um humano. "
+            "USE essa tool quando: o cliente pedir explicitamente para falar com um atendente ou humano; "
+            "a situacao envolver reclamacao grave, cancelamento, reembolso ou devolucao; "
+            "voce nao souber responder adequadamente; "
+            "a solicitacao estiver fora do seu escopo; "
+            "ou quando perceber que o cliente esta frustrado ou insatisfeito. "
+            "Ao transferir, informe brevemente o motivo no parametro 'reason'."
+            "\nVoce tem acesso a uma tool 'calculate_order' para validar pedidos no cardapio. "
+            "Chame essa tool ANTES de confirmar o pedido com o cliente, informando os itens e o bairro de entrega. "
+            "Ela valida produtos, quantidades, calcula subtotal, frete e total."
+            "\nVoce tem acesso a uma tool 'send_order_to_cardapio' para enviar pedidos confirmados para o cardapio digital. "
+            "USE essa tool SOMENTE apos o cliente ter confirmado o pedido completo e voce ter validado com calculate_order. "
+            "Nunca envie sem confirmacao explicita do cliente."
+        )
+    print(f"[knowledge] system prompt recarregado: {len(FULL_SYSTEM_PROMPT)} chars")
+    return jsonify({"ok": True, "prompt_chars": len(FULL_SYSTEM_PROMPT)})
 
 
 # ── WhatsApp Cloud API (Meta) ────────────────────────────────────────────────
