@@ -3200,9 +3200,17 @@ select option {
 /* Stats grid for cardápio view */
 .cardapio-stats {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
     gap: 16px;
     margin-bottom: 24px;
+}
+
+/* Stat value override for cardápio (menor para caber "R$ 1209.09") */
+.cardapio-stats .stat-value {
+    font-size: 22px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 /* Table */

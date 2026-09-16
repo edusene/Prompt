@@ -167,7 +167,7 @@ function loadView(view) {
             loadCardapioSettings();
             loadCardapioStats();
             loadCardapioOrders();
-            pollTimers.push(setInterval(loadCardapioOrders, 30000));
+            pollTimers.push(setInterval(() => { loadCardapioOrders(); loadCardapioStats(); }, 30000));
             break;
     }
 }
@@ -2444,6 +2444,11 @@ function connectSSE() {
         } else if (event === 'wa_status') {
             if (currentView === 'whatsapp') {
                 loadWAConnection();
+            }
+        } else if (event === 'cardapio_order') {
+            if (currentView === 'cardapio') {
+                loadCardapioStats();
+                loadCardapioOrders();
             }
         }
     };
