@@ -8,7 +8,7 @@ import json
 from openai import OpenAI
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.6-luna")
 
 _client = OpenAI(api_key=OPENAI_API_KEY)
 
@@ -94,6 +94,13 @@ def generate_reply(
     response = _client.chat.completions.create(**kwargs)
     choice = response.choices[0]
 
+    # Log de cache hits (prompt caching)
+    if hasattr(response, 'usage') and response.usage:
+        _cached = getattr(response.usage.prompt_tokens_details, 'cached_tokens', 0) if response.usage.prompt_tokens_details else 0
+        _total = response.usage.prompt_tokens or 0
+        if _total > 0:
+            print(f"[llm] cache tokens: {_cached}/{_total} cached ({_cached*100//_total}% hit)")
+
     # Loop de tool calling: permite múltiplos rounds de tools
     max_tool_rounds = 5
     rounds = 0
@@ -133,6 +140,13 @@ def generate_reply(
             max_tokens=1024,
         )
         choice = response.choices[0]
+
+        # Log de cache hits no tool calling loop
+        if hasattr(response, 'usage') and response.usage:
+            _cached = getattr(response.usage.prompt_tokens_details, 'cached_tokens', 0) if response.usage.prompt_tokens_details else 0
+            _total = response.usage.prompt_tokens or 0
+            if _total > 0:
+                print(f"[llm] cache tokens (tool round {rounds}): {_cached}/{_total} cached ({_cached*100//_total}% hit)")
 
     text = (choice.message.content or "").strip()
     print(f"[llm] reply len={len(text)}")

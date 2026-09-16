@@ -772,67 +772,6 @@ def handle_flush(user: str, items: list[dict]) -> None:
                 + knowledge_index
             )
 
-        # Injeta data e hora atual para o agente saber o horario (fuso de Cuiaba = UTC-4)
-        _now = (datetime.utcnow() - timedelta(hours=4)).strftime("%d/%m/%Y %H:%M")
-        _tomorrow = (datetime.utcnow() - timedelta(hours=4) + timedelta(days=1)).strftime("%d/%m/%Y")
-        _today = (datetime.utcnow() - timedelta(hours=4)).strftime("%d/%m/%Y")
-        dynamic_prompt += (
-            f"\n\nData e hora atual (Cuiaba): {_now}. "
-            "Use esta informacao para responder sobre horarios, funcionamento, "
-            "se esta aberto/fechado, e regras baseadas em horario."
-            "\n\n⚠️ VERIFICACAO OBRIGATORIA DE HORARIO — TEM PRIORIDADE SOBRE TUDO:\n"
-            "1. AO INICIAR QUALQUER CONVERSA ou RECEBER QUALQUER PEDIDO, PRIMEIRO CHAME "
-            "search_knowledge(query='horario funcionamento') para saber o horario de funcionamento.\n"
-            "2. Compare o horario atual injetado acima com o horario de funcionamento retornado.\n"
-            "3. Se o horario atual ESTIVER FORA do horario de funcionamento (antes da abertura ou apos o fechamento):\n"
-            "   a) INFORME AO CLIENTE QUE A BALBS ESTA FECHADA NO MOMENTO — isso e PRIORITARIO.\n"
-            "   b) Informe o horario de funcionamento completo.\n"
-            "   c) NAO processe nenhum pedido. NAO envie mensagem de boas-vindas antes disso.\n"
-            "   d) Pergunte: 'Posso agendar seu pedido para amanha no primeiro horario?'\n"
-            f"   e) Se o cliente concordar, recolha os itens do pedido normalmente, e ao enviar com "
-            f"send_order_to_cardapio, inclua scheduled_date='{_tomorrow}' "
-            "e is_scheduled=true.\n"
-            "   f) NAO envie o pedido para entrega imediata se estiver fechado.\n"
-            "4. Se o horario atual ESTIVER DENTRO do horario de funcionamento, continue o fluxo normalmente.\n"
-            "\n⚠️ REGRAS DE SAUDACAO:\n"
-            "A verificacao de horario acima TEM PRIORIDADE ABSOLUTA sobre qualquer saudacao.\n"
-            "Se o estabelecimento esta fechado, NAO envie saudacao — informe o fechamento primeiro.\n"
-        )
-
-        # Injeta regra de saudação contextual baseada no histórico
-        history = memory.get(user)
-        has_name = bool(contact and contact.get("name"))
-        has_greeting = any(
-            "sandrinha" in (m.get("parts", [{}])[0].get("text", "").lower() or "")
-            for m in history if m.get("role") == "assistant"
-        )
-        # Detecta se ha fluxo de pedido ativo (ultima mensagem do agente pediu confirmacao)
-        _last_assistant = ""
-        for m in reversed(history):
-            if m.get("role") == "assistant":
-                _last_assistant = (m.get("parts", [{}])[0].get("text", "") or "").lower()
-                break
-        _order_flow_active = any(kw in _last_assistant for kw in ("confirma?", "confirma?", "total:", "pedido:", "forma de pagamento"))
-
-        if (len(history) > 2 or has_greeting or has_name) and not _order_flow_active:
-            dynamic_prompt += (
-                "\n\n⚠️ REGRAS DE SAUDACAO - LEIA COM ATENCAO:\n"
-                "Este cliente JA conversou com voce anteriormente.\n"
-                "A VERIFICACAO DE HORARIO ja foi feita acima. Se esta aberto, continue normalmente.\n"
-            )
-            if has_name:
-                dynamic_prompt += (
-                    f"O nome do cliente ja e conhecido: {contact['name']}.\n"
-                    "NAO pergunte 'Qual e o seu nome?'. Ja tem o nome.\n"
-                    f"Responda exatamente: 'Prazer, {contact['name']}! Dá uma olhada no nosso cardápio completo: https://balbssalgados.ocardapio.net/ — quais delícias vamos pedir hoje?'\n"
-                )
-            else:
-                dynamic_prompt += (
-                    "Ja houve interacao anterior. NAO repita a mensagem de boas-vindas "
-                    "'Oi! Eu sou a Sandrinha da BALBS...' nem pergunte o nome.\n"
-                    "Responda de forma contextual a mensagem do cliente.\n"
-                )
-
         # Injeta regras de porcao e NAO PRESUMIR (antes do fluxo de pedido)
         dynamic_prompt += (
             "\n\n⚠️ REGRAS DE PORCAO — SALGADOS DE FESTA:\n"
@@ -894,6 +833,69 @@ def handle_flush(user: str, items: list[dict]) -> None:
             "14. NUNCA envie o pedido sem confirmacao explicita do cliente.\n"
             "15. NUNCA informe frete ZERO sem consultar o knowledge.\n"
             "16. NUNCA envie o resumo sem incluir o horario de entrega/retirada solicitado pelo cliente."
+        )
+
+        # Injeta regras de verificacao de horario (REGRAS estaticas - sem timestamp)
+        dynamic_prompt += (
+            "\n\n⚠️ VERIFICACAO OBRIGATORIA DE HORARIO — TEM PRIORIDADE SOBRE TUDO:\n"
+            "1. AO INICIAR QUALQUER CONVERSA ou RECEBER QUALQUER PEDIDO, PRIMEIRO CHAME "
+            "search_knowledge(query='horario funcionamento') para saber o horario de funcionamento.\n"
+            "2. Compare o horario atual (injetado abaixo no final deste prompt) com o horario retornado.\n"
+            "3. Se o horario atual ESTIVER FORA do horario de funcionamento (antes da abertura ou apos o fechamento):\n"
+            "   a) INFORME AO CLIENTE QUE A BALBS ESTA FECHADA NO MOMENTO — isso e PRIORITARIO.\n"
+            "   b) Informe o horario de funcionamento completo.\n"
+            "   c) NAO processe nenhum pedido. NAO envie mensagem de boas-vindas antes disso.\n"
+            "   d) Pergunte: 'Posso agendar seu pedido para amanha no primeiro horario?'\n"
+            "   e) Se o cliente concordar, recolha os itens do pedido normalmente, e ao enviar com "
+            "send_order_to_cardapio, inclua a data de amanha em scheduled_date e is_scheduled=true.\n"
+            "   f) NAO envie o pedido para entrega imediata se estiver fechado.\n"
+            "4. Se o horario atual ESTIVER DENTRO do horario de funcionamento, continue o fluxo normalmente.\n"
+            "\n⚠️ REGRAS DE SAUDACAO:\n"
+            "A verificacao de horario acima TEM PRIORIDADE ABSOLUTA sobre qualquer saudacao.\n"
+            "Se o estabelecimento esta fechado, NAO envie saudacao — informe o fechamento primeiro.\n"
+        )
+
+        # Injeta regra de saudação contextual baseada no histórico
+        history = memory.get(user)
+        has_name = bool(contact and contact.get("name"))
+        has_greeting = any(
+            "sandrinha" in (m.get("parts", [{}])[0].get("text", "").lower() or "")
+            for m in history if m.get("role") == "assistant"
+        )
+        # Detecta se ha fluxo de pedido ativo (ultima mensagem do agente pediu confirmacao)
+        _last_assistant = ""
+        for m in reversed(history):
+            if m.get("role") == "assistant":
+                _last_assistant = (m.get("parts", [{}])[0].get("text", "") or "").lower()
+                break
+        _order_flow_active = any(kw in _last_assistant for kw in ("confirma?", "confirma?", "total:", "pedido:", "forma de pagamento"))
+
+        if (len(history) > 2 or has_greeting or has_name) and not _order_flow_active:
+            dynamic_prompt += (
+                "\n\n⚠️ REGRAS DE SAUDACAO - LEIA COM ATENCAO:\n"
+                "Este cliente JA conversou com voce anteriormente.\n"
+                "A VERIFICACAO DE HORARIO ja foi feita acima. Se esta aberto, continue normalmente.\n"
+            )
+            if has_name:
+                dynamic_prompt += (
+                    f"O nome do cliente ja e conhecido: {contact['name']}.\n"
+                    "NAO pergunte 'Qual e o seu nome?'. Ja tem o nome.\n"
+                    f"Responda exatamente: 'Prazer, {contact['name']}! Dá uma olhada no nosso cardápio completo: https://balbssalgados.ocardapio.net/ — quais delícias vamos pedir hoje?'\n"
+                )
+            else:
+                dynamic_prompt += (
+                    "Ja houve interacao anterior. NAO repita a mensagem de boas-vindas "
+                    "'Oi! Eu sou a Sandrinha da BALBS...' nem pergunte o nome.\n"
+                    "Responda de forma contextual a mensagem do cliente.\n"
+                )
+
+        # ── CONTEUDO DINAMICO (no final para preservar cache do prefixo estatico) ──
+        # Injeta data e hora atual para o agente saber o horario (fuso de Cuiaba = UTC-4)
+        _now = (datetime.utcnow() - timedelta(hours=4)).strftime("%d/%m/%Y %H:%M")
+        _tomorrow = (datetime.utcnow() - timedelta(hours=4) + timedelta(days=1)).strftime("%d/%m/%Y")
+        dynamic_prompt += (
+            f"\n\nData e hora atual (Cuiaba): {_now}. "
+            f"Data de amanha (se agendar): {_tomorrow}."
         )
 
         # Injeta nome do cliente no prompt
