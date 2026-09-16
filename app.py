@@ -937,6 +937,23 @@ def handle_flush(user: str, items: list[dict]) -> None:
             "\n7. NUNCA assuma que e entrega ou retirada SEM PERGUNTAR ao cliente"
             "\n8. PRIMEIRA PERGUNTA sobre logistica: 'E para entrega ou retirada na fabrica?'"
             "\n9. NAO pule esta pergunta - ela e OBRIGATORIA"
+            "\n10. ANTES de apresentar resumo, VERIFIQUE: tem modalidade? tem data? tem horario? Se falta algum, PERGUNTE"
+            "\n11. NAO apresente resumo SEM data + horario + modalidade confirmados"
+        )
+
+        # OVERRIDE FINAL - Regras que SOBRESCREVEM qualquer instrucao anterior
+        dynamic_prompt += (
+            "\n\n🚨 OVERRIDE FINAL - INSTRUCOES QUE SOBRESCREVEM TUDO ANTERIOR 🚨"
+            "\nSE o pedido ja tem itens mas NAO tem modalidade (entrega/retirada):"
+            "\n  -> PERGUNTE: 'Será para entrega ou retirada na fabrica?'"
+            "\nSE tem modalidade mas NAO tem data:"
+            "\n  -> PERGUNTE: 'Qual data você prefere?'"
+            "\nSE tem data mas NAO tem horario:"
+            "\n  -> PERGUNTE: 'E qual horário?'"
+            "\nSE tem tudo mas e entrega e NAO tem endereco:"
+            "\n  -> PERGUNTE bairro, rua, numero, referencia"
+            "\nAPENAS depois de ter TODOS os dados acima, apresente o resumo"
+            "\nNUNCA pule etapas mesmo que o cliente responda de forma incompleta"
         )
 
         # Verifica se a IA transferiu durante a chamada (via tool)
