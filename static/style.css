@@ -3344,14 +3344,13 @@ select option {
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
+    overflow: hidden;
 }
 
 .crm-table {
     width: 100%;
     border-collapse: collapse;
-    min-width: 900px;
+    table-layout: fixed;
 }
 
 .crm-table th {
@@ -3385,17 +3384,31 @@ select option {
     border-bottom: none;
 }
 
-/* CRM Table - Colunas com largura definida */
-.crm-table .col-name { min-width: 160px; }
-.crm-table .col-phone { min-width: 130px; }
-.crm-table .col-status { min-width: 110px; }
-.crm-table .col-tags { min-width: 110px; }
-.crm-table .col-date { min-width: 120px; }
-.crm-table .col-days { min-width: 90px; text-align: center; }
-.crm-table .col-msg { max-width: 220px; }
-.crm-table .col-action { min-width: 90px; }
-.crm-table .col-result { min-width: 90px; }
-.crm-table .col-error { max-width: 160px; color: #ef4444; }
+/* CRM Table - Colunas com largura proporcional */
+.crm-table th,
+.crm-table td {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.crm-table .col-name { width: 22%; }
+.crm-table .col-phone { width: 16%; }
+.crm-table .col-status { width: 12%; }
+.crm-table .col-tags { width: 14%; }
+.crm-table .col-date { width: 14%; }
+.crm-table .col-days { width: 10%; text-align: center; }
+.crm-table .col-msg { width: 20%; }
+.crm-table .col-action { width: 10%; }
+.crm-table .col-result { width: 10%; }
+.crm-table .col-error { width: 12%; color: #ef4444; }
+
+.crm-table .col-msg,
+.crm-table .col-error {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
 
 /* CRM Status Badges */
 .crm-status-badge {

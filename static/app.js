@@ -3213,7 +3213,7 @@ async function loadCrmFollowUps() {
                         <td><strong>${esc(fu.contact_name || fu.contact_phone)}</strong><br><span class="muted">${esc(fu.contact_phone)}</span></td>
                         <td>${esc(fu.automation_name)}</td>
                         <td>${sched}</td>
-                        <td style="max-width:250px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(msg)}</td>
+                        <td title="${esc(msg)}">${esc(msg)}</td>
                         <td><span class="crm-fu-status-badge crm-fu-${fu.status}">${esc(crmFollowUpLabel(fu.status))}</span></td>
                     </tr>`;
                 }).join('')}
@@ -3244,9 +3244,9 @@ async function loadCrmLogs() {
                         <td>${esc(l.contact_name || l.contact_phone || '-')}</td>
                         <td>${esc(l.automation_name || '-')}</td>
                         <td>${esc(l.action)}</td>
-                        <td style="max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(l.message)}</td>
+                        <td title="${esc(l.message)}">${esc(l.message)}</td>
                         <td><span class="crm-fu-status-badge crm-fu-${l.result === 'enviado' ? 'enviado' : l.result === 'erro' ? 'erro' : ''}">${esc(l.result)}</span></td>
-                        <td style="max-width:150px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#ef4444">${esc(l.error)}</td>
+                        <td title="${esc(l.error)}">${esc(l.error)}</td>
                     </tr>`;
                 }).join('')}
                 </tbody>
