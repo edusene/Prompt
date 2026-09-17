@@ -3603,7 +3603,7 @@ function handleMediaSelect(event, type) {
     _selectedMedia = file;
     _selectedMediaType = type;
     
-    // Mostra preview
+    closeMediaMenu();
     showMediaPreview(file, type);
     
     // Limpa input para permitir selecionar o mesmo arquivo novamente

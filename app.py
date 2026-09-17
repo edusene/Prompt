@@ -1133,7 +1133,9 @@ def _fetch_and_store_media(m: dict) -> str:
     with lock:
         fresh = database.get_message(msg_id)
         if fresh and str(fresh.get("media_url") or "").strip():
-            return fresh["media_url"]
+            url = fresh["media_url"]
+            if url.startswith("data:") and len(url) > 500:
+                return url
         wa_media_id = str((fresh or {}).get("wa_media_id") or "")
         if not wa_media_id:
             return ""
@@ -1950,7 +1952,7 @@ def api_messages_send_media():
         sender="human",
         msg_type=media_type,
         wa_message_id=meta_msg_id,
-        media_url=f"data:{mime};base64,{__import__('base64').b64encode(file_bytes[:1000]).decode()}"  # Preview compacto
+        wa_media_id=media_id,
     )
     
     db_msg_id = saved_msg["id"] if saved_msg else ""
