@@ -2212,92 +2212,90 @@ def api_knowledge_xlsx_data(filename):
         return jsonify({"error": "Arquivo nao encontrado"}), 404
     
     try:
-        import pandas as pd
-        import io
-        import json
+        import openpyxl
+        from pathlib import Path
         
         # Busca o arquivo original do storage
-        from pathlib import Path
         uploads_dir = Path(__file__).parent / "uploads"
         xlsx_path = uploads_dir / filename
         
         if not xlsx_path.exists():
-            # Tenta no diretorio static
             xlsx_path = Path(__file__).parent / "static" / filename
         
         if not xlsx_path.exists():
-            # Tenta na raiz do projeto
             xlsx_path = Path(__file__).parent / filename
         
         if not xlsx_path.exists():
-            # Retorna dados do content parseado
             content = file_data.get("content", "")
             return jsonify({
                 "sheets": [{"name": "Dados", "data": content}],
                 "filename": filename
             })
         
-        xls = pd.ExcelFile(io.BytesIO(xlsx_path.read_bytes()))
+        wb = openpyxl.load_workbook(str(xlsx_path), read_only=True, data_only=True)
         sheets = []
         
-        for sheet_name in xls.sheet_names:
-            # Le sem headers primeiro para detectar onde comecam os dados reais
-            df_raw = pd.read_excel(xls, sheet_name=sheet_name, header=None)
-            df_raw = df_raw.dropna(how="all")
+        for sheet_name in wb.sheetnames:
+            ws = wb[sheet_name]
             
-            if df_raw.empty:
+            # Le todas as linhas como listas
+            all_rows = []
+            for row in ws.iter_rows(values_only=True):
+                vals = [str(cell) if cell is not None else "" for cell in row]
+                all_rows.append(vals)
+            
+            if not all_rows:
                 continue
             
-            # Procura a linha que contem os headers reais (primeira linha com 2+ valores nao-vazios
-            # que nao comeca com === ou nao e generica como col0, col1)
-            header_row = 0
-            for idx, row in df_raw.iterrows():
-                vals = [str(v).strip() for v in row.values if pd.notna(v) and str(v).strip()]
-                if len(vals) >= 2:
-                    # Verifica se nao e linha de titulo (=== ...) ou header generico
-                    first_val = vals[0]
-                    if first_val.startswith("===") or first_val.startswith("col"):
-                        continue
-                    # Verifica se parece header (valores nao sao todos numericos)
-                    has_text = any(not v.replace(".", "").replace(",", "").isdigit() for v in vals)
+            # Remove colunas totalmente vazias (conta colunas com pelo menos 1 valor)
+            non_empty_cols = set()
+            for row in all_rows:
+                for ci, cell in enumerate(row):
+                    if cell.strip():
+                        non_empty_cols.add(ci)
+            
+            if not non_empty_cols:
+                continue
+            
+            non_empty_cols = sorted(non_empty_cols)
+            all_rows = [[row[ci] if ci < len(row) else "" for ci in non_empty_cols] for row in all_rows]
+            
+            # Remove linhas totalmente vazias
+            all_rows = [r for r in all_rows if any(cell.strip() for cell in r)]
+            
+            if not all_rows:
+                continue
+            
+            # Detecta linha de headers: procura a primeira linha com 2+ valores nao-vazios
+            # que parecem ser nomes de coluna (nao numericos)
+            header_idx = 0
+            for idx, row in enumerate(all_rows):
+                non_empty = [c.strip() for c in row if c.strip()]
+                if len(non_empty) >= 2:
+                    # Verifica se parece header (valores sao texto, nao numeros puros)
+                    has_text = any(
+                        not c.replace(".", "").replace(",", "").isdigit()
+                        for c in non_empty
+                    )
                     if has_text:
-                        header_row = idx
+                        header_idx = idx
                         break
             
-            # Le com headers na linha detectada
-            df = pd.read_excel(xls, sheet_name=sheet_name, header=header_row)
-            df = df.dropna(how="all")
-            df = df.dropna(axis=1, how="all")
+            headers = [c.strip() or f"Col_{i+1}" for i, c in enumerate(all_rows[header_idx])]
+            data_rows = all_rows[header_idx + 1:]
             
-            if df.empty:
-                continue
-            
-            # Remove linhas que parecem ser titulos ou separadores
-            df = df[~df.iloc[:, 0].astype(str).str.startswith("===", na=False)]
-            
-            # Renomeia colunas sem nome
-            df.columns = [
-                f"Col_{i+1}" if "Unnamed" in str(c) else str(c)
-                for i, c in enumerate(df.columns)
-            ]
-            
-            # Converte para formato de tabela
-            headers = df.columns.tolist()
-            rows = df.values.tolist()
-            
-            # Converte valores para string
-            rows = [[str(cell) if pd.notna(cell) else "" for cell in row] for row in rows]
-            
-            # Remove linhas totalmente vazias apos conversao
-            rows = [r for r in rows if any(cell.strip() for cell in r)]
+            # Remove linhas totalmente vazias apos headers
+            data_rows = [r for r in data_rows if any(cell.strip() for cell in r)]
             
             sheets.append({
                 "name": sheet_name,
                 "headers": headers,
-                "rows": rows,
-                "rowCount": len(rows),
+                "rows": data_rows,
+                "rowCount": len(data_rows),
                 "colCount": len(headers)
             })
+        
+        wb.close()
         
         return jsonify({
             "sheets": sheets,
