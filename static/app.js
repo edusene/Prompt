@@ -1363,7 +1363,7 @@ function autoResizeChatInput() {
     }
 }
 
-document.getElementById('chat-send').addEventListener('click', sendMessage);
+document.getElementById('chat-send').addEventListener('click', () => sendMessage());
 document.getElementById('chat-input').addEventListener('keydown', e => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 });
@@ -3918,6 +3918,8 @@ async function sendRecordedAudio() {
     const conv = conversations.find(c => c.id === currentConvId);
     if (!conv) return;
     
+    const audioBlob = _recordedAudioBlob;
+    
     const btn = document.getElementById('chat-send');
     setBtnLoading(btn, true, 'Enviando...');
     
@@ -3934,11 +3936,11 @@ async function sendRecordedAudio() {
             uazapi_id: '',
         });
         
-        hideRecordingPanel();
         _recordedAudioBlob = null;
+        hideRecordingPanel();
         
         const formData = new FormData();
-        const audioFile = new File([_recordedAudioBlob], 'audio.webm', { type: 'audio/webm' });
+        const audioFile = new File([audioBlob], 'audio.webm', { type: 'audio/webm' });
         formData.append('media', audioFile);
         formData.append('phone', conv.contact_phone);
         formData.append('type', 'audio');
