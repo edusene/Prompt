@@ -1929,27 +1929,47 @@ function renderXlsxPreview(filename, xlsxData) {
 function renderXlsxSheetTable(sheet, sheetIndex) {
     if (!sheet.headers && !sheet.data) return '';
     
+    // Fallback: dados em texto - tenta parsear em tabela
     if (sheet.data && !sheet.headers) {
-        return `<div class="knowledge-xlsx-container"><pre class="knowledge-xlsx-pre">${esc(sheet.data)}</pre></div>`;
+        const lines = sheet.data.split('\n').filter(l => l.trim());
+        if (lines.length > 2) {
+            // Tenta detectar separador (tab ou 2+ espacos)
+            const firstDataLine = lines.find(l => !l.trim().startsWith('===')) || lines[0];
+            const hasTab = firstDataLine.includes('\t');
+            const separator = hasTab ? /\t/ : /\s{2,}/;
+            
+            // Primeira linha nao-vazia que nao comeca com === vira header
+            let headerIdx = 0;
+            for (let i = 0; i < lines.length; i++) {
+                if (!lines[i].trim().startsWith('===')) {
+                    headerIdx = i;
+                    break;
+                }
+            }
+            
+            const headers = lines[headerIdx].split(separator).map(h => h.trim()).filter(Boolean);
+            const dataLines = lines.slice(headerIdx + 1).filter(l => !l.trim().startsWith('==='));
+            const rows = dataLines.map(line => {
+                const cells = line.split(separator).map(c => c.trim());
+                // Preenche celulas faltantes
+                while (cells.length < headers.length) cells.push('');
+                return cells.slice(0, headers.length);
+            }).filter(row => row.some(c => c !== ''));
+            
+            if (headers.length > 0 && rows.length > 0) {
+                // Forca como sheet com headers/rows para usar a renderizacao normal
+                sheet = { ...sheet, headers, rows, rowCount: rows.length, colCount: headers.length };
+            }
+        }
     }
     
-    const pageState = _xlsxPageState.pages[sheetIndex] || { page: 0, perPage: 50 };
-    const allRows = sheet.rows || [];
-    const totalRows = allRows.length;
-    const perPage = pageState.perPage;
-    const totalPages = Math.ceil(totalRows / perPage);
-    const currentPage = Math.min(pageState.page, totalPages - 1);
-    const startIdx = currentPage * perPage;
-    const endIdx = Math.min(startIdx + perPage, totalRows);
-    const pageRows = allRows.slice(startIdx, endIdx);
+    if (!sheet.headers) return '';
     
-    // Detecta se a primeira linha parece ser header (todas strings, nao parecem dados numericos)
+    // Se headers sao genericos (Col_1, Col_2...) e tem dados, tenta usar a primeira linha como header
     let headers = sheet.headers || [];
-    let displayRows = pageRows;
-    let headerOffset = 0;
+    let allRows = sheet.rows || [];
     
-    if (headers.length > 0 && headers[0] && /^col_?\d+$/i.test(headers[0])) {
-        // Headers sao genericos (Col_1, Col_2...) - tenta usar a primeira linha como header
+    if (headers.length > 0 && /^col_?\d+$/i.test(headers[0]) && allRows.length > 0) {
         const firstRow = allRows[0];
         if (firstRow && firstRow.length === headers.length) {
             const looksLikeHeader = firstRow.every(cell => {
@@ -1958,11 +1978,19 @@ function renderXlsxSheetTable(sheet, sheetIndex) {
             });
             if (looksLikeHeader) {
                 headers = firstRow.map(h => String(h || '').trim() || '-');
-                displayRows = allRows.slice(startIdx + 1, endIdx + 1);
-                headerOffset = 1;
+                allRows = allRows.slice(1);
             }
         }
     }
+    
+    const pageState = _xlsxPageState.pages[sheetIndex] || { page: 0, perPage: 50 };
+    const totalRows = allRows.length;
+    const perPage = pageState.perPage;
+    const totalPages = Math.ceil(totalRows / perPage);
+    const currentPage = Math.min(pageState.page, totalPages - 1);
+    const startIdx = currentPage * perPage;
+    const endIdx = Math.min(startIdx + perPage, totalRows);
+    const displayRows = allRows.slice(startIdx, endIdx);
     
     let paginationHtml = '';
     if (totalPages > 1) {
@@ -1990,7 +2018,6 @@ function renderXlsxSheetTable(sheet, sheetIndex) {
                 <tbody>
                     ${displayRows.length === 0 ? `<tr><td colspan="${headers.length + 1}" class="knowledge-xlsx-empty-row">Nenhum dado</td></tr>` : ''}
                     ${displayRows.map((row, i) => {
-                        const rowNum = startIdx + i + 1 + (headerOffset && currentPage === 0 ? 0 : headerOffset);
                         return `<tr>
                             <td class="knowledge-xlsx-row-num">${startIdx + i + 1}</td>
                             ${row.map(cell => {

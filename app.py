@@ -2237,12 +2237,39 @@ def api_knowledge_xlsx_data(filename):
         sheets = []
         
         for sheet_name in xls.sheet_names:
-            df = pd.read_excel(xls, sheet_name=sheet_name)
+            # Le sem headers primeiro para detectar onde comecam os dados reais
+            df_raw = pd.read_excel(xls, sheet_name=sheet_name, header=None)
+            df_raw = df_raw.dropna(how="all")
+            
+            if df_raw.empty:
+                continue
+            
+            # Procura a linha que contem os headers reais (primeira linha com 2+ valores nao-vazios
+            # que nao comeca com === ou nao e generica como col0, col1)
+            header_row = 0
+            for idx, row in df_raw.iterrows():
+                vals = [str(v).strip() for v in row.values if pd.notna(v) and str(v).strip()]
+                if len(vals) >= 2:
+                    # Verifica se nao e linha de titulo (=== ...) ou header generico
+                    first_val = vals[0]
+                    if first_val.startswith("===") or first_val.startswith("col"):
+                        continue
+                    # Verifica se parece header (valores nao sao todos numericos)
+                    has_text = any(not v.replace(".", "").replace(",", "").isdigit() for v in vals)
+                    if has_text:
+                        header_row = idx
+                        break
+            
+            # Le com headers na linha detectada
+            df = pd.read_excel(xls, sheet_name=sheet_name, header=header_row)
             df = df.dropna(how="all")
             df = df.dropna(axis=1, how="all")
             
             if df.empty:
                 continue
+            
+            # Remove linhas que parecem ser titulos ou separadores
+            df = df[~df.iloc[:, 0].astype(str).str.startswith("===", na=False)]
             
             # Renomeia colunas sem nome
             df.columns = [
@@ -2256,6 +2283,9 @@ def api_knowledge_xlsx_data(filename):
             
             # Converte valores para string
             rows = [[str(cell) if pd.notna(cell) else "" for cell in row] for row in rows]
+            
+            # Remove linhas totalmente vazias apos conversao
+            rows = [r for r in rows if any(cell.strip() for cell in r)]
             
             sheets.append({
                 "name": sheet_name,
