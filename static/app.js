@@ -3886,9 +3886,11 @@ async function startAudioRecording() {
             } 
         });
         
-        const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') 
-            ? 'audio/webm;codecs=opus' 
-            : 'audio/webm';
+        const mimeType = MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')
+            ? 'audio/ogg;codecs=opus'
+            : MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+                ? 'audio/webm;codecs=opus'
+                : 'audio/webm';
         
         _mediaRecorder = new MediaRecorder(_audioStream, { mimeType });
         _audioChunks = [];
@@ -4087,7 +4089,8 @@ async function sendRecordedAudio() {
         hideRecordingPanel();
         
         const formData = new FormData();
-        const audioFile = new File([audioBlob], 'audio.webm', { type: 'audio/webm' });
+        const ext = audioBlob.type.includes('ogg') ? 'ogg' : 'webm';
+        const audioFile = new File([audioBlob], `audio.${ext}`, { type: audioBlob.type });
         formData.append('media', audioFile);
         formData.append('phone', conv.contact_phone);
         formData.append('type', 'audio');
