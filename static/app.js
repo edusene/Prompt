@@ -1451,11 +1451,19 @@ async function loadContacts() {
         return;
     }
     document.getElementById('contacts-list').innerHTML = `
+        <div class="contacts-bulk-bar" id="contacts-bulk-bar" style="display:none">
+            <span id="contacts-selected-count">0 selecionados</span>
+            <button class="btn-sm btn-danger" onclick="bulkDeleteContacts()">Excluir selecionados</button>
+        </div>
         <table>
-            <thead><tr><th>Telefone</th><th>Nome</th><th>Email</th><th>Modo</th><th>Ações</th></tr></thead>
+            <thead><tr>
+                <th style="width:36px"><input type="checkbox" id="contacts-select-all" onchange="toggleAllContacts(this)"></th>
+                <th>Telefone</th><th>Nome</th><th>Email</th><th>Modo</th><th>Ações</th>
+            </tr></thead>
             <tbody>
             ${contacts.map(c => `
                 <tr>
+                    <td><input type="checkbox" class="contact-checkbox" value="${c.id}" onchange="updateBulkBar()"></td>
                     <td>${esc(c.phone)}</td>
                     <td>${esc(c.name || '-')}</td>
                     <td>${esc(c.email || '-')}</td>
@@ -1468,6 +1476,38 @@ async function loadContacts() {
             `).join('')}
             </tbody>
         </table>`;
+}
+
+function toggleAllContacts(master) {
+    document.querySelectorAll('.contact-checkbox').forEach(cb => cb.checked = master.checked);
+    updateBulkBar();
+}
+
+function updateBulkBar() {
+    const checked = document.querySelectorAll('.contact-checkbox:checked');
+    const bar = document.getElementById('contacts-bulk-bar');
+    const count = document.getElementById('contacts-selected-count');
+    if (!bar || !count) return;
+    if (checked.length > 0) {
+        bar.style.display = 'flex';
+        count.textContent = `${checked.length} selecionado${checked.length > 1 ? 's' : ''}`;
+    } else {
+        bar.style.display = 'none';
+    }
+}
+
+async function bulkDeleteContacts() {
+    const ids = [...document.querySelectorAll('.contact-checkbox:checked')].map(cb => Number(cb.value));
+    if (!ids.length) return;
+    if (!confirm(`Excluir ${ids.length} contato${ids.length > 1 ? 's' : ''}?`)) return;
+    
+    const results = await Promise.all(ids.map(id => api(`/api/contacts/${id}`, { method: 'DELETE' })));
+    const ok = results.filter(r => r && !r.error).length;
+    const fail = ids.length - ok;
+    
+    if (ok) toast(`${ok} contato${ok > 1 ? 's' : ''} excluído${ok > 1 ? 's' : ''}`, 'success');
+    if (fail) toast(`${fail} falha${fail > 1 ? 's' : ''}`, 'error');
+    loadContacts();
 }
 
 function showContactForm(contact = null) {

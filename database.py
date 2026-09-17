@@ -675,9 +675,13 @@ def clear_conversation(conv_id: int) -> None:
 
 
 def delete_conversation(conv_id: int) -> None:
-    """Remove mensagens, vínculo de tags e a própria conversa."""
+    """Remove mensagens, vínculo de tags, pedidos do cardápio e a própria conversa."""
     db.execute("DELETE FROM messages WHERE conversation_id=?", (conv_id,))
     db.execute("DELETE FROM conversation_tags WHERE conversation_id=?", (conv_id,))
+    try:
+        db.execute("DELETE FROM cardapio_orders WHERE conversation_id=?", (conv_id,))
+    except Exception:
+        pass
     db.execute("DELETE FROM conversations WHERE id=?", (conv_id,))
 
 

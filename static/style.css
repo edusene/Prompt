@@ -2416,6 +2416,20 @@ select option {
 .status-resolved { background: #6366f1; }
 .status-closed { background: #64748b; }
 
+.contacts-bulk-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    margin-bottom: 8px;
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.2);
+    border-radius: var(--radius-md);
+    font-size: 13px;
+    color: #fca5a5;
+    animation: fadeInUp 0.15s ease;
+}
+
 .auto-badge {
     font-size: 11px;
     padding: 3px 10px;
