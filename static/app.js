@@ -3900,7 +3900,7 @@ async function startAudioRecording() {
         };
         
         _mediaRecorder.onstop = () => {
-            if (_audioChunks.length > 0 && _isRecording) {
+            if (_audioChunks.length > 0) {
                 const audioBlob = new Blob(_audioChunks, { type: mimeType });
                 showRecordedAudioPreview(audioBlob);
             }
