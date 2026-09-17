@@ -69,6 +69,8 @@ Sabores disponiveis:
 Qual sabor voce vai querer? 😊
 ```
 
+**REGRA CANUDINHOS**: Canudinhos sao vendidos APENAS em pacotes de 25 unidades (um sabor). NAO existe opcao de meio cento (50) ou cento (100) para Canudinhos especificamente. Apos cliente escolher o sabor, va direto para proximo item ou handoff.
+
 **EXEMPLO CORRETO para Coxinha:**
 ```
 Coxinha - Porção com 25 unidades - R$ 20,00
