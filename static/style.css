@@ -1938,6 +1938,136 @@ select option {
     display: none;
 }
 
+/* ── Audio Recording Button ────────────────────────────────────────────── */
+.chat-record-btn {
+    transition: all var(--transition-fast);
+}
+
+.chat-record-btn.recording {
+    background: rgba(239, 68, 68, 0.2);
+    color: #ef4444;
+    animation: pulse-record 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-record {
+    0%, 100% { 
+        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
+    }
+    50% { 
+        box-shadow: 0 0 0 10px rgba(239, 68, 68, 0);
+    }
+}
+
+.chat-record-btn.recording:hover {
+    background: rgba(239, 68, 68, 0.3);
+    color: #ef4444;
+}
+
+/* ── Audio Recording Panel ─────────────────────────────────────────────── */
+.audio-recording-panel {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.2);
+    border-radius: var(--radius-md);
+    margin-bottom: 8px;
+    animation: fadeInUp 0.2s ease;
+}
+
+.audio-recording-panel .recording-indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.audio-recording-panel .rec-dot {
+    width: 12px;
+    height: 12px;
+    background: #ef4444;
+    border-radius: 50%;
+    animation: rec-blink 1s ease-in-out infinite;
+}
+
+@keyframes rec-blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+}
+
+.audio-recording-panel .recording-time {
+    font-size: 14px;
+    font-weight: 600;
+    color: #ef4444;
+    font-variant-numeric: tabular-nums;
+    min-width: 50px;
+}
+
+.audio-recording-panel .recording-wave {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    height: 30px;
+}
+
+.audio-recording-panel .recording-wave .wave-bar {
+    width: 4px;
+    height: 20px;
+    background: rgba(239, 68, 68, 0.5);
+    border-radius: 2px;
+    animation: wave-animation 0.5s ease-in-out infinite alternate;
+}
+
+.audio-recording-panel .recording-wave .wave-bar:nth-child(2) { animation-delay: 0.1s; }
+.audio-recording-panel .recording-wave .wave-bar:nth-child(3) { animation-delay: 0.2s; }
+.audio-recording-panel .recording-wave .wave-bar:nth-child(4) { animation-delay: 0.3s; }
+.audio-recording-panel .recording-wave .wave-bar:nth-child(5) { animation-delay: 0.4s; }
+
+@keyframes wave-animation {
+    from { height: 8px; }
+    to { height: 24px; }
+}
+
+.audio-recording-panel .cancel-recording {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    background: rgba(255, 255, 255, 0.1);
+    border: none;
+    border-radius: 50%;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.audio-recording-panel .cancel-recording:hover {
+    background: rgba(239, 68, 68, 0.2);
+    color: #ef4444;
+}
+
+.audio-recording-panel .send-recording {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    background: #22c55e;
+    border: none;
+    border-radius: 50%;
+    color: #fff;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.audio-recording-panel .send-recording:hover {
+    background: #16a34a;
+    transform: scale(1.05);
+}
+
 .chat-media-preview {
     display: flex;
     align-items: center;

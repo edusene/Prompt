@@ -3686,3 +3686,244 @@ sendMessage = async function() {
     }
     await _originalSendMessage();
 };
+
+/* ── Audio Recording ────────────────────────────────────────────────────── */
+let _mediaRecorder = null;
+let _audioChunks = [];
+let _isRecording = false;
+let _recordingStartTime = 0;
+let _recordingTimer = null;
+let _audioStream = null;
+
+async function toggleAudioRecording() {
+    if (_isRecording) {
+        stopAudioRecording(true);
+    } else {
+        await startAudioRecording();
+    }
+}
+
+async function startAudioRecording() {
+    try {
+        _audioStream = await navigator.mediaDevices.getUserMedia({ 
+            audio: {
+                echoCancellation: true,
+                noiseSuppression: true,
+                sampleRate: 44100
+            } 
+        });
+        
+        const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') 
+            ? 'audio/webm;codecs=opus' 
+            : 'audio/webm';
+        
+        _mediaRecorder = new MediaRecorder(_audioStream, { mimeType });
+        _audioChunks = [];
+        
+        _mediaRecorder.ondataavailable = (e) => {
+            if (e.data.size > 0) {
+                _audioChunks.push(e.data);
+            }
+        };
+        
+        _mediaRecorder.onstop = () => {
+            if (_audioChunks.length > 0 && _isRecording) {
+                const audioBlob = new Blob(_audioChunks, { type: mimeType });
+                showRecordedAudioPreview(audioBlob);
+            }
+        };
+        
+        _mediaRecorder.start(100);
+        _isRecording = true;
+        _recordingStartTime = Date.now();
+        
+        const btn = document.getElementById('chat-record-btn');
+        if (btn) btn.classList.add('recording');
+        
+        showRecordingPanel();
+        startRecordingTimer();
+        
+    } catch (err) {
+        console.error('Erro ao acessar microfone:', err);
+        toast('Nao foi possivel acessar o microfone. Verifique as permissoes do navegador.', 'error');
+    }
+}
+
+function stopAudioRecording(send = false) {
+    _isRecording = false;
+    
+    if (_mediaRecorder && _mediaRecorder.state !== 'inactive') {
+        _mediaRecorder.stop();
+    }
+    
+    if (_audioStream) {
+        _audioStream.getTracks().forEach(track => track.stop());
+        _audioStream = null;
+    }
+    
+    const btn = document.getElementById('chat-record-btn');
+    if (btn) btn.classList.remove('recording');
+    
+    stopRecordingTimer();
+    
+    if (!send) {
+        hideRecordingPanel();
+    }
+}
+
+function showRecordingPanel() {
+    const previewContainer = document.getElementById('chat-media-preview');
+    if (!previewContainer) return;
+    
+    previewContainer.innerHTML = `
+        <div class="audio-recording-panel">
+            <div class="recording-indicator">
+                <div class="rec-dot"></div>
+                <span class="recording-time" id="recording-time">0:00</span>
+            </div>
+            <div class="recording-wave">
+                <div class="wave-bar"></div>
+                <div class="wave-bar"></div>
+                <div class="wave-bar"></div>
+                <div class="wave-bar"></div>
+                <div class="wave-bar"></div>
+            </div>
+            <button class="cancel-recording" onclick="cancelAudioRecording()" title="Cancelar">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+            <button class="send-recording" onclick="sendRecordedAudio()" title="Enviar audio">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            </button>
+        </div>
+    `;
+    previewContainer.style.display = 'flex';
+}
+
+function hideRecordingPanel() {
+    const previewContainer = document.getElementById('chat-media-preview');
+    if (previewContainer) {
+        previewContainer.style.display = 'none';
+        previewContainer.innerHTML = '';
+    }
+}
+
+function startRecordingTimer() {
+    _recordingTimer = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - _recordingStartTime) / 1000);
+        const minutes = Math.floor(elapsed / 60);
+        const seconds = elapsed % 60;
+        const timeEl = document.getElementById('recording-time');
+        if (timeEl) {
+            timeEl.textContent = `${minutes}:${String(seconds).padStart(2, '0')}`;
+        }
+    }, 1000);
+}
+
+function stopRecordingTimer() {
+    if (_recordingTimer) {
+        clearInterval(_recordingTimer);
+        _recordingTimer = null;
+    }
+}
+
+function cancelAudioRecording() {
+    _audioChunks = [];
+    stopAudioRecording(false);
+    hideRecordingPanel();
+    toast('Gravacao cancelada', 'info');
+}
+
+let _recordedAudioBlob = null;
+
+function showRecordedAudioPreview(audioBlob) {
+    _recordedAudioBlob = audioBlob;
+    
+    const previewContainer = document.getElementById('chat-media-preview');
+    if (!previewContainer) return;
+    
+    const audioUrl = URL.createObjectURL(audioBlob);
+    const duration = formatRecordingDuration(audioBlob);
+    
+    previewContainer.innerHTML = `
+        <div class="audio-recording-panel" style="background:rgba(99,102,241,0.1);border-color:rgba(99,102,241,0.2)">
+            <div class="recording-indicator">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#6366f1" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg>
+                <span class="recording-time" style="color:var(--accent)">Audio gravado</span>
+            </div>
+            <audio id="recorded-audio-preview" src="${audioUrl}" controls style="flex:1;height:32px"></audio>
+            <button class="cancel-recording" onclick="discardRecordedAudio()" title="Descartar">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+            <button class="send-recording" onclick="sendRecordedAudio()" title="Enviar audio">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            </button>
+        </div>
+    `;
+    previewContainer.style.display = 'flex';
+}
+
+function discardRecordedAudio() {
+    _recordedAudioBlob = null;
+    hideRecordingPanel();
+}
+
+async function sendRecordedAudio() {
+    if (!_recordedAudioBlob || !currentConvId) {
+        toast('Nenhum audio para enviar', 'error');
+        return;
+    }
+    
+    const conv = conversations.find(c => c.id === currentConvId);
+    if (!conv) return;
+    
+    const btn = document.getElementById('chat-send');
+    setBtnLoading(btn, true, 'Enviando...');
+    
+    try {
+        const tempId = 'temp-audio-' + Date.now();
+        appendMessage({
+            id: tempId,
+            direction: 'out',
+            sender: 'Atendente',
+            body: '[Audio]',
+            status: 'sending',
+            msg_type: 'audio',
+            created_at: new Date().toISOString(),
+            uazapi_id: '',
+        });
+        
+        hideRecordingPanel();
+        _recordedAudioBlob = null;
+        
+        const formData = new FormData();
+        const audioFile = new File([_recordedAudioBlob], 'audio.webm', { type: 'audio/webm' });
+        formData.append('media', audioFile);
+        formData.append('phone', conv.contact_phone);
+        formData.append('type', 'audio');
+        
+        const res = await fetch('/api/messages/send-media', {
+            method: 'POST',
+            body: formData
+        });
+        
+        const data = await res.json();
+        
+        if (!res.ok || data.error) {
+            markTempMsgError(tempId);
+            toast(data?.error || 'Erro ao enviar audio', 'error');
+            return;
+        }
+        
+        toast('Audio enviado', 'success');
+        setTimeout(() => markTempMsgSent(tempId), 1500);
+        
+    } catch (e) {
+        toast('Erro ao enviar audio', 'error');
+    } finally {
+        setBtnLoading(btn, false);
+    }
+}
+
+function formatRecordingDuration(blob) {
+    return 'gravando...';
+}
