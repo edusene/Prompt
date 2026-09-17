@@ -485,11 +485,20 @@ def update_contact(contact_id: int, **fields: Any) -> None:
 def delete_contact(contact_id: int) -> None:
     convs = db.fetch_all("SELECT id FROM conversations WHERE contact_id=?", (contact_id,))
     for conv in convs:
-        db.execute("DELETE FROM conversation_tags WHERE conversation_id=?", (conv["id"],))
-        db.execute("DELETE FROM messages WHERE conversation_id=?", (conv["id"],))
+        cid = conv["id"]
+        for tbl in ("cardapio_orders", "crm_follow_ups", "crm_logs"):
+            try:
+                db.execute(f"DELETE FROM {tbl} WHERE conversation_id=?", (cid,))
+            except Exception:
+                pass
+        db.execute("DELETE FROM conversation_tags WHERE conversation_id=?", (cid,))
+        db.execute("DELETE FROM messages WHERE conversation_id=?", (cid,))
     db.execute("DELETE FROM conversations WHERE contact_id=?", (contact_id,))
-    db.execute("DELETE FROM contact_tags WHERE contact_id=?", (contact_id,))
-    db.execute("DELETE FROM tasks WHERE contact_id=?", (contact_id,))
+    for tbl in ("contact_tags", "tasks", "crm_follow_ups", "crm_logs"):
+        try:
+            db.execute(f"DELETE FROM {tbl} WHERE contact_id=?", (contact_id,))
+        except Exception:
+            pass
     db.execute("DELETE FROM contacts WHERE id=?", (contact_id,))
 
 
@@ -675,13 +684,14 @@ def clear_conversation(conv_id: int) -> None:
 
 
 def delete_conversation(conv_id: int) -> None:
-    """Remove mensagens, vínculo de tags, pedidos do cardápio e a própria conversa."""
+    """Remove todas as dependências FK e a própria conversa."""
+    for tbl in ("cardapio_orders", "crm_follow_ups", "crm_logs"):
+        try:
+            db.execute(f"DELETE FROM {tbl} WHERE conversation_id=?", (conv_id,))
+        except Exception:
+            pass
     db.execute("DELETE FROM messages WHERE conversation_id=?", (conv_id,))
     db.execute("DELETE FROM conversation_tags WHERE conversation_id=?", (conv_id,))
-    try:
-        db.execute("DELETE FROM cardapio_orders WHERE conversation_id=?", (conv_id,))
-    except Exception:
-        pass
     db.execute("DELETE FROM conversations WHERE id=?", (conv_id,))
 
 
