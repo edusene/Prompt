@@ -1032,6 +1032,9 @@ function _applyMsgMedia(box, dataUri) {
         el.textContent = 'Baixar anexo';
         el.href = uri;
         el.setAttribute('download', '');
+        el.style.overflow = 'hidden';
+        el.style.textOverflow = 'ellipsis';
+        el.style.whiteSpace = 'nowrap';
     } else {
         el = document.createElement('img');
         el.alt = '';

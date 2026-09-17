@@ -3348,14 +3348,20 @@ select option {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 6px 12px;
+    padding: 8px 14px;
     background: rgba(99, 102, 241, 0.15);
-    border: 1px solid var(--border);
+    border: 1px solid rgba(99, 102, 241, 0.3);
     border-radius: var(--radius-md);
-    color: var(--accent);
+    color: #e0e0ff;
     text-decoration: none;
     font-size: 12.5px;
     font-weight: 600;
+    max-width: 100%;
+    overflow: hidden;
+}
+.msg-media-doc:hover {
+    background: rgba(99, 102, 241, 0.25);
+    color: #fff;
 }
 .msg-media-img.loading,
 .msg-media-video.loading,
