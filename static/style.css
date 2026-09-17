@@ -1681,6 +1681,343 @@ select option {
 }
 .tag-badge:hover { transform: scale(1.05); }
 
+/* ── Tags Table (Estilo Planilha) ──────────────────────────────────────── */
+#view-tags .table-container {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    box-shadow: var(--shadow-md);
+}
+
+#view-tags .table-container table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+#view-tags .table-container th {
+    text-align: left;
+    padding: 14px 20px;
+    background: var(--bg-surface);
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    border-bottom: 2px solid var(--border);
+}
+
+#view-tags .table-container td {
+    padding: 14px 20px;
+    border-bottom: 1px solid rgba(30,45,68,0.4);
+    vertical-align: middle;
+}
+
+#view-tags .table-container tbody tr {
+    transition: all var(--transition-fast);
+}
+
+#view-tags .table-container tbody tr:hover {
+    background: rgba(99,102,241,0.06);
+}
+
+#view-tags .table-container tbody tr:hover td {
+    background: rgba(99,102,241,0.04);
+}
+
+#view-tags .tag-color-dot {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: inline-block;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    transition: transform var(--transition-fast);
+}
+
+#view-tags .table-container tbody tr:hover .tag-color-dot {
+    transform: scale(1.15);
+}
+
+#view-tags .tag-name-cell {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: 0.01em;
+}
+
+#view-tags .table-actions {
+    display: flex;
+    gap: 8px;
+}
+
+#view-tags .btn-edit {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 14px;
+    background: rgba(99,102,241,0.15);
+    color: var(--accent-hover);
+    border: 1px solid rgba(99,102,241,0.25);
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+#view-tags .btn-edit:hover {
+    background: rgba(99,102,241,0.25);
+    border-color: rgba(99,102,241,0.4);
+    transform: translateY(-1px);
+}
+
+#view-tags .btn-delete {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 14px;
+    background: rgba(239,68,68,0.15);
+    color: #fca5a5;
+    border: 1px solid rgba(239,68,68,0.25);
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+#view-tags .btn-delete:hover {
+    background: rgba(239,68,68,0.25);
+    border-color: rgba(239,68,68,0.4);
+    transform: translateY(-1px);
+}
+
+/* ── Knowledge XLSX Preview ─────────────────────────────────────────────── */
+.knowledge-xlsx-preview {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    margin-top: 12px;
+}
+
+.knowledge-xlsx-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border);
+}
+
+.knowledge-xlsx-header h4 {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    margin: 0;
+}
+
+.knowledge-xlsx-tabs {
+    display: flex;
+    gap: 4px;
+}
+
+.knowledge-xlsx-tab {
+    padding: 4px 12px;
+    background: rgba(99,102,241,0.1);
+    border: 1px solid rgba(99,102,241,0.2);
+    border-radius: var(--radius-sm);
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.knowledge-xlsx-tab:hover {
+    background: rgba(99,102,241,0.2);
+    color: var(--text);
+}
+
+.knowledge-xlsx-tab.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+
+.knowledge-xlsx-container {
+    overflow-x: auto;
+    max-height: 500px;
+    overflow-y: auto;
+}
+
+.knowledge-xlsx-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+
+.knowledge-xlsx-table th {
+    position: sticky;
+    top: 0;
+    background: var(--bg-surface);
+    padding: 10px 14px;
+    text-align: left;
+    font-weight: 600;
+    color: var(--text-muted);
+    border-bottom: 2px solid var(--border);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    z-index: 1;
+}
+
+.knowledge-xlsx-table td {
+    padding: 10px 14px;
+    border-bottom: 1px solid rgba(30,45,68,0.3);
+    color: var(--text);
+    max-width: 300px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.knowledge-xlsx-table tbody tr:hover {
+    background: rgba(99,102,241,0.05);
+}
+
+.knowledge-xlsx-table tbody tr:hover td {
+    background: rgba(99,102,241,0.03);
+}
+
+.knowledge-xlsx-empty {
+    padding: 40px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 13px;
+}
+
+/* ── Chat Media Buttons ────────────────────────────────────────────────── */
+.chat-media-buttons {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+}
+
+.chat-media-btn {
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    border-radius: 50%;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    position: relative;
+}
+
+.chat-media-btn:hover {
+    background: rgba(99,102,241,0.15);
+    color: var(--accent-hover);
+    transform: scale(1.1);
+}
+
+.chat-media-btn:active {
+    transform: scale(0.95);
+}
+
+.chat-media-btn svg {
+    width: 20px;
+    height: 20px;
+}
+
+.chat-media-input {
+    display: none;
+}
+
+.chat-media-preview {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: rgba(99,102,241,0.1);
+    border: 1px solid rgba(99,102,241,0.2);
+    border-radius: var(--radius-md);
+    margin-bottom: 8px;
+    animation: fadeInUp 0.2s ease;
+}
+
+.chat-media-preview img {
+    width: 48px;
+    height: 48px;
+    object-fit: cover;
+    border-radius: var(--radius-sm);
+}
+
+.chat-media-preview video {
+    width: 48px;
+    height: 48px;
+    object-fit: cover;
+    border-radius: var(--radius-sm);
+}
+
+.chat-media-preview audio {
+    flex: 1;
+    height: 32px;
+}
+
+.chat-media-preview .file-icon {
+    width: 48px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(99,102,241,0.2);
+    border-radius: var(--radius-sm);
+    color: var(--accent-hover);
+}
+
+.chat-media-preview .file-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.chat-media-preview .file-name {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.chat-media-preview .file-size {
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.chat-media-preview .remove-media {
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(239,68,68,0.2);
+    border: none;
+    border-radius: 50%;
+    color: #fca5a5;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.chat-media-preview .remove-media:hover {
+    background: rgba(239,68,68,0.4);
+    transform: scale(1.1);
+}
+
 /* ── Status Dots ─────────────────────────────────────────────────────────── */
 .status-dot {
     display: inline-block;

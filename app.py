@@ -1871,6 +1871,94 @@ def api_messages_send():
     return jsonify({"ok": True, "phone": wa_id, "message_id": meta_msg_id})
 
 
+@app.post("/api/messages/send-media")
+@login_required
+def api_messages_send_media():
+    """Envia midia (imagem, video, audio, documento) via WhatsApp."""
+    if "media" not in request.files:
+        return jsonify({"error": "Arquivo de midia requerido"}), 400
+    
+    phone = request.form.get("phone", "").strip()
+    media_type = request.form.get("type", "").strip()
+    caption = request.form.get("caption", "").strip()
+    
+    if not phone:
+        return jsonify({"error": "Phone requerido"}), 400
+    
+    if not media_type or media_type not in ["image", "video", "audio", "document"]:
+        return jsonify({"error": "Tipo de midia invalido"}), 400
+    
+    f = request.files["media"]
+    if not f.filename:
+        return jsonify({"error": "Filename requerido"}), 400
+    
+    import mimetypes
+    mime = mimetypes.guess_type(f.filename)[0] or "application/octet-stream"
+    file_bytes = f.read()
+    
+    # Upload da midia para o servidor Meta
+    from meta import upload_media_bytes
+    upload_result = upload_media_bytes(file_bytes, mime, f.filename)
+    
+    if not upload_result.get("ok"):
+        err = upload_result.get("error", "Erro ao fazer upload da midia")
+        print(f"[api] ERRO upload media p/ {phone}: {err}")
+        return jsonify({"error": err}), (upload_result.get("status") or 500)
+    
+    media_id = upload_result.get("data", {}).get("id", "")
+    if not media_id:
+        return jsonify({"error": "media_id nao retornado"}), 500
+    
+    # Envia a midia conforme o tipo
+    from meta import send_image, send_video, send_audio, send_document
+    
+    if media_type == "image":
+        res = send_image(phone, media_id, caption)
+    elif media_type == "video":
+        res = send_video(phone, media_id, caption)
+    elif media_type == "audio":
+        res = send_audio(phone, media_id)
+    elif media_type == "document":
+        res = send_document(phone, media_id, f.filename, caption)
+    else:
+        return jsonify({"error": "Tipo de midia nao suportado"}), 400
+    
+    if not res.get("ok"):
+        err = res.get("error") or "Falha ao enviar midia."
+        print(f"[api] ERRO ao enviar media p/ {phone}: {err}")
+        return jsonify({"error": err}), (res.get("status") or 500)
+    
+    # Extrai wa_id da resposta Meta
+    data_res = res.get("data") or {}
+    contacts = data_res.get("contacts", [])
+    wa_id = contacts[0].get("wa_id", phone) if contacts else phone
+    messages_res = data_res.get("messages", [])
+    meta_msg_id = messages_res[0].get("id", "") if messages_res else ""
+    
+    # Salva no banco
+    contact = database.upsert_contact(wa_id)
+    conv = database.get_or_create_conversation(wa_id)
+    
+    # Corpo da mensagem
+    body = caption if caption else f"[{media_type.upper()}]"
+    
+    database.save_message(
+        conversation_id=conv["id"],
+        phone=wa_id,
+        direction="out",
+        body=body,
+        sender="human",
+        msg_type=media_type,
+        wa_message_id=meta_msg_id,
+        media_url=f"data:{mime};base64,{__import__('base64').b64encode(file_bytes[:1000]).decode()}"  # Preview compacto
+    )
+    
+    database.update_conversation(conv["id"], last_message_at=time.strftime("%Y-%m-%dT%H:%M:%S"))
+    events.emit("message_sent", {"conversation_id": conv["id"], "phone": wa_id, "body": body})
+    
+    return jsonify({"ok": True, "phone": wa_id, "message_id": meta_msg_id, "media_type": media_type})
+
+
 @app.get("/api/messages/<int:msg_id>/media")
 @login_required
 def api_messages_media(msg_id):
@@ -2106,6 +2194,88 @@ def api_knowledge_get(filename):
     if not file_data:
         return jsonify({"error": "Arquivo nao encontrado"}), 404
     return jsonify(file_data)
+
+
+@app.get("/api/knowledge/<filename>/xlsx-data")
+@login_required
+def api_knowledge_xlsx_data(filename):
+    """Retorna dados estruturados de um arquivo .xlsx para visualizacao em tabela."""
+    if not filename.endswith('.xlsx'):
+        return jsonify({"error": "Arquivo nao e xlsx"}), 400
+    
+    file_data = knowledge_rag.get_file(filename)
+    if not file_data:
+        return jsonify({"error": "Arquivo nao encontrado"}), 404
+    
+    try:
+        import pandas as pd
+        import io
+        import json
+        
+        # Busca o arquivo original do storage
+        from pathlib import Path
+        uploads_dir = Path(__file__).parent / "uploads"
+        xlsx_path = uploads_dir / filename
+        
+        if not xlsx_path.exists():
+            # Tenta no diretorio static
+            xlsx_path = Path(__file__).parent / "static" / filename
+        
+        if not xlsx_path.exists():
+            # Retorna dados do content parseado
+            content = file_data.get("content", "")
+            return jsonify({
+                "sheets": [{"name": "Dados", "data": content}],
+                "filename": filename
+            })
+        
+        xls = pd.ExcelFile(io.BytesIO(xlsx_path.read_bytes()))
+        sheets = []
+        
+        for sheet_name in xls.sheet_names:
+            df = pd.read_excel(xls, sheet_name=sheet_name)
+            df = df.dropna(how="all")
+            df = df.dropna(axis=1, how="all")
+            
+            if df.empty:
+                continue
+            
+            # Renomeia colunas sem nome
+            df.columns = [
+                f"Col_{i+1}" if "Unnamed" in str(c) else str(c)
+                for i, c in enumerate(df.columns)
+            ]
+            
+            # Converte para formato de tabela
+            headers = df.columns.tolist()
+            rows = df.values.tolist()
+            
+            # Converte valores para string
+            rows = [[str(cell) if pd.notna(cell) else "" for cell in row] for row in rows]
+            
+            sheets.append({
+                "name": sheet_name,
+                "headers": headers,
+                "rows": rows,
+                "rowCount": len(rows),
+                "colCount": len(headers)
+            })
+        
+        return jsonify({
+            "sheets": sheets,
+            "filename": filename,
+            "totalSheets": len(sheets)
+        })
+        
+    except Exception as e:
+        print(f"[knowledge] ERRO ao processar xlsx: {e}")
+        # Fallback: retorna o conteudo como texto
+        content = file_data.get("content", "")
+        return jsonify({
+            "sheets": [{"name": "Dados", "data": content}],
+            "filename": filename,
+            "error": str(e)
+        })
 
 
 @app.post("/api/knowledge")

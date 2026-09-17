@@ -1533,15 +1533,27 @@ async function loadTags() {
     }
     document.getElementById('tags-list').innerHTML = `
         <table>
-            <thead><tr><th>Cor</th><th>Nome</th><th>Ações</th></tr></thead>
+            <thead>
+                <tr>
+                    <th style="width:80px">Cor</th>
+                    <th>Nome</th>
+                    <th style="width:180px;text-align:right">Ações</th>
+                </tr>
+            </thead>
             <tbody>
             ${tags.map(t => `
                 <tr>
-                    <td><span class="tag-badge" style="background:${t.color}">&nbsp;&nbsp;</span></td>
-                    <td>${esc(t.name)}</td>
-                    <td class="table-actions">
-                        <button class="btn-sm btn-secondary" onclick="editTag(${t.id},'${esc(t.name)}','${t.color}')">Editar</button>
-                        <button class="btn-sm btn-danger" onclick="deleteTag(${t.id})">Excluir</button>
+                    <td><span class="tag-color-dot" style="background:${t.color}"></span></td>
+                    <td class="tag-name-cell">${esc(t.name)}</td>
+                    <td class="table-actions" style="justify-content:flex-end">
+                        <button class="btn-edit" onclick="editTag(${t.id},'${esc(t.name)}','${t.color}')">
+                            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                            Editar
+                        </button>
+                        <button class="btn-delete" onclick="deleteTag(${t.id})">
+                            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                            Excluir
+                        </button>
                     </td>
                 </tr>
             `).join('')}
@@ -1781,6 +1793,27 @@ async function selectKnowledgeFile(filename) {
     document.getElementById('knowledge-description').value = '';
     document.getElementById('knowledge-actions').style.display = 'flex';
 
+    // Verifica se é um arquivo xlsx
+    const isXlsx = filename.toLowerCase().endsWith('.xlsx');
+    
+    // Se for xlsx, busca dados estruturados
+    if (isXlsx) {
+        const xlsxData = await api(`/api/knowledge/${encodeURIComponent(filename)}/xlsx-data`);
+        const regularData = await api(`/api/knowledge/${encodeURIComponent(filename)}`);
+        
+        if (!regularData || regularData.error) {
+            document.getElementById('knowledge-editor').value = '';
+            toast(regularData?.error || 'Erro ao carregar', 'error');
+            return;
+        }
+        
+        document.getElementById('knowledge-description').value = regularData.description || '';
+        
+        // Renderiza visualização xlsx
+        renderXlsxPreview(filename, xlsxData);
+        return;
+    }
+
     const data = await api(`/api/knowledge/${encodeURIComponent(filename)}`);
     if (!data || data.error) {
         document.getElementById('knowledge-editor').value = '';
@@ -1789,6 +1822,152 @@ async function selectKnowledgeFile(filename) {
     }
     document.getElementById('knowledge-editor').value = data.content;
     document.getElementById('knowledge-description').value = data.description || '';
+    
+    // Remove preview xlsx se existir
+    const existingPreview = document.querySelector('.knowledge-xlsx-preview');
+    if (existingPreview) existingPreview.remove();
+    
+    // Mostra editor de texto
+    document.getElementById('knowledge-editor').style.display = 'block';
+}
+
+// Renderiza visualização de planilha xlsx
+function renderXlsxPreview(filename, xlsxData) {
+    // Remove preview anterior
+    const existingPreview = document.querySelector('.knowledge-xlsx-preview');
+    if (existingPreview) existingPreview.remove();
+    
+    // Esconde editor de texto
+    document.getElementById('knowledge-editor').style.display = 'none';
+    
+    const editorPanel = document.querySelector('.knowledge-editor-panel');
+    if (!editorPanel) return;
+    
+    if (!xlsxData || !xlsxData.sheets || xlsxData.sheets.length === 0) {
+        // Se não conseguiu carregar dados estruturados, mostra mensagem
+        const preview = document.createElement('div');
+        preview.className = 'knowledge-xlsx-preview';
+        preview.innerHTML = `
+            <div class="knowledge-xlsx-header">
+                <h4>Visualizacao da Planilha</h4>
+            </div>
+            <div class="knowledge-xlsx-empty">
+                Nao foi possivel carregar a visualizacao da planilha.
+                <br>O conteudo esta disponivel no editor de texto.
+            </div>
+        `;
+        editorPanel.insertBefore(preview, document.getElementById('knowledge-actions'));
+        
+        // Mostra editor de texto como fallback
+        document.getElementById('knowledge-editor').style.display = 'block';
+        return;
+    }
+    
+    // Cria container de preview
+    const preview = document.createElement('div');
+    preview.className = 'knowledge-xlsx-preview';
+    
+    // Cria tabs para múltiplas abas
+    let tabsHtml = '';
+    if (xlsxData.sheets.length > 1) {
+        tabsHtml = `<div class="knowledge-xlsx-tabs">
+            ${xlsxData.sheets.map((sheet, i) => 
+                `<button class="knowledge-xlsx-tab ${i === 0 ? 'active' : ''}" onclick="switchXlsxSheet(${i})" data-sheet-index="${i}">${esc(sheet.name)}</button>`
+            ).join('')}
+        </div>`;
+    }
+    
+    // Renderiza primeira aba
+    const firstSheet = xlsxData.sheets[0];
+    let tableHtml = '';
+    
+    if (firstSheet.headers && firstSheet.rows) {
+        tableHtml = `
+            <div class="knowledge-xlsx-container">
+                <table class="knowledge-xlsx-table">
+                    <thead>
+                        <tr>
+                            <th style="width:40px;color:var(--text-dim)">#</th>
+                            ${firstSheet.headers.map(h => `<th>${esc(h)}</th>`).join('')}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${firstSheet.rows.map((row, i) => `
+                            <tr>
+                                <td style="color:var(--text-dim);font-size:11px">${i + 1}</td>
+                                ${row.map(cell => `<td title="${esc(cell)}">${esc(cell)}</td>`).join('')}
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
+    } else if (firstSheet.data) {
+        // Fallback para dados em texto
+        tableHtml = `<div class="knowledge-xlsx-container"><pre style="padding:16px;margin:0;font-size:12px;white-space:pre-wrap">${esc(firstSheet.data)}</pre></div>`;
+    }
+    
+    preview.innerHTML = `
+        <div class="knowledge-xlsx-header">
+            <h4>Visualizacao da Planilha</h4>
+            ${tabsHtml}
+            <span style="font-size:11px;color:var(--text-muted)">${firstSheet.rowCount || 0} linhas x ${firstSheet.colCount || 0} colunas</span>
+        </div>
+        ${tableHtml}
+    `;
+    
+    // Armazena dados para troca de abas
+    preview.dataset.xlsxData = JSON.stringify(xlsxData);
+    
+    // Insere antes do botão de salvar
+    editorPanel.insertBefore(preview, document.getElementById('knowledge-actions'));
+}
+
+// Troca aba da planilha xlsx
+function switchXlsxSheet(sheetIndex) {
+    const preview = document.querySelector('.knowledge-xlsx-preview');
+    if (!preview) return;
+    
+    const xlsxData = JSON.parse(preview.dataset.xlsxData || '{}');
+    if (!xlsxData.sheets || !xlsxData.sheets[sheetIndex]) return;
+    
+    // Atualiza tabs
+    preview.querySelectorAll('.knowledge-xlsx-tab').forEach((tab, i) => {
+        tab.classList.toggle('active', i === sheetIndex);
+    });
+    
+    const sheet = xlsxData.sheets[sheetIndex];
+    const container = preview.querySelector('.knowledge-xlsx-container');
+    
+    if (sheet.headers && sheet.rows) {
+        container.innerHTML = `
+            <table class="knowledge-xlsx-table">
+                <thead>
+                    <tr>
+                        <th style="width:40px;color:var(--text-dim)">#</th>
+                        ${sheet.headers.map(h => `<th>${esc(h)}</th>`).join('')}
+                    </tr>
+                </thead>
+                <tbody>
+                    ${sheet.rows.map((row, i) => `
+                        <tr>
+                            <td style="color:var(--text-dim);font-size:11px">${i + 1}</td>
+                            ${row.map(cell => `<td title="${esc(cell)}">${esc(cell)}</td>`).join('')}
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        `;
+    } else if (sheet.data) {
+        container.innerHTML = `<pre style="padding:16px;margin:0;font-size:12px;white-space:pre-wrap">${esc(sheet.data)}</pre>`;
+    }
+    
+    // Atualiza info
+    const header = preview.querySelector('.knowledge-xlsx-header');
+    const infoSpan = header.querySelector('span:last-child');
+    if (infoSpan) {
+        infoSpan.textContent = `${sheet.rowCount || 0} linhas x ${sheet.colCount || 0} colunas`;
+    }
 }
 
 async function saveKnowledge() {
@@ -3253,3 +3432,251 @@ function formatCardapioItems(items) {
     if (!Array.isArray(items)) return '-';
     return items.map(i => `${i.quantity}x ${i.name}`).join(', ');
 }
+
+/* ── Chat Media Send ────────────────────────────────────────────────────── */
+let _selectedMedia = null;
+let _selectedMediaType = null;
+
+// Abre seletor de arquivo para mídia
+function selectMedia(type) {
+    const inputMap = {
+        'image': 'chat-image-input',
+        'video': 'chat-video-input',
+        'audio': 'chat-audio-input',
+        'document': 'chat-doc-input'
+    };
+    
+    const input = document.getElementById(inputMap[type]);
+    if (input) {
+        input.click();
+    }
+}
+
+// Processa seleção de arquivo de mídia
+function handleMediaSelect(event, type) {
+    const file = event.target.files[0];
+    if (!file) return;
+    
+    // Valida tamanho (max 16MB)
+    const maxSize = 16 * 1024 * 1024;
+    if (file.size > maxSize) {
+        toast('Arquivo muito grande (maximo 16MB)', 'error');
+        event.target.value = '';
+        return;
+    }
+    
+    _selectedMedia = file;
+    _selectedMediaType = type;
+    
+    // Mostra preview
+    showMediaPreview(file, type);
+    
+    // Limpa input para permitir selecionar o mesmo arquivo novamente
+    event.target.value = '';
+}
+
+// Mostra preview da mídia selecionada
+function showMediaPreview(file, type) {
+    const previewContainer = document.getElementById('chat-media-preview');
+    if (!previewContainer) return;
+    
+    const reader = new FileReader();
+    
+    reader.onload = function(e) {
+        let previewHtml = '';
+        
+        if (type === 'image') {
+            previewHtml = `
+                <img src="${e.target.result}" alt="Preview">
+                <div class="file-info">
+                    <div class="file-name">${esc(file.name)}</div>
+                    <div class="file-size">${formatFileSize(file.size)}</div>
+                </div>
+            `;
+        } else if (type === 'video') {
+            previewHtml = `
+                <video src="${e.target.result}" muted></video>
+                <div class="file-info">
+                    <div class="file-name">${esc(file.name)}</div>
+                    <div class="file-size">${formatFileSize(file.size)}</div>
+                </div>
+            `;
+        } else if (type === 'audio') {
+            previewHtml = `
+                <div class="file-icon">
+                    <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg>
+                </div>
+                <div class="file-info">
+                    <div class="file-name">${esc(file.name)}</div>
+                    <div class="file-size">${formatFileSize(file.size)}</div>
+                </div>
+            `;
+        } else {
+            // Documento
+            const ext = file.name.split('.').pop().toLowerCase();
+            const iconColor = ext === 'pdf' ? '#ef4444' : ext === 'doc' || ext === 'docx' ? '#3b82f6' : '#22c55e';
+            previewHtml = `
+                <div class="file-icon" style="color:${iconColor}">
+                    <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                </div>
+                <div class="file-info">
+                    <div class="file-name">${esc(file.name)}</div>
+                    <div class="file-size">${formatFileSize(file.size)}</div>
+                </div>
+            `;
+        }
+        
+        previewHtml += `
+            <button class="remove-media" onclick="removeSelectedMedia()" title="Remover">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+        `;
+        
+        previewContainer.innerHTML = previewHtml;
+        previewContainer.style.display = 'flex';
+    };
+    
+    if (type === 'image' || type === 'video') {
+        reader.readAsDataURL(file);
+    } else {
+        // Para áudio e documentos, mostra apenas info do arquivo
+        reader.onload = function() {
+            let previewHtml = '';
+            if (type === 'audio') {
+                previewHtml = `
+                    <div class="file-icon">
+                        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg>
+                    </div>
+                    <div class="file-info">
+                        <div class="file-name">${esc(file.name)}</div>
+                        <div class="file-size">${formatFileSize(file.size)}</div>
+                    </div>
+                    <button class="remove-media" onclick="removeSelectedMedia()" title="Remover">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                    </button>
+                `;
+            } else {
+                const ext = file.name.split('.').pop().toLowerCase();
+                const iconColor = ext === 'pdf' ? '#ef4444' : ext === 'doc' || ext === 'docx' ? '#3b82f6' : '#22c55e';
+                previewHtml = `
+                    <div class="file-icon" style="color:${iconColor}">
+                        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                    </div>
+                    <div class="file-info">
+                        <div class="file-name">${esc(file.name)}</div>
+                        <div class="file-size">${formatFileSize(file.size)}</div>
+                    </div>
+                    <button class="remove-media" onclick="removeSelectedMedia()" title="Remover">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                    </button>
+                `;
+            }
+            previewContainer.innerHTML = previewHtml;
+            previewContainer.style.display = 'flex';
+        };
+        reader.readAsDataURL(file);
+    }
+}
+
+// Remove mídia selecionada
+function removeSelectedMedia() {
+    _selectedMedia = null;
+    _selectedMediaType = null;
+    const preview = document.getElementById('chat-media-preview');
+    if (preview) {
+        preview.style.display = 'none';
+        preview.innerHTML = '';
+    }
+}
+
+// Formata tamanho do arquivo
+function formatFileSize(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+// Envia mídia selecionada
+async function sendMediaMessage() {
+    if (!_selectedMedia || !currentConvId) return;
+    
+    const conv = conversations.find(c => c.id === currentConvId);
+    if (!conv) return;
+    
+    const btn = document.getElementById('chat-send');
+    setBtnLoading(btn, true, 'Enviando...');
+    
+    try {
+        const formData = new FormData();
+        formData.append('media', _selectedMedia);
+        formData.append('phone', conv.contact_phone);
+        formData.append('type', _selectedMediaType);
+        
+        // Adiciona caption se houver texto
+        const input = document.getElementById('chat-input');
+        const caption = input.value.trim();
+        if (caption) {
+            formData.append('caption', caption);
+        }
+        
+        // Mensagem optimistic
+        const tempId = 'temp-media-' + Date.now();
+        const mediaLabel = {
+            'image': '[Imagem]',
+            'video': '[Video]',
+            'audio': '[Audio]',
+            'document': '[Documento]'
+        }[_selectedMediaType] || '[Midia]';
+        
+        appendMessage({
+            id: tempId,
+            direction: 'out',
+            sender: 'Atendente',
+            body: caption || mediaLabel,
+            status: 'sending',
+            msg_type: _selectedMediaType,
+            created_at: new Date().toISOString(),
+            uazapi_id: '',
+        });
+        
+        // Limpa seleção
+        removeSelectedMedia();
+        if (caption) {
+            input.value = '';
+            autoResizeChatInput();
+        }
+        
+        const res = await fetch('/api/messages/send-media', {
+            method: 'POST',
+            body: formData
+        });
+        
+        const data = await res.json();
+        
+        if (!res.ok || data.error) {
+            markTempMsgError(tempId);
+            toast(data?.error || 'Erro ao enviar midia', 'error');
+            return;
+        }
+        
+        toast('Midia enviada', 'success');
+        setTimeout(() => markTempMsgSent(tempId), 1500);
+        
+    } catch (e) {
+        toast('Erro ao enviar midia', 'error');
+    } finally {
+        setBtnLoading(btn, false);
+    }
+}
+
+// Modifica sendMessage para verificar se há mídia selecionada
+const _originalSendMessage = sendMessage;
+sendMessage = async function() {
+    if (_selectedMedia) {
+        await sendMediaMessage();
+        return;
+    }
+    await _originalSendMessage();
+};
