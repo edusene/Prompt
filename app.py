@@ -1942,7 +1942,7 @@ def api_messages_send_media():
     # Corpo da mensagem
     body = caption if caption else f"[{media_type.upper()}]"
     
-    database.save_message(
+    saved_msg = database.save_message(
         conversation_id=conv["id"],
         phone=wa_id,
         direction="out",
@@ -1953,10 +1953,12 @@ def api_messages_send_media():
         media_url=f"data:{mime};base64,{__import__('base64').b64encode(file_bytes[:1000]).decode()}"  # Preview compacto
     )
     
+    db_msg_id = saved_msg["id"] if saved_msg else ""
+    
     database.update_conversation(conv["id"], last_message_at=time.strftime("%Y-%m-%dT%H:%M:%S"))
     events.emit("message_sent", {"conversation_id": conv["id"], "phone": wa_id, "body": body})
     
-    return jsonify({"ok": True, "phone": wa_id, "message_id": meta_msg_id, "media_type": media_type})
+    return jsonify({"ok": True, "phone": wa_id, "message_id": meta_msg_id, "media_type": media_type, "db_msg_id": db_msg_id})
 
 
 @app.get("/api/messages/<int:msg_id>/media")

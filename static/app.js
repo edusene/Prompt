@@ -3801,6 +3801,20 @@ async function sendMediaMessage() {
         toast('Midia enviada', 'success');
         setTimeout(() => markTempMsgSent(tempId), 1500);
         
+        // Atualiza o data-media-dbid para o ID real do banco
+        if (data.db_msg_id) {
+            const tempEl = document.querySelector(`#chat-messages .msg[data-msg-id="${tempId}"]`);
+            if (tempEl) {
+                tempEl.setAttribute('data-msg-id', String(data.db_msg_id));
+                const mediaBox = tempEl.querySelector('.msg-media-lazy');
+                if (mediaBox) {
+                    mediaBox.setAttribute('data-media-dbid', String(data.db_msg_id));
+                    mediaBox.dataset.state = '';
+                    bindMsgMedia(tempEl);
+                }
+            }
+        }
+        
     } catch (e) {
         toast('Erro ao enviar midia', 'error');
     } finally {
@@ -4110,6 +4124,19 @@ async function sendRecordedAudio() {
         
         toast('Audio enviado', 'success');
         setTimeout(() => markTempMsgSent(tempId), 1500);
+        
+        if (data.db_msg_id) {
+            const tempEl = document.querySelector(`#chat-messages .msg[data-msg-id="${tempId}"]`);
+            if (tempEl) {
+                tempEl.setAttribute('data-msg-id', String(data.db_msg_id));
+                const mediaBox = tempEl.querySelector('.msg-media-lazy');
+                if (mediaBox) {
+                    mediaBox.setAttribute('data-media-dbid', String(data.db_msg_id));
+                    mediaBox.dataset.state = '';
+                    bindMsgMedia(tempEl);
+                }
+            }
+        }
         
     } catch (e) {
         toast('Erro ao enviar audio', 'error');
