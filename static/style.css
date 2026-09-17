@@ -3482,8 +3482,16 @@ select option {
 .crm-table th,
 .crm-table td {
     overflow: hidden;
-    text-overflow: ellipsis;
+    word-wrap: break-word;
+    word-break: break-word;
+}
+
+.crm-table th {
     white-space: nowrap;
+}
+
+.crm-table td {
+    white-space: normal;
 }
 
 .crm-table .col-name { width: 22%; }
@@ -3496,13 +3504,6 @@ select option {
 .crm-table .col-action { width: 10%; }
 .crm-table .col-result { width: 10%; }
 .crm-table .col-error { width: 12%; color: #ef4444; }
-
-.crm-table .col-msg,
-.crm-table .col-error {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
 
 /* CRM Status Badges */
 .crm-status-badge {
