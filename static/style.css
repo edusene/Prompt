@@ -199,14 +199,30 @@ h3 { font-size: 14px; font-weight: 600; }
     flex-shrink: 0;
     box-shadow: 0 2px 12px var(--accent-glow);
     transition: transform var(--transition-med), box-shadow var(--transition-med);
+    overflow: hidden;
+}
+.logo-icon.logo-client {
+    background: #db2727;
+    box-shadow: 0 2px 12px rgba(219, 39, 39, 0.25);
+}
+.logo-icon.logo-client img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
 }
 .logo-icon:hover {
     transform: scale(1.05) rotate(-3deg);
-    box-shadow: 0 4px 20px rgba(99,102,241,0.4);
+    box-shadow: 0 4px 20px rgba(219, 39, 39, 0.4);
 }
 .logo-icon svg {
     width: 22px;
     height: 22px;
+}
+
+.logo-text {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
 }
 
 .logo h2 {
@@ -218,6 +234,20 @@ h3 { font-size: 14px; font-weight: 600; }
     background-clip: text;
     letter-spacing: -0.03em;
     line-height: 1;
+}
+.logo h2.client-name {
+    font-size: 17px;
+    background: none;
+    -webkit-text-fill-color: #f8fafc;
+    color: #f8fafc;
+    margin-bottom: 2px;
+}
+.client-subname {
+    font-size: 12px;
+    color: #ef4444;
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: 0.02em;
 }
 
 .sidebar-nav { flex: 1; padding: 10px 8px; overflow-y: auto; }
