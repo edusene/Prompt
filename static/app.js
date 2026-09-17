@@ -1857,6 +1857,9 @@ async function selectKnowledgeFile(filename) {
     document.getElementById('knowledge-editor').style.display = 'block';
 }
 
+// Estado de paginação do xlsx
+let _xlsxPageState = {};
+
 // Renderiza visualização de planilha xlsx
 function renderXlsxPreview(filename, xlsxData) {
     // Remove preview anterior
@@ -1870,7 +1873,6 @@ function renderXlsxPreview(filename, xlsxData) {
     if (!editorPanel) return;
     
     if (!xlsxData || !xlsxData.sheets || xlsxData.sheets.length === 0) {
-        // Se não conseguiu carregar dados estruturados, mostra mensagem
         const preview = document.createElement('div');
         preview.className = 'knowledge-xlsx-preview';
         preview.innerHTML = `
@@ -1883,17 +1885,20 @@ function renderXlsxPreview(filename, xlsxData) {
             </div>
         `;
         editorPanel.insertBefore(preview, document.getElementById('knowledge-actions'));
-        
-        // Mostra editor de texto como fallback
         document.getElementById('knowledge-editor').style.display = 'block';
         return;
     }
     
-    // Cria container de preview
+    // Inicializa paginação
+    _xlsxPageState = { currentSheet: 0, pages: {} };
+    xlsxData.sheets.forEach((sheet, i) => {
+        _xlsxPageState.pages[i] = { page: 0, perPage: 50 };
+    });
+    
     const preview = document.createElement('div');
     preview.className = 'knowledge-xlsx-preview';
     
-    // Cria tabs para múltiplas abas
+    // Tabs para múltiplas abas
     let tabsHtml = '';
     if (xlsxData.sheets.length > 1) {
         tabsHtml = `<div class="knowledge-xlsx-tabs">
@@ -1905,52 +1910,132 @@ function renderXlsxPreview(filename, xlsxData) {
     
     // Renderiza primeira aba
     const firstSheet = xlsxData.sheets[0];
-    let tableHtml = '';
-    
-    if (firstSheet.headers && firstSheet.rows) {
-        tableHtml = `
-            <div class="knowledge-xlsx-container">
-                <table class="knowledge-xlsx-table">
-                    <thead>
-                        <tr>
-                            <th style="width:40px;color:var(--text-dim)">#</th>
-                            ${firstSheet.headers.map(h => `<th>${esc(h)}</th>`).join('')}
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${firstSheet.rows.map((row, i) => `
-                            <tr>
-                                <td style="color:var(--text-dim);font-size:11px">${i + 1}</td>
-                                ${row.map(cell => `<td title="${esc(cell)}">${esc(cell)}</td>`).join('')}
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
-            </div>
-        `;
-    } else if (firstSheet.data) {
-        // Fallback para dados em texto
-        tableHtml = `<div class="knowledge-xlsx-container"><pre style="padding:16px;margin:0;font-size:12px;white-space:pre-wrap">${esc(firstSheet.data)}</pre></div>`;
-    }
+    let tableHtml = renderXlsxSheetTable(firstSheet, 0);
     
     preview.innerHTML = `
         <div class="knowledge-xlsx-header">
             <h4>Visualizacao da Planilha</h4>
             ${tabsHtml}
-            <span style="font-size:11px;color:var(--text-muted)">${firstSheet.rowCount || 0} linhas x ${firstSheet.colCount || 0} colunas</span>
+            <span class="knowledge-xlsx-info">${firstSheet.rowCount || 0} linhas x ${firstSheet.colCount || 0} colunas</span>
         </div>
         ${tableHtml}
     `;
     
-    // Armazena dados para troca de abas
     preview.dataset.xlsxData = JSON.stringify(xlsxData);
-    
-    // Insere antes do botão de salvar
     editorPanel.insertBefore(preview, document.getElementById('knowledge-actions'));
+}
+
+// Renderiza tabela de uma aba com paginação
+function renderXlsxSheetTable(sheet, sheetIndex) {
+    if (!sheet.headers && !sheet.data) return '';
+    
+    if (sheet.data && !sheet.headers) {
+        return `<div class="knowledge-xlsx-container"><pre class="knowledge-xlsx-pre">${esc(sheet.data)}</pre></div>`;
+    }
+    
+    const pageState = _xlsxPageState.pages[sheetIndex] || { page: 0, perPage: 50 };
+    const allRows = sheet.rows || [];
+    const totalRows = allRows.length;
+    const perPage = pageState.perPage;
+    const totalPages = Math.ceil(totalRows / perPage);
+    const currentPage = Math.min(pageState.page, totalPages - 1);
+    const startIdx = currentPage * perPage;
+    const endIdx = Math.min(startIdx + perPage, totalRows);
+    const pageRows = allRows.slice(startIdx, endIdx);
+    
+    // Detecta se a primeira linha parece ser header (todas strings, nao parecem dados numericos)
+    let headers = sheet.headers || [];
+    let displayRows = pageRows;
+    let headerOffset = 0;
+    
+    if (headers.length > 0 && headers[0] && /^col_?\d+$/i.test(headers[0])) {
+        // Headers sao genericos (Col_1, Col_2...) - tenta usar a primeira linha como header
+        const firstRow = allRows[0];
+        if (firstRow && firstRow.length === headers.length) {
+            const looksLikeHeader = firstRow.every(cell => {
+                const s = String(cell || '').trim();
+                return s !== '' && isNaN(s.replace(',', '.'));
+            });
+            if (looksLikeHeader) {
+                headers = firstRow.map(h => String(h || '').trim() || '-');
+                displayRows = allRows.slice(startIdx + 1, endIdx + 1);
+                headerOffset = 1;
+            }
+        }
+    }
+    
+    let paginationHtml = '';
+    if (totalPages > 1) {
+        paginationHtml = `
+            <div class="knowledge-xlsx-pagination">
+                <button class="knowledge-xlsx-page-btn" onclick="xlsxGoPage(${sheetIndex}, 0)" ${currentPage === 0 ? 'disabled' : ''}>&laquo;</button>
+                <button class="knowledge-xlsx-page-btn" onclick="xlsxGoPage(${sheetIndex}, ${currentPage - 1})" ${currentPage === 0 ? 'disabled' : ''}>&lsaquo;</button>
+                <span class="knowledge-xlsx-page-info">Pagina ${currentPage + 1} de ${totalPages}</span>
+                <button class="knowledge-xlsx-page-btn" onclick="xlsxGoPage(${sheetIndex}, ${currentPage + 1})" ${currentPage >= totalPages - 1 ? 'disabled' : ''}>&rsaquo;</button>
+                <button class="knowledge-xlsx-page-btn" onclick="xlsxGoPage(${sheetIndex}, ${totalPages - 1})" ${currentPage >= totalPages - 1 ? 'disabled' : ''}>&raquo;</button>
+                <span class="knowledge-xlsx-page-count">${totalRows} linhas total</span>
+            </div>
+        `;
+    }
+    
+    return `
+        <div class="knowledge-xlsx-container">
+            <table class="knowledge-xlsx-table">
+                <thead>
+                    <tr>
+                        <th class="knowledge-xlsx-row-num">#</th>
+                        ${headers.map(h => `<th>${esc(h)}</th>`).join('')}
+                    </tr>
+                </thead>
+                <tbody>
+                    ${displayRows.length === 0 ? `<tr><td colspan="${headers.length + 1}" class="knowledge-xlsx-empty-row">Nenhum dado</td></tr>` : ''}
+                    ${displayRows.map((row, i) => {
+                        const rowNum = startIdx + i + 1 + (headerOffset && currentPage === 0 ? 0 : headerOffset);
+                        return `<tr>
+                            <td class="knowledge-xlsx-row-num">${startIdx + i + 1}</td>
+                            ${row.map(cell => {
+                                const val = String(cell || '').trim();
+                                const display = val === '' ? '<span class="knowledge-xlsx-empty">-</span>' : esc(val);
+                                return `<td title="${esc(val)}">${display}</td>`;
+                            }).join('')}
+                        </tr>`;
+                    }).join('')}
+                </tbody>
+            </table>
+        </div>
+        ${paginationHtml}
+    `;
+}
+
+// Navega para uma pagina especifica
+function xlsxGoPage(sheetIndex, page) {
+    const preview = document.querySelector('.knowledge-xlsx-preview');
+    if (!preview) return;
+    const xlsxData = JSON.parse(preview.dataset.xlsxData || '{}');
+    if (!xlsxData.sheets || !xlsxData.sheets[sheetIndex]) return;
+    
+    const totalPages = Math.ceil((xlsxData.sheets[sheetIndex].rows || []).length / 50);
+    page = Math.max(0, Math.min(page, totalPages - 1));
+    _xlsxPageState.pages[sheetIndex].page = page;
+    
+    const sheet = xlsxData.sheets[sheetIndex];
+    const container = preview.querySelector('.knowledge-xlsx-container');
+    const pagination = preview.querySelector('.knowledge-xlsx-pagination');
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = renderXlsxSheetTable(sheet, sheetIndex);
+    
+    const newContainer = tempDiv.querySelector('.knowledge-xlsx-container');
+    const newPagination = tempDiv.querySelector('.knowledge-xlsx-pagination');
+    if (newContainer && container) container.replaceWith(newContainer);
+    if (newPagination && pagination) pagination.replaceWith(newPagination);
+    else if (newPagination && !pagination) preview.appendChild(newPagination);
 }
 
 // Troca aba da planilha xlsx
 function switchXlsxSheet(sheetIndex) {
+    _xlsxPageState.currentSheet = sheetIndex;
+    _xlsxPageState.pages[sheetIndex].page = 0;
+    
     const preview = document.querySelector('.knowledge-xlsx-preview');
     if (!preview) return;
     
@@ -1963,37 +2048,28 @@ function switchXlsxSheet(sheetIndex) {
     });
     
     const sheet = xlsxData.sheets[sheetIndex];
-    const container = preview.querySelector('.knowledge-xlsx-container');
+    const tableHtml = renderXlsxSheetTable(sheet, sheetIndex);
     
-    if (sheet.headers && sheet.rows) {
-        container.innerHTML = `
-            <table class="knowledge-xlsx-table">
-                <thead>
-                    <tr>
-                        <th style="width:40px;color:var(--text-dim)">#</th>
-                        ${sheet.headers.map(h => `<th>${esc(h)}</th>`).join('')}
-                    </tr>
-                </thead>
-                <tbody>
-                    ${sheet.rows.map((row, i) => `
-                        <tr>
-                            <td style="color:var(--text-dim);font-size:11px">${i + 1}</td>
-                            ${row.map(cell => `<td title="${esc(cell)}">${esc(cell)}</td>`).join('')}
-                        </tr>
-                    `).join('')}
-                </tbody>
-            </table>
-        `;
-    } else if (sheet.data) {
-        container.innerHTML = `<pre style="padding:16px;margin:0;font-size:12px;white-space:pre-wrap">${esc(sheet.data)}</pre>`;
-    }
+    // Remove container e pagination antigos
+    const oldContainer = preview.querySelector('.knowledge-xlsx-container');
+    const oldPagination = preview.querySelector('.knowledge-xlsx-pagination');
+    if (oldContainer) oldContainer.remove();
+    if (oldPagination) oldPagination.remove();
     
     // Atualiza info
     const header = preview.querySelector('.knowledge-xlsx-header');
-    const infoSpan = header.querySelector('span:last-child');
+    const infoSpan = header.querySelector('.knowledge-xlsx-info');
     if (infoSpan) {
         infoSpan.textContent = `${sheet.rowCount || 0} linhas x ${sheet.colCount || 0} colunas`;
     }
+    
+    // Insere novo conteudo
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = tableHtml;
+    const newContainer = tempDiv.querySelector('.knowledge-xlsx-container');
+    const newPagination = tempDiv.querySelector('.knowledge-xlsx-pagination');
+    if (newContainer) preview.appendChild(newContainer);
+    if (newPagination) preview.appendChild(newPagination);
 }
 
 async function saveKnowledge() {

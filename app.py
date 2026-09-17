@@ -2222,6 +2222,10 @@ def api_knowledge_xlsx_data(filename):
             xlsx_path = Path(__file__).parent / "static" / filename
         
         if not xlsx_path.exists():
+            # Tenta na raiz do projeto
+            xlsx_path = Path(__file__).parent / filename
+        
+        if not xlsx_path.exists():
             # Retorna dados do content parseado
             content = file_data.get("content", "")
             return jsonify({
