@@ -3226,7 +3226,7 @@ async function deleteCardapioOrder(id) {
         toast('Pedido excluido com sucesso', 'success');
         loadCardapioOrders();
         loadCardapioStats();
-        document.getElementById('modal')?.classList.add('hidden');
+        closeModal();
     } else {
         toast('Erro ao excluir pedido', 'error');
     }
