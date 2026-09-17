@@ -6,8 +6,9 @@ let selectedTags = [];
 let pollTimers = [];
 let lastWAStatus = '';
 let waStatusTimer = null;
-let lastSentBody = '';
+let lastSentBodyQueue = [];
 let _sseSource = null;
+let _sending = false;
 
 /* ── Estado de conversas (portugués) ─────────────────────────────────────── */
 const CONV_STATUS = { new: 'Novo', open: 'Aberto', waiting: 'Aguardando', resolved: 'Resolvido', closed: 'Fechado' };
@@ -1372,6 +1373,7 @@ async function sendMessage() {
     const btn = document.getElementById('chat-send');
     const text = input.value.trim();
     if (!text || !currentConvId) return;
+    if (_sending) return;
 
     const conv = conversations.find(c => c.id === currentConvId);
     if (!conv) return;
@@ -1389,7 +1391,9 @@ async function sendMessage() {
     autoResizeChatInput();
 
     setBtnLoading(btn, true);
-    lastSentBody = text;
+    _sending = true;
+    lastSentBodyQueue.push(text);
+    if (lastSentBodyQueue.length > 5) lastSentBodyQueue.shift();
     let res = null;
     try {
         res = await api('/api/messages/send', {
@@ -1398,10 +1402,11 @@ async function sendMessage() {
         });
     } finally {
         setBtnLoading(btn, false);
+        _sending = false;
     }
 
     if (!res || res.error) {
-        lastSentBody = '';
+        lastSentBodyQueue = [];
         markTempMsgError(tempId);
         toast(friendlyError(res?.error), 'error');
         return;
@@ -1410,7 +1415,7 @@ async function sendMessage() {
     toast('Mensagem enviada', 'success');
     // El evento SSE message_sent re-renderiza la conversa y reemplaza el temporal.
     // Como respaldo, si SSE no llega en ~3s, marcamos el temporal como enviado.
-    setTimeout(() => markTempMsgSent(tempId), 3000);
+    setTimeout(() => markTempMsgSent(tempId), 1500);
 }
 
 function markTempMsgError(tempId) {
@@ -2397,8 +2402,8 @@ function connectSSE() {
                     const d = await api(`/api/conversations/${data.conversation_id}`);
                     if (d?.messages?.length) {
                         const last = d.messages[d.messages.length - 1];
-                        if (last.body === lastSentBody) {
-                            lastSentBody = '';
+                        if (lastSentBodyQueue.includes(last.body)) {
+                            lastSentBodyQueue = lastSentBodyQueue.filter(b => b !== last.body);
                         } else {
                             const lastEl = document.querySelector('#chat-messages .msg:last-child');
                             const lastId = lastEl?.dataset?.msgId;
@@ -2418,7 +2423,7 @@ function connectSSE() {
             updateUnreadBadge();
             if (currentView === 'dashboard') debouncedLoadDashboard();
         } else if (event === 'message_sent') {
-            lastSentBody = '';
+            lastSentBodyQueue = [];
             if ((currentView === 'conversations' || currentView === 'bot' || currentView === 'human-queue') && currentConvId === data.conversation_id) {
                 refreshConversationPanel(data.conversation_id);
                 const d = await api(`/api/conversations/${data.conversation_id}`);
@@ -2432,6 +2437,7 @@ function connectSSE() {
             if (currentView === 'dashboard') debouncedLoadDashboard();
         } else if (event === 'conversation_updated') {
             debouncedLoadConversations();
+            updateUnreadBadge();
             updateHumanQueueBadge();
         } else if (event === 'tags_updated') {
             refreshTagsUI();
