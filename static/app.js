@@ -1501,9 +1501,19 @@ async function bulkDeleteContacts() {
     if (!ids.length) return;
     if (!confirm(`Excluir ${ids.length} contato${ids.length > 1 ? 's' : ''}?`)) return;
     
-    const results = await Promise.all(ids.map(id => api(`/api/contacts/${id}`, { method: 'DELETE' })));
-    const ok = results.filter(r => r && !r.error).length;
-    const fail = ids.length - ok;
+    const bar = document.getElementById('contacts-bulk-bar');
+    const btn = bar?.querySelector('.btn-danger');
+    const countEl = document.getElementById('contacts-selected-count');
+    if (btn) setBtnLoading(btn, true, 'Excluindo...');
+    if (countEl) countEl.textContent = 'Excluindo...';
+    
+    let ok = 0, fail = 0;
+    for (const id of ids) {
+        try {
+            const res = await api(`/api/contacts/${id}`, { method: 'DELETE' });
+            if (res && !res.error) ok++; else fail++;
+        } catch { fail++; }
+    }
     
     if (ok) toast(`${ok} contato${ok > 1 ? 's' : ''} excluído${ok > 1 ? 's' : ''}`, 'success');
     if (fail) toast(`${fail} falha${fail > 1 ? 's' : ''}`, 'error');
