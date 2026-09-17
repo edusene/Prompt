@@ -1768,6 +1768,32 @@ function openChatMobile() {
     if (layout) layout.classList.add('chat-open');
 }
 
+let _infoPanelHidden = false;
+
+function toggleInfoPanel() {
+    const panel = document.getElementById('conv-info-panel');
+    const showBtn = document.getElementById('info-panel-show-btn');
+    if (!panel) return;
+
+    _infoPanelHidden = !_infoPanelHidden;
+
+    if (_infoPanelHidden) {
+        panel.classList.add('hidden');
+        if (showBtn) showBtn.classList.add('visible');
+    } else {
+        panel.classList.remove('hidden');
+        if (showBtn) showBtn.classList.remove('visible');
+    }
+}
+
+function showInfoPanel() {
+    const panel = document.getElementById('conv-info-panel');
+    const showBtn = document.getElementById('info-panel-show-btn');
+    if (panel) panel.classList.remove('hidden');
+    if (showBtn) showBtn.classList.remove('visible');
+    _infoPanelHidden = false;
+}
+
 function closeChatMobile() {
     const layout = document.querySelector('.conv-layout');
     if (layout) layout.classList.remove('chat-open');
@@ -3533,13 +3559,14 @@ function showMediaPreview(file, type) {
         }
         
         previewHtml += `
-            <button class="remove-media" onclick="removeSelectedMedia()" title="Remover">
+            <button class="remove-media" onclick="event.stopPropagation(); removeSelectedMedia()" title="Remover">
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
         `;
         
         previewContainer.innerHTML = previewHtml;
         previewContainer.style.display = 'flex';
+        previewContainer.onclick = (e) => e.stopPropagation();
     };
     
     if (type === 'image' || type === 'video') {
@@ -3557,7 +3584,7 @@ function showMediaPreview(file, type) {
                         <div class="file-name">${esc(file.name)}</div>
                         <div class="file-size">${formatFileSize(file.size)}</div>
                     </div>
-                    <button class="remove-media" onclick="removeSelectedMedia()" title="Remover">
+                    <button class="remove-media" onclick="event.stopPropagation(); removeSelectedMedia()" title="Remover">
                         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                     </button>
                 `;
@@ -3572,13 +3599,14 @@ function showMediaPreview(file, type) {
                         <div class="file-name">${esc(file.name)}</div>
                         <div class="file-size">${formatFileSize(file.size)}</div>
                     </div>
-                    <button class="remove-media" onclick="removeSelectedMedia()" title="Remover">
+                    <button class="remove-media" onclick="event.stopPropagation(); removeSelectedMedia()" title="Remover">
                         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                     </button>
                 `;
             }
             previewContainer.innerHTML = previewHtml;
             previewContainer.style.display = 'flex';
+            previewContainer.onclick = (e) => e.stopPropagation();
         };
         reader.readAsDataURL(file);
     }
@@ -3833,12 +3861,13 @@ function showRecordingPanel() {
             <button class="cancel-recording" onclick="cancelAudioRecording()" title="Cancelar">
                 <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
-            <button class="send-recording" onclick="sendRecordedAudio()" title="Enviar audio">
+            <button class="send-recording" onclick="stopAndSendRecording()" title="Enviar audio">
                 <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
             </button>
         </div>
     `;
     previewContainer.style.display = 'flex';
+    previewContainer.onclick = (e) => e.stopPropagation();
 }
 
 function hideRecordingPanel() {
@@ -3876,6 +3905,7 @@ function cancelAudioRecording() {
 }
 
 let _recordedAudioBlob = null;
+let _sendAfterRecord = false;
 
 function showRecordedAudioPreview(audioBlob) {
     _recordedAudioBlob = audioBlob;
@@ -3884,7 +3914,6 @@ function showRecordedAudioPreview(audioBlob) {
     if (!previewContainer) return;
     
     const audioUrl = URL.createObjectURL(audioBlob);
-    const duration = formatRecordingDuration(audioBlob);
     
     previewContainer.innerHTML = `
         <div class="audio-recording-panel" style="background:rgba(99,102,241,0.1);border-color:rgba(99,102,241,0.2)">
@@ -3902,11 +3931,26 @@ function showRecordedAudioPreview(audioBlob) {
         </div>
     `;
     previewContainer.style.display = 'flex';
+    previewContainer.onclick = (e) => e.stopPropagation();
+    
+    if (_sendAfterRecord) {
+        _sendAfterRecord = false;
+        setTimeout(() => sendRecordedAudio(), 100);
+    }
 }
 
 function discardRecordedAudio() {
     _recordedAudioBlob = null;
     hideRecordingPanel();
+}
+
+function stopAndSendRecording() {
+    if (!_isRecording) {
+        sendRecordedAudio();
+        return;
+    }
+    _sendAfterRecord = true;
+    stopAudioRecording(true);
 }
 
 async function sendRecordedAudio() {

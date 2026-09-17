@@ -438,6 +438,7 @@ h3 { font-size: 14px; font-weight: 600; }
     gap: 0;
     height: 100vh;
     min-height: 0;
+    position: relative;
 }
 
 .conv-list-panel {
@@ -472,6 +473,72 @@ h3 { font-size: 14px; font-weight: 600; }
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
     min-height: 0;
+    transition: width 0.25s ease, opacity 0.25s ease, padding 0.25s ease;
+    overflow: hidden;
+}
+
+.conv-info-panel.hidden {
+    width: 0;
+    padding: 0;
+    border-left: none;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.info-panel-toggle {
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.1);
+    border: none;
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    flex-shrink: 0;
+}
+
+.info-panel-toggle:hover {
+    background: rgba(255, 255, 255, 0.2);
+    color: var(--text);
+}
+
+.info-panel-show-btn {
+    position: absolute;
+    top: 60px;
+    right: 8px;
+    width: 36px;
+    height: 36px;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: var(--accent);
+    border: none;
+    border-radius: var(--radius-sm);
+    color: #fff;
+    cursor: pointer;
+    z-index: 20;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    transition: all var(--transition-fast);
+}
+
+.info-panel-show-btn:hover {
+    transform: scale(1.1);
+}
+
+.info-panel-show-btn.visible {
+    display: flex;
+}
+
+.conv-layout:has(.conv-info-panel.hidden) .conv-chat-panel {
+    flex: 1;
+    max-width: none;
+}
+
+.conv-layout:has(.conv-info-panel.hidden) .chat-messages {
+    max-width: none;
 }
 .conv-info-body {
     flex: 1;
@@ -869,6 +936,7 @@ h3 { font-size: 14px; font-weight: 600; }
     padding: 10px 16px;
     border-top: 1px solid var(--border);
     display: flex;
+    flex-wrap: wrap;
     gap: 10px;
     align-items: flex-end;
     background: var(--bg-sidebar);
@@ -2172,6 +2240,8 @@ select option {
     border-radius: var(--radius-md);
     margin-bottom: 8px;
     animation: fadeInUp 0.2s ease;
+    width: 100%;
+    flex-shrink: 0;
 }
 
 .chat-media-preview img {
@@ -2827,7 +2897,7 @@ select option {
 
 /* Oculta painel de detalhes em telas estreitas */
 @media (max-width: 1024px) {
-    .conv-info-panel { display: none; }
+    .conv-info-panel:not(.hidden) { display: none; }
     .conv-list-panel { width: 220px; }
 }
 
