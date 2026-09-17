@@ -2314,6 +2314,112 @@ def api_knowledge_xlsx_data(filename):
         })
 
 
+@app.put("/api/knowledge/<filename>/xlsx-data")
+@login_required
+def api_knowledge_xlsx_data_update(filename):
+    """Salva dados editados de uma planilha .xlsx de volta ao arquivo."""
+    if not filename.endswith('.xlsx'):
+        return jsonify({"error": "Arquivo nao e xlsx"}), 400
+    
+    data = request.get_json(silent=True) or {}
+    sheets = data.get("sheets", [])
+    description = data.get("description", "").strip()
+    
+    if not sheets:
+        return jsonify({"error": "Nenhum dado fornecido"}), 400
+    
+    try:
+        import openpyxl
+        from pathlib import Path
+        
+        # Busca o arquivo
+        uploads_dir = Path(__file__).parent / "uploads"
+        xlsx_path = uploads_dir / filename
+        if not xlsx_path.exists():
+            xlsx_path = Path(__file__).parent / "static" / filename
+        if not xlsx_path.exists():
+            xlsx_path = Path(__file__).parent / filename
+        
+        if not xlsx_path.exists():
+            return jsonify({"error": "Arquivo xlsx nao encontrado no disco"}), 404
+        
+        # Abre o workbook existente
+        wb = openpyxl.load_workbook(str(xlsx_path))
+        
+        for sheet_data in sheets:
+            sheet_name = sheet_data.get("name", "")
+            headers = sheet_data.get("headers", [])
+            rows = sheet_data.get("rows", [])
+            
+            if sheet_name not in wb.sheetnames:
+                continue
+            
+            ws = wb[sheet_name]
+            
+            # Encontra onde comecam os headers no worksheet original
+            header_row_idx = None
+            for row_idx in range(1, min(ws.max_row + 1, 20)):
+                row_vals = [str(ws.cell(row=row_idx, column=ci + 1).value or "").strip() for ci in range(len(headers))]
+                # Compara com os headers atuais
+                if row_vals == headers or row_vals[:len(headers)] == headers:
+                    header_row_idx = row_idx
+                    break
+            
+            if header_row_idx is None:
+                # Headers nao encontrados - escreve a partir da linha 1
+                header_row_idx = 1
+                # Escreve headers
+                for ci, h in enumerate(headers):
+                    ws.cell(row=1, column=ci + 1, value=h)
+                header_row_idx = 2
+            
+            # Limpa dados antigos (mantem headers)
+            max_data_row = ws.max_row
+            for row_idx in range(header_row_idx, max_data_row + 1):
+                for ci in range(len(headers)):
+                    ws.cell(row=row_idx, column=ci + 1, value=None)
+            
+            # Escreve novos dados
+            for ri, row in enumerate(rows):
+                for ci, val in enumerate(row):
+                    # Tenta manter tipo numerico quando possivel
+                    cell_val = val
+                    if val and isinstance(val, str):
+                        try:
+                            cell_val = float(val.replace(",", "."))
+                        except (ValueError, AttributeError):
+                            cell_val = val
+                    ws.cell(row=header_row_idx + ri, column=ci + 1, value=cell_val)
+        
+        # Salva o arquivo
+        wb.save(str(xlsx_path))
+        wb.close()
+        
+        # Atualiza o conteudo de texto no knowledge base
+        content_parts = []
+        for sheet_data in sheets:
+            sheet_name = sheet_data.get("name", "Dados")
+            headers = sheet_data.get("headers", [])
+            rows = sheet_data.get("rows", [])
+            content_parts.append(f"=== {sheet_name} ===")
+            content_parts.append("\t".join(headers))
+            for row in rows:
+                content_parts.append("\t".join(str(c) for c in row))
+            content_parts.append("")
+        
+        full_content = "\n".join(content_parts)
+        knowledge_rag.save_knowledge_raw(filename, full_content, description=description)
+        
+        print(f"[knowledge] planilha salva: {filename}")
+        return jsonify({"ok": True})
+        
+    except Exception as e:
+        print(f"[knowledge] ERRO ao salvar xlsx: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": f"Erro ao salvar planilha: {str(e)}"}), 500
+
+
 @app.post("/api/knowledge")
 @login_required
 def api_knowledge_create():

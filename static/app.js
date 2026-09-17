@@ -1854,6 +1854,10 @@ function closeChatMobile() {
 
 document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
+        if (_xlsxFullscreen) {
+            toggleXlsxFullscreen();
+            return;
+        }
         closeSidebar();
         closeChatMobile();
     }
@@ -1912,6 +1916,7 @@ async function selectKnowledgeFile(filename) {
 
 // Estado de paginação do xlsx
 let _xlsxPageState = {};
+let _xlsxFullscreen = false;
 
 // Renderiza visualização de planilha xlsx
 function renderXlsxPreview(filename, xlsxData) {
@@ -1967,15 +1972,42 @@ function renderXlsxPreview(filename, xlsxData) {
     
     preview.innerHTML = `
         <div class="knowledge-xlsx-header">
-            <h4>Visualizacao da Planilha</h4>
-            ${tabsHtml}
-            <span class="knowledge-xlsx-info">${firstSheet.rowCount || 0} linhas x ${firstSheet.colCount || 0} colunas</span>
+            <div class="knowledge-xlsx-header-left">
+                <h4>Visualizacao da Planilha</h4>
+                ${tabsHtml}
+                <span class="knowledge-xlsx-info">${firstSheet.rowCount || 0} linhas x ${firstSheet.colCount || 0} colunas</span>
+            </div>
+            <div class="knowledge-xlsx-header-right">
+                <button class="btn-icon knowledge-xlsx-fullscreen-btn" onclick="toggleXlsxFullscreen()" title="Tela cheia">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+                    </svg>
+                </button>
+            </div>
         </div>
         ${tableHtml}
     `;
     
     preview.dataset.xlsxData = JSON.stringify(xlsxData);
     editorPanel.insertBefore(preview, document.getElementById('knowledge-actions'));
+}
+
+// Alterna modo tela cheia
+function toggleXlsxFullscreen() {
+    const preview = document.querySelector('.knowledge-xlsx-preview');
+    if (!preview) return;
+    
+    _xlsxFullscreen = !_xlsxFullscreen;
+    preview.classList.toggle('knowledge-xlsx-fullscreen', _xlsxFullscreen);
+    document.body.classList.toggle('knowledge-xlsx-fullscreen-body', _xlsxFullscreen);
+    
+    const btn = preview.querySelector('.knowledge-xlsx-fullscreen-btn');
+    if (btn) {
+        btn.innerHTML = _xlsxFullscreen
+            ? '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 14h6v6m10-10h-6V4m0 6l7-7M3 21l7-7"/></svg>'
+            : '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>';
+        btn.title = _xlsxFullscreen ? 'Sair da tela cheia' : 'Tela cheia';
+    }
 }
 
 // Renderiza tabela de uma aba com paginação
@@ -2073,10 +2105,10 @@ function renderXlsxSheetTable(sheet, sheetIndex) {
                     ${displayRows.map((row, i) => {
                         return `<tr>
                             <td class="knowledge-xlsx-row-num">${startIdx + i + 1}</td>
-                            ${row.map(cell => {
+                            ${row.map((cell, ci) => {
                                 const val = String(cell || '').trim();
-                                const display = val === '' ? '<span class="knowledge-xlsx-empty">-</span>' : esc(val);
-                                return `<td title="${esc(val)}">${display}</td>`;
+                                const display = val === '' ? '' : esc(val);
+                                return `<td contenteditable="true" data-row="${startIdx + i}" data-col="${ci}" class="knowledge-xlsx-cell" title="${esc(val)}">${display}</td>`;
                             }).join('')}
                         </tr>`;
                     }).join('')}
@@ -2093,6 +2125,9 @@ function xlsxGoPage(sheetIndex, page) {
     if (!preview) return;
     const xlsxData = JSON.parse(preview.dataset.xlsxData || '{}');
     if (!xlsxData.sheets || !xlsxData.sheets[sheetIndex]) return;
+    
+    // Preserva edits da pagina atual antes de navegar
+    _preserveCurrentSheetEdits();
     
     const totalPages = Math.ceil((xlsxData.sheets[sheetIndex].rows || []).length / 50);
     page = Math.max(0, Math.min(page, totalPages - 1));
@@ -2113,6 +2148,9 @@ function xlsxGoPage(sheetIndex, page) {
 
 // Troca aba da planilha xlsx
 function switchXlsxSheet(sheetIndex) {
+    // Preserva edits da aba atual antes de trocar
+    _preserveCurrentSheetEdits();
+    
     _xlsxPageState.currentSheet = sheetIndex;
     _xlsxPageState.pages[sheetIndex].page = 0;
     
@@ -2152,22 +2190,106 @@ function switchXlsxSheet(sheetIndex) {
     if (newPagination) preview.appendChild(newPagination);
 }
 
+// Preserva edicoes da aba atual no xlsxData antes de trocar de aba
+function _preserveCurrentSheetEdits() {
+    const preview = document.querySelector('.knowledge-xlsx-preview');
+    if (!preview) return;
+    const xlsxData = JSON.parse(preview.dataset.xlsxData || '{}');
+    if (!xlsxData.sheets) return;
+    
+    const cells = preview.querySelectorAll('.knowledge-xlsx-cell[data-row]');
+    cells.forEach(cell => {
+        const rowIdx = parseInt(cell.dataset.row);
+        const colIdx = parseInt(cell.dataset.col);
+        const sheetIdx = _xlsxPageState.currentSheet;
+        const sheet = xlsxData.sheets[sheetIdx];
+        if (sheet && sheet.rows && rowIdx >= 0 && rowIdx < sheet.rows.length && colIdx >= 0 && colIdx < sheet.headers.length) {
+            sheet.rows[rowIdx][colIdx] = cell.textContent.trim();
+        }
+    });
+    
+    // Salva de volta no dataset
+    preview.dataset.xlsxData = JSON.stringify(xlsxData);
+}
+
+// Coleta dados editados da planilha
+function collectXlsxEdits() {
+    const preview = document.querySelector('.knowledge-xlsx-preview');
+    if (!preview) return null;
+    const xlsxData = JSON.parse(preview.dataset.xlsxData || '{}');
+    if (!xlsxData.sheets) return null;
+    
+    // Para cada aba, coleta os valores editados das celulas
+    const editedSheets = xlsxData.sheets.map((sheet, sheetIdx) => {
+        const pageState = _xlsxPageState.pages[sheetIdx] || { page: 0, perPage: 50 };
+        const perPage = pageState.perPage;
+        
+        // Deep clone das rows
+        const rows = (sheet.rows || []).map(r => [...r]);
+        const headers = sheet.headers || [];
+        
+        // Coleta edits de todas as paginas (as celulas editadas ficam no DOM)
+        const cells = preview.querySelectorAll(`.knowledge-xlsx-cell[data-row]`);
+        cells.forEach(cell => {
+            const rowIdx = parseInt(cell.dataset.row);
+            const colIdx = parseInt(cell.dataset.col);
+            if (rowIdx >= 0 && rowIdx < rows.length && colIdx >= 0 && colIdx < headers.length) {
+                rows[rowIdx][colIdx] = cell.textContent.trim();
+            }
+        });
+        
+        return {
+            name: sheet.name,
+            headers: headers,
+            rows: rows
+        };
+    });
+    
+    return { sheets: editedSheets };
+}
+
 async function saveKnowledge() {
     if (!currentKnowledgeFile) return;
     const btn = event.currentTarget;
-    const content = document.getElementById('knowledge-editor').value;
     const description = document.getElementById('knowledge-description').value;
     setBtnLoading(btn, true, 'Salvando...');
-    const data = await api(`/api/knowledge/${encodeURIComponent(currentKnowledgeFile)}`, {
-        method: 'PUT',
-        body: JSON.stringify({ content, description })
-    });
-    setBtnLoading(btn, false);
-    if (data?.error) {
-        toast(friendlyError(data.error), 'error');
+    
+    const isXlsx = currentKnowledgeFile.toLowerCase().endsWith('.xlsx');
+    
+    if (isXlsx) {
+        // Salva dados estruturados da planilha
+        const editedData = collectXlsxEdits();
+        if (!editedData) {
+            setBtnLoading(btn, false);
+            toast('Erro ao coletar dados da planilha', 'error');
+            return;
+        }
+        
+        const data = await api(`/api/knowledge/${encodeURIComponent(currentKnowledgeFile)}/xlsx-data`, {
+            method: 'PUT',
+            body: JSON.stringify({ sheets: editedData.sheets, description })
+        });
+        setBtnLoading(btn, false);
+        if (data?.error) {
+            toast(friendlyError(data.error), 'error');
+        } else {
+            toast('Planilha salva com sucesso!', 'success');
+            loadKnowledge();
+        }
     } else {
-        toast('Knowledge salvo (pendente de embedding)', 'success');
-        loadKnowledge();
+        // Salva texto normal
+        const content = document.getElementById('knowledge-editor').value;
+        const data = await api(`/api/knowledge/${encodeURIComponent(currentKnowledgeFile)}`, {
+            method: 'PUT',
+            body: JSON.stringify({ content, description })
+        });
+        setBtnLoading(btn, false);
+        if (data?.error) {
+            toast(friendlyError(data.error), 'error');
+        } else {
+            toast('Knowledge salvo (pendente de embedding)', 'success');
+            loadKnowledge();
+        }
     }
 }
 
