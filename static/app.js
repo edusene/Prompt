@@ -3687,6 +3687,48 @@ sendMessage = async function() {
     await _originalSendMessage();
 };
 
+/* ── Media Dropdown Menu ────────────────────────────────────────────────── */
+function toggleMediaMenu(e) {
+    e.stopPropagation();
+    const dropdown = document.getElementById('chat-media-dropdown');
+    const btn = document.getElementById('chat-media-menu-btn');
+    
+    if (!dropdown || !btn) return;
+    
+    const isOpen = dropdown.style.display !== 'none';
+    
+    if (isOpen) {
+        dropdown.style.display = 'none';
+        btn.classList.remove('active');
+    } else {
+        dropdown.style.display = 'block';
+        btn.classList.add('active');
+    }
+}
+
+function closeMediaMenu() {
+    const dropdown = document.getElementById('chat-media-dropdown');
+    const btn = document.getElementById('chat-media-menu-btn');
+    
+    if (dropdown) dropdown.style.display = 'none';
+    if (btn) btn.classList.remove('active');
+}
+
+// Fecha o dropdown de mídia ao clicar fora
+document.addEventListener('click', (e) => {
+    const wrapper = document.querySelector('.chat-media-dropdown-wrapper');
+    if (wrapper && !wrapper.contains(e.target)) {
+        closeMediaMenu();
+    }
+});
+
+// Fecha o dropdown de mídia ao pressionar Escape
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        closeMediaMenu();
+    }
+});
+
 /* ── Audio Recording ────────────────────────────────────────────────────── */
 let _mediaRecorder = null;
 let _audioChunks = [];

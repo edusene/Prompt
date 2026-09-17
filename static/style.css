@@ -1897,6 +1897,22 @@ select option {
     font-size: 13px;
 }
 
+/* ── Chat Media Container ──────────────────────────────────────────────── */
+.chat-media-container {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+}
+
+.chat-media-container textarea {
+    flex: 1;
+}
+
+.chat-media-container .btn-primary {
+    flex-shrink: 0;
+}
+
 /* ── Chat Media Buttons ────────────────────────────────────────────────── */
 .chat-media-buttons {
     display: flex;
@@ -1936,6 +1952,84 @@ select option {
 
 .chat-media-input {
     display: none;
+}
+
+/* ── Chat Media Dropdown ───────────────────────────────────────────────── */
+.chat-media-dropdown-wrapper {
+    position: relative;
+}
+
+.chat-media-menu-btn {
+    transition: all var(--transition-fast);
+}
+
+.chat-media-menu-btn.active {
+    background: rgba(99, 102, 241, 0.2);
+    color: var(--accent-hover);
+}
+
+.chat-media-dropdown {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 0;
+    background: rgba(15, 23, 42, 0.97);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid rgba(99, 102, 241, 0.25);
+    border-radius: var(--radius-md);
+    padding: 6px;
+    min-width: 160px;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6), 0 0 15px rgba(99, 102, 241, 0.1);
+    z-index: 100;
+    animation: fadeInUp 0.15s ease;
+}
+
+.chat-media-dropdown::after {
+    content: '';
+    position: absolute;
+    bottom: -6px;
+    left: 12px;
+    width: 12px;
+    height: 12px;
+    background: rgba(15, 23, 42, 0.97);
+    border-right: 1px solid rgba(99, 102, 241, 0.25);
+    border-bottom: 1px solid rgba(99, 102, 241, 0.25);
+    transform: rotate(45deg);
+}
+
+.chat-media-dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 10px 14px;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    text-align: left;
+}
+
+.chat-media-dropdown-item:hover {
+    background: rgba(99, 102, 241, 0.15);
+    color: var(--accent-hover);
+}
+
+.chat-media-dropdown-item:active {
+    transform: scale(0.98);
+}
+
+.chat-media-dropdown-item svg {
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+
+.chat-media-dropdown-item:hover svg {
+    color: var(--accent-hover);
 }
 
 /* ── Audio Recording Button ────────────────────────────────────────────── */
