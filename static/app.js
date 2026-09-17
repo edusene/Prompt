@@ -2896,29 +2896,31 @@ async function loadCrmContacts() {
     }
 
     list.innerHTML = `
-        <table>
-            <thead><tr><th>Nome</th><th>Telefone</th><th>Status</th><th>Tags</th><th>Ultima Interacao</th><th>Dias s/ Interacao</th></tr></thead>
-            <tbody>
-            ${crmContactsList.map(c => {
-                const name = c.name || c.phone || '-';
-                const tags = (c.tags || []).map(t =>
-                    `<span class="conv-tag-chip" style="background:${t.color}">${esc(t.name)}</span>`
-                ).join(' ');
-                const lastInt = c.last_interaction_at
-                    ? new Date(c.last_interaction_at + 'Z').toLocaleDateString('pt-BR')
-                    : '-';
-                const daysW = c.days_without_interaction != null ? c.days_without_interaction : '-';
-                return `<tr class="crm-contact-row" onclick="openCrmContactProfile(${c.id})">
-                    <td><strong>${esc(name)}</strong></td>
-                    <td>${esc(c.phone)}</td>
-                    <td><span class="crm-status-badge crm-status-${c.crm_status || 'novo'}">${esc(crmStatusLabel(c.crm_status))}</span></td>
-                    <td>${tags || '<span class="muted">-</span>'}</td>
-                    <td>${lastInt}</td>
-                    <td>${daysW}</td>
-                </tr>`;
-            }).join('')}
-            </tbody>
-        </table>
+        <div class="crm-table-container">
+            <table class="crm-table">
+                <thead><tr><th class="col-name">Nome</th><th class="col-phone">Telefone</th><th class="col-status">Status</th><th class="col-tags">Tags</th><th class="col-date">Ultima Interacao</th><th class="col-days">Dias s/ Interacao</th></tr></thead>
+                <tbody>
+                ${crmContactsList.map(c => {
+                    const name = c.name || c.phone || '-';
+                    const tags = (c.tags || []).map(t =>
+                        `<span class="conv-tag-chip" style="background:${t.color}">${esc(t.name)}</span>`
+                    ).join(' ');
+                    const lastInt = c.last_interaction_at
+                        ? new Date(c.last_interaction_at + 'Z').toLocaleDateString('pt-BR')
+                        : '-';
+                    const daysW = c.days_without_interaction != null ? c.days_without_interaction : '-';
+                    return `<tr class="crm-contact-row" onclick="openCrmContactProfile(${c.id})">
+                        <td><strong>${esc(name)}</strong></td>
+                        <td>${esc(c.phone)}</td>
+                        <td><span class="crm-status-badge crm-status-${c.crm_status || 'novo'}">${esc(crmStatusLabel(c.crm_status))}</span></td>
+                        <td>${tags || '<span class="muted">-</span>'}</td>
+                        <td>${lastInt}</td>
+                        <td>${daysW}</td>
+                    </tr>`;
+                }).join('')}
+                </tbody>
+            </table>
+        </div>
     `;
 }
 
@@ -3200,22 +3202,24 @@ async function loadCrmFollowUps() {
         return;
     }
     list.innerHTML = `
-        <table>
-            <thead><tr><th>Contato</th><th>Automacao</th><th>Data Prevista</th><th>Mensagem</th><th>Status</th></tr></thead>
-            <tbody>
-            ${followUps.map(fu => {
-                const sched = fu.scheduled_for ? new Date(fu.scheduled_for + 'Z').toLocaleString('pt-BR') : '-';
-                const msg = (fu.message_sent || fu.message_template || '').substring(0, 60);
-                return `<tr>
-                    <td><strong>${esc(fu.contact_name || fu.contact_phone)}</strong><br><span class="muted">${esc(fu.contact_phone)}</span></td>
-                    <td>${esc(fu.automation_name)}</td>
-                    <td>${sched}</td>
-                    <td style="max-width:250px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(msg)}</td>
-                    <td><span class="crm-fu-status-badge crm-fu-${fu.status}">${esc(crmFollowUpLabel(fu.status))}</span></td>
-                </tr>`;
-            }).join('')}
-            </tbody>
-        </table>
+        <div class="crm-table-container">
+            <table class="crm-table">
+                <thead><tr><th class="col-name">Contato</th><th>Automacao</th><th class="col-date">Data Prevista</th><th class="col-msg">Mensagem</th><th class="col-status">Status</th></tr></thead>
+                <tbody>
+                ${followUps.map(fu => {
+                    const sched = fu.scheduled_for ? new Date(fu.scheduled_for + 'Z').toLocaleString('pt-BR') : '-';
+                    const msg = (fu.message_sent || fu.message_template || '').substring(0, 60);
+                    return `<tr>
+                        <td><strong>${esc(fu.contact_name || fu.contact_phone)}</strong><br><span class="muted">${esc(fu.contact_phone)}</span></td>
+                        <td>${esc(fu.automation_name)}</td>
+                        <td>${sched}</td>
+                        <td style="max-width:250px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(msg)}</td>
+                        <td><span class="crm-fu-status-badge crm-fu-${fu.status}">${esc(crmFollowUpLabel(fu.status))}</span></td>
+                    </tr>`;
+                }).join('')}
+                </tbody>
+            </table>
+        </div>
     `;
 }
 
@@ -3229,23 +3233,25 @@ async function loadCrmLogs() {
         return;
     }
     list.innerHTML = `
-        <table>
-            <thead><tr><th>Data/Hora</th><th>Contato</th><th>Automacao</th><th>Acao</th><th>Mensagem</th><th>Resultado</th><th>Erro</th></tr></thead>
-            <tbody>
-            ${logs.map(l => {
-                const dt = l.created_at ? new Date(l.created_at + 'Z').toLocaleString('pt-BR') : '-';
-                return `<tr>
-                    <td>${dt}</td>
-                    <td>${esc(l.contact_name || l.contact_phone || '-')}</td>
-                    <td>${esc(l.automation_name || '-')}</td>
-                    <td>${esc(l.action)}</td>
-                    <td style="max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(l.message)}</td>
-                    <td><span class="crm-fu-status-badge crm-fu-${l.result === 'enviado' ? 'enviado' : l.result === 'erro' ? 'erro' : ''}">${esc(l.result)}</span></td>
-                    <td style="max-width:150px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#ef4444">${esc(l.error)}</td>
-                </tr>`;
-            }).join('')}
-            </tbody>
-        </table>
+        <div class="crm-table-container">
+            <table class="crm-table">
+                <thead><tr><th class="col-date">Data/Hora</th><th class="col-name">Contato</th><th>Automacao</th><th class="col-action">Acao</th><th class="col-msg">Mensagem</th><th class="col-result">Resultado</th><th class="col-error">Erro</th></tr></thead>
+                <tbody>
+                ${logs.map(l => {
+                    const dt = l.created_at ? new Date(l.created_at + 'Z').toLocaleString('pt-BR') : '-';
+                    return `<tr>
+                        <td>${dt}</td>
+                        <td>${esc(l.contact_name || l.contact_phone || '-')}</td>
+                        <td>${esc(l.automation_name || '-')}</td>
+                        <td>${esc(l.action)}</td>
+                        <td style="max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(l.message)}</td>
+                        <td><span class="crm-fu-status-badge crm-fu-${l.result === 'enviado' ? 'enviado' : l.result === 'erro' ? 'erro' : ''}">${esc(l.result)}</span></td>
+                        <td style="max-width:150px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#ef4444">${esc(l.error)}</td>
+                    </tr>`;
+                }).join('')}
+                </tbody>
+            </table>
+        </div>
     `;
 }
 
