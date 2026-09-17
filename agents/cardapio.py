@@ -52,10 +52,58 @@ Nunca misture sabores na mesma porcao."""
         queries = []
 
         msg_lower = message.lower()
-        for sabor in ["coxinha", "esfirra", "empadinha", "quibe", "pastel", "rissole", "canudinho", "enroladinho", "quiche", "saltenha", "panqueca", "bomba", "empada"]:
+
+        # Mapeamento de produtos para queries especificas que direcionam ao RAG correto
+        # Produtos Assados (porcao) - query inclui "assado porcao" para evitar confusao com Salgados Grandes
+        assados = {
+            "canudinho": "canudinho assado porcao preco",
+            "esfirra": "esfirra assada porcao preco",
+            "empadinha": "empadinha assada porcao preco",
+            "pao pizza": "pao pizza assado porcao preco",
+        }
+
+        # Produtos Fritos (porcao)
+        fritos = {
+            "coxinha": "coxinha frita porcao preco",
+            "bolinha de queijo": "bolinha de queijo porcao preco",
+            "enroladinho": "enroladinho de salsicha porcao preco",
+            "pastel": "pastel porcao preco",
+            "quibe": "quibe porcao preco",
+            "rissole": "rissole porcao preco",
+            "churros": "churros porcao preco",
+            "croquete": "croquete de carne porcao preco",
+            "misto": "misto porcao preco",
+        }
+
+        # Salgados Grandes (unitario)
+        grandes = {
+            "quiche": "quiche unidade preco",
+            "saltenha": "saltenha unidade preco",
+            "panqueca": "panqueca unidade preco",
+            "bomba": "bomba de carne de sol unidade preco",
+            "empada": "empada unidade preco",
+            "croquete de macaxeira": "croquete de macaxeira unidade preco",
+        }
+
+        # Busca primeiro por assados (mais especifico)
+        for sabor, query in assados.items():
             if sabor in msg_lower:
-                queries.append(sabor)
+                queries.append(query)
                 break
+
+        # Se nao encontrou assados, busca por fritos
+        if not queries:
+            for sabor, query in fritos.items():
+                if sabor in msg_lower:
+                    queries.append(query)
+                    break
+
+        # Se nao encontrou fritos, busca por grandes
+        if not queries:
+            for sabor, query in grandes.items():
+                if sabor in msg_lower:
+                    queries.append(query)
+                    break
 
         if not queries:
             if state.items:
