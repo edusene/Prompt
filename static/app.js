@@ -1768,7 +1768,7 @@ function openChatMobile() {
     if (layout) layout.classList.add('chat-open');
 }
 
-let _infoPanelHidden = false;
+let _infoPanelHidden = true;
 
 function toggleInfoPanel() {
     const panel = document.getElementById('conv-info-panel');
