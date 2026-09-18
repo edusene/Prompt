@@ -18,11 +18,11 @@ class PedidoAgent:
 
     def _load_prompt(self) -> str:
         if self._prompt is None:
-            try:
-                with open("prompts/pedido.md", "r", encoding="utf-8") as f:
-                    self._prompt = f.read()
-            except Exception:
-                self._prompt = self._default_prompt()
+            self._prompt = knowledge_rag.load_prompt_db_first(
+                db_name="pedido.md",
+                local_path="prompts/pedido.md",
+                fallback_content=self._default_prompt(),
+            )
         return self._prompt
 
     def _default_prompt(self) -> str:
@@ -125,7 +125,10 @@ Aguarde confirmacao explicita."""
             result = cardapio.calcular_pedido(items, bairro or state.bairro)
             if result.get("success"):
                 state.subtotal = result.get("subtotal", 0)
-                state.frete = result.get("delivery_fee", 0)
+                # So atualiza frete se o novo valor for > 0 ou se ainda nao foi calculado
+                new_fee = result.get("delivery_fee", 0)
+                if new_fee > 0 or state.frete == 0:
+                    state.frete = new_fee
                 state.taxa_retorno = result.get("return_fee", 0)
                 state.total = result.get("total", 0)
             return json.dumps(result, ensure_ascii=False)

@@ -17,11 +17,11 @@ class LogisticaAgent:
 
     def _load_prompt(self) -> str:
         if self._prompt is None:
-            try:
-                with open("prompts/logistica.md", "r", encoding="utf-8") as f:
-                    self._prompt = f.read()
-            except Exception:
-                self._prompt = self._default_prompt()
+            self._prompt = knowledge_rag.load_prompt_db_first(
+                db_name="logistica.md",
+                local_path="prompts/logistica.md",
+                fallback_content=self._default_prompt(),
+            )
         return self._prompt
 
     def _default_prompt(self) -> str:
@@ -36,8 +36,10 @@ Taxa retorno: R$ 2,00 (dinheiro/cartao) ou R$ 0,00 (Pix)."""
         context = self._get_knowledge(message, state)
         system = self._build_system_prompt(state, context)
         history = self._build_history(state, message)
+        tools = self._get_tools()
+        tool_handlers = self._get_tool_handlers()
 
-        response = llm.generate_reply(history=history, system=system)
+        response = llm.generate_reply(history=history, system=system, tools=tools, tool_handlers=tool_handlers)
 
         # Atualiza estado baseado na resposta
         self._update_state(state, message, response)
@@ -46,13 +48,14 @@ Taxa retorno: R$ 2,00 (dinheiro/cartao) ou R$ 0,00 (Pix)."""
 
     def _get_knowledge(self, message: str, state: ConversationState) -> str:
         """Busca knowledge de frete e bairros."""
-        queries = ["frete entrega bairros delivery"]
+        queries = ["frete entrega bairros delivery taxa"]
         if state.bairro:
-            queries.append(f"frete {state.bairro}")
+            queries.insert(0, f"frete {state.bairro}")
+            queries.append(f"taxa entrega {state.bairro}")
 
         context_parts = []
         for q in queries:
-            result = knowledge_rag.search_context(q, top_k=3)
+            result = knowledge_rag.search_context(q, top_k=5)
             if result:
                 context_parts.append(result)
 
@@ -102,6 +105,7 @@ Taxa retorno: R$ 2,00 (dinheiro/cartao) ou R$ 0,00 (Pix)."""
 
     def _update_state(self, state: ConversationState, message: str, response: str):
         """Atualiza estado baseado na interacao."""
+        import re
         msg_lower = message.lower()
 
         # Detecta modalidade
@@ -110,15 +114,64 @@ Taxa retorno: R$ 2,00 (dinheiro/cartao) ou R$ 0,00 (Pix)."""
         elif "retirada" in msg_lower or "balcao" in msg_lower or "fabrica" in msg_lower:
             state.modality = "retirada"
 
-        # Detecta bairro (palavra unica que pode ser bairro)
-        words = message.strip().split()
-        if len(words) == 1 and len(words[0]) > 3 and not state.bairro:
-            if state.modality == "entrega" or not state.modality:
-                # Pode ser bairro
-                pass
+        # Detecta bairro de varias formas
+        if not state.bairro:
+            bairro = None
+            # Padrãoes comuns: "bairro X", "no X", "entrega X", "é X"
+            m = re.search(r'(?:bairro|no|na|entrega\s+(?:no|na)|para|em)\s+([A-ZÁÉÍÓÚÇÃÕ][a-záéíóúçãõ]+(?:\s+[A-ZÁÉÍÓÚÇÃÕ]?[a-záéíóúçãõ]+)*)', message)
+            if m:
+                bairro = m.group(1).strip()
+            elif len(words := message.strip().split()) <= 3 and len(message.strip()) > 3:
+                # Frase curta que pode ser só o bairro
+                candidate = message.strip()
+                if not any(x in candidate.lower() for x in ["sim", "nao", "ok", "entrega", "retirada", "hoje", "amanha"]):
+                    bairro = candidate
+            if bairro and len(bairro) > 2:
+                state.bairro = bairro
+
+        # Detecta endereco (rua, numero)
+        if not state.endereco:
+            m = re.search(r'(?:rua|av\.?|avenida|alameda|travessa)\s+[^,]+,?\s*\d+', message, re.IGNORECASE)
+            if m:
+                state.endereco = m.group(0).strip()
 
         # Detecta horario
-        for termo in ["hoje", "amanha", "agora"]:
-            if termo in msg_lower:
-                state.data_agendada = termo
-                break
+        m = re.search(r'(\d{1,2})\s*[h:]\s*(\d{2})?', message)
+        if m:
+            state.horario = m.group(0).strip()
+        elif "hoje" in msg_lower:
+            state.data_agendada = "hoje"
+        elif "amanha" in msg_lower:
+            state.data_agendada = "amanha"
+
+    def _get_tools(self) -> list:
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": "search_knowledge",
+                    "description": "Busca informacoes na base de conhecimento (frete, bairros, taxas, horarios)",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "Busca descritiva (ex: 'frete Aponia', 'taxa entrega Centro')",
+                            },
+                            "filename": {
+                                "type": "string",
+                                "description": "Nome exato do arquivo knowledge",
+                            },
+                        },
+                    },
+                },
+            }
+        ]
+
+    def _get_tool_handlers(self) -> dict:
+        def _search(query="", filename="", **kwargs):
+            if filename:
+                return knowledge_rag.get_file_content(filename.strip())
+            return knowledge_rag.search_context(query.strip(), top_k=5)
+
+        return {"search_knowledge": _search}

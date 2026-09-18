@@ -198,6 +198,40 @@ def get_file_content(filename: str) -> str:
     return "\n\n".join(c["content"] for c in chunks)
 
 
+def load_prompt_db_first(db_name: str, local_path: str, fallback_content: str = "") -> str:
+    """Carrega prompt do banco primeiro, depois disco, depois fallback.
+    Usado por sub-agentes para carregar seus .md de prompt."""
+    # 1. Tenta do banco de dados
+    content = get_file_content(db_name)
+    if content:
+        return content
+    # 2. Tenta do arquivo local
+    try:
+        from pathlib import Path
+        p = Path(local_path)
+        if p.exists():
+            return p.read_text(encoding="utf-8")
+    except Exception:
+        pass
+    # 3. Fallback
+    return fallback_content
+
+
+def reload_agent_prompts():
+    """Limpa cache de prompts de todos os sub-agentes."""
+    try:
+        from agents import triagem, cardapio, pedido, logistica, pagamento, crise
+        for mod in (triagem, cardapio, pedido, logistica, pagamento, crise):
+            # Cada agent tem _prompt como atributo de classe, resetamos
+            cls = getattr(mod, mod.__name__.split('.')[-1].title() + 'Agent', None)
+            if cls and hasattr(cls, '_prompt'):
+                # Reset no prototype para afetar todas as instâncias
+                cls._prompt = None
+        print("[knowledge] prompts dos sub-agentes recarregados")
+    except Exception as e:
+        print(f"[knowledge] aviso ao recarregar prompts: {e}")
+
+
 def get_full_knowledge_content() -> str:
     """Retorna TODO o conteúdo do knowledge concatenado, pronto para injetar no system prompt.
     Organiza por arquivo com separadores para facilitar a leitura pelo LLM.

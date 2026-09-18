@@ -48,13 +48,42 @@ def calcular_pedido(items: list[dict], bairro: str = "") -> dict:
                 subtotal += q * p
             except (ValueError, TypeError):
                 pass
-        print(f"[cardápio] MODO TESTE - calculateOrder simulado: subtotal={subtotal}")
+
+        # Busca frete no knowledge se tiver bairro
+        delivery_fee = 0
+        if bairro:
+            try:
+                import knowledge_rag
+                import re
+                result = knowledge_rag.search_context(f"frete {bairro}", top_k=3)
+                if result:
+                    # Tenta extrair valor do frete do resultado
+                    # Procura padroes como "Aponia: R$ 5,00" ou "Aponia - R$5" ou "Aponia R$ 5,00"
+                    m = re.search(rf'{re.escape(bairro)}[^R]*R\$\s*(\d+[.,]?\d*)', result, re.IGNORECASE)
+                    if not m:
+                        # Busca qualquer valor de frete proximo ao bairro
+                        lines = result.split('\n')
+                        for line in lines:
+                            if bairro.lower() in line.lower():
+                                m = re.search(r'R\$\s*(\d+[.,]?\d*)', line)
+                                if m:
+                                    break
+                    if m:
+                        delivery_fee = float(m.group(1).replace(',', '.'))
+                        print(f"[cardápio] MODO TESTE - frete encontrado: {bairro} = R$ {delivery_fee}")
+                    else:
+                        print(f"[cardápio] MODO TESTE - frete nao encontrado para: {bairro}")
+            except Exception as e:
+                print(f"[cardápio] MODO TESTE - erro ao buscar frete: {e}")
+
+        total = subtotal + delivery_fee
+        print(f"[cardápio] MODO TESTE - calculateOrder simulado: subtotal={subtotal} frete={delivery_fee} total={total}")
         return {
             "success": True,
             "subtotal": subtotal,
-            "delivery_fee": 0,
+            "delivery_fee": delivery_fee,
             "return_fee": 0,
-            "total": subtotal,
+            "total": total,
         }
 
     base_url = _get_base_url()

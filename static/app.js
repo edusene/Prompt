@@ -1739,24 +1739,94 @@ async function loadKnowledge() {
     const list = document.getElementById('knowledge-list');
     if (files.length === 0) {
         list.innerHTML = '<div class="empty-state">Nenhum arquivo</div>';
-        return;
+    } else {
+        list.innerHTML = files.map(f => {
+            const status = f.status || 'indexed';
+            return `
+            <div class="knowledge-file ${f.filename === currentKnowledgeFile ? 'active' : ''}" onclick="selectKnowledgeFile('${esc(f.filename)}')">
+                <div class="knowledge-file-info">
+                    <div class="knowledge-file-name">${esc(f.filename)}</div>
+                    <div class="knowledge-file-meta">
+                        <span class="knowledge-file-size">${f.chunks} chunks</span>
+                        <span class="knowledge-status-badge ${status}">${status === 'pending' ? 'Pendente' : status === 'indexed' ? 'Indexado' : 'Erro'}</span>
+                    </div>
+                </div>
+                <button class="btn-icon btn-danger" onclick="event.stopPropagation();deleteKnowledge('${esc(f.filename)}')" title="Deletar">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                </button>
+            </div>
+        `}).join('');
     }
-    list.innerHTML = files.map(f => {
-        const status = f.status || 'indexed';
-        return `
-        <div class="knowledge-file ${f.filename === currentKnowledgeFile ? 'active' : ''}" onclick="selectKnowledgeFile('${esc(f.filename)}')">
-            <div class="knowledge-file-info">
-                <div class="knowledge-file-name">${esc(f.filename)}</div>
-                <div class="knowledge-file-meta">
-                    <span class="knowledge-file-size">${f.chunks} chunks</span>
-                    <span class="knowledge-status-badge ${status}">${status === 'pending' ? 'Pendente' : status === 'indexed' ? 'Indexado' : 'Erro'}</span>
+    loadKnowledgePrompts();
+}
+
+/* ── Knowledge Prompts (Sub-Agentes) ─────────────────────────────────────── */
+let knowledgePrompts = [];
+
+async function loadKnowledgePrompts() {
+    const list = document.getElementById('knowledge-prompts-list');
+    if (!list) return;
+    list.innerHTML = skeletonRows(3);
+    const prompts = await api('/api/knowledge/prompts');
+    if (!prompts) { list.innerHTML = ''; return; }
+    knowledgePrompts = prompts;
+    list.innerHTML = prompts.map(p => `
+        <div class="knowledge-prompt-item" onclick="selectKnowledgePrompt('${esc(p.filename)}')">
+            <div class="knowledge-prompt-info">
+                <div class="knowledge-prompt-agent">${esc(p.agent)}</div>
+                <div class="knowledge-prompt-meta">
+                    <span class="knowledge-prompt-source ${p.source}">${p.source === 'db' ? 'Banco' : 'Disco'}</span>
+                    <span class="knowledge-prompt-chars">${p.chars} chars</span>
                 </div>
             </div>
-            <button class="btn-icon btn-danger" onclick="event.stopPropagation();deleteKnowledge('${esc(f.filename)}')" title="Deletar">
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-            </button>
         </div>
-    `}).join('');
+    `).join('');
+}
+
+async function selectKnowledgePrompt(filename) {
+    const editor = document.getElementById('knowledge-editor');
+    const header = document.getElementById('knowledge-editor-header');
+    const actions = document.getElementById('knowledge-actions');
+    const descBar = document.querySelector('.knowledge-desc-bar');
+    const deleteBtn = document.getElementById('knowledge-delete-btn');
+    if (!editor) return;
+    // Busca conteudo do prompt
+    const data = await api('/api/knowledge/' + encodeURIComponent(filename));
+    if (!data) return;
+    editor.value = data.content || '';
+    editor.dataset.filename = filename;
+    editor.dataset.isPrompt = 'true';
+    header.innerHTML = `<span>${esc(filename)}</span>`;
+    if (descBar) descBar.style.display = 'none';
+    if (deleteBtn) deleteBtn.style.display = 'none';
+    if (actions) actions.style.display = 'flex';
+    editor.focus();
+}
+
+async function saveKnowledgePrompt() {
+    const editor = document.getElementById('knowledge-editor');
+    if (!editor || !editor.dataset.filename) return;
+    const filename = editor.dataset.filename;
+    const content = editor.value;
+    const res = await api('/api/knowledge/' + encodeURIComponent(filename), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content, description: '' })
+    });
+    if (res && res.ok) {
+        showToast('Prompt salvo', 'success');
+        loadKnowledgePrompts();
+    } else {
+        showToast('Erro ao salvar prompt', 'error');
+    }
+}
+
+async function reloadAgentPrompts() {
+    const res = await api('/api/knowledge/reload-prompts', { method: 'POST' });
+    if (res && res.ok) {
+        showToast('Cache de prompts recarregado', 'success');
+        loadKnowledgePrompts();
+    }
 }
 
 /* ── Knowledge Dropdown ─────────────────────────────────────────────────── */
@@ -2249,6 +2319,11 @@ function collectXlsxEdits() {
 }
 
 async function saveKnowledge() {
+    const editor = document.getElementById('knowledge-editor');
+    // Se estamos editando um prompt de sub-agente
+    if (editor && editor.dataset.isPrompt === 'true') {
+        return saveKnowledgePrompt();
+    }
     if (!currentKnowledgeFile) return;
     const btn = event.currentTarget;
     const description = document.getElementById('knowledge-description').value;

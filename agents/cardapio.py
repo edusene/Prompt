@@ -17,11 +17,11 @@ class CardapioAgent:
 
     def _load_prompt(self) -> str:
         if self._prompt is None:
-            try:
-                with open("prompts/cardapio.md", "r", encoding="utf-8") as f:
-                    self._prompt = f.read()
-            except Exception:
-                self._prompt = self._default_prompt()
+            self._prompt = knowledge_rag.load_prompt_db_first(
+                db_name="cardapio.md",
+                local_path="prompts/cardapio.md",
+                fallback_content=self._default_prompt(),
+            )
         return self._prompt
 
     def _default_prompt(self) -> str:

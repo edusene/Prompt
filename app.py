@@ -2470,15 +2470,25 @@ def api_knowledge_update(filename):
     elif filename.endswith(('.txt', '.md')):
         try:
             from pathlib import Path
-            uploads_dir = Path(__file__).parent / "uploads"
-            txt_path = uploads_dir / filename
-            if not txt_path.exists():
-                txt_path = Path(__file__).parent / "static" / filename
-            if not txt_path.exists():
-                txt_path = Path(__file__).parent / filename
-            if txt_path.exists():
+            # Para .md de prompts dos sub-agentes, salva na pasta prompts/
+            prompts_dir = Path(__file__).parent / "prompts"
+            agent_prompts = {"triagem.md", "cardapio.md", "pedido.md", "logistica.md", "pagamento.md", "crise.md"}
+            if filename in agent_prompts:
+                txt_path = prompts_dir / filename
+                if not txt_path.exists():
+                    txt_path = Path(__file__).parent / "uploads" / filename
+            else:
+                uploads_dir = Path(__file__).parent / "uploads"
+                txt_path = uploads_dir / filename
+                if not txt_path.exists():
+                    txt_path = Path(__file__).parent / "static" / filename
+                if not txt_path.exists():
+                    txt_path = Path(__file__).parent / filename
+            if txt_path.parent.exists():
                 txt_path.write_text(content, encoding='utf-8')
                 print(f"[knowledge] arquivo local salvo: {txt_path}")
+                # Limpa cache do agente correspondente
+                knowledge_rag.reload_agent_prompts()
         except Exception as e:
             print(f"[knowledge] aviso: nao foi possivel salvar arquivo local: {e}")
 
@@ -2630,6 +2640,46 @@ def api_knowledge_reload():
         )
     print(f"[knowledge] system prompt recarregado: {len(FULL_SYSTEM_PROMPT)} chars")
     return jsonify({"ok": True, "prompt_chars": len(FULL_SYSTEM_PROMPT)})
+
+
+@app.get("/api/knowledge/prompts")
+@login_required
+def api_knowledge_prompts():
+    """Lista os arquivos .md dos sub-agentes (prompts)."""
+    prompts_dir = Path(__file__).parent / "prompts"
+    prompts = []
+    agent_map = {
+        "triagem.md": "triagem",
+        "cardapio.md": "cardapio",
+        "pedido.md": "pedido",
+        "logistica.md": "logistica",
+        "pagamento.md": "pagamento",
+        "crise.md": "crise",
+    }
+    for filename, agent in agent_map.items():
+        fpath = prompts_dir / filename
+        # Tenta ler do banco primeiro
+        content = knowledge_rag.get_file_content(filename)
+        source = "db" if content else "disk"
+        if not content and fpath.exists():
+            content = fpath.read_text(encoding="utf-8")
+            source = "disk"
+        prompts.append({
+            "filename": filename,
+            "agent": agent,
+            "source": source,
+            "chars": len(content) if content else 0,
+            "exists": bool(content),
+        })
+    return jsonify(prompts)
+
+
+@app.post("/api/knowledge/reload-prompts")
+@login_required
+def api_knowledge_reload_prompts():
+    """Recarrega cache de prompts dos sub-agentes."""
+    knowledge_rag.reload_agent_prompts()
+    return jsonify({"ok": True})
 
 
 # ── WhatsApp Cloud API (Meta) ────────────────────────────────────────────────

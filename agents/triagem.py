@@ -4,6 +4,7 @@ Coleta nome do cliente e detecta intencao inicial.
 """
 
 import llm
+import knowledge_rag
 from agents.conversation import ConversationState
 
 
@@ -16,11 +17,11 @@ class TriagemAgent:
 
     def _load_prompt(self) -> str:
         if self._prompt is None:
-            try:
-                with open("prompts/triagem.md", "r", encoding="utf-8") as f:
-                    self._prompt = f.read()
-            except Exception:
-                self._prompt = self._default_prompt()
+            self._prompt = knowledge_rag.load_prompt_db_first(
+                db_name="triagem.md",
+                local_path="prompts/triagem.md",
+                fallback_content=self._default_prompt(),
+            )
         return self._prompt
 
     def _default_prompt(self) -> str:
