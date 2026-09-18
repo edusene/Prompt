@@ -159,7 +159,6 @@ Aguarde confirmacao explicita."""
                 new_fee = result.get("delivery_fee", 0)
                 if new_fee > 0 or state.frete == 0:
                     state.frete = new_fee
-                state.total = result.get("total", 0)
                 # Calcula taxa de retorno baseado no pagamento
                 if state.payment_method in ("dinheiro", "cartao", "cartao_debito", "cartao_credito"):
                     state.taxa_retorno = 2.00
@@ -167,6 +166,38 @@ Aguarde confirmacao explicita."""
                     state.taxa_retorno = 0.00
                 # Recalcula total incluindo taxa de retorno
                 state.total = state.subtotal + state.frete + state.taxa_retorno
+
+                # Monta resumo COMPLETO formatado para o LLM copiar
+                itens_texto = ""
+                for item in state.items:
+                    itens_texto += f"• {item.get('quantity', 0)} un - {item.get('name', '?')}\n"
+
+                resumo_valores = (
+                    f"Subtotal: R$ {state.subtotal:.2f}\n"
+                    f"Frete: R$ {state.frete:.2f}\n"
+                )
+                if state.taxa_retorno > 0:
+                    resumo_valores += f"Taxa de retorno: R$ {state.taxa_retorno:.2f}\n"
+                resumo_valores += f"Total: R$ {state.total:.2f}\n"
+
+                result["resumo_formatado"] = (
+                    f"=== RESUMO PRONTO - COPIE EXATAMENTE ===\n"
+                    f"Cliente: {state.name or '[NOME DO CLIENTE]'}\n"
+                    f"Data: {state.data_agendada or '[DATA]'}\n"
+                    f"Horario: {state.horario or '[HORARIO]'}\n"
+                    f"Bairro: {state.bairro or '[BAIRRO]'}\n"
+                    f"Endereco: {state.endereco or '[ENDERECO]'}\n"
+                    f"\nItens:\n{itens_texto}\n"
+                    f"{resumo_valores}\n"
+                    f"Pagamento: {state.payment_method or '[PAGAMENTO]'}\n"
+                    f"\nPosso confirmar o seu pedido? 💛\n"
+                    f"=== FIM DO RESUMO ==="
+                )
+                result["subtotal"] = state.subtotal
+                result["delivery_fee"] = state.frete
+                result["return_fee"] = state.taxa_retorno
+                result["total"] = state.total
+
             return json.dumps(result, ensure_ascii=False)
 
         return {"calculate_order": _calculate}
