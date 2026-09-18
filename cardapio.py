@@ -59,32 +59,55 @@ def calcular_pedido(items: list[dict], bairro: str = "") -> dict:
             try:
                 import knowledge_rag
                 import re
-                result = knowledge_rag.search_context(f"frete {bairro}", top_k=3)
+                # Tenta varias buscas para encontrar o frete
+                search_queries = [
+                    f"frete {bairro}",
+                    f"frete entrega {bairro}",
+                    bairro,
+                    f"tabela frete {bairro}",
+                ]
+                result = ""
+                for q in search_queries:
+                    result = knowledge_rag.search_context(q, top_k=3)
+                    if result:
+                        break
+                
                 if result:
                     # Tenta extrair valor do frete do resultado
-                    # Procura padroes como "Aponia: R$ 8,00" ou "Aponia 8" ou "Aponia R$8"
-                    # 1. Tenta com R$: "Aponia ... R$ 8,00"
-                    m = re.search(rf'{re.escape(bairro)}[^0-9\n]*R\$\s*(\d+[.,]?\d*)', result, re.IGNORECASE)
-                    if not m:
-                        # 2. Tenta sem R$: "Aponia   8" (numero logo apos o bairro)
-                        m = re.search(rf'{re.escape(bairro)}\s+(\d+(?:[.,]\d+)?)', result, re.IGNORECASE)
-                    if not m:
-                        # 3. Busca linha que contenha o bairro e qualquer valor
-                        lines = result.split('\n')
-                        for line in lines:
-                            if bairro.lower() in line.lower():
-                                # Tenta com R$
-                                m = re.search(r'R\$\s*(\d+[.,]?\d*)', line)
-                                if not m:
-                                    # Tenta sem R$ - numero isolado
-                                    m = re.search(r'(\d+(?:[.,]\d+)?)', line)
-                                if m:
-                                    break
-                    if m:
-                        delivery_fee = float(m.group(1).replace(',', '.'))
-                        print(f"[cardápio] MODO TESTE - frete encontrado: {bairro} = R$ {delivery_fee}")
-                    else:
-                        print(f"[cardápio] MODO TESTE - frete nao encontrado para: {bairro}")
+                    bairro_lower = bairro.lower().strip()
+                    
+                    # 1. Busca linha que contenha o bairro (case-insensitive)
+                    lines = result.split('\n')
+                    for line in lines:
+                        if bairro_lower in line.lower():
+                            # Tenta com R$: "Aponia: R$ 8,00" ou "Aponia ... R$ 8,00"
+                            m = re.search(r'R\$\s*(\d+[.,]?\d*)', line)
+                            if not m:
+                                # Tenta sem R$: "Aponia 8" ou "Aponia 8,00"
+                                m = re.search(r'(\d+[.,]?\d+)', line)
+                            if m:
+                                delivery_fee = float(m.group(1).replace(',', '.'))
+                                print(f"[cardápio] MODO TESTE - frete encontrado: {bairro} = R$ {delivery_fee} (linha: {line.strip()})")
+                                break
+                    
+                    # 2. Se nao encontrou, tenta regex geral
+                    if delivery_fee == 0:
+                        # Procura "bairro ... R$ valor" ou "bairro valor"
+                        m = re.search(rf'{re.escape(bairro)}[^0-9\n]*R\$\s*(\d+[.,]?\d*)', result, re.IGNORECASE)
+                        if m:
+                            delivery_fee = float(m.group(1).replace(',', '.'))
+                            print(f"[cardápio] MODO TESTE - frete encontrado (regex): {bairro} = R$ {delivery_fee}")
+                        else:
+                            m = re.search(rf'{re.escape(bairro)}\s+(\d+[.,]?\d+)', result, re.IGNORECASE)
+                            if m:
+                                delivery_fee = float(m.group(1).replace(',', '.'))
+                                print(f"[cardápio] MODO TESTE - frete encontrado (regex2): {bairro} = R$ {delivery_fee}")
+                    
+                    if delivery_fee == 0:
+                        print(f"[cardápio] MODO TESTE - frete NAO encontrado para: {bairro}")
+                        print(f"[cardápio] MODO TESTE - conteudo retornado: {result[:300]}")
+                else:
+                    print(f"[cardápio] MODO TESTE - knowledge vazio para: {bairro}")
             except Exception as e:
                 print(f"[cardápio] MODO TESTE - erro ao buscar frete: {e}")
 
