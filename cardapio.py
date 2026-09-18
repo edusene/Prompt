@@ -9,10 +9,14 @@ import httpx
 
 
 def _get_base_url() -> str:
-    test_mode = os.getenv("CARDÁPIO_TEST_MODE", "true").lower() == "true"
+    test_mode = (os.getenv("CARDÁPIO_TEST_MODE", "true") or os.getenv("CARD_TEST_MODE", "true")).lower() == "true"
     if test_mode:
-        return os.getenv("CARDÁPIO_API_URL_TEST", os.getenv("CARDÁPIO_API_URL", "")).rstrip("/")
-    return os.getenv("CARDÁPIO_API_URL", "").rstrip("/")
+        url = os.getenv("CARDÁPIO_API_URL_TEST", "") or os.getenv("CARD_API_URL_TEST", "")
+        if not url:
+            url = os.getenv("CARDÁPIO_API_URL", "") or os.getenv("CARD_API_URL", "")
+        return url.rstrip("/")
+    url = os.getenv("CARDÁPIO_API_URL", "") or os.getenv("CARD_API_URL", "")
+    return url.rstrip("/")
 
 
 def _get_api_key() -> str:
@@ -36,7 +40,7 @@ def calcular_pedido(items: list[dict], bairro: str = "") -> dict:
     Returns:
         dict com success, subtotal, delivery_fee, total ou error
     """
-    test_mode = os.getenv("CARDÁPIO_TEST_MODE", "true").lower() == "true"
+    test_mode = (os.getenv("CARDÁPIO_TEST_MODE", "true") or os.getenv("CARD_TEST_MODE", "true")).lower() == "true"
 
     if test_mode:
         # Modo teste: simula cálculo sem chamar API

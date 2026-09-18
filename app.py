@@ -388,7 +388,7 @@ def _send_order_handler(
             pass
     print(f"[cardápio] TOOL send_order customer={customer_name} phone={customer_phone} total={total}")
 
-    test_mode = database.get_setting("CARDÁPIO_TEST_MODE", "true").lower() == "true"
+    test_mode = (database.get_setting("CARDÁPIO_TEST_MODE", "true") or os.getenv("CARDÁPIO_TEST_MODE", "true") or os.getenv("CARD_TEST_MODE", "true")).lower() == "true"
     is_test = 1 if test_mode else 0
 
     # Detecta phone do contexto da conversa (user variable do escopo pai)
