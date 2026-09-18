@@ -1732,6 +1732,26 @@ async function deleteTemplate(id) {
 /* ── Knowledge ────────────────────────────────────────────────────────────── */
 let currentKnowledgeFile = null;
 
+function deselectKnowledgeFile() {
+    currentKnowledgeFile = null;
+    document.querySelectorAll('.knowledge-file').forEach(el => el.classList.remove('active'));
+    document.getElementById('knowledge-editor-header').innerHTML = '<span>Selecione um arquivo</span>';
+    const editor = document.getElementById('knowledge-editor');
+    if (editor) {
+        editor.value = '';
+        delete editor.dataset.filename;
+        delete editor.dataset.isPrompt;
+    }
+    const descBar = document.querySelector('.knowledge-desc-bar');
+    if (descBar) descBar.style.display = '';
+    document.getElementById('knowledge-description').value = '';
+    document.getElementById('knowledge-actions').style.display = 'none';
+    const deleteBtn = document.getElementById('knowledge-delete-btn');
+    if (deleteBtn) deleteBtn.style.display = 'none';
+    // Desmarca prompts tambem
+    document.querySelectorAll('.knowledge-prompt-item').forEach(el => el.classList.remove('active'));
+}
+
 async function loadKnowledge() {
     document.getElementById('knowledge-list').innerHTML = skeletonRows(4);
     const files = await api('/api/knowledge');
@@ -3157,6 +3177,12 @@ document.addEventListener('keydown', e => {
         const profile = document.getElementById('crm-contact-profile');
         if (profile && profile.style.display !== 'none') {
             closeCrmContactProfile();
+            return;
+        }
+    }
+    if (currentView === 'knowledge') {
+        if (currentKnowledgeFile != null) {
+            deselectKnowledgeFile();
             return;
         }
     }
