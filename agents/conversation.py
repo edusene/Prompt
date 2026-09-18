@@ -402,7 +402,14 @@ class ConversationManager:
             phase_order = ["triagem", "cardapio", "pedido", "logistica", "pagamento"]
             current_idx = phase_order.index(state.phase) if state.phase in phase_order else 0
             new_idx = phase_order.index(new_phase) if new_phase in phase_order else 0
-            if new_idx >= current_idx or state.items:
+            # SE ja tem itens extraidos, NAO deixa o router reverter para triagem
+            if state.items:
+                # Mantem o agente ja definido pela extracao - so avanca, nunca volta
+                if new_idx > current_idx:
+                    state.phase = new_phase
+                    state.active_agent = router_result.get("agente", state.active_agent)
+                    state.intent = router_result.get("intencao", state.intent)
+            elif new_idx >= current_idx:
                 state.phase = new_phase
                 state.active_agent = router_result.get("agente", state.active_agent)
                 state.intent = router_result.get("intencao", state.intent)
