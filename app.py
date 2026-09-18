@@ -941,6 +941,9 @@ def handle_flush(user: str, items: list[dict]) -> None:
             "\n9. NAO pule esta pergunta - ela e OBRIGATORIA"
             "\n10. ANTES de apresentar resumo, VERIFIQUE: tem modalidade? tem data? tem horario? Se falta algum, PERGUNTE"
             "\n11. NAO apresente resumo SEM data + horario + modalidade confirmados"
+            "\n12. NAO PERGUNTE forma de pagamento se o cliente JA INFORMOU (pix/dinheiro/cartao)"
+            "\n13. NAO PERGUNTE ponto de referencia se o cliente NAO INFORMOU - se nao mencionou, nao tem. ACEITE."
+            "\n14. QUANDO CLIENTE DEFINE QUANTIDADE (ex: '50 coxinhas'), ACEITE como meio cento. NAO questione formato."
         )
 
         # OVERRIDE FINAL - Regras que SOBRESCREVEM qualquer instrucao anterior
@@ -953,9 +956,11 @@ def handle_flush(user: str, items: list[dict]) -> None:
             "\nSE tem data mas NAO tem horario:"
             "\n  -> PERGUNTE: 'E qual horário?'"
             "\nSE tem tudo mas e entrega e NAO tem endereco:"
-            "\n  -> PERGUNTE bairro, rua, numero, referencia"
+            "\n  -> PERGUNTE bairro, rua, numero. SE cliente nao informou referencia, ACEITE e prossiga."
             "\nSE e entrega e tem bairro mas NAO calculou frete:"
             "\n  -> CALCULE o frete com search_knowledge ANTES do resumo"
+            "\nSE cliente JA INFORMOU pagamento (pix/dinheiro/cartao): NAO PERGUNTE NOVAMENTE"
+            "\nSE cliente DEFINIU quantidade (ex: '50 coxinhas'): ACEITE como meio cento, NAO questione formato"
             "\nNAO assuma 'hoje' para data - SEMPRE confirme com o cliente"
             "\nNAO assuma horario - SEMPRE pergunte ao cliente"
             "\nAPENAS depois de ter TODOS os dados acima, apresente o resumo"

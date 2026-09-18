@@ -82,6 +82,8 @@ NAO apresente resumo SEM TODOS os dados acima.
 6. **NAO apresente resumo SEM data, horario E modalidade confirmados**
 7. **NUNCA envie o pedido duas vezes**
 8. **NUNCA assuma entrega ou retirada** - SEMPRE pergunte
+9. **NAO PERGUNTE forma de pagamento se o cliente JA INFORMOU** (ex: "pix", "dinheiro", "cartao"). Se ja disse, ja esta definido.
+10. **NAO PERGUNTE ponto de referencia se o cliente NAO INFORMOU** - se nao mencionou referencia, e porque nao tem. ACEITE e prossiga.
 
 ## Apos Confirmacao
 
