@@ -106,7 +106,7 @@ Taxa retorno: R$ 2,00 (dinheiro/cartao) ou R$ 0,00 (Pix)."""
     def _update_state(self, state: ConversationState, message: str, response: str):
         """Atualiza estado baseado na interacao."""
         import re
-        msg_lower = message.lower()
+        msg_lower = message.lower().strip()
 
         # Detecta modalidade
         if "entrega" in msg_lower:
@@ -117,12 +117,12 @@ Taxa retorno: R$ 2,00 (dinheiro/cartao) ou R$ 0,00 (Pix)."""
         # Detecta bairro de varias formas
         if not state.bairro:
             bairro = None
-            # Padrãoes comuns: "bairro X", "no X", "entrega X", "é X"
+            # Padroes comuns: "bairro X", "no X", "entrega X", "e X"
             m = re.search(r'(?:bairro|no|na|entrega\s+(?:no|na)|para|em)\s+([A-ZÁÉÍÓÚÇÃÕ][a-záéíóúçãõ]+(?:\s+[A-ZÁÉÍÓÚÇÃÕ]?[a-záéíóúçãõ]+)*)', message)
             if m:
                 bairro = m.group(1).strip()
             elif len(words := message.strip().split()) <= 3 and len(message.strip()) > 3:
-                # Frase curta que pode ser só o bairro
+                # Frase curta que pode ser so o bairro
                 candidate = message.strip()
                 if not any(x in candidate.lower() for x in ["sim", "nao", "ok", "entrega", "retirada", "hoje", "amanha"]):
                     bairro = candidate
@@ -135,14 +135,20 @@ Taxa retorno: R$ 2,00 (dinheiro/cartao) ou R$ 0,00 (Pix)."""
             if m:
                 state.endereco = m.group(0).strip()
 
-        # Detecta horario
-        m = re.search(r'(\d{1,2})\s*[h:]\s*(\d{2})?', message)
+        # Detecta horario (apenas numeros no formato HH:MM ou HHhMM)
+        m = re.search(r'(\d{1,2})\s*[h:]\s*(\d{2})', message)
         if m:
             state.horario = m.group(0).strip()
-        elif "hoje" in msg_lower:
+
+        # Detecta data - SO se for claramente uma resposta de data
+        # Nao detecta "hoje" em frases como "hoje eu queria saber..."
+        msg_stripped = msg_lower.rstrip("?!.,;:")
+        if msg_stripped in ("hoje", "hoje sim", "sim hoje"):
             state.data_agendada = "hoje"
-        elif "amanha" in msg_lower:
+        elif msg_stripped in ("amanha", "amanhã", "amanha sim", "sim amanha"):
             state.data_agendada = "amanha"
+        elif re.match(r'^\d{1,2}/\d{1,2}(/\d{2,4})?$', msg_stripped):
+            state.data_agendada = msg_stripped
 
     def _get_tools(self) -> list:
         return [

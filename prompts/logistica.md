@@ -48,13 +48,15 @@ ANTES de coletar qualquer dado de logistica, verifique a hora atual injetada no 
 - NUNCA aceite pedido para "hoje" se estiver fora de horario sem avisar primeiro
 
 ### Data e Horario
-- SEMPRE pergunte data E horario
+- SEMPRE pergunte data E horario SEPARADAMENTE (em mensagens diferentes)
 - NUNCA assuma "hoje" sem confirmar
 - NUNCA assuma horario sem perguntar
 - NAO prossiga sem AMBOS confirmados
 - Se cliente disse "hoje, 18h" = entendeu data E horario
 - Se cliente disse apenas "hoje" = pergunte o horario
 - Se cliente disse apenas "18h" = pergunte a data
+- NUNCA pule a pergunta de data para ir direto ao resumo
+- NUNCA pule a pergunta de horario para ir direto ao resumo
 
 ### Modalidade
 - SEMPRE pergunte "entrega ou retirada"
@@ -74,6 +76,7 @@ ANTES de coletar qualquer dado de logistica, verifique a hora atual injetada no 
 - 12h01-13h59: "Estamos em intervalo"
 - Apos 20h00: "Nossa producao ja encerrou"
 - Domingo: "Aos domingos nao abrimos"
+- Se o horario pedido for invalido (antes 07h40, intervalo, ou apos 20h00), AVISE o cliente e sugira um horario valido
 
 ## Handoff
 Apos coleta completa:

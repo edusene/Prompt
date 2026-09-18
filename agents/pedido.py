@@ -71,11 +71,29 @@ Aguarde confirmacao explicita."""
             prompt += f"\nEndereco: {state.endereco}"
         if state.horario:
             prompt += f"\nHorario: {state.horario}"
+        if state.data_agendada:
+            prompt += f"\nData: {state.data_agendada}"
         if state.payment_method:
             prompt += f"\nPagamento: {state.payment_method}"
 
         if state.current_time:
             prompt += f"\n\nData e hora atual (Porto Velho): {state.current_time}"
+
+        # Status dos dados obrigatorios
+        dados_faltando = []
+        if not state.modality:
+            dados_faltando.append("modalidade (entrega ou retirada)")
+        if not state.data_agendada:
+            dados_faltando.append("data")
+        if not state.horario:
+            dados_faltando.append("horario")
+        if state.modality == "entrega" and not state.bairro:
+            dados_faltando.append("bairro")
+        if state.modality == "entrega" and not state.endereco:
+            dados_faltando.append("endereco")
+        if dados_faltando:
+            prompt += f"\n\n⚠️ DADOS OBRIGATORIOS FALTANDO: {', '.join(dados_faltando)}"
+            prompt += "\nNAO apresente resumo SEM TODOS os dados acima. Pergunte ao cliente os dados que faltam."
 
         return prompt
 
