@@ -794,7 +794,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
                 message_text = "\n".join(it.get("text", "") for it in items)
                 # Typing indicator
                 last_wa_msg_id = items[-1].get("wa_message_id", "") if items else ""
-                if last_wa_msg_id:
+                if last_wa_msg_id and last_wa_msg_id.startswith("wamid."):
                     send_typing(last_wa_msg_id)
                 # Processa via sub-agentes
                 reply = manager.handle_message(phone=user, message=message_text)
@@ -817,7 +817,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
 
         # Typing indicator (Meta: combinado com mark_read via typing_indicator)
         last_wa_msg_id = items[-1].get("wa_message_id", "") if items else ""
-        if last_wa_msg_id:
+        if last_wa_msg_id and last_wa_msg_id.startswith("wamid."):
             send_typing(last_wa_msg_id)
 
         user_parts = _build_user_parts(items)
@@ -1545,10 +1545,15 @@ def api_conversations_mark_read(conv_id):
         contact = database.get_contact_by_id(conv["contact_id"])
         if contact and contact.get("phone"):
             number = str(contact["phone"])
-            # Busca a ultima mensagem para mark_read na Meta
-            msgs = database.get_messages(conv_id, limit=1)
+            # Busca a ultima mensagem RECEBIDA para mark_read na Meta
+            # (nao usa a ultima mensagem da conversa, que pode ser enviada pelo agente)
+            import db as _db
+            msgs = _db.fetch_all(
+                "SELECT * FROM messages WHERE conversation_id=? AND direction='in' ORDER BY created_at DESC LIMIT 1",
+                (conv_id,),
+            )
             if msgs:
-                wa_mid = msgs[-1].get("wa_message_id", "")
+                wa_mid = msgs[0].get("wa_message_id", "")
                 if wa_mid:
                     try:
                         mark_read(wa_mid)
