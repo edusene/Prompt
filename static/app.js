@@ -318,6 +318,9 @@ async function selectConversation(convId) {
     // Mostra painel do chat no desktop
     const layout = document.querySelector('.conv-layout');
     if (layout) layout.classList.remove('chat-closed');
+    // Mostra botao de detalhes
+    const showBtn = document.getElementById('info-panel-show-btn');
+    if (showBtn && _infoPanelHidden) showBtn.classList.add('visible');
     document.querySelectorAll('.conv-item').forEach(el => {
         el.classList.toggle('active', Number(el.dataset.convId) === convId);
     });
@@ -394,6 +397,13 @@ function deselectConversation() {
     // Esconde painel do chat no desktop
     const layout = document.querySelector('.conv-layout');
     if (layout) layout.classList.add('chat-closed');
+    // Esconde botao de detalhes
+    const showBtn = document.getElementById('info-panel-show-btn');
+    if (showBtn) showBtn.classList.remove('visible');
+    // Esconde painel de detalhes
+    const panel = document.getElementById('conv-info-panel');
+    if (panel) panel.classList.add('hidden');
+    _infoPanelHidden = true;
     document.querySelectorAll('.conv-item').forEach(el => el.classList.remove('active'));
     const header = document.getElementById('chat-header');
     if (header) header.innerHTML = '<span>Selecione uma conversa</span>';
