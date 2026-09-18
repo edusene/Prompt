@@ -1851,7 +1851,13 @@ async function saveKnowledgePrompt() {
 }
 
 async function reloadAgentPrompts() {
+    const btn = document.getElementById('reload-prompts-btn');
+    const icon = btn ? btn.querySelector('.reload-icon') : null;
+    if (icon) icon.classList.add('spinning');
+    if (btn) btn.disabled = true;
     const res = await api('/api/knowledge/reload-prompts', { method: 'POST' });
+    if (icon) icon.classList.remove('spinning');
+    if (btn) btn.disabled = false;
     if (res && res.ok) {
         showToast('Cache de prompts recarregado', 'success');
         loadKnowledgePrompts();
