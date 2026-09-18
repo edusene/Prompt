@@ -113,7 +113,7 @@ Nunca misture sabores na mesma porcao."""
 
         context_parts = []
         for q in queries:
-            result = knowledge_rag.search_context(q, top_k=3)
+            result = knowledge_rag.search_context(q, top_k=5)
             if result:
                 context_parts.append(result)
 
@@ -121,6 +121,13 @@ Nunca misture sabores na mesma porcao."""
 
     def _build_system_prompt(self, state: ConversationState, context: str) -> str:
         prompt = self._load_prompt()
+
+        if state.knowledge_context:
+            prompt += (
+                "\n\n=== BASE OFICIAL DA EMPRESA ===\n"
+                "Use estes dados para produtos, precos e regras; nao invente informacoes.\n"
+                + state.knowledge_context
+            )
 
         if context:
             prompt += f"\n\n=== CONTEXTO ===\n{context}"

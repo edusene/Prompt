@@ -56,6 +56,9 @@ Apos finalizar, encerre sem perguntas."""
     def _build_system_prompt(self, state: ConversationState) -> str:
         prompt = self._load_prompt()
 
+        if state.knowledge_context:
+            prompt += "\n\n=== BASE OFICIAL DA EMPRESA ===\n" + state.knowledge_context
+
         if state.name:
             prompt += f"\n\nCliente: {state.name}"
 

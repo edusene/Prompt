@@ -123,7 +123,43 @@ def save_knowledge(filename: str, content: str, description: str = "") -> None:
     if description:
         database.upsert_knowledge_file(filename, description)
 
+    invalidate_knowledge_caches()
     print(f"[rag] salvo {filename}: {len(chunks)} chunks")
+
+
+def _format_search_results(results: list[dict], query: str) -> str:
+    """Formata resultados e preserva tabelas quando a consulta e generica."""
+    if not results:
+        return ""
+
+    generic_terms = {
+        "cardapio", "cardápio", "produtos", "precos", "preços", "valor",
+        "horario", "horários", "horarios", "frete", "entrega", "bairros",
+        "taxa", "pagamento", "regras", "politicas", "políticas",
+    }
+    terms = {term.strip(".,?!:;") for term in query.lower().split()}
+    is_generic = len(terms) <= 3 or (bool(terms) and terms.issubset(generic_terms))
+    is_sparse = len(results) < 2 or sum(
+        len(result.get("content", "")) for result in results
+    ) < 800
+
+    if is_generic or is_sparse:
+        filenames = []
+        for result in results:
+            filename = result["filename"]
+            if filename not in filenames:
+                filenames.append(filename)
+        full_files = []
+        for filename in filenames:
+            content = get_file_content(filename)
+            if content:
+                full_files.append(f"[{filename}] {content}")
+        if full_files:
+            joined = "\n\n---\n\n".join(full_files)
+            print(f"[rag] search full-file fallback query_len={len(query)} files={len(full_files)} context_len={len(joined)}")
+            return joined
+
+    return "\n\n---\n\n".join(f"[{r['filename']}] {r['content']}" for r in results)
 
 
 def search_context(query: str, top_k: int = 3) -> str:
@@ -139,8 +175,7 @@ def search_context(query: str, top_k: int = 3) -> str:
         query_embedding = embed_text(query)
         results = database.search_knowledge(query_embedding, top_k=top_k, query_text=query)
         if results:
-            parts = [f"[{r['filename']}] {r['content']}" for r in results]
-            joined = "\n\n---\n\n".join(parts)
+            joined = _format_search_results(results, query)
             print(f"[rag] search vectorial query_len={len(query)} results={len(results)} context_len={len(joined)}")
             return joined
     except Exception as e:
@@ -150,8 +185,7 @@ def search_context(query: str, top_k: int = 3) -> str:
     try:
         results = database.search_knowledge([], top_k=top_k, query_text=query)
         if results:
-            parts = [f"[{r['filename']}] {r['content']}" for r in results]
-            joined = "\n\n---\n\n".join(parts)
+            joined = _format_search_results(results, query)
             print(f"[rag] search fallback query_len={len(query)} results={len(results)} context_len={len(joined)}")
             return joined
     except Exception as e:
@@ -179,6 +213,7 @@ def get_file(filename: str) -> dict | None:
 def delete_file(filename: str) -> None:
     """Deleta todos os chunks de um arquivo e sua descrição."""
     database.delete_knowledge_file(filename)
+    invalidate_knowledge_caches()
     print(f"[rag] deletado {filename}")
 
 
@@ -227,9 +262,27 @@ def reload_agent_prompts():
             if cls and hasattr(cls, '_prompt'):
                 # Reset no prototype para afetar todas as instâncias
                 cls._prompt = None
+        # Os agentes ativos guardam _prompt na instancia, portanto tambem
+        # precisam ser invalidados no singleton ja criado.
+        from agents import conversation
+        manager = conversation._manager
+        if manager:
+            for agent in manager.agents.values():
+                if hasattr(agent, "_prompt"):
+                    agent._prompt = None
         print("[knowledge] prompts dos sub-agentes recarregados")
     except Exception as e:
         print(f"[knowledge] aviso ao recarregar prompts: {e}")
+
+
+def invalidate_knowledge_caches():
+    """Invalida caches que dependem do conteudo atualizado do knowledge."""
+    try:
+        import parse_knowledge
+        parse_knowledge.reload_cache()
+    except Exception as e:
+        print(f"[knowledge] aviso ao limpar cache de parse: {e}")
+    reload_agent_prompts()
 
 
 def get_full_knowledge_content() -> str:
@@ -255,6 +308,30 @@ def get_full_knowledge_content() -> str:
     return result
 
 
+def get_knowledge_for_agent(agent_name: str) -> str:
+    """Retorna knowledge relevante por area, com fallback seguro para a base completa."""
+    keywords = {
+        "triagem": ("horario", "horário", "cardapio", "cardápio", "geral"),
+        "cardapio": ("cardapio", "cardápio", "produto", "preco", "preço"),
+        "pedido": ("cardapio", "cardápio", "produto", "preco", "preço", "frete"),
+        "logistica": ("frete", "bairro", "entrega", "horario", "horário"),
+        "crise": ("crise", "reclam", "cancel", "troca", "devol", "politica", "política"),
+    }
+    terms = keywords.get(agent_name.lower())
+    if not terms:
+        return get_full_knowledge_content()
+
+    selected = []
+    for item in list_files():
+        filename = item.get("filename", "")
+        description = item.get("description", "") or ""
+        if any(term in f"{filename} {description}".lower() for term in terms):
+            content = get_file_content(filename)
+            if content:
+                selected.append(f"=== {filename} ===\n{content}")
+    return "\n\n".join(selected) or get_full_knowledge_content()
+
+
 # ── Knowledge Batch Operations ────────────────────────────────────────────────
 
 
@@ -272,6 +349,7 @@ def save_knowledge_raw(filename: str, content: str, description: str = "") -> No
 
     database.insert_knowledge_chunks(filename, chunks, [None] * len(chunks))
     database.upsert_knowledge_file_with_status(filename, description, status="pending")
+    invalidate_knowledge_caches()
     print(f"[rag] salvo (raw) {filename}: {len(chunks)} chunks (pendente de embedding)")
 
 
@@ -333,6 +411,7 @@ def clear_all_embeddings() -> int:
 def delete_all() -> int:
     """Deleta todo o knowledge (chunks + metadados)."""
     count = database.delete_all_knowledge()
+    invalidate_knowledge_caches()
     print(f"[rag] todo knowledge deletado: {count} arquivos")
     return count
 

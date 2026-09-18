@@ -55,14 +55,20 @@ Taxa retorno: R$ 2,00 (dinheiro/cartao) ou R$ 0,00 (Pix)."""
 
         context_parts = []
         for q in queries:
-            result = knowledge_rag.search_context(q, top_k=5)
+            result = knowledge_rag.search_context(q, top_k=8)
             if result:
                 context_parts.append(result)
+
+        if state.bairro and not context_parts:
+            context_parts.append(knowledge_rag.get_knowledge_for_agent("logistica"))
 
         return "\n\n".join(context_parts)
 
     def _build_system_prompt(self, state: ConversationState, context: str) -> str:
         prompt = self._load_prompt()
+
+        if state.knowledge_context:
+            prompt += "\n\n=== BASE OFICIAL DA EMPRESA ===\n" + state.knowledge_context
 
         if context:
             prompt += f"\n\n=== TABELA DE FRETE ===\n{context}"
@@ -203,6 +209,6 @@ Taxa retorno: R$ 2,00 (dinheiro/cartao) ou R$ 0,00 (Pix)."""
         def _search(query="", filename="", **kwargs):
             if filename:
                 return knowledge_rag.get_file_content(filename.strip())
-            return knowledge_rag.search_context(query.strip(), top_k=5)
+            return knowledge_rag.search_context(query.strip(), top_k=8)
 
         return {"search_knowledge": _search}

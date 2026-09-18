@@ -100,6 +100,14 @@ FULL_SYSTEM_PROMPT += (
     "Nunca envie sem confirmacao explicita do cliente."
 )
 
+# O conteudo do DOCX pode mudar pelo painel. A base e reavaliada a cada
+# atendimento, mas continua usando o cache de parse enquanto ele for valido.
+_TOOLS_PROMPT = FULL_SYSTEM_PROMPT[len(_PROMPT_FROM_DOCX or _BASE_PROMPT):]
+
+
+def _get_current_system_prompt() -> str:
+    return (parse_knowledge.get_prompt_cached() or _BASE_PROMPT) + _TOOLS_PROMPT
+
 # ── Knowledge Tool (busca seletiva via function calling) ──────────────────────
 import knowledge_rag
 
@@ -901,7 +909,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
             
         memory.append_multimodal(user, "user", user_parts)
 
-        dynamic_prompt = FULL_SYSTEM_PROMPT
+        dynamic_prompt = _get_current_system_prompt()
         
         if is_confirmation and last_assistant_text:
             dynamic_prompt += (
@@ -933,14 +941,15 @@ def handle_flush(user: str, items: list[dict]) -> None:
                 )
         # --- FIM DETECÇÃO DE CONFIRMAÇÃO ---
 
-        # Injeta dados do xlsx (cardapio, bairros, horarios, pagamentos)
-        knowledge_dados = parse_knowledge.get_knowledge_dados()
-        if knowledge_dados:
+        # Injeta toda a base antes da chamada ao LLM. Isso elimina a dependencia
+        # de o modelo decidir usar search_knowledge para dados essenciais.
+        full_knowledge = knowledge_rag.get_full_knowledge_content()
+        if full_knowledge:
             dynamic_prompt += (
-                "\n\n=== BASE DE DADOS OFICIAL ===\n"
-                "Use estes dados como FONTE VERDADEIRA para precos, taxas de frete, "
-                "horarios de funcionamento e formas de pagamento.\n\n"
-                + knowledge_dados
+                "\n\n=== BASE DE CONHECIMENTO OFICIAL ===\n"
+                "Use esta base como FONTE VERDADEIRA para qualquer informacao da empresa. "
+                "Nao invente dados que contrariem este conteudo.\n\n"
+                + full_knowledge
             )
 
         # ── CONTEUDO DINAMICO (no final para preservar cache do prefixo estatico) ──
@@ -2729,6 +2738,7 @@ def api_knowledge_reload():
     """Recarrega o cache do system prompt (util apos upload de .docx/.xlsx)."""
     global FULL_SYSTEM_PROMPT
     parse_knowledge.reload_cache()
+    knowledge_rag.reload_agent_prompts()
     _prompt_from_docx = parse_knowledge.get_prompt_cached()
     if _prompt_from_docx:
         FULL_SYSTEM_PROMPT = _prompt_from_docx + (

@@ -6,6 +6,7 @@ Monta pedido, valida com calculate_order e apresenta resumo.
 import json
 import llm
 import cardapio
+import knowledge_rag
 from agents.conversation import ConversationState
 
 
@@ -54,6 +55,9 @@ Aguarde confirmacao explicita."""
 
     def _build_system_prompt(self, state: ConversationState) -> str:
         prompt = self._load_prompt()
+
+        if state.knowledge_context:
+            prompt += "\n\n=== BASE OFICIAL DA EMPRESA ===\n" + state.knowledge_context
 
         if state.name:
             prompt += f"\n\nCliente: {state.name}"
@@ -121,6 +125,20 @@ Aguarde confirmacao explicita."""
 
     def _get_tools(self) -> list:
         return [
+            {
+                "type": "function",
+                "function": {
+                    "name": "search_knowledge",
+                    "description": "Consulta a base oficial para precos, produtos, frete e regras antes de validar um pedido.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string", "description": "Busca descritiva"},
+                            "filename": {"type": "string", "description": "Nome exato do arquivo"},
+                        },
+                    },
+                },
+            },
             {
                 "type": "function",
                 "function": {
@@ -200,4 +218,11 @@ Aguarde confirmacao explicita."""
 
             return json.dumps(result, ensure_ascii=False)
 
-        return {"calculate_order": _calculate}
+        def _search(query: str = "", filename: str = "", **kwargs) -> str:
+            if filename:
+                return knowledge_rag.get_file_content(filename.strip()) or "Arquivo nao encontrado."
+            if not query.strip():
+                return "Forneca uma busca descritiva."
+            return knowledge_rag.search_context(query.strip(), top_k=5)
+
+        return {"calculate_order": _calculate, "search_knowledge": _search}

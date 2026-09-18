@@ -52,6 +52,9 @@ class ConversationState:
     # Tempo atual (injetado pelo ConversationManager)
     current_time: str = ""
 
+    # Carregado em cada mensagem; nao e persistido no estado da conversa.
+    knowledge_context: str = ""
+
     # Historico
     history: list = field(default_factory=list)
     collected_data: dict = field(default_factory=dict)
@@ -375,6 +378,11 @@ class ConversationManager:
         from datetime import datetime, timedelta
         _now = (datetime.utcnow() - timedelta(hours=4)).strftime("%d/%m/%Y %H:%M")
         state.current_time = _now
+
+        # Conhecimento obrigatorio no contexto: os agentes nao dependem de uma
+        # decisao do LLM de chamar a tool antes de responder.
+        import knowledge_rag
+        state.knowledge_context = knowledge_rag.get_full_knowledge_content()
 
         # 2. Extrai dados estruturados da mensagem ANTES de rotear
         extracted = _extract_data_from_message(message, state)

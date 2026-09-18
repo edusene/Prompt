@@ -50,6 +50,13 @@ Transfira IMEDIATAMENTE para humano."""
     def _build_system_prompt(self, state: ConversationState) -> str:
         prompt = self._load_prompt()
 
+        if state.knowledge_context:
+            prompt += (
+                "\n\n=== POLITICAS E INFORMACOES OFICIAIS ===\n"
+                "Use esta base para reclamacoes, cancelamentos e orientacoes antes de transferir.\n"
+                + state.knowledge_context
+            )
+
         if state.name:
             prompt += f"\n\nCliente: {state.name}"
 

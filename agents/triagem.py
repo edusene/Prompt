@@ -42,6 +42,13 @@ Maximo 2-3 linhas por mensagem.
     def _build_system_prompt(self, state: ConversationState) -> str:
         prompt = self._load_prompt()
 
+        if state.knowledge_context:
+            prompt += (
+                "\n\n=== INFORMACOES OFICIAIS DA EMPRESA ===\n"
+                "Use esta base como fonte verdadeira para horarios, cardapio e regras.\n"
+                + state.knowledge_context
+            )
+
         if state.name:
             prompt += f"\n\nO nome do cliente e: {state.name}"
         else:
