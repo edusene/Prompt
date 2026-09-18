@@ -93,6 +93,10 @@ NAO apresente resumo SEM TODOS os dados acima.
 - customer_name: nome do cliente
 - customer_phone: telefone do cliente (ja injetado no prompt)
 - items: lista de itens [{name, quantity, price}]
+  - **price = PRECO UNITARIO (por UNIDADE), NAO o preco da porcao**
+  - Produtos Fritos: R$ 0,80/un (20,00 / 25 un)
+  - Produtos Assados: R$ 1,20/un (30,00 / 25 un)
+  - Salgados Grandes: preco unitario conforme cardapio (R$ 9,00 a R$ 15,00)
 - total: valor total do pedido (numero, nao texto)
 
 **SE ENTREGA:**
@@ -135,3 +139,7 @@ send_order_to_cardapio(
 4. NAO apresente resumo SEM data, horario E modalidade confirmados
 5. **TODOS os valores numericos devem ser numeros, nao textos**
 6. **SE data != "hoje", SEMPRE envie scheduled_date e is_scheduled=true**
+7. **⚠️ price no items = PRECO UNITARIO por UNIDADE (NAO o preco da porcao)**
+   - Produtos Fritos: R$ 20,00/25 un = R$ 0,80/un
+   - Produtos Assados: R$ 30,00/25 un = R$ 1,20/un
+   - Salgados Grandes: preco unitario direto (R$ 9,00 a R$ 15,00)

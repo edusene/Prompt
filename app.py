@@ -290,7 +290,7 @@ SEND_ORDER_TOOL = {
                         "properties": {
                             "name": {"type": "string", "description": "Nome exato do produto cadastrado no cardapio"},
                             "quantity": {"type": "integer", "description": "Quantidade do item"},
-                            "price": {"type": "number", "description": "Preco unitario do item"},
+                            "price": {"type": "number", "description": "Preco UNITARIO por UNIDADE (ex: Coxinha = 0.80, NAO 20.00 que e o preco da porcao de 25)"},
                             "notes": {"type": "string", "description": "Observacao especifica deste item"},
                             "selected_flavors": {
                                 "type": "array",
@@ -971,6 +971,8 @@ def handle_flush(user: str, items: list[dict]) -> None:
             "\n- SE ENTREGA: delivery_address, delivery_fee, return_fee (2.00 dinheiro/cartao ou 0.00 pix)"
             "\n- SE DATA != HOJE: scheduled_date ('DD/MM/YYYY') E is_scheduled=true"
             "\n- TODOS valores numericos devem ser numeros, nao textos"
+            "\n- ⚠️ price no items = PRECO UNITARIO por UNIDADE (ex: Coxinha=0.80, NAO 20.00)"
+            "\n  Produtos Fritos: 20,00/25 = R$ 0,80/un | Produtos Assados: 30,00/25 = R$ 1,20/un"
             "\n\nREGRAS DE HORARIO:"
             "\n- Use saudacao baseada no horario: 06-12=Bom dia, 12-18=Boa tarde, 18-06=Boa noite"
             "\n- Se hora atual > 20:00 ou < 07:40: avise que estamos fora do horario ANTES de qualquer coisa"

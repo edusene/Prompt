@@ -128,13 +128,13 @@ Aguarde confirmacao explicita."""
                         "properties": {
                             "items": {
                                 "type": "array",
-                                "description": "Lista de itens com nome, quantidade e preco",
+                                "description": "Lista de itens com nome, quantidade e preco UNITARIO por unidade (ex: Coxinha=0.80, NAO 20.00)",
                                 "items": {
                                     "type": "object",
                                     "properties": {
                                         "name": {"type": "string"},
                                         "quantity": {"type": "integer"},
-                                        "price": {"type": "number"},
+                                        "price": {"type": "number", "description": "Preco por UNIDADE, nao por porcao"},
                                     },
                                     "required": ["name", "quantity"],
                                 },
