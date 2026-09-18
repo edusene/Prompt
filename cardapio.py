@@ -106,10 +106,13 @@ def calcular_pedido(items: list[dict], bairro: str = "") -> dict:
                     if delivery_fee == 0:
                         print(f"[cardápio] MODO TESTE - frete NAO encontrado para: {bairro}")
                         print(f"[cardápio] MODO TESTE - conteudo retornado: {result[:300]}")
+                        frete_nao_encontrado = True
                 else:
                     print(f"[cardápio] MODO TESTE - knowledge vazio para: {bairro}")
+                    frete_nao_encontrado = True
             except Exception as e:
                 print(f"[cardápio] MODO TESTE - erro ao buscar frete: {e}")
+                frete_nao_encontrado = True
 
         total = subtotal + delivery_fee
         print(f"[cardápio] MODO TESTE - calculateOrder simulado: subtotal={subtotal} frete={delivery_fee} total={total}")
@@ -119,6 +122,7 @@ def calcular_pedido(items: list[dict], bairro: str = "") -> dict:
             "delivery_fee": delivery_fee,
             "return_fee": 0,
             "total": total,
+            "frete_nao_encontrado": frete_nao_encontrado if 'frete_nao_encontrado' in locals() else False,
         }
 
     base_url = _get_base_url()

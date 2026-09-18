@@ -70,6 +70,7 @@ APOS apresentar o resumo, AGUARDE a resposta do cliente.
 - USE O RETORNO DA TOOL PARA PREENCHER subtotal, delivery_fee e total NO RESUMO
 - NAO USE VALORES FIXOS OU ZERO PARA FRETE
 - SE calculate_order retornar erro, informe o cliente
+- SE calculate_order retornar "frete_nao_encontrado": true, AVISE o cliente que nao encontramos o frete para aquele bairro e pergunte se quer prosseguir com frete estimado
 
 NAO apresente resumo SEM TODOS os dados acima.
 
