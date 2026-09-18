@@ -1790,13 +1790,12 @@ async function selectKnowledgePrompt(filename) {
     const descBar = document.querySelector('.knowledge-desc-bar');
     const deleteBtn = document.getElementById('knowledge-delete-btn');
     if (!editor) return;
-    // Busca conteudo do prompt
-    const data = await api('/api/knowledge/' + encodeURIComponent(filename));
-    if (!data) return;
+    const data = await api('/api/knowledge/prompt/' + encodeURIComponent(filename));
+    if (!data || data.error) return;
     editor.value = data.content || '';
     editor.dataset.filename = filename;
     editor.dataset.isPrompt = 'true';
-    header.innerHTML = `<span>${esc(filename)}</span>`;
+    header.innerHTML = `<span>${esc(filename)}</span> <span class="knowledge-prompt-source ${data.source}" style="margin-left:8px;font-size:11px">${data.source === 'db' ? 'Banco' : 'Disco'}</span>`;
     if (descBar) descBar.style.display = 'none';
     if (deleteBtn) deleteBtn.style.display = 'none';
     if (actions) actions.style.display = 'flex';
@@ -1808,13 +1807,13 @@ async function saveKnowledgePrompt() {
     if (!editor || !editor.dataset.filename) return;
     const filename = editor.dataset.filename;
     const content = editor.value;
-    const res = await api('/api/knowledge/' + encodeURIComponent(filename), {
+    const res = await api('/api/knowledge/prompt/' + encodeURIComponent(filename), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content, description: '' })
+        body: JSON.stringify({ content })
     });
     if (res && res.ok) {
-        showToast('Prompt salvo', 'success');
+        showToast('Prompt salvo e cache recarregado', 'success');
         loadKnowledgePrompts();
     } else {
         showToast('Erro ao salvar prompt', 'error');

@@ -2683,6 +2683,52 @@ def api_knowledge_reload_prompts():
     return jsonify({"ok": True})
 
 
+@app.get("/api/knowledge/prompt/<filename>")
+@login_required
+def api_knowledge_prompt_get(filename):
+    """Le conteudo de um .md de prompt da pasta prompts/."""
+    agent_prompts = {"triagem.md", "cardapio.md", "pedido.md", "logistica.md", "pagamento.md", "crise.md"}
+    if filename not in agent_prompts:
+        return jsonify({"error": "Prompt invalido"}), 400
+    # Tenta do banco primeiro
+    content = knowledge_rag.get_file_content(filename)
+    source = "db"
+    if not content:
+        # Fallback: disco
+        prompts_dir = Path(__file__).parent / "prompts"
+        fpath = prompts_dir / filename
+        if fpath.exists():
+            content = fpath.read_text(encoding="utf-8")
+            source = "disk"
+        else:
+            return jsonify({"error": "Prompt nao encontrado"}), 404
+    return jsonify({"content": content, "source": source, "filename": filename})
+
+
+@app.put("/api/knowledge/prompt/<filename>")
+@login_required
+def api_knowledge_prompt_put(filename):
+    """Salva conteudo de um .md de prompt no banco + disco."""
+    agent_prompts = {"triagem.md", "cardapio.md", "pedido.md", "logistica.md", "pagamento.md", "crise.md"}
+    if filename not in agent_prompts:
+        return jsonify({"error": "Prompt invalido"}), 400
+    data = request.get_json(silent=True) or {}
+    content = data.get("content", "")
+    # Salva no banco
+    knowledge_rag.save_knowledge_raw(filename, content, description=f"Prompt do agente {filename.replace('.md','')}")
+    # Salva no disco (pasta prompts/)
+    prompts_dir = Path(__file__).parent / "prompts"
+    fpath = prompts_dir / filename
+    try:
+        fpath.write_text(content, encoding="utf-8")
+        print(f"[knowledge] prompt salvo em disco: {fpath}")
+    except Exception as e:
+        print(f"[knowledge] aviso: nao foi possivel salvar prompt em disco: {e}")
+    # Limpa cache dos agentes
+    knowledge_rag.reload_agent_prompts()
+    return jsonify({"ok": True, "filename": filename})
+
+
 # ── WhatsApp Cloud API (Meta) ────────────────────────────────────────────────
 
 @app.get("/api/whatsapp/status")
