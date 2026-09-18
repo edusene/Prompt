@@ -253,13 +253,17 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
 
     # ── Endereco ────────────────────────────────────────────────────────────
     if not state.endereco:
-        # Padrão: "Av. Calama, 3234" ou "Rua X, 123"
+        # Padrão: "Av. Calama, 3234" ou "Av. Calama 3234" ou "Rua X, 123"
+        # Para antes de "bairro" ou no final da string
         addr_match = re.search(
-            r'((?:Av\.|Avenida|Rua|Al\.|Alameda|Travessa|Tv\.|Estrada)\s+[^\.,]+(?:,\s*\d+)?)',
+            r'((?:Av\.|Avenida|Rua|Al\.|Alameda|Travessa|Tv\.|Estrada)\s+[^\.,]+(?:[,\s]+\d+)?)',
             message, re.IGNORECASE
         )
         if addr_match:
-            extracted["endereco"] = addr_match.group(1).strip()
+            addr = addr_match.group(1).strip()
+            # Remove "bairro" e o que vem depois se estiver junto
+            addr = re.split(r'\s+bairro', addr, flags=re.IGNORECASE)[0].strip()
+            extracted["endereco"] = addr
 
     # ── Bairro ──────────────────────────────────────────────────────────────
     if not state.bairro:
