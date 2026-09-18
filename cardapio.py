@@ -58,14 +58,22 @@ def calcular_pedido(items: list[dict], bairro: str = "") -> dict:
                 result = knowledge_rag.search_context(f"frete {bairro}", top_k=3)
                 if result:
                     # Tenta extrair valor do frete do resultado
-                    # Procura padroes como "Aponia: R$ 5,00" ou "Aponia - R$5" ou "Aponia R$ 5,00"
-                    m = re.search(rf'{re.escape(bairro)}[^R]*R\$\s*(\d+[.,]?\d*)', result, re.IGNORECASE)
+                    # Procura padroes como "Aponia: R$ 8,00" ou "Aponia 8" ou "Aponia R$8"
+                    # 1. Tenta com R$: "Aponia ... R$ 8,00"
+                    m = re.search(rf'{re.escape(bairro)}[^0-9\n]*R\$\s*(\d+[.,]?\d*)', result, re.IGNORECASE)
                     if not m:
-                        # Busca qualquer valor de frete proximo ao bairro
+                        # 2. Tenta sem R$: "Aponia   8" (numero logo apos o bairro)
+                        m = re.search(rf'{re.escape(bairro)}\s+(\d+(?:[.,]\d+)?)', result, re.IGNORECASE)
+                    if not m:
+                        # 3. Busca linha que contenha o bairro e qualquer valor
                         lines = result.split('\n')
                         for line in lines:
                             if bairro.lower() in line.lower():
+                                # Tenta com R$
                                 m = re.search(r'R\$\s*(\d+[.,]?\d*)', line)
+                                if not m:
+                                    # Tenta sem R$ - numero isolado
+                                    m = re.search(r'(\d+(?:[.,]\d+)?)', line)
                                 if m:
                                     break
                     if m:
