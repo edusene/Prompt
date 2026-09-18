@@ -61,18 +61,18 @@ def calcular_pedido(items: list[dict], bairro: str = "") -> dict:
                 import re
                 # Tenta varias buscas para encontrar o frete
                 search_queries = [
+                    bairro,
                     f"frete {bairro}",
                     f"frete entrega {bairro}",
-                    bairro,
                     f"tabela frete {bairro}",
                 ]
                 result = ""
                 for q in search_queries:
                     result = knowledge_rag.search_context(q, top_k=3)
-                    if result:
+                    if result and bairro.lower() in result.lower():
                         break
                 
-                if result:
+                if result and bairro.lower() in result.lower():
                     # Log completo do resultado para debug
                     print(f"[cardápio] MODO TESTE - knowledge retornado para '{bairro}':")
                     print(f"[cardápio] CONTEUDO COMPLETO: {result}")
