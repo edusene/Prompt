@@ -983,7 +983,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
             "\n9. NAO pule esta pergunta - ela e OBRIGATORIA (exceto se modalidade ja extraida)"
             "\n10. ANTES de apresentar resumo, VERIFIQUE: tem modalidade? tem data? tem horario? Se falta algum, PERGUNTE"
             "\n11. NAO apresente resumo SEM data + horario + modalidade confirmados"
-            "\n12. NAO PERGUNTE forma de pagamento se o cliente JA INFORMOU (pix/dinheiro/cartao)"
+            "\n12. NAO PERGUNTE forma de pagamento se o cliente JA INFORMOU (pix/dinheiro/cartao de credito/cartao de debito). EXCECAO: se disse apenas 'cartao' sem debito/credito, PERGUNTE qual"
             "\n13. NAO PERGUNTE ponto de referencia se o cliente NAO INFORMOU - se nao mencionou, nao tem. ACEITE."
             "\n14. QUANDO CLIENTE DEFINE QUANTIDADE (ex: '50 coxinhas'), ACEITE como meio cento. NAO questione formato."
         )

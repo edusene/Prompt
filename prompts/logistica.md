@@ -99,10 +99,11 @@ ANTES de coletar qualquer dado de logistica, verifique a hora atual injetada no 
 - Se o horario pedido for invalido (antes 07h40, intervalo, ou apos 20h00), AVISE o cliente e sugira um horario valido
 
 ### Forma de Pagamento
-- **NAO PERGUNTE forma de pagamento se o cliente JA INFORMOU** (ex: "pix", "dinheiro", "cartao")
+- **NAO PERGUNTE forma de pagamento se o cliente JA INFORMOU** (ex: "pix", "dinheiro", "cartao de credito", "cartao de debito")
 - Se o cliente disse "pix" ou "vou pagar por pix" -> ja esta definido, NAO pergunte novamente
 - Se o cliente disse "dinheiro" ou "na entrega" -> ja esta definido, NAO pergunte novamente
-- Se o cliente disse "cartao" ou "debito/credito" -> ja esta definido, NAO pergunte novamente
+- Se o cliente disse "cartao de credito" ou "cartao de debito" -> ja esta definido, NAO pergunte novamente
+- Se o cliente disse APENAS "cartao" (sem especificar debito/credito) -> PERGUNTE: "Certo! Será no débito ou crédito?"
 - So pergunte pagamento se NENHUMA forma foi mencionada em toda a conversa
 
 ## Handoff
