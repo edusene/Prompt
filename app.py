@@ -82,6 +82,12 @@ else:
 # Tools description (sempre injetada)
 FULL_SYSTEM_PROMPT += (
     "\n\n=== TOOLS DISPONIVEIS ==="
+    "\nVoce tem acesso a uma tool 'consultar_frete' que retorna a taxa OFICIAL de "
+    "entrega de um bairro. Use SEMPRE que precisar informar frete: ela le a tabela "
+    "oficial. Se ela responder que o bairro nao esta na tabela, NAO invente um valor "
+    "- pergunte o bairro de novo ou transfira para um humano."
+    "\nVoce tem acesso a uma tool 'consultar_preco' que retorna o preco OFICIAL de um "
+    "produto do cardapio. Use SEMPRE antes de informar qualquer preco."
     "\nVoce tem acesso a uma tool 'search_knowledge' para buscar informacoes "
     "na base de conhecimento. Chame essa tool sempre que precisar consultar "
     "produtos, precos, politicas ou qualquer informacao da empresa."
@@ -110,6 +116,128 @@ def _get_current_system_prompt() -> str:
 
 # ── Knowledge Tool (busca seletiva via function calling) ──────────────────────
 import knowledge_rag
+import facts
+import conversation_memory
+
+# ── Tools deterministicas (frete e preco vem da tabela, nao do texto) ─────────
+
+CONSULTAR_FRETE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "consultar_frete",
+        "description": (
+            "Retorna a taxa de entrega OFICIAL de um bairro de Porto Velho, lida "
+            "diretamente da tabela da empresa. Use SEMPRE antes de informar frete ou "
+            "montar o total de uma entrega. Se o bairro nao existir na tabela, a tool "
+            "avisa - nesse caso NUNCA estime um valor."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "bairro": {
+                    "type": "string",
+                    "description": "Nome do bairro informado pelo cliente (aceita apelidos e erros de digitacao)",
+                },
+            },
+            "required": ["bairro"],
+        },
+    },
+}
+
+CONSULTAR_PRECO_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "consultar_preco",
+        "description": (
+            "Retorna o preco OFICIAL de itens do cardapio (porcao, meio cento, cento, "
+            "salgados grandes, combos, bolos, bebidas). Use SEMPRE antes de informar "
+            "qualquer preco ao cliente. Se o item nao aparecer, ele nao esta no cardapio. "
+            "O retorno traz 'forma_de_venda' de cada item: respeite-a - item vendido por "
+            "UNIDADE nunca vira porcao de 25."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "produto": {
+                    "type": "string",
+                    "description": (
+                        "Nome do produto exatamente como o cliente falou (ex: 'quiche de frango', "
+                        "'coxinha'). NAO troque pelo nome da categoria que voce supoe - consulte "
+                        "o produto citado e leia a categoria que a tool devolve."
+                    ),
+                },
+                "formato": {
+                    "type": "string",
+                    "description": "Formato desejado, se houver (ex: 'porcao', 'meio cento', 'cento', 'unidade')",
+                },
+            },
+            "required": ["produto"],
+        },
+    },
+}
+
+
+def _consultar_frete_handler(bairro: str = "", **kwargs) -> str:
+    resultado = facts.lookup_frete(bairro)
+    if not resultado:
+        disponiveis = ", ".join(facts.bairro_names())
+        print(f"[facts] consultar_frete bairro='{bairro}' -> NAO ENCONTRADO")
+        return json.dumps({
+            "encontrado": False,
+            "bairro_consultado": bairro,
+            "aviso": (
+                "Bairro nao esta na tabela oficial de entrega. NAO invente uma taxa. "
+                "Confirme o bairro com o cliente ou transfira para um atendente."
+            ),
+            "bairros_atendidos": disponiveis,
+        }, ensure_ascii=False)
+
+    print(f"[facts] consultar_frete bairro='{bairro}' -> {resultado['bairro']} R$ {resultado['taxa']:.2f} ({resultado['match']})")
+    return json.dumps({
+        "encontrado": True,
+        "bairro_oficial": resultado["bairro"],
+        "taxa_entrega": resultado["taxa"],
+        "tipo_de_correspondencia": resultado["match"],
+    }, ensure_ascii=False)
+
+
+def _consultar_preco_handler(produto: str = "", formato: str = "", **kwargs) -> str:
+    itens = facts.lookup_preco(produto, formato)
+    if not itens:
+        print(f"[facts] consultar_preco produto='{produto}' -> NAO ENCONTRADO")
+        return json.dumps({
+            "encontrado": False,
+            "produto_consultado": produto,
+            "aviso": (
+                "Produto nao encontrado no cardapio oficial. NAO invente preco nem "
+                "disponibilidade: ofereca outro item do cardapio."
+            ),
+        }, ensure_ascii=False)
+
+    print(f"[facts] consultar_preco produto='{produto}' -> {len(itens)} itens")
+
+    def _forma_de_venda(item: dict) -> str:
+        formato = facts.normalize(item["formato"])
+        if item["preco"] is None:
+            return "sabor incluso no pacote da categoria (o preco esta na linha do formato)"
+        if "unidade" in formato:
+            return "vendido por UNIDADE - nao existe porcao de 25 deste item"
+        return f"vendido no formato '{item['formato']}'"
+
+    return json.dumps({
+        "encontrado": True,
+        "itens": [
+            {
+                "categoria": i["categoria"],
+                "item": i["item"],
+                "formato": i["formato"],
+                "preco": i["preco"] if i["preco"] is not None else i["preco_texto"],
+                "forma_de_venda": _forma_de_venda(i),
+                "disponivel": i["disponivel"],
+            }
+            for i in itens
+        ],
+    }, ensure_ascii=False)
 
 KNOWLEDGE_TOOL = {
     "type": "function",
@@ -778,6 +906,73 @@ def perform_transfer(phone: str, reason: str = "", send_message: bool = True) ->
 
 # ── Flush handler ─────────────────────────────────────────────────────────────
 
+_VALOR_RE = __import__("re").compile(r"R\$\s*(\d{1,3}(?:\.\d{3})*(?:,\d{2})?|\d+(?:[.,]\d{1,2})?)")
+
+
+def _valores_oficiais() -> set:
+    """Todos os valores monetarios que existem na base oficial."""
+    dados = facts.get()
+    valores = {float(b["taxa"]) for b in dados["bairros"]}
+    valores |= {float(p["preco"]) for p in dados["produtos"] if p["preco"] is not None}
+    return valores
+
+
+def _multiplo_de(valor: float, base: float, limite: int = 500) -> bool:
+    if base <= 0:
+        return False
+    fator = valor / base
+    return abs(fator - round(fator)) < 0.005 and 0 < round(fator) <= limite
+
+
+def _valor_explicavel(valor: float, conhecidos: set, consultados: list) -> bool:
+    """O valor sai da base, de uma quantidade x preco, ou de subtotal + frete?"""
+    alvo = round(valor, 2)
+    if alvo in conhecidos:
+        return True
+    if any(_multiplo_de(alvo, base) for base in consultados):
+        return True
+    # subtotal (quantidade x preco) somado a uma taxa tambem consultada
+    for taxa in consultados:
+        resto = round(alvo - taxa, 2)
+        if resto > 0 and any(_multiplo_de(resto, base) for base in consultados):
+            return True
+    return False
+
+
+def _auditar_valores(user: str, reply: str, consultados: list) -> None:
+    """Registra no log todo valor em R$ da resposta que nao veio da base.
+
+    Nao reescreve a mensagem: serve para enxergar, nos logs, se o agente ainda
+    esta inventando numero — e para qual cliente. Somas (subtotal, total) sao
+    aceitas quando batem com a combinacao dos valores consultados.
+    """
+    if not reply:
+        return
+    try:
+        citados = []
+        for bruto in _VALOR_RE.findall(reply):
+            texto = bruto.replace(".", "").replace(",", ".") if "," in bruto else bruto
+            try:
+                citados.append(float(texto))
+            except ValueError:
+                continue
+        if not citados:
+            return
+
+        conhecidos = _valores_oficiais() | {round(float(v), 2) for v in consultados}
+        suspeitos = [
+            v for v in citados
+            if v > 0 and not _valor_explicavel(v, conhecidos, consultados)
+        ]
+        if suspeitos:
+            print(
+                f"[auditoria] user={user} valores SEM ORIGEM na base: {suspeitos} "
+                f"| consultados nesta resposta: {consultados}"
+            )
+    except Exception as e:
+        print(f"[auditoria] WARN falhou: {e}")
+
+
 def handle_flush(user: str, items: list[dict]) -> None:
     try:
         global_mode = int(database.get_setting("agent_mode", "1"))
@@ -829,49 +1024,37 @@ def handle_flush(user: str, items: list[dict]) -> None:
         if last_wa_msg_id and last_wa_msg_id.startswith("wamid."):
             send_typing(last_wa_msg_id)
 
-        # ── Extracao de dados da mensagem (modo classico) ────────────────────
-        # Extraindo dados estruturados para injetar no prompt dinamico
+        # ── Memoria estruturada do atendimento ───────────────────────────────
+        # A extracao roda duas vezes: uma sobre o que ja esta na memoria (so
+        # preenche lacunas) e outra sem estado (detecta correcao do cliente).
         text_only = "\n".join(it.get("text", "") for it in items)
-        _ext_state = ConversationState(
-            phone=user,
-            # Um nome dito agora deve poder substituir um cadastro antigo.
-            name="",
-            items=[],
-            modality="",
-            bairro="",
-            endereco="",
-            horario="",
-            data_agendada="",
-            payment_method="",
-        )
-        _extracted = _extract_data_from_message(text_only, _ext_state)
-        _extracted_summary = ""
-        if _extracted:
-            _parts = []
-            if "name" in _extracted:
-                _parts.append(f"nome={_extracted['name']}")
-            if "items" in _extracted:
-                _parts.append(f"itens={_extracted['items']}")
-            if "modality" in _extracted:
-                _parts.append(f"modalidade={_extracted['modality']}")
-            if "endereco" in _extracted:
-                _parts.append(f"endereco={_extracted['endereco']}")
-            if "bairro" in _extracted:
-                _parts.append(f"bairro={_extracted['bairro']}")
-            if "horario" in _extracted:
-                _parts.append(f"horario={_extracted['horario']}")
-            if "data_agendada" in _extracted:
-                _parts.append(f"data={_extracted['data_agendada']}")
-            if "payment_method" in _extracted:
-                _parts.append(f"pagamento={_extracted['payment_method']}")
-            if "referencia" in _extracted:
-                _parts.append(f"referencia={_extracted['referencia']}")
-            _extracted_summary = ", ".join(_parts)
-            print(f"[extract] DADOS EXTRAIDOS: {_extracted_summary}")
+
+        _memoria = conversation_memory.load(user)
+        if contact and contact.get("name") and not _memoria.get("name"):
+            _memoria["name"] = contact["name"]
+
+        _state_memoria = ConversationState(phone=user, **{
+            campo: _memoria.get(campo) or ("" if campo != "items" else [])
+            for campo in ("name", "items", "modality", "bairro", "endereco",
+                          "referencia", "horario", "data_agendada", "payment_method")
+        })
+        _extracted = _extract_data_from_message(text_only, _state_memoria)
+        _extracted_fresh = _extract_data_from_message(text_only, ConversationState(phone=user))
+
+        _memoria, _mudancas = conversation_memory.merge(_memoria, _extracted, _extracted_fresh)
+        conversation_memory.save(user, _memoria)
+        if _mudancas:
+            print(f"[memoria] {user}: {', '.join(_mudancas)}")
+
+        # Nome novo tambem atualiza o cadastro do contato
+        if _memoria.get("name") and (not contact or contact.get("name") != _memoria["name"]):
+            try:
+                database.upsert_contact(user, name=_memoria["name"])
+            except Exception as e:
+                print(f"[memoria] WARN nao atualizou contato: {e}")
 
         user_parts = _build_user_parts(items)
-        text_only = "\n".join(it["text"] for it in items)
-        
+
         # --- INÍCIO DETECÇÃO DE CONFIRMAÇÃO ---
         history_before = memory.get(user)
         last_assistant_text = ""
@@ -879,18 +1062,18 @@ def handle_flush(user: str, items: list[dict]) -> None:
             if m.get("role") == "assistant":
                 last_assistant_text = (m.get("parts", [{}])[0].get("text", "") or "")
                 break
-                
+
         is_short_reply = len(text_only.strip()) <= 60
         confirmation_keywords = ["sim", "isso", "isso mesmo", "esse", "essa", "esse mesmo", "1 mesmo", "uma mesmo", "1 de 25", "1 de 25 mesmo", "pode ser", "correto", "exatamente", "é isso", "quero esse", "ok", "manda", "confirmo"]
-        
+
         # Padrões para detectar respostas sobre data/horário
         date_time_patterns = ["hoje", "amanha", "agora", "daqui a pouco", "já", "já já"]
-        time_patterns = ["\d{1,2}h", "\d{1,2}:\d{2}", "manha", "tarde", "noite", "almoco"]
-        
+        time_patterns = [r"\d{1,2}h", r"\d{1,2}:\d{2}", "manha", "tarde", "noite", "almoco"]
+
         is_confirmation = False
         is_date_time_reply = False
         text_lower = text_only.strip().lower()
-        
+
         # Verifica se é uma resposta sobre data/horário
         if is_short_reply:
             for pattern in date_time_patterns:
@@ -903,192 +1086,96 @@ def handle_flush(user: str, items: list[dict]) -> None:
                     if re.search(pattern, text_lower):
                         is_date_time_reply = True
                         break
-        
+
         # Detecta confirmação
         if is_short_reply and (text_lower in confirmation_keywords or text_lower in last_assistant_text.lower() or "confirma" in last_assistant_text.lower() or "?" in last_assistant_text[-15:]):
             is_confirmation = True
-            
+
         memory.append_multimodal(user, "user", user_parts)
 
         dynamic_prompt = _get_current_system_prompt()
-        
-        if is_confirmation and last_assistant_text:
-            dynamic_prompt += (
-                "\n\n⚠️ ATENÇÃO: CONTEXTO DE CONFIRMAÇÃO DETECTADO\n"
-                "A última mensagem do cliente parece ser uma confirmação ou resposta direta à sua última pergunta.\n"
-                f"Sua última pergunta/mensagem foi: '{last_assistant_text[-250:]}'\n"
-                "NÃO reinterprete a mensagem do cliente como uma nova intenção isolada.\n"
-                "PRESERVE TODO o estado do pedido (produto, formato, quantidade em porções, preço da porção, etc) que já estava sendo discutido.\n"
-                "Se o cliente disse algo como '1 de 25 mesmo', ele está confirmando a porção de 25 que você ofereceu, NÃO pedindo 1 unidade individual.\n"
-            )
-        
-        # Detecta se é uma resposta sobre data/horário
-        if is_date_time_reply and last_assistant_text:
-            # Verifica se a última mensagem do bot era sobre data/horário
-            perguntas_data_horario = ["data", "horario", "horário", "que dia", "que hora", "quando", "que dia"]
-            is_response_to_datetime = any(p in last_assistant_text.lower() for p in perguntas_data_horario)
-            
-            if is_response_to_datetime:
-                dynamic_prompt += (
-                    "\n\n⚠️ ATENÇÃO: RESPOSTA SOBRE DATA/HORÁRIO DETECTADA\n"
-                    "O cliente está respondendo à sua pergunta sobre data e/ou horário.\n"
-                    f"Sua última pergunta/mensagem foi: '{last_assistant_text[-250:]}'\n"
-                    "NÃO pergunte o nome do cliente novamente - você já tem essa informação.\n"
-                    "Interprete a resposta como data e/ou horário conforme o contexto.\n"
-                    "Exemplos:\n"
-                    "- 'hoje, 18h' = data é hoje, horário é 18h\n"
-                    "- 'hoje' = apenas data, pergunte o horário\n"
-                    "- '18h' = apenas horário, pergunte a data\n"
-                )
-        # --- FIM DETECÇÃO DE CONFIRMAÇÃO ---
 
-        # Injeta toda a base antes da chamada ao LLM. Isso elimina a dependencia
-        # de o modelo decidir usar search_knowledge para dados essenciais.
+        # ── BASE OFICIAL (uma unica vez, sem duplicar o prompt) ──────────────
         full_knowledge = knowledge_rag.get_full_knowledge_content()
         if full_knowledge:
             dynamic_prompt += (
                 "\n\n=== BASE DE CONHECIMENTO OFICIAL ===\n"
-                "Use esta base como FONTE VERDADEIRA para qualquer informacao da empresa. "
-                "Nao invente dados que contrariem este conteudo.\n\n"
+                "Esta e a UNICA fonte valida para preco, taxa de entrega, horario, "
+                "forma de pagamento e politica da empresa.\n"
+                "Cada linha e um registro completo no formato 'campo | campo | campo'.\n"
+                "Se um dado NAO estiver aqui nem no retorno de uma tool, ele NAO existe: "
+                "diga que vai confirmar com a equipe ou transfira - nunca estime.\n\n"
                 + full_knowledge
             )
 
-        # ── CONTEUDO DINAMICO (no final para preservar cache do prefixo estatico) ──
-        # Injeta data e hora atual para o agente saber o horario (fuso de Porto Velho = UTC-4)
-        _now = (datetime.utcnow() - timedelta(hours=4)).strftime("%d/%m/%Y %H:%M")
-        _tomorrow = (datetime.utcnow() - timedelta(hours=4) + timedelta(days=1)).strftime("%d/%m/%Y")
+        # ── CONTEUDO DINAMICO (no final, para preservar o cache do prefixo) ──
+        _now_dt = datetime.utcnow() - timedelta(hours=4)
+        _now = _now_dt.strftime("%d/%m/%Y %H:%M")
+        _tomorrow = (_now_dt + timedelta(days=1)).strftime("%d/%m/%Y")
+        _dias = ("segunda-feira", "terca-feira", "quarta-feira", "quinta-feira",
+                 "sexta-feira", "sabado", "domingo")
         dynamic_prompt += (
-            f"\n\nData e hora atual (Porto Velho): {_now}. "
+            f"\n\nData e hora atual (Porto Velho): {_now} ({_dias[_now_dt.weekday()]}). "
             f"Data de amanha (se agendar): {_tomorrow}."
+            f"\nO telefone (numero WhatsApp) do cliente e: {user} "
+            f"(use em send_order_to_cardapio)."
         )
 
-        # Injeta nome do cliente no prompt
-        if contact and contact.get("name"):
+        if is_confirmation and last_assistant_text:
             dynamic_prompt += (
-                f"\n\nO nome do cliente e: {contact['name']}. "
-                f"Use o nome dele ao conversar, mas de forma natural. "
-                f"NUNCA pergunte o nome novamente - ele ja foi coletado."
+                "\n\nCONTEXTO: a ultima mensagem do cliente e uma confirmacao/resposta "
+                f"direta a sua pergunta anterior: '{last_assistant_text[-250:]}'\n"
+                "Nao reinterprete como uma nova intencao isolada e preserve o que ja "
+                "estava sendo tratado (produto, formato, quantidade, preco). "
+                "'1 de 25 mesmo' confirma a porcao de 25 oferecida, nao 1 unidade."
             )
-            print(f"[flush] injetando nome: {contact['name']}")
 
-        # Injeta telefone do cliente no prompt (necessario para send_order_to_cardapio)
-        dynamic_prompt += (
-            f"\n\nO telefone (numero WhatsApp) do cliente e: {user}. "
-            f"Use este numero ao enviar pedidos com send_order_to_cardapio."
-        )
-
-        # Injeta dados extraidos da mensagem no prompt (REMOVIDO - injetado apos OVERRIDE FINAL)
-
-        # REGRAS CRITICAS DE CONTROLE DE FLUXO
-        dynamic_prompt += (
-            "\n\n⚠️ REGRAS CRITICAS DE CONTROLE DE FLUXO ⚠️"
-            "\n1. NUNCA chame send_order_to_cardapio SEM ter apresentado o resumo do pedido ANTES"
-            "\n2. NUNCA chame send_order_to_cardapio SEM o cliente ter confirmado EXPLICITAMENTE (sim, ok, pode ser, confirma)"
-            "\n3. Se o cliente disse 'sim' mas voce ainda NAO apresentou o resumo, APRESENTE o resumo PRIMEIRO"
-            "\n4. Apos apresentar resumo, AGUARDE confirmacao do cliente"
-            "\n5. So CHAME send_order_to_cardapio apos o cliente ter confirmado o resumo"
-            "\n6. NUNCA assume que o cliente quer enviar o pedido sem confirmacao"
-            "\n7. NUNCA assuma entrega ou retirada SEM PERGUNTA - EXCETO se modalidade ja extraida"
-            "\n8. PRIMEIRA PERGUNTA sobre logistica: 'E para entrega ou retirada na fabrica?' - EXCETO se modalidade ja extraida"
-            "\n9. NAO pule esta pergunta - ela e OBRIGATORIA (exceto se modalidade ja extraida)"
-            "\n10. ANTES de apresentar resumo, VERIFIQUE: tem modalidade? tem data? tem horario? Se falta algum, PERGUNTE"
-            "\n11. NAO apresente resumo SEM data + horario + modalidade confirmados"
-            "\n12. NAO PERGUNTE forma de pagamento se o cliente JA INFORMOU (pix/dinheiro/cartao de credito/cartao de debito). EXCECAO: se disse apenas 'cartao' sem debito/credito, PERGUNTE qual"
-            "\n13. NAO PERGUNTE ponto de referencia se o cliente NAO INFORMOU - se nao mencionou, nao tem. ACEITE."
-            "\n14. QUANDO CLIENTE DEFINE QUANTIDADE (ex: '50 coxinhas'), ACEITE como meio cento. NAO questione formato."
-        )
-
-        # OVERRIDE FINAL - Regras que SOBRESCREVEM qualquer instrucao anterior
-        dynamic_prompt += (
-            "\n\n🚨 OVERRIDE FINAL - INSTRUCOES QUE SOBRESCREVEM TUDO ANTERIOR 🚨"
-            "\nSE o pedido ja tem itens mas NAO tem modalidade (entrega/retirada):"
-            "\n  -> PERGUNTE: 'Será para entrega ou retirada na fabrica?' - EXCETO se modalidade ja foi extraida da mensagem"
-            "\nSE tem modalidade mas NAO tem data:"
-            "\n  -> PERGUNTE: 'Qual data você prefere?'"
-            "\nSE tem data mas NAO tem horario:"
-            "\n  -> PERGUNTE: 'E qual horário?'"
-            "\nSE tem tudo mas e entrega e NAO tem endereco:"
-            "\n  -> PERGUNTE bairro, rua, numero. SE cliente nao informou referencia, ACEITE e prossiga."
-            "\nSE e entrega e tem bairro mas NAO calculou frete:"
-            "\n  -> CALCULE o frete com search_knowledge ANTES do resumo"
-            "\nSE cliente JA INFORMOU pagamento (pix/dinheiro/cartao): NAO PERGUNTE NOVAMENTE"
-            "\nSE cliente DEFINIU quantidade (ex: '50 coxinhas'): ACEITE como meio cento, NAO questione formato"
-            "\nNAO assuma 'hoje' para data - SEMPRE confirme com o cliente"
-            "\nNAO assuma horario - SEMPRE pergunte ao cliente"
-            "\nAPENAS depois de ter TODOS os dados acima, apresente o resumo"
-            "\nNUNCA pule etapas mesmo que o cliente responda de forma incompleta"
-            "\n\n🚨🚨🚨 VERIFICACAO FINAL ANTES DO RESUMO 🚨🚨🚨"
-            "\nANTES de apresentar QUALQUER resumo, VERIFIQUE:"
-            "\n- Tem MODALIDADE (entrega/retirada)? SE NAO -> PERGUNTE"
-            "\n- Tem DATA confirmada? SE NAO -> PERGUNTE"
-            "\n- Tem HORARIO confirmado? SE NAO -> PERGUNTE"
-            "\n- Se entrega: tem ENDERECO? SE NAO -> PERGUNTE"
-            "\n- Se entrega: FRETE foi calculado? SE NAO -> CHAME calculate_order"
-            "\nSE FALTA ALGUM DADO ACIMA, NAO APRESENTE RESUMO - PERGUNTE O QUE FALTA"
-            "\n\n🚨🚨🚨 OBRIGATORIO: ANTES de apresentar resumo de ENTREGA, CHAME a tool calculate_order 🚨🚨🚨"
-            "\n1. CHAME calculate_order(items=[{name, quantity, price}], bairro='NOME_DO_BAIRRO')"
-            "\n2. AGUARDE o retorno da tool"
-            "\n3. O retorno TEM UM CAMPO 'resumo_formatado' COM O RESUMO PRONTO - COPIE ELE"
-            "\n4. NAO MUDJE OS VALORES NUMERICOS - use exatamente o que a tool retornou"
-            "\n5. SE nao chamar calculate_order, os valores estarao ERRADOS e o cliente sera prejudicado"
-            "\n\n🚨🚨🚨 REGRA FINAL - COPIE O resumo_formatado DA TOOL: 🚨🚨🚨"
-            "\nA tool retorna: subtotal, delivery_fee, return_fee, total E resumo_formatado"
-            "\nCopie o resumo_formatado EXATAMENTE - NAO some, NAO subtraia, NAO invente!"
-            "\nExemplo: tool retornou subtotal=80, delivery_fee=12, return_fee=2, total=94"
-            "\n  -> Subtotal: R$ 80,00 | Frete: R$ 12,00 | Taxa: R$ 2,00 | Total: R$ 94,00"
-            "\n\n🚫 NÃO CHAME send_order_to_cardapio AGORA - apenas apresente o resumo e aguarde 'sim' do cliente 🚫"
-            "\n\nAo CHAMAR send_order_to_cardapio (depois da confirmacao), envie:"
-            "\n- customer_name, customer_phone, items [{name, quantity, price}], total"
-            "\n- subtotal, payment_method ('pix'/'cartao_debito'/'cartao_credito'/'dinheiro')"
-            "\n- SE ENTREGA: delivery_address, delivery_fee, return_fee (2.00 dinheiro/cartao ou 0.00 pix)"
-            "\n- SE DATA != HOJE: scheduled_date ('DD/MM/YYYY') E is_scheduled=true"
-            "\n- TODOS valores numericos devem ser numeros, nao textos"
-            "\n- ⚠️ price no items = PRECO UNITARIO por UNIDADE (ex: Coxinha=0.80, NAO 20.00)"
-            "\n  Produtos Fritos: 20,00/25 = R$ 0,80/un | Produtos Assados: 30,00/25 = R$ 1,20/un"
-            "\n\nREGRAS DE HORARIO:"
-            "\n- Use saudacao baseada no horario: 06-12=Bom dia, 12-18=Boa tarde, 18-06=Boa noite"
-            "\n- Se hora atual > 20:00 ou < 07:40: avise que estamos fora do horario ANTES de qualquer coisa"
-            "\n- Se domingo: avise que nao abrimos e ofereca agendamento para segunda"
-            "\n- NAO inicie fluxo de pedidos se estiver fora de horario sem avisar primeiro"
-            "\n- Se cliente pedir 'hoje' e for fora de horario: 'Nossa producao ja encerrou! Quer agendar para amanha?'"
-        )
-
-        # ═══ DADOS EXTRAIDOS - PRIORIDADE MAXIMA (DEPOIS de todas as regras) ═══
-        if _extracted:
-            _ext_lines = []
-            if "name" in _extracted:
-                _ext_lines.append(f"Nome do cliente: {_extracted['name']} (substitui qualquer nome anterior)")
-            if "items" in _extracted:
-                _ext_lines.append("Itens ja definidos pelo cliente:")
-                for _it in _extracted["items"]:
-                    _ext_lines.append(f"  - {_it['quantity']} un - {_it['name']}")
-            if "modality" in _extracted:
-                _ext_lines.append(f"Modalidade: {_extracted['modality']} (JA CONFIRMADA pelo cliente)")
-            if "endereco" in _extracted:
-                _ext_lines.append(f"Endereco: {_extracted['endereco']}")
-            if "bairro" in _extracted:
-                _ext_lines.append(f"Bairro: {_extracted['bairro']}")
-            if "horario" in _extracted:
-                _ext_lines.append(f"Horario: {_extracted['horario']}")
-            if "data_agendada" in _extracted:
-                _ext_lines.append(f"Data: {_extracted['data_agendada']}")
-            if "payment_method" in _extracted:
-                _ext_lines.append(f"Pagamento: {_extracted['payment_method']}")
-            if "referencia" in _extracted:
-                _ext_lines.append(f"Referencia: {_extracted['referencia']}")
-            if _ext_lines:
+        if is_date_time_reply and last_assistant_text:
+            perguntas_data_horario = ["data", "horario", "horário", "que dia", "que hora", "quando"]
+            if any(p in last_assistant_text.lower() for p in perguntas_data_horario):
                 dynamic_prompt += (
-                    "\n\n🚨🚨🚨 PRIORIDADE MAXIMA - DADOS JA CONFIRMADOS PELO CLIENTE 🚨🚨🚨"
-                    + "\n\n" + "\n".join(_ext_lines)
-                    + "\n\nACIMA ESTAO DADOS QUE O CLIENTE JA INFORMOU NA MENSAGEM."
-                    + "\nNAO PERGUNTE NENHUM DOS DADOS LISTADOS ACIMA."
-                    + "\nNAO DIGA 'sera para entrega ou retirada?' SE A MODALIDADE JA FOI LISTADA."
-                    + "\nNAO DIGA 'qual o endereco?' SE O ENDERECO JA FOI LISTADO."
-                    + "\nNAO DIGA 'qual horario?' SE O HORARIO JA FOI LISTADO."
-                    + "\nNAO DIGA 'qual forma de pagamento?' SE O PAGAMENTO JA FOI LISTADO."
-                    + "\nVA DIRETO PARA O PROXIMO PASSO COM OS DADOS ACIMA."
+                    "\n\nCONTEXTO: o cliente esta respondendo a sua pergunta de data/horario. "
+                    "Interprete assim: 'hoje, 18h' = data hoje + horario 18h; 'hoje' = so a data "
+                    "(pergunte o horario); '18h' = so o horario (pergunte a data)."
                 )
-                print(f"[flush] DADOS PRIORITARIOS injetados: {_extracted_summary}")
+
+        # ── REGRAS DE EXECUCAO (ordem unica, sem repeticao) ──────────────────
+        dynamic_prompt += (
+            "\n\n=== REGRAS DE EXECUCAO (valem sobre qualquer instrucao anterior) ==="
+            "\n1. FONTE DOS NUMEROS: preco vem de consultar_preco ou da BASE OFICIAL; "
+            "taxa de entrega vem de consultar_frete. Nunca calcule de cabeca, nunca "
+            "estime, nunca reaproveite valor de exemplo do prompt."
+            "\n2. NAO SEI: se o dado nao esta na base nem no retorno de uma tool, responda "
+            "que vai confirmar com a equipe (ou transfira). Inventar e o pior erro possivel."
+            "\n3. MEMORIA: a FICHA acima e a verdade sobre o que o cliente ja informou. "
+            "Nao pergunte o que ja esta preenchido; pergunte UM item pendente por mensagem, "
+            "na ordem listada."
+            "\n4. RESUMO: so apresente resumo quando a ficha nao tiver nenhuma pendencia. "
+            "Para entrega, chame calculate_order(items, bairro) antes e copie o campo "
+            "'resumo_formatado' do retorno, sem alterar nenhum numero."
+            "\n5. ENVIO: so chame send_order_to_cardapio depois de apresentar o resumo E "
+            "receber confirmacao explicita do cliente (sim/ok/pode ser/confirma). "
+            "Nunca envie na mesma mensagem em que apresenta o resumo."
+            "\n6. PRECO UNITARIO em items: e o valor por UNIDADE (Fritos 20,00/25 = 0,80; "
+            "Assados 30,00/25 = 1,20), nunca o preco do pacote."
+            "\n7. Se for entrega e o bairro nao estiver na tabela oficial, diga que precisa "
+            "confirmar a taxa com a equipe - nao chute frete."
+            "\n8. HORARIO: use a saudacao conforme a hora atual informada acima. Fora do "
+            "expediente (ver HORARIO na base), avise antes de iniciar o pedido e ofereca "
+            "agendamento."
+            "\n9. Quando o cliente define a quantidade (ex: '50 coxinhas'), aceite o lote "
+            "correspondente e nao questione o formato."
+            "\n10. SEMPRE responda primeiro a pergunta que o cliente fez (preco, frete, "
+            "horario, endereco, forma de pagamento, se tem determinado produto) e so "
+            "depois puxe o proximo dado do funil, na mesma mensagem. Isso vale tambem no "
+            "primeiro contato: se a primeira mensagem ja traz uma pergunta, responda-a e "
+            "peca o nome em seguida - nunca troque a resposta pela saudacao padrao."
+        )
+
+        # ── FICHA DO ATENDIMENTO (fica por ultimo de proposito: e o trecho que o
+        # modelo le mais perto da resposta, onde pesa mais contra repergunta e
+        # contra resumo apresentado antes da hora) ───────────────────────────
+        dynamic_prompt += "\n\n" + conversation_memory.render_ficha(_memoria)
 
         # Verifica se a IA transferiu durante a chamada (via tool)
         _transfer_done = False
@@ -1113,21 +1200,67 @@ def handle_flush(user: str, items: list[dict]) -> None:
                         return _knowledge_tool_handler(query=expanded_query, filename=filename)
             return _knowledge_tool_handler(query=query, filename=filename)
 
+        # Valores realmente consultados nesta mensagem — usados para conferir
+        # a resposta final contra os numeros oficiais.
+        _valores_consultados: list[float] = []
+
+        def _frete_handler(bairro: str = "", **kwargs) -> str:
+            resultado = facts.lookup_frete(bairro)
+            if resultado:
+                _valores_consultados.append(float(resultado["taxa"]))
+                conversation_memory.registrar_frete(user, _memoria, float(resultado["taxa"]))
+            return _consultar_frete_handler(bairro=bairro, **kwargs)
+
+        def _preco_handler(produto: str = "", formato: str = "", **kwargs) -> str:
+            for item in facts.lookup_preco(produto, formato):
+                if item.get("preco") is not None:
+                    _valores_consultados.append(float(item["preco"]))
+            return _consultar_preco_handler(produto=produto, formato=formato, **kwargs)
+
+        def _calculate_handler(items: list = None, bairro: str = "", **kwargs) -> str:
+            resultado = _calculate_order_handler(items or [], bairro, **kwargs)
+            try:
+                dados = json.loads(resultado)
+                for campo in ("subtotal", "delivery_fee", "return_fee", "total"):
+                    if dados.get(campo) is not None:
+                        _valores_consultados.append(float(dados[campo]))
+                if dados.get("delivery_fee"):
+                    conversation_memory.registrar_frete(user, _memoria, float(dados["delivery_fee"]))
+            except Exception:
+                pass
+            return resultado
+
+        def _send_handler(**kwargs) -> str:
+            resultado = _send_order_handler(**kwargs)
+            conversation_memory.registrar_pedido_enviado(user, _memoria)
+            return resultado
+
         try:
             reply = llm.generate_reply(
                 history=memory.get(user),
                 system=dynamic_prompt,
-                tools=[KNOWLEDGE_TOOL, TRANSFER_TOOL, CALCULATE_ORDER_TOOL, SEND_ORDER_TOOL],
+                tools=[
+                    CONSULTAR_FRETE_TOOL,
+                    CONSULTAR_PRECO_TOOL,
+                    KNOWLEDGE_TOOL,
+                    TRANSFER_TOOL,
+                    CALCULATE_ORDER_TOOL,
+                    SEND_ORDER_TOOL,
+                ],
                 tool_handlers={
+                    "consultar_frete": _frete_handler,
+                    "consultar_preco": _preco_handler,
                     "search_knowledge": _contextual_knowledge_handler,
                     "transfer_to_human": _transfer_handler,
-                    "calculate_order": _calculate_order_handler,
-                    "send_order_to_cardapio": _send_order_handler,
+                    "calculate_order": _calculate_handler,
+                    "send_order_to_cardapio": _send_handler,
                 },
             )
         except Exception as e:
             print(f"[flush] ERRO llm p/ {user}: {e}")
             return
+
+        _auditar_valores(user, reply, _valores_consultados)
 
         # Se a IA transferiu, envia a resposta do LLM (knowledge/explicação) e depois a msg de transferência
         if _transfer_done:
@@ -2517,19 +2650,19 @@ def api_knowledge_xlsx_data_update(filename):
         wb.save(str(xlsx_path))
         wb.close()
         
-        # Atualiza o conteudo de texto no knowledge base
+        # Atualiza o texto no knowledge no MESMO formato do carregamento
+        # oficial: uma linha por registro, colunas separadas por ' | '.
         content_parts = []
         for sheet_data in sheets:
-            sheet_name = sheet_data.get("name", "Dados")
-            headers = sheet_data.get("headers", [])
-            rows = sheet_data.get("rows", [])
-            content_parts.append(f"=== {sheet_name} ===")
-            content_parts.append("\t".join(headers))
-            for row in rows:
-                content_parts.append("\t".join(str(c) for c in row))
-            content_parts.append("")
-        
-        full_content = "\n".join(content_parts)
+            texto = parse_knowledge.sheet_rows_to_text(
+                sheet_data.get("name", "Dados"),
+                sheet_data.get("headers", []),
+                sheet_data.get("rows", []),
+            )
+            if texto:
+                content_parts.append(texto)
+
+        full_content = "\n\n".join(content_parts)
         knowledge_rag.save_knowledge_raw(filename, full_content, description=description)
         
         print(f"[knowledge] planilha salva: {filename}")
@@ -2643,25 +2776,15 @@ def _parse_docx_upload(file_storage) -> str:
 
 
 def _parse_xlsx_upload(file_storage) -> str:
-    """Extrai texto de um arquivo .xlsx enviado via upload (todas as abas)."""
+    """Extrai texto de um arquivo .xlsx enviado via upload (todas as abas).
+
+    Usa o mesmo conversor do carregamento oficial: uma linha por registro. O
+    formato antigo (df.to_string) alinhava colunas com dezenas de espacos e as
+    linhas eram cortadas na indexacao, quebrando precos e taxas.
+    """
     try:
-        import pandas as pd
         import io
-        xls = pd.ExcelFile(io.BytesIO(file_storage.read()))
-        partes = []
-        for sheet in xls.sheet_names:
-            df = pd.read_excel(xls, sheet_name=sheet)
-            df = df.dropna(how="all")
-            df = df.dropna(axis=1, how="all")
-            if df.empty:
-                continue
-            df.columns = [
-                f"col{i}" if "Unnamed" in str(c) else str(c)
-                for i, c in enumerate(df.columns)
-            ]
-            texto = df.to_string(index=False, max_colwidth=120)
-            partes.append(f"=== {sheet} ===\n{texto}")
-        return "\n\n".join(partes)
+        return parse_knowledge.xlsx_to_text(io.BytesIO(file_storage.read()))
     except Exception as e:
         print(f"[knowledge] ERRO parse xlsx: {e}")
         return ""
@@ -2736,33 +2859,74 @@ def api_knowledge_delete_all():
 @app.post("/api/knowledge/reload")
 @login_required
 def api_knowledge_reload():
-    """Recarrega o cache do system prompt (util apos upload de .docx/.xlsx)."""
+    """Recarrega tudo que depende do knowledge (prompt, base, tabelas, RAG)."""
     global FULL_SYSTEM_PROMPT
     parse_knowledge.reload_cache()
-    knowledge_rag.reload_agent_prompts()
-    _prompt_from_docx = parse_knowledge.get_prompt_cached()
-    if _prompt_from_docx:
-        FULL_SYSTEM_PROMPT = _prompt_from_docx + (
-            "\n\n=== TOOLS DISPONIVEIS ==="
-            "\nVoce tem acesso a uma tool 'search_knowledge' para buscar informacoes "
-            "na base de conhecimento. Chame essa tool sempre que precisar consultar "
-            "produtos, precos, politicas ou qualquer informacao da empresa."
-            "\nVoce tem acesso a uma tool 'transfer_to_human' para transferir o atendimento a um humano. "
-            "USE essa tool quando: o cliente pedir explicitamente para falar com um atendente ou humano; "
-            "a situacao envolver reclamacao grave, cancelamento, reembolso ou devolucao; "
-            "voce nao souber responder adequadamente; "
-            "a solicitacao estiver fora do seu escopo; "
-            "ou quando perceber que o cliente esta frustrado ou insatisfeito. "
-            "Ao transferir, informe brevemente o motivo no parametro 'reason'."
-            "\nVoce tem acesso a uma tool 'calculate_order' para validar pedidos no cardapio. "
-            "Chame essa tool ANTES de confirmar o pedido com o cliente, informando os itens e o bairro de entrega. "
-            "Ela valida produtos, quantidades, calcula subtotal, frete e total."
-            "\nVoce tem acesso a uma tool 'send_order_to_cardapio' para enviar pedidos confirmados para o cardapio digital. "
-            "USE essa tool SOMENTE apos o cliente ter confirmado o pedido completo e voce ter validado com calculate_order. "
-            "Nunca envie sem confirmacao explicita do cliente."
-        )
-    print(f"[knowledge] system prompt recarregado: {len(FULL_SYSTEM_PROMPT)} chars")
-    return jsonify({"ok": True, "prompt_chars": len(FULL_SYSTEM_PROMPT)})
+    knowledge_rag.invalidate_knowledge_caches()
+    facts.invalidate()
+
+    FULL_SYSTEM_PROMPT = _get_current_system_prompt()
+    dados = facts.get()
+    print(
+        f"[knowledge] recarregado: prompt={len(FULL_SYSTEM_PROMPT)} chars, "
+        f"{len(dados['bairros'])} bairros, {len(dados['produtos'])} produtos"
+    )
+    return jsonify({
+        "ok": True,
+        "prompt_chars": len(FULL_SYSTEM_PROMPT),
+        "bairros": len(dados["bairros"]),
+        "produtos": len(dados["produtos"]),
+    })
+
+
+@app.get("/api/knowledge/health")
+@login_required
+def api_knowledge_health():
+    """Diagnostico da base: o que o agente realmente le antes de responder.
+
+    Aponta arquivo sem documento original, texto com trechos duplicados e
+    tabelas que nao foram reconhecidas — as tres coisas que fazem o agente
+    responder errado sem dar nenhum erro visivel.
+    """
+    import knowledge_repair
+
+    arquivos = []
+    for item in knowledge_rag.list_files_with_status():
+        filename = item["filename"]
+        documento = database.get_knowledge_document(filename)
+        conteudo = documento or knowledge_rag.get_file_content(filename)
+        arquivos.append({
+            "filename": filename,
+            "eh_prompt": knowledge_rag.is_prompt_file(filename),
+            "chunks": item.get("chunks", 0),
+            "status": item.get("status", ""),
+            "chars": len(conteudo),
+            "tem_documento_original": bool(documento),
+            "texto_duplicado": knowledge_repair.looks_corrupted(conteudo),
+        })
+
+    dados = facts.get()
+    problemas = []
+    for a in arquivos:
+        if not a["tem_documento_original"]:
+            problemas.append(f"{a['filename']}: sem documento original — rode reindex_knowledge.py")
+        if a["texto_duplicado"]:
+            problemas.append(f"{a['filename']}: texto com trechos duplicados — rode reindex_knowledge.py")
+        if a["status"] != "indexed":
+            problemas.append(f"{a['filename']}: status '{a['status']}' (busca semantica incompleta)")
+    if not dados["bairros"]:
+        problemas.append("tabela de bairros vazia — consultar_frete nao vai funcionar")
+    if not dados["produtos"]:
+        problemas.append("tabela de produtos vazia — consultar_preco nao vai funcionar")
+
+    return jsonify({
+        "ok": not problemas,
+        "arquivos": arquivos,
+        "bairros_carregados": len(dados["bairros"]),
+        "produtos_carregados": len(dados["produtos"]),
+        "contexto_injetado_chars": len(knowledge_rag.get_full_knowledge_content()),
+        "problemas": problemas,
+    })
 
 
 @app.get("/api/knowledge/prompts")

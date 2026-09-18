@@ -27,3 +27,6 @@ env/
 # OS
 .DS_Store
 Thumbs.db
+
+# Backup local da base de conhecimento (dados do negocio)
+backup_knowledge_pre_reindex.json

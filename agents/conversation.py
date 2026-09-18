@@ -300,6 +300,13 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
         for qty_str, _, product_name in item_pattern:
             qty = int(qty_str)
             product_name = product_name.strip()
+
+            # Nome curto demais nao identifica produto. Sem esta guarda, "hoje as
+            # 18h" virava "18 x Coxinha": o resto "h" casava por substring com
+            # "coxinha" e o pedido inteiro era trocado por um horario.
+            if len(product_name) < 3:
+                continue
+
             # Remove plural
             if product_name.endswith('s') and not product_name.endswith('es'):
                 product_name_singular = product_name[:-1]
@@ -312,11 +319,18 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
             matched_name = None
             # Tenta match exato primeiro
             for key, canonical in _TODOS_PRODUTOS.items():
-                if key in product_name or product_name in key:
+                if key == product_name or key == product_name_singular:
                     matched_name = canonical
                     break
-            # Tenta match parcial
+            # Depois, o nome do produto contido no texto (ou vice-versa),
+            # exigindo um trecho longo o bastante para nao casar por acaso
             if not matched_name:
+                for key, canonical in _TODOS_PRODUTOS.items():
+                    if (key in product_name or product_name in key) and min(len(key), len(product_name)) >= 4:
+                        matched_name = canonical
+                        break
+            # Por ultimo, prefixo de 4 letras (trata plural/typo leve)
+            if not matched_name and len(product_name_singular) >= 4:
                 for key, canonical in _TODOS_PRODUTOS.items():
                     if key.startswith(product_name_singular[:4]) or product_name_singular.startswith(key[:4]):
                         matched_name = canonical

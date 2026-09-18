@@ -59,12 +59,20 @@ def init_db() -> None:
     if "knowledge_files" not in _get_tables():
         db.executescript(KNOWLEDGE_FILES_SCHEMA)
         print("[db] tabela knowledge_files criada")
-    elif "status" not in db.table_columns("knowledge_files"):
-        try:
-            db.execute("ALTER TABLE knowledge_files ADD COLUMN status TEXT DEFAULT 'indexed'")
-            print("[db] coluna status adicionada em knowledge_files")
-        except Exception:
-            pass
+    else:
+        kfcols = db.table_columns("knowledge_files")
+        if "status" not in kfcols:
+            try:
+                db.execute("ALTER TABLE knowledge_files ADD COLUMN status TEXT DEFAULT 'indexed'")
+                print("[db] coluna status adicionada em knowledge_files")
+            except Exception:
+                pass
+        if "content" not in kfcols:
+            try:
+                db.execute("ALTER TABLE knowledge_files ADD COLUMN content TEXT DEFAULT ''")
+                print("[db] coluna content adicionada em knowledge_files (documento original)")
+            except Exception:
+                pass
 
     # Migração: adiciona wa_media_id na tabela messages
     mcols = db.table_columns("messages")
@@ -189,6 +197,7 @@ KNOWLEDGE_FILES_SCHEMA = """
 CREATE TABLE IF NOT EXISTS knowledge_files (
     filename TEXT PRIMARY KEY,
     description TEXT DEFAULT '',
+    content TEXT DEFAULT '',
     status TEXT DEFAULT 'indexed',
     created_at TEXT DEFAULT NOW(),
     updated_at TEXT DEFAULT NOW()
@@ -1107,13 +1116,59 @@ def delete_knowledge_file(filename: str) -> None:
 # ── Knowledge Files (descrições) ──────────────────────────────────────────────
 
 def upsert_knowledge_file(filename: str, description: str = "") -> None:
-    """Insere ou atualiza a descrição de um arquivo knowledge."""
+    """Insere ou atualiza a descrição de um arquivo knowledge.
+    Descrição vazia NÃO apaga a descrição já cadastrada."""
     now = datetime.utcnow().isoformat()
     db.execute(
         "INSERT INTO knowledge_files (filename, description, created_at, updated_at) VALUES (?,?,?,?) "
-        "ON CONFLICT(filename) DO UPDATE SET description=EXCLUDED.description, updated_at=EXCLUDED.updated_at",
+        "ON CONFLICT(filename) DO UPDATE SET "
+        "description=CASE WHEN EXCLUDED.description = '' THEN knowledge_files.description "
+        "ELSE EXCLUDED.description END, updated_at=EXCLUDED.updated_at",
         (filename, description, now, now),
     )
+
+
+# ── Documento original (fonte da verdade, sem perdas de chunking) ────────────
+
+def set_knowledge_document(filename: str, content: str, description: str = "", status: str = "indexed") -> None:
+    """Guarda o texto ORIGINAL completo do arquivo.
+
+    Os chunks da tabela `knowledge` existem só para busca semântica; a
+    reconstrução do documento a partir deles é lossy (quebras e sobreposição).
+    Esta coluna preserva o texto exato que o agente deve ler.
+    """
+    now = datetime.utcnow().isoformat()
+    db.execute(
+        "INSERT INTO knowledge_files (filename, description, content, status, created_at, updated_at) "
+        "VALUES (?,?,?,?,?,?) "
+        "ON CONFLICT(filename) DO UPDATE SET "
+        "description=CASE WHEN EXCLUDED.description = '' THEN knowledge_files.description "
+        "ELSE EXCLUDED.description END, "
+        "content=EXCLUDED.content, status=EXCLUDED.status, updated_at=EXCLUDED.updated_at",
+        (filename, description, content, status, now, now),
+    )
+
+
+def get_knowledge_document(filename: str) -> str:
+    """Retorna o texto original de um arquivo (vazio se não houver)."""
+    try:
+        row = db.fetch_one("SELECT content FROM knowledge_files WHERE filename=?", (filename,))
+    except Exception:
+        return ""
+    if not row:
+        return ""
+    return (row.get("content") or "") if isinstance(row, dict) else ""
+
+
+def get_all_knowledge_documents() -> list[dict]:
+    """Retorna {filename, description, content} de todos os arquivos com texto original."""
+    try:
+        return db.fetch_all(
+            "SELECT filename, description, content FROM knowledge_files "
+            "WHERE content IS NOT NULL AND content <> '' ORDER BY filename"
+        )
+    except Exception:
+        return []
 
 
 def get_knowledge_file_description(filename: str) -> str:
@@ -1165,7 +1220,9 @@ def upsert_knowledge_file_with_status(filename: str, description: str = "", stat
         "INSERT INTO knowledge_files (filename, description, status, created_at, updated_at) "
         "VALUES (?,?,?,?,?) "
         "ON CONFLICT(filename) DO UPDATE SET "
-        "description=EXCLUDED.description, status=EXCLUDED.status, updated_at=EXCLUDED.updated_at",
+        "description=CASE WHEN EXCLUDED.description = '' THEN knowledge_files.description "
+        "ELSE EXCLUDED.description END, "
+        "status=EXCLUDED.status, updated_at=EXCLUDED.updated_at",
         (filename, description, status, now, now),
     )
 
@@ -1241,7 +1298,8 @@ def insert_knowledge_chunks_batch(records: list[dict]) -> None:
 def get_recent_messages(phone: str, limit: int = 20) -> list[dict]:
     """Retorna últimas mensagens no formato para memory.py."""
     rows = db.fetch_all(
-        "SELECT direction, body FROM messages WHERE phone=? ORDER BY created_at DESC LIMIT ?",
+        "SELECT direction, body FROM messages WHERE phone=? AND body <> '' "
+        "ORDER BY created_at DESC, id DESC LIMIT ?",
         (phone, limit),
     )
     if not rows:

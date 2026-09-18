@@ -13,6 +13,11 @@ EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
 
 _client = OpenAI(api_key=OPENAI_API_KEY)
 
+# Caches de leitura. Toda escrita no knowledge passa por
+# invalidate_knowledge_caches(), que limpa os dois.
+_DOC_CACHE: dict[str, str] = {}
+_CONTEXT_CACHE: dict[str, str] = {}
+
 # ── Embeddings ───────────────────────────────────────────────────────────────
 
 
@@ -36,60 +41,95 @@ def embed_batch(texts: list[str]) -> list[list[float]]:
 
 # ── Chunking ─────────────────────────────────────────────────────────────────
 
+# Arquivos que sao INSTRUCOES do agente (prompts), nao dados consultaveis.
+# Eles nunca entram no bloco de knowledge injetado no system prompt: o prompt
+# operacional ja e carregado por parse_knowledge e os .md sao dos sub-agentes.
+PROMPT_FILES = {
+    "PROMPTS EDUARDO 13.09.26.docx",
+    "triagem.md",
+    "cardapio.md",
+    "pedido.md",
+    "logistica.md",
+    "pagamento.md",
+    "crise.md",
+    "router.md",
+}
 
-def chunk_text(text: str, max_len: int = 500, overlap: int = 50) -> list[str]:
-    """Divide texto em chunks para embedding com sobreposição entre chunks.
-    Prioridade: paragrafo duplo (\\n\\n) > sentenca (.\\s) > corte bruto por max_len.
+
+def is_prompt_file(filename: str) -> bool:
+    """True para arquivos de prompt (instrucoes), False para dados."""
+    return (filename or "").strip() in PROMPT_FILES
+
+
+def _is_heading(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped:
+        return False
+    if stripped.startswith("#"):
+        return True
+    if stripped.startswith("===") and stripped.endswith("==="):
+        return True
+    return False
+
+
+def chunk_text(text: str, max_len: int = 900, overlap_lines: int = 1) -> list[str]:
+    """Divide o texto em chunks SEM cortar linhas no meio.
+
+    Regras:
+    - nunca parte uma linha (linhas = registros de tabela, itens de lista);
+    - cada chunk carrega o cabecalho de secao vigente, para continuar
+      legivel quando recuperado isolado pela busca vetorial;
+    - a sobreposicao e feita por LINHAS inteiras, nunca por fatia de caracteres.
+
+    O conteudo salvo aqui e usado apenas para BUSCA. O texto oficial do
+    arquivo fica em knowledge_files.content (ver database.set_knowledge_document).
     """
-    text = text.strip()
+    text = (text or "").strip()
     if not text:
         return []
 
-    # 1) Quebra por parágrafo duplo
-    paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+    lines = text.split("\n")
+    chunks: list[str] = []
+    current: list[str] = []
+    current_len = 0
+    heading = ""
 
-    raw_chunks = []
-    for para in paragraphs:
-        if len(para) <= max_len:
-            raw_chunks.append(para)
-        else:
-            # 2) Quebra por sentença dentro do parágrafo grande
-            sentences = []
-            current = ""
-            for char in para:
-                current += char
-                if char in (".", "!", "?") and len(current.strip()) > 0:
-                    sentences.append(current.strip())
-                    current = ""
-            if current.strip():
-                sentences.append(current.strip())
+    def flush():
+        nonlocal current, current_len
+        if not current:
+            return
+        body = "\n".join(current).strip()
+        if body:
+            if heading and not body.startswith(heading):
+                chunks.append(f"{heading}\n{body}")
+            else:
+                chunks.append(body)
+        current = []
+        current_len = 0
 
-            # Agrupa sentenças respeitando max_len
-            buffer = ""
-            for sent in sentences:
-                if buffer and len(buffer) + len(sent) + 1 > max_len:
-                    raw_chunks.append(buffer)
-                    buffer = sent
-                else:
-                    buffer = f"{buffer} {sent}".strip() if buffer else sent
-            if buffer:
-                raw_chunks.append(buffer)
+    for line in lines:
+        if _is_heading(line):
+            flush()
+            heading = line.strip()
+            current = [line]
+            current_len = len(line)
+            continue
 
-    # 3) Remove chunks muito curtos (< 10 chars) — provavelmente lixo
-    raw_chunks = [c for c in raw_chunks if len(c) >= 10]
+        line_len = len(line) + 1
+        if current_len + line_len > max_len and current:
+            tail = [ln for ln in current[-overlap_lines:] if ln.strip()] if overlap_lines > 0 else []
+            flush()
+            current = list(tail)
+            current_len = sum(len(ln) + 1 for ln in current)
 
-    if not raw_chunks:
-        return [text[:max_len]]
+        current.append(line)
+        current_len += line_len
 
-    # 4) Adiciona sobreposição entre chunks para preservar contexto nas fronteiras
-    if overlap > 0 and len(raw_chunks) > 1:
-        chunks = [raw_chunks[0]]
-        for i in range(1, len(raw_chunks)):
-            prev_tail = raw_chunks[i - 1][-overlap:]
-            chunks.append(prev_tail + " " + raw_chunks[i])
-        return chunks
+    flush()
 
-    return raw_chunks
+    # Descarta chunks sem conteudo util (so cabecalho ou lixo curto)
+    result = [c for c in chunks if len(c.strip()) >= 12]
+    return result or [text[:max_len]]
 
 
 # ── Knowledge CRUD ───────────────────────────────────────────────────────────
@@ -119,47 +159,43 @@ def save_knowledge(filename: str, content: str, description: str = "") -> None:
     # Insere no banco
     database.insert_knowledge_chunks(filename, chunks, embeddings)
 
-    # Salva descrição do arquivo
-    if description:
-        database.upsert_knowledge_file(filename, description)
+    # Texto ORIGINAL: fonte da verdade lida pelo agente (chunks sao so busca)
+    database.set_knowledge_document(filename, content, description, status="indexed")
 
     invalidate_knowledge_caches()
     print(f"[rag] salvo {filename}: {len(chunks)} chunks")
 
 
 def _format_search_results(results: list[dict], query: str) -> str:
-    """Formata resultados e preserva tabelas quando a consulta e generica."""
+    """Formata os trechos recuperados, cada um rotulado com o arquivo de origem.
+
+    Quando os trechos recuperados de um arquivo forem pequenos demais para
+    responder com segurança (tabelas cortadas, por exemplo), devolve o arquivo
+    inteiro daquele arquivo — e só dele, nunca de todos.
+    """
     if not results:
         return ""
 
-    generic_terms = {
-        "cardapio", "cardápio", "produtos", "precos", "preços", "valor",
-        "horario", "horários", "horarios", "frete", "entrega", "bairros",
-        "taxa", "pagamento", "regras", "politicas", "políticas",
-    }
-    terms = {term.strip(".,?!:;") for term in query.lower().split()}
-    is_generic = len(terms) <= 3 or (bool(terms) and terms.issubset(generic_terms))
-    is_sparse = len(results) < 2 or sum(
-        len(result.get("content", "")) for result in results
-    ) < 800
+    by_file: dict[str, list[str]] = {}
+    for result in results:
+        filename = result.get("filename", "")
+        content = (result.get("content") or "").strip()
+        if not content:
+            continue
+        by_file.setdefault(filename, []).append(content)
 
-    if is_generic or is_sparse:
-        filenames = []
-        for result in results:
-            filename = result["filename"]
-            if filename not in filenames:
-                filenames.append(filename)
-        full_files = []
-        for filename in filenames:
-            content = get_file_content(filename)
-            if content:
-                full_files.append(f"[{filename}] {content}")
-        if full_files:
-            joined = "\n\n---\n\n".join(full_files)
-            print(f"[rag] search full-file fallback query_len={len(query)} files={len(full_files)} context_len={len(joined)}")
-            return joined
+    blocks = []
+    for filename, contents in by_file.items():
+        joined = ("\n\n").join(contents)
+        full = get_file_content(filename)
+        # Se o arquivo inteiro e pequeno, ou se os trechos cobrem quase tudo,
+        # vale mais entregar o documento completo do que fragmentos.
+        if full and (len(full) <= 4000 or len(joined) >= 0.6 * len(full)):
+            blocks.append(f"[{filename}]" + "\n" + full)
+        else:
+            blocks.append(f"[{filename}]" + "\n" + joined)
 
-    return "\n\n---\n\n".join(f"[{r['filename']}] {r['content']}" for r in results)
+    return ("\n\n---\n\n").join(blocks)
 
 
 def search_context(query: str, top_k: int = 3) -> str:
@@ -200,12 +236,10 @@ def list_files() -> list[dict]:
 
 
 def get_file(filename: str) -> dict | None:
-    """Retorna conteúdo completo de um arquivo (concatenado dos chunks) + descrição."""
-    chunks = database.get_knowledge_chunks(filename)
-    if not chunks:
+    """Retorna o conteúdo completo de um arquivo + descrição."""
+    content = get_file_content(filename)
+    if not content:
         return None
-    chunks.sort(key=lambda c: c["chunk_index"])
-    content = "\n\n".join(c["content"] for c in chunks)
     description = database.get_knowledge_file_description(filename)
     return {"filename": filename, "content": content, "description": description}
 
@@ -225,12 +259,36 @@ def get_file_descriptions() -> list[dict]:
 
 
 def get_file_content(filename: str) -> str:
-    """Retorna o conteúdo completo de um arquivo específico (chamado pela tool)."""
-    chunks = database.get_knowledge_chunks(filename)
-    if not chunks:
+    """Retorna o conteúdo completo e FIEL de um arquivo.
+
+    Prioriza o documento original guardado em knowledge_files.content. Só cai
+    para a remontagem dos chunks em bases antigas ainda não reindexadas —
+    essa remontagem é aproximada; rode reindex_knowledge.py.
+    """
+    filename = (filename or "").strip()
+    if not filename:
         return ""
-    chunks.sort(key=lambda c: c["chunk_index"])
-    return "\n\n".join(c["content"] for c in chunks)
+
+    cached = _DOC_CACHE.get(filename)
+    if cached is not None:
+        return cached
+
+    content = ""
+    try:
+        content = database.get_knowledge_document(filename)
+    except Exception as e:
+        print(f"[rag] WARN documento original indisponivel ({filename}): {e}")
+
+    if not content:
+        chunks = database.get_knowledge_chunks(filename)
+        if not chunks:
+            return ""
+        chunks.sort(key=lambda c: c["chunk_index"])
+        content = "\n".join(c["content"] for c in chunks)
+        print(f"[rag] AVISO: {filename} sem documento original - remontado dos chunks (rode reindex_knowledge.py)")
+
+    _DOC_CACHE[filename] = content
+    return content
 
 
 def load_prompt_db_first(db_name: str, local_path: str, fallback_content: str = "") -> str:
@@ -277,6 +335,13 @@ def reload_agent_prompts():
 
 def invalidate_knowledge_caches():
     """Invalida caches que dependem do conteudo atualizado do knowledge."""
+    _DOC_CACHE.clear()
+    _CONTEXT_CACHE.clear()
+    try:
+        import facts
+        facts.invalidate()
+    except Exception as e:
+        print(f"[knowledge] aviso ao limpar cache de facts: {e}")
     try:
         import parse_knowledge
         parse_knowledge.reload_cache()
@@ -285,26 +350,53 @@ def invalidate_knowledge_caches():
     reload_agent_prompts()
 
 
-def get_full_knowledge_content() -> str:
-    """Retorna TODO o conteúdo do knowledge concatenado, pronto para injetar no system prompt.
-    Organiza por arquivo com separadores para facilitar a leitura pelo LLM.
+def get_full_knowledge_content(include_prompts: bool = False) -> str:
+    """Retorna o conteúdo dos arquivos de knowledge, pronto para o system prompt.
+
+    Por padrão devolve só os arquivos de DADOS (cardápio, bairros, horários,
+    políticas). Os arquivos de prompt ficam de fora: o prompt operacional já é
+    carregado por parse_knowledge e os .md são dos sub-agentes — injetá-los
+    aqui duplicava instruções e criava regras conflitantes no mesmo contexto.
     """
-    chunks = database.get_all_knowledge_content()
-    if not chunks:
-        return ""
+    cache_key = "all" if include_prompts else "dados"
+    cached = _CONTEXT_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
 
+    docs = database.get_all_knowledge_documents()
     parts = []
-    current_file = None
-    for c in chunks:
-        if c["filename"] != current_file:
-            current_file = c["filename"]
-            if parts:
-                parts.append("")  # linha em branco entre arquivos
-            parts.append(f"=== {current_file} ===")
-        parts.append(c["content"])
+    used = []
 
-    result = "\n\n".join(parts)
-    print(f"[rag] full knowledge content: {len(result)} chars, {len(chunks)} chunks")
+    if docs:
+        for doc in docs:
+            filename = doc.get("filename", "")
+            if not include_prompts and is_prompt_file(filename):
+                continue
+            content = (doc.get("content") or "").strip()
+            if not content:
+                continue
+            used.append(filename)
+            parts.append(f"=== {filename} ==="  + "\n\n" + content)
+    else:
+        # Base antiga (sem documento original): remonta pelos chunks
+        chunks = database.get_all_knowledge_content()
+        current_file = None
+        buf = []
+        for c in chunks:
+            if c["filename"] != current_file:
+                if buf and current_file and (include_prompts or not is_prompt_file(current_file)):
+                    used.append(current_file)
+                    parts.append(f"=== {current_file} ==="  + "\n\n" + "\n".join(buf))
+                current_file = c["filename"]
+                buf = []
+            buf.append(c["content"])
+        if buf and current_file and (include_prompts or not is_prompt_file(current_file)):
+            used.append(current_file)
+            parts.append(f"=== {current_file} ==="  + "\n\n" + "\n".join(buf))
+
+    result = ("\n\n").join(parts)
+    _CONTEXT_CACHE[cache_key] = result
+    print(f"[rag] knowledge context: {len(result)} chars, arquivos={used}")
     return result
 
 
@@ -324,6 +416,10 @@ def get_knowledge_for_agent(agent_name: str) -> str:
     selected = []
     for item in list_files():
         filename = item.get("filename", "")
+        # cardapio.md e o PROMPT do sub-agente, nao dado consultavel: sem este
+        # filtro o agente recebia as proprias instrucoes como se fossem base.
+        if is_prompt_file(filename):
+            continue
         description = item.get("description", "") or ""
         if any(term in f"{filename} {description}".lower() for term in terms):
             content = get_file_content(filename)
@@ -348,7 +444,7 @@ def save_knowledge_raw(filename: str, content: str, description: str = "") -> No
         return
 
     database.insert_knowledge_chunks(filename, chunks, [None] * len(chunks))
-    database.upsert_knowledge_file_with_status(filename, description, status="pending")
+    database.set_knowledge_document(filename, content, description, status="pending")
     invalidate_knowledge_caches()
     print(f"[rag] salvo (raw) {filename}: {len(chunks)} chunks (pendente de embedding)")
 

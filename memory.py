@@ -8,7 +8,11 @@ import threading
 import os
 import database
 
-MAX_HISTORY = int(os.getenv("MAX_HISTORY", "20"))
+# Janela de mensagens enviadas ao LLM. 20 cobria ~10 turnos: em pedidos longos
+# (item -> upsell -> logistica -> pagamento) o inicio da conversa saia da janela
+# e o agente voltava a perguntar o que ja sabia. Os dados coletados tambem ficam
+# em conversation_memory, que nao expira com a janela.
+MAX_HISTORY = int(os.getenv("MAX_HISTORY", "40"))
 
 _lock = threading.Lock()
 _store: dict[str, list[dict]] = {}
@@ -56,6 +60,18 @@ def _load_from_database(user: str) -> None:
 
 
 def reset(user: str) -> None:
-    """Limpa o histórico de um usuário."""
+    """Limpa o histórico de um usuário (memória e ficha estruturada)."""
     with _lock:
         _store.pop(user, None)
+    try:
+        import conversation_memory
+        conversation_memory.reset(user)
+    except Exception as e:
+        print(f"[memory] WARN nao limpou ficha de {user}: {e}")
+
+
+def reload_from_database(user: str) -> None:
+    """Descarta a cópia em memória e recarrega o histórico do banco."""
+    with _lock:
+        _store.pop(user, None)
+        _load_from_database(user)

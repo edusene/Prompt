@@ -70,44 +70,117 @@ def _adaptar_prompt_docx(texto: str) -> str:
     return texto.strip()
 
 
+def _clean_cell(value) -> str:
+    """Normaliza uma celula da planilha para texto."""
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if text.lower() in ("nan", "nat", "none"):
+        return ""
+    # 8.0 -> 8 ; 12.5 -> 12.5 (evita "R$ 8.0" na tabela de frete)
+    if text.replace(".", "", 1).replace("-", "", 1).isdigit() and text.endswith(".0"):
+        text = text[:-2]
+    return text
+
+
+def sheet_rows_to_text(sheet_name: str, headers: list, rows: list) -> str:
+    """Formata uma aba como cabecalho + UMA LINHA POR REGISTRO.
+
+    Uma linha por registro e essencial: o chunker nunca quebra uma linha, entao
+    nenhum bairro fica separado da sua taxa nem produto do seu preco.
+    """
+    headers = [_clean_cell(h) or f"col{i+1}" for i, h in enumerate(headers)]
+    lines = [f"=== {sheet_name} ===", " | ".join(headers)]
+    seen = set()
+    for row in rows:
+        cells = [_clean_cell(c) for c in row]
+        while cells and not cells[-1]:
+            cells.pop()
+        if not any(cells):
+            continue
+        line = " | ".join(cells)
+        # A planilha repete blocos de cabecalho/linhas; duplicata vira ruido
+        if line in seen or line == " | ".join(headers):
+            continue
+        seen.add(line)
+        lines.append(line)
+    return ("\n").join(lines)
+
+
+def _detect_header_row(rows: list) -> int:
+    """Indice da primeira linha que parece cabecalho (2+ celulas de texto)."""
+    for idx, row in enumerate(rows):
+        filled = [c for c in row if c]
+        if len(filled) >= 2 and any(not c.replace(".", "").replace(",", "").isdigit() for c in filled):
+            return idx
+    return 0
+
+
+def xlsx_to_text(source) -> str:
+    """Converte um .xlsx (caminho ou file-like) em texto estruturado limpo.
+
+    Substitui o antigo df.to_string(), que alinhava colunas com dezenas de
+    espacos e era truncado no meio das linhas pelo chunker — origem dos precos
+    e fretes errados que o agente informava. Usa openpyxl (dependencia
+    declarada); pandas nao e necessario.
+    """
+    try:
+        import openpyxl
+    except ImportError:
+        print("[parse_knowledge] openpyxl nao instalado, pulando xlsx")
+        return ""
+
+    wb = openpyxl.load_workbook(source, read_only=True, data_only=True)
+    partes = []
+    try:
+        for sheet_name in wb.sheetnames:
+            ws = wb[sheet_name]
+            rows = []
+            for row in ws.iter_rows(values_only=True):
+                cells = [_clean_cell(c) for c in row]
+                if any(cells):
+                    rows.append(cells)
+            if not rows:
+                continue
+
+            # Remove colunas totalmente vazias
+            width = max(len(r) for r in rows)
+            keep = [
+                ci for ci in range(width)
+                if any(ci < len(r) and r[ci] for r in rows)
+            ]
+            rows = [[r[ci] if ci < len(r) else "" for ci in keep] for r in rows]
+
+            header_idx = _detect_header_row(rows)
+            headers = rows[header_idx]
+            texto = sheet_rows_to_text(sheet_name, headers, rows[header_idx + 1:])
+            if texto:
+                partes.append(texto)
+    finally:
+        try:
+            wb.close()
+        except Exception:
+            pass
+
+    return ("\n\n").join(partes)
+
+
 def _read_xlsx() -> str:
     """Le o .xlsx e converte cada aba para texto estruturado limpo.
     Tenta DB primeiro, depois local.
     """
-    # Tenta do banco de dados
     content = _read_from_db(_DADOS_DB_NAME)
     if content:
         return content
 
-    # Fallback: arquivo local
-    try:
-        import pandas as pd
-    except ImportError:
-        print("[parse_knowledge] pandas/openpyxl nao instalado, pulando xlsx")
-        return ""
     if not _DADOS_XLSX.exists():
         print(f"[parse_knowledge] arquivo nao encontrado: {_DADOS_XLSX.name}")
         return ""
-
-    xls = pd.ExcelFile(str(_DADOS_XLSX))
-    partes = []
-
-    for sheet in xls.sheet_names:
-        df = pd.read_excel(xls, sheet_name=sheet)
-        # Remove linhas 100% NaN
-        df = df.dropna(how="all")
-        # Remove colunas 100% NaN
-        df = df.dropna(axis=1, how="all")
-        if df.empty:
-            continue
-        # Limpa nomes de colunas Unnamed
-        df.columns = [
-            f"col{i}" if "Unnamed" in str(c) else str(c) for i, c in enumerate(df.columns)
-        ]
-        texto = df.to_string(index=False, max_colwidth=120)
-        partes.append(f"=== {sheet} ===\n{texto}")
-
-    return "\n\n".join(partes)
+    try:
+        return xlsx_to_text(str(_DADOS_XLSX))
+    except Exception as e:
+        print(f"[parse_knowledge] ERRO ao ler xlsx: {e}")
+        return ""
 
 
 def get_prompt_system() -> str:
@@ -124,20 +197,14 @@ def get_knowledge_dados() -> str:
 
 
 def get_full_prompt_with_knowledge() -> str:
-    """Retorna prompt + knowledge completos para injetar no system prompt."""
-    prompt = get_prompt_system()
-    dados = get_knowledge_dados()
-    parts = []
-    if prompt:
-        parts.append(prompt)
-    if dados:
-        parts.append(
-            "\n\n=== BASE DE DADOS OFICIAL (PRECOS, BAIRROS, HORARIOS, PAGAMENTOS) ===\n"
-            "Use estes dados como FONTE VERDADEIRA para precos, taxas de frete, "
-            "horarios de funcionamento e formas de pagamento.\n\n"
-            + dados
-        )
-    return "\n\n".join(parts)
+    """Retorna apenas o prompt operacional (instrucoes do agente).
+
+    Os DADOS (cardapio, bairros, horarios) NAO entram aqui: eles sao injetados
+    uma unica vez por app.py, a partir de knowledge_rag.get_full_knowledge_content().
+    Antes eram concatenados nos dois lugares e a planilha aparecia duplicada no
+    mesmo contexto — instrucao repetida e o que fazia o modelo ignorar a base.
+    """
+    return get_prompt_system()
 
 
 # Cache em memoria para evitar re-leitura a cada chamada
@@ -145,16 +212,12 @@ _cached_prompt = None
 
 
 def get_prompt_cached() -> str:
-    """Retorna o system prompt completo (cached)."""
+    """Retorna o prompt operacional (cached)."""
     global _cached_prompt
     if _cached_prompt is None:
         _cached_prompt = get_full_prompt_with_knowledge()
         if _cached_prompt:
-            print(
-                f"[parse_knowledge] prompt carregado: {len(_cached_prompt)} chars "
-                f"(docx={len(get_prompt_system())} chars, "
-                f"xlsx={len(get_knowledge_dados())} chars)"
-            )
+            print(f"[parse_knowledge] prompt operacional carregado: {len(_cached_prompt)} chars")
     return _cached_prompt or ""
 
 

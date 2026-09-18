@@ -49,7 +49,7 @@ Edite `.env` e preencha:
 | `OPENAI_API_KEY` | Chave da OpenAI |
 | `OPENAI_MODEL` | Modelo OpenAI (padrao: `gpt-4o-mini`) |
 | `BUFFER_SECONDS` | Segundos de debounce (padrao: `8`) |
-| `MAX_HISTORY` | Maximo de mensagens no historico (padrao: `20`) |
+| `MAX_HISTORY` | Maximo de mensagens no historico (padrao: `40`) |
 | `SYSTEM_PROMPT` | Instrucao de sistema para o LLM |
 | `PORT` | Porta do Flask (padrao: `5000`) |
 
@@ -225,20 +225,75 @@ Meta envia webhooks para notificacoes:
 
 ---
 
-## 11. Estrutura de arquivos
+## 11. Memoria e base de conhecimento do agente
+
+O que o agente le antes de responder, em ordem:
+
+1. **Prompt operacional** (`PROMPTS EDUARDO ... .docx`, carregado por `parse_knowledge`)
+2. **Base oficial** (`knowledge_rag.get_full_knowledge_content()`) — só os arquivos de
+   DADOS. Arquivos de prompt (o .docx e os `prompts/*.md` dos sub-agentes) ficam de
+   fora: injetá-los junto duplicava instruções e gerava regras conflitantes.
+3. **Regras de execucao** e, por ultimo, a **ficha do atendimento**.
+
+### Numeros nunca saem da cabeca do modelo
+
+| Dado | De onde vem |
+|---|---|
+| Taxa de entrega | tool `consultar_frete` → `facts.lookup_frete` (tabela oficial, com apelidos e tolerancia a erro de digitacao) |
+| Preco de produto | tool `consultar_preco` → `facts.lookup_preco` |
+| Subtotal / frete / total | tool `calculate_order` → `cardapio.calcular_pedido`, que devolve `resumo_formatado` pronto para copiar |
+
+Se o bairro ou o produto nao existir na tabela, a tool diz isso explicitamente e o
+prompt manda nao estimar. Depois de cada resposta, `_auditar_valores` registra no log
+todo valor em `R$` que nao venha da base (`[auditoria] valores SEM ORIGEM na base: [...]`).
+
+### Memoria do atendimento
+
+`conversation_memory` guarda no banco (`conversation_states`) nome, itens, modalidade,
+endereco, bairro, data, horario e pagamento, e devolve ao prompt uma ficha com o que ja
+foi coletado e qual a **proxima pergunta obrigatoria**. O historico de mensagens sozinho
+nao bastava: a janela expirava e o agente reperguntava o que ja sabia.
+
+### Manutencao da base
+
+```bash
+python reindex_knowledge.py --dry-run   # mostra o que mudaria
+python reindex_knowledge.py --embed     # regrava documentos + chunks + embeddings
+python test_agente.py                   # bateria de perguntas (nao envia WhatsApp)
+python test_agente.py --fluxo           # conversa completa de pedido
+```
+
+`GET /api/knowledge/health` (logado) diagnostica a base: arquivo sem documento
+original, texto com trechos duplicados, status de indexacao e quantas linhas de
+cardapio/bairro foram reconhecidas.
+
+> O chunker antigo gravava 50 caracteres do chunk anterior dentro do seguinte e
+> cortava no meio de linhas e palavras. Como o texto oficial era remontado desses
+> chunks, o prompt e a tabela de precos chegavam ao modelo duplicados e quebrados.
+> Hoje o texto original fica em `knowledge_files.content` e os chunks servem so para
+> busca; `knowledge_repair.py` conserta bases antigas.
+
+---
+
+## 12. Estrutura de arquivos
 
 ```
-├── app.py            # Flask + webhook + rotas API + SSE
-├── database.py       # ORM + CRUD completo (Supabase/PostgreSQL)
-├── db.py             # Camada de abstracao de banco
-├── auth.py           # Login/logout com sessao Flask
-├── events.py         # SSE pub/sub thread-safe
-├── meta.py           # Cliente Meta WhatsApp Cloud API
-├── llm.py            # Cliente OpenAI
-├── buffer.py         # Debounce buffer por usuario
-├── memory.py         # Historico in-memory para o agente
-├── knowledge_rag.py  # RAG com embeddings
-├── knowledge/        # Memoria do agente
+├── app.py                  # Flask + webhook + rotas API + SSE
+├── database.py             # ORM + CRUD completo (Supabase/PostgreSQL)
+├── db.py                   # Camada de abstracao de banco
+├── auth.py                 # Login/logout com sessao Flask
+├── events.py               # SSE pub/sub thread-safe
+├── meta.py                 # Cliente Meta WhatsApp Cloud API
+├── llm.py                  # Cliente OpenAI
+├── buffer.py               # Debounce buffer por usuario
+├── memory.py               # Historico de mensagens do agente
+├── conversation_memory.py  # Ficha do atendimento (dados coletados, persistente)
+├── facts.py                # Tabelas oficiais: fretes, precos, horarios
+├── knowledge_rag.py        # RAG com embeddings + documento original
+├── knowledge_repair.py     # Conserto de bases danificadas pelo chunker antigo
+├── parse_knowledge.py      # Leitura do .docx/.xlsx -> texto limpo
+├── reindex_knowledge.py    # Reconstroi a base de conhecimento
+├── test_agente.py          # Simulador de conversa (sem WhatsApp, sem CRM)
 ├── requirements.txt
 ├── .env.example
 ├── templates/
