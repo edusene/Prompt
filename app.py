@@ -2447,6 +2447,41 @@ def api_knowledge_update(filename):
     content = data.get("content", "")
     description = data.get("description", "").strip()
     knowledge_rag.save_knowledge_raw(filename, content, description=description)
+
+    # Salva de volta no arquivo local (.docx ou .txt/.md)
+    if filename.endswith('.docx'):
+        try:
+            from docx import Document
+            from pathlib import Path
+            uploads_dir = Path(__file__).parent / "uploads"
+            docx_path = uploads_dir / filename
+            if not docx_path.exists():
+                docx_path = Path(__file__).parent / "static" / filename
+            if not docx_path.exists():
+                docx_path = Path(__file__).parent / filename
+            if docx_path.exists():
+                doc = Document()
+                for line in content.split('\n'):
+                    doc.add_paragraph(line)
+                doc.save(str(docx_path))
+                print(f"[knowledge] arquivo local salvo: {docx_path}")
+        except Exception as e:
+            print(f"[knowledge] aviso: nao foi possivel salvar arquivo local: {e}")
+    elif filename.endswith(('.txt', '.md')):
+        try:
+            from pathlib import Path
+            uploads_dir = Path(__file__).parent / "uploads"
+            txt_path = uploads_dir / filename
+            if not txt_path.exists():
+                txt_path = Path(__file__).parent / "static" / filename
+            if not txt_path.exists():
+                txt_path = Path(__file__).parent / filename
+            if txt_path.exists():
+                txt_path.write_text(content, encoding='utf-8')
+                print(f"[knowledge] arquivo local salvo: {txt_path}")
+        except Exception as e:
+            print(f"[knowledge] aviso: nao foi possivel salvar arquivo local: {e}")
+
     print(f"[knowledge] salvo: {filename}")
     return jsonify({"ok": True})
 
