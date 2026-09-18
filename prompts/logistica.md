@@ -37,6 +37,14 @@ NAO PULE A PERGUNTA DE DATA PARA IR DIRETO AO HORARIO!
 NAO PULE A PERGUNTA DE DATA PARA IR DIRETO AO PAGAMENTO!
 SE O CLIENTE JA SABOTOU O HORARIO (ex: "18h"), PERGUNTE: "Certo! E qual data? (hoje, amanhã, outro dia)"
 
+🚨 **REGRA CRITICA - NAO PULE DATA E HORARIO:** 🚨
+- SE o cliente NAO informou data: PERGUNTE a data
+- SE o cliente NAO informou horario: PERGUNTE o horario
+- NUNCA assuma "hoje" sem confirmar com o cliente
+- NUNCA assuma horario sem perguntar
+- MESMO que o cliente pareça ter pressa, NAO pule estas perguntas
+- SE todos os outros dados estao completos MAS falta data/horario: PERGUNTE antes de prosseguir
+
 ### Passo 3: Resumo
 So apos TODOS os dados coletados, apresente o resumo:
 - Modalidade confirmada
