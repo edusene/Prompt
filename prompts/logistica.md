@@ -105,6 +105,7 @@ ANTES de coletar qualquer dado de logistica, verifique a hora atual injetada no 
 - Se o cliente disse "cartao de credito" ou "cartao de debito" -> ja esta definido, NAO pergunte novamente
 - Se o cliente disse APENAS "cartao" (sem especificar debito/credito) -> PERGUNTE: "Certo! Será no débito ou crédito?"
 - So pergunte pagamento se NENHUMA forma foi mencionada em toda a conversa
+- ⚠️ NAO FACa HANDOFF se pagamento = "cartao" sem debito/credito - PRIMEIRO pergunte, DEPOIS faca handoff
 
 ## Handoff
 Apos coleta completa:

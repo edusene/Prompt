@@ -276,15 +276,15 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
     if not state.payment_method:
         if re.search(r'\b(pix|chave pix)\b', msg_lower):
             extracted["payment_method"] = "pix"
-        elif re.search(r'\b(cartão|cartao|credito|crédito|débito|debito|maestro|visa|elo)\b', msg_lower):
-            if re.search(r'\b(crédito|credito)\b', msg_lower):
-                extracted["payment_method"] = "cartao_credito"
-            elif re.search(r'\b(débito|debito)\b', msg_lower):
-                extracted["payment_method"] = "cartao_debito"
-            else:
-                extracted["payment_method"] = "cartao_debito"
+        elif re.search(r'\b(crédito|credito)\b', msg_lower):
+            extracted["payment_method"] = "cartao_credito"
+        elif re.search(r'\b(débito|debito)\b', msg_lower):
+            extracted["payment_method"] = "cartao_debito"
         elif re.search(r'\b(dinheiro|na entrega|pagar na entrega)\b', msg_lower):
             extracted["payment_method"] = "dinheiro"
+        elif re.search(r'\b(cartão|cartao|maestro|visa|elo)\b', msg_lower):
+            # Cartao sem especificar debito/credito - NAO extrai, deixa o agente perguntar
+            pass
 
     # ── Itens ───────────────────────────────────────────────────────────────
     if not state.items:

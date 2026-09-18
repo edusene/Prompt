@@ -62,6 +62,7 @@ Aguarde confirmacao explicita."""
             prompt += "\n\n=== ITENS DO PEDIDO ==="
             for item in state.items:
                 prompt += f"\n- {item.get('quantity', 0)} un - {item.get('name', '?')} (R$ {item.get('price', 0):.2f}/un)"
+            prompt += "\n⚠️ USE EXATAMENTE estes itens, nomes e precos no resumo. NAO invente outros produtos."
 
         if state.modality:
             prompt += f"\n\nModalidade: {state.modality}"
@@ -75,6 +76,8 @@ Aguarde confirmacao explicita."""
             prompt += f"\nData: {state.data_agendada}"
         if state.payment_method:
             prompt += f"\nPagamento: {state.payment_method}"
+        if state.taxa_retorno > 0:
+            prompt += f"\nTaxa de retorno: R$ {state.taxa_retorno:.2f} (INCLUIR no resumo - SE obrigatorio para cartao/dinheiro)"
 
         if state.current_time:
             prompt += f"\n\nData e hora atual (Porto Velho): {state.current_time}"
@@ -162,6 +165,8 @@ Aguarde confirmacao explicita."""
                     state.taxa_retorno = 2.00
                 else:
                     state.taxa_retorno = 0.00
+                # Recalcula total incluindo taxa de retorno
+                state.total = state.subtotal + state.frete + state.taxa_retorno
             return json.dumps(result, ensure_ascii=False)
 
         return {"calculate_order": _calculate}
