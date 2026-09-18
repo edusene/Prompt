@@ -967,36 +967,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
             f"Use este numero ao enviar pedidos com send_order_to_cardapio."
         )
 
-        # Injeta dados extraidos da mensagem no prompt
-        if _extracted:
-            _ext_lines = []
-            if "name" in _extracted and not (contact and contact.get("name")):
-                _ext_lines.append(f"Nome do cliente: {_extracted['name']}")
-            if "items" in _extracted:
-                _ext_lines.append("Itens ja definidos pelo cliente:")
-                for _it in _extracted["items"]:
-                    _ext_lines.append(f"  - {_it['quantity']} un - {_it['name']}")
-            if "modality" in _extracted:
-                _ext_lines.append(f"Modalidade: {_extracted['modality']} (JA CONFIRMADA pelo cliente)")
-            if "endereco" in _extracted:
-                _ext_lines.append(f"Endereco: {_extracted['endereco']}")
-            if "bairro" in _extracted:
-                _ext_lines.append(f"Bairro: {_extracted['bairro']}")
-            if "horario" in _extracted:
-                _ext_lines.append(f"Horario: {_extracted['horario']}")
-            if "data_agendada" in _extracted:
-                _ext_lines.append(f"Data: {_extracted['data_agendada']}")
-            if "payment_method" in _extracted:
-                _ext_lines.append(f"Pagamento: {_extracted['payment_method']}")
-            if "referencia" in _extracted:
-                _ext_lines.append(f"Referencia: {_extracted['referencia']}")
-            if _ext_lines:
-                dynamic_prompt += (
-                    "\n\n=== DADOS JA EXTRAIDOS DA MENSAGEM DO CLIENTE ===\n"
-                    + "\n".join(_ext_lines)
-                    + "\n\n⚠️ NAO PERGUNTE dados que ja foram extraidos acima. Ja estao confirmados."
-                )
-                print(f"[flush] injetando dados extraidos: {_extracted_summary}")
+        # Injeta dados extraidos da mensagem no prompt (REMOVIDO - injetado apos OVERRIDE FINAL)
 
         # REGRAS CRITICAS DE CONTROLE DE FLUXO
         dynamic_prompt += (
@@ -1007,9 +978,9 @@ def handle_flush(user: str, items: list[dict]) -> None:
             "\n4. Apos apresentar resumo, AGUARDE confirmacao do cliente"
             "\n5. So CHAME send_order_to_cardapio apos o cliente ter confirmado o resumo"
             "\n6. NUNCA assume que o cliente quer enviar o pedido sem confirmacao"
-            "\n7. NUNCA assuma que e entrega ou retirada SEM PERGUNTAR ao cliente"
-            "\n8. PRIMEIRA PERGUNTA sobre logistica: 'E para entrega ou retirada na fabrica?'"
-            "\n9. NAO pule esta pergunta - ela e OBRIGATORIA"
+            "\n7. NUNCA assuma entrega ou retirada SEM PERGUNTA - EXCETO se modalidade ja extraida"
+            "\n8. PRIMEIRA PERGUNTA sobre logistica: 'E para entrega ou retirada na fabrica?' - EXCETO se modalidade ja extraida"
+            "\n9. NAO pule esta pergunta - ela e OBRIGATORIA (exceto se modalidade ja extraida)"
             "\n10. ANTES de apresentar resumo, VERIFIQUE: tem modalidade? tem data? tem horario? Se falta algum, PERGUNTE"
             "\n11. NAO apresente resumo SEM data + horario + modalidade confirmados"
             "\n12. NAO PERGUNTE forma de pagamento se o cliente JA INFORMOU (pix/dinheiro/cartao)"
@@ -1021,7 +992,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
         dynamic_prompt += (
             "\n\n🚨 OVERRIDE FINAL - INSTRUCOES QUE SOBRESCREVEM TUDO ANTERIOR 🚨"
             "\nSE o pedido ja tem itens mas NAO tem modalidade (entrega/retirada):"
-            "\n  -> PERGUNTE: 'Será para entrega ou retirada na fabrica?'"
+            "\n  -> PERGUNTE: 'Será para entrega ou retirada na fabrica?' - EXCETO se modalidade ja foi extraida da mensagem"
             "\nSE tem modalidade mas NAO tem data:"
             "\n  -> PERGUNTE: 'Qual data você prefere?'"
             "\nSE tem data mas NAO tem horario:"
@@ -1051,6 +1022,43 @@ def handle_flush(user: str, items: list[dict]) -> None:
             "\n- NAO inicie fluxo de pedidos se estiver fora de horario sem avisar primeiro"
             "\n- Se cliente pedir 'hoje' e for fora de horario: 'Nossa producao ja encerrou! Quer agendar para amanha?'"
         )
+
+        # ═══ DADOS EXTRAIDOS - PRIORIDADE MAXIMA (DEPOIS de todas as regras) ═══
+        if _extracted:
+            _ext_lines = []
+            if "name" in _extracted and not (contact and contact.get("name")):
+                _ext_lines.append(f"Nome do cliente: {_extracted['name']}")
+            if "items" in _extracted:
+                _ext_lines.append("Itens ja definidos pelo cliente:")
+                for _it in _extracted["items"]:
+                    _ext_lines.append(f"  - {_it['quantity']} un - {_it['name']}")
+            if "modality" in _extracted:
+                _ext_lines.append(f"Modalidade: {_extracted['modality']} (JA CONFIRMADA pelo cliente)")
+            if "endereco" in _extracted:
+                _ext_lines.append(f"Endereco: {_extracted['endereco']}")
+            if "bairro" in _extracted:
+                _ext_lines.append(f"Bairro: {_extracted['bairro']}")
+            if "horario" in _extracted:
+                _ext_lines.append(f"Horario: {_extracted['horario']}")
+            if "data_agendada" in _extracted:
+                _ext_lines.append(f"Data: {_extracted['data_agendada']}")
+            if "payment_method" in _extracted:
+                _ext_lines.append(f"Pagamento: {_extracted['payment_method']}")
+            if "referencia" in _extracted:
+                _ext_lines.append(f"Referencia: {_extracted['referencia']}")
+            if _ext_lines:
+                dynamic_prompt += (
+                    "\n\n🚨🚨🚨 PRIORIDADE MAXIMA - DADOS JA CONFIRMADOS PELO CLIENTE 🚨🚨🚨"
+                    + "\n\n" + "\n".join(_ext_lines)
+                    + "\n\nACIMA ESTAO DADOS QUE O CLIENTE JA INFORMOU NA MENSAGEM."
+                    + "\nNAO PERGUNTE NENHUM DOS DADOS LISTADOS ACIMA."
+                    + "\nNAO DIGA 'sera para entrega ou retirada?' SE A MODALIDADE JA FOI LISTADA."
+                    + "\nNAO DIGA 'qual o endereco?' SE O ENDERECO JA FOI LISTADO."
+                    + "\nNAO DIGA 'qual horario?' SE O HORARIO JA FOI LISTADO."
+                    + "\nNAO DIGA 'qual forma de pagamento?' SE O PAGAMENTO JA FOI LISTADO."
+                    + "\nVA DIRETO PARA O PROXIMO PASSO COM OS DADOS ACIMA."
+                )
+                print(f"[flush] DADOS PRIORITARIOS injetados: {_extracted_summary}")
 
         # Verifica se a IA transferiu durante a chamada (via tool)
         _transfer_done = False
