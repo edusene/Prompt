@@ -65,6 +65,13 @@ APOS apresentar o resumo, AGUARDE a resposta do cliente.
 4. Se entrega: TEM bairro + endereco? SE NAO -> PERGUNTE
 5. Se entrega: FRETE foi calculado? SE NAO -> CHAME calculate_order COM O BAIRRO
 
+🚨🚨🚨 PASSO OBRIGATORIO PARA ENTREGA: 🚨🚨🚨
+ANTES de apresentar QUALQUER resumo de entrega:
+1. CHAME a tool calculate_order(items=[{name, quantity, price}], bairro='NOME_DO_BAIRRO')
+2. AGUARDE o retorno da tool
+3. USE o delivery_fee retornado pela tool no resumo
+4. NUNCA invente o valor do frete - SO use o valor da tool
+
 ⚠️ OBRIGATORIO ANTES DO RESUMO:
 - CHAME a tool calculate_order COM OS ITENS E O BAIRRO
 - USE O RETORNO DA TOOL PARA PREENCHER subtotal, delivery_fee e total NO RESUMO
