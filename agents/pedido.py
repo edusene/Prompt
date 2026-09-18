@@ -156,8 +156,12 @@ Aguarde confirmacao explicita."""
                 new_fee = result.get("delivery_fee", 0)
                 if new_fee > 0 or state.frete == 0:
                     state.frete = new_fee
-                state.taxa_retorno = result.get("return_fee", 0)
                 state.total = result.get("total", 0)
+                # Calcula taxa de retorno baseado no pagamento
+                if state.payment_method in ("dinheiro", "cartao", "cartao_debito", "cartao_credito"):
+                    state.taxa_retorno = 2.00
+                else:
+                    state.taxa_retorno = 0.00
             return json.dumps(result, ensure_ascii=False)
 
         return {"calculate_order": _calculate}
