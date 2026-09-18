@@ -834,7 +834,8 @@ def handle_flush(user: str, items: list[dict]) -> None:
         text_only = "\n".join(it.get("text", "") for it in items)
         _ext_state = ConversationState(
             phone=user,
-            name=contact.get("name", "") if contact else "",
+            # Um nome dito agora deve poder substituir um cadastro antigo.
+            name="",
             items=[],
             modality="",
             bairro="",
@@ -1055,8 +1056,8 @@ def handle_flush(user: str, items: list[dict]) -> None:
         # ═══ DADOS EXTRAIDOS - PRIORIDADE MAXIMA (DEPOIS de todas as regras) ═══
         if _extracted:
             _ext_lines = []
-            if "name" in _extracted and not (contact and contact.get("name")):
-                _ext_lines.append(f"Nome do cliente: {_extracted['name']}")
+            if "name" in _extracted:
+                _ext_lines.append(f"Nome do cliente: {_extracted['name']} (substitui qualquer nome anterior)")
             if "items" in _extracted:
                 _ext_lines.append("Itens ja definidos pelo cliente:")
                 for _it in _extracted["items"]:

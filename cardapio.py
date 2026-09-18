@@ -8,6 +8,24 @@ import json
 import httpx
 
 
+def _extract_delivery_fee(context: str, bairro: str) -> float:
+    """Extrai a taxa apenas de uma linha de tabela do bairro informado."""
+    import re
+
+    bairro = bairro.strip()
+    if not bairro:
+        return 0
+    pattern = re.compile(
+        rf"^\s*{re.escape(bairro)}\s*(?:[:;|\-]\s*)?(?:R\$\s*)?(\d+(?:[.,]\d{{1,2}})?)\b",
+        re.IGNORECASE,
+    )
+    for line in context.splitlines():
+        match = pattern.search(line)
+        if match:
+            return float(match.group(1).replace(",", "."))
+    return 0
+
+
 def _get_base_url() -> str:
     test_mode = (os.getenv("CARDÁPIO_TEST_MODE", "true") or os.getenv("CARD_TEST_MODE", "true")).lower() == "true"
     if test_mode:
@@ -83,7 +101,9 @@ def calcular_pedido(items: list[dict], bairro: str = "") -> dict:
                     # 1. Busca linha que contenha o bairro (case-insensitive)
                     lines = result.split('\n')
                     for line in lines:
-                        if bairro_lower in line.lower():
+                        # Somente uma linha de tabela iniciada pelo bairro e
+                        # valida. Isso exclui exemplos como "50 un ... Olaria".
+                        if re.match(rf'^\s*{re.escape(bairro_lower)}(?:\s|:|\||$)', line, re.IGNORECASE):
                             # Tenta com R$: "Aponia: R$ 8,00" ou "Aponia ... R$ 8,00"
                             m = re.search(r'R\$\s*(\d+[.,]?\d*)', line)
                             if not m:
@@ -117,6 +137,19 @@ def calcular_pedido(items: list[dict], bairro: str = "") -> dict:
             except Exception as e:
                 print(f"[cardápio] MODO TESTE - erro ao buscar frete: {e}")
                 frete_nao_encontrado = True
+
+        # Se o RAG trouxe apenas exemplos de prompt, busca a tabela completa
+        # antes de aceitar frete zero. Nao reutiliza numeros de exemplos.
+        if bairro and delivery_fee == 0:
+            try:
+                import knowledge_rag
+                delivery_fee = _extract_delivery_fee(
+                    knowledge_rag.get_full_knowledge_content(), bairro
+                )
+                if delivery_fee > 0:
+                    frete_nao_encontrado = False
+            except Exception as e:
+                print(f"[cardÃ¡pio] MODO TESTE - erro no fallback de frete: {e}")
 
         total = subtotal + delivery_fee
         print(f"[cardápio] MODO TESTE - calculateOrder simulado: subtotal={subtotal} frete={delivery_fee} total={total}")
