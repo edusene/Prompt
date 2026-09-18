@@ -128,8 +128,8 @@ NAO apresente resumo SEM TODOS os dados acima.
 send_order_to_cardapio(
   customer_name="Joao Silva",
   customer_phone="5569999999999",
-  items=[{"name": "Coxinha", "quantity": 50, "price": 0.95}],
-  subtotal=47.50,
+  items=[{"name": "Coxinha", "quantity": 50, "price": 0.80}],
+  subtotal=40.00,
   delivery_fee=5.00,
   return_fee=2.00,
   total=54.50,

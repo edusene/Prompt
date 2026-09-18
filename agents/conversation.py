@@ -168,6 +168,38 @@ _PRODUTOS_GRANDES = {
 
 _TODOS_PRODUTOS = {**_PRODUTOS_FRI_COCOQ, **_PRODUTOS_ASSADOS, **_PRODUTOS_GRANDES}
 
+_PRECO_UNITARIO = {
+    # Produtos Fritos: R$ 20,00 / 25 un = R$ 0,80/un
+    "Coxinha": 0.80,
+    "Bolinha de Queijo": 0.80,
+    "Enroladinho de Salsicha": 0.80,
+    "Pastel": 0.80,
+    "Pastel Carne": 0.80,
+    "Pastel Queijo": 0.80,
+    "Quibe": 0.80,
+    "Rissole de Carne": 0.80,
+    "Churros": 0.80,
+    "Croquete de Carne": 0.80,
+    "Misto": 0.80,
+    # Produtos Assados: R$ 30,00 / 25 un = R$ 1,20/un
+    "Esfirra de Carne": 1.20,
+    "Empadinha de Frango": 1.20,
+    "Pao Pizza": 1.20,
+    "Canudinho de Frango": 1.20,
+    "Canudinho de Camarao": 1.20,
+    # Produtos Grandes: preços individuais
+    "Quiche de Frango": 12.00,
+    "Quiche de Carne de Sol": 12.00,
+    "Saltenha Assada": 9.00,
+    "Saltenha Frita": 10.00,
+    "Panqueca de Carne": 15.00,
+    "Panqueca de Frango": 15.00,
+    "Bomba de Carne de Sol": 10.00,
+    "Empada de Frango": 9.00,
+    "Empada de Camarao": 9.00,
+    "Croquete de Macaxeira": 9.00,
+}
+
 
 def _extract_data_from_message(message: str, state: "ConversationState") -> dict:
     """Extrai dados estruturados da mensagem do cliente (nome, itens, modalidade, endereco, horario, pagamento).
@@ -284,10 +316,11 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
                         break
 
             if matched_name and qty > 0:
+                unit_price = _PRECO_UNITARIO.get(matched_name, 0.0)
                 items_found.append({
                     "name": matched_name,
                     "quantity": qty,
-                    "price": 0,
+                    "price": unit_price,
                 })
 
         if items_found:
