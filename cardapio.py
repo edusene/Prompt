@@ -73,6 +73,10 @@ def calcular_pedido(items: list[dict], bairro: str = "") -> dict:
                         break
                 
                 if result:
+                    # Log completo do resultado para debug
+                    print(f"[cardápio] MODO TESTE - knowledge retornado para '{bairro}':")
+                    print(f"[cardápio] CONTEUDO COMPLETO: {result}")
+                    
                     # Tenta extrair valor do frete do resultado
                     bairro_lower = bairro.lower().strip()
                     
@@ -87,7 +91,7 @@ def calcular_pedido(items: list[dict], bairro: str = "") -> dict:
                                 m = re.search(r'(\d+[.,]?\d+)', line)
                             if m:
                                 delivery_fee = float(m.group(1).replace(',', '.'))
-                                print(f"[cardápio] MODO TESTE - frete encontrado: {bairro} = R$ {delivery_fee} (linha: {line.strip()})")
+                                print(f"[cardápio] MODO TESTE - frete EXTRAIDO: {bairro} = R$ {delivery_fee} (regex: {m.group(0)})")
                                 break
                     
                     # 2. Se nao encontrou, tenta regex geral
