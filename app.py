@@ -37,6 +37,7 @@ import meta
 import cardapio
 import parse_knowledge
 import scheduler as crm_scheduler
+from agents.conversation import _extract_data_from_message, ConversationState
 
 from meta import send_text, mark_read, send_typing, get_media_url, download_media_bytes
 from meta import get_phone_info, list_templates, get_template, delete_template, create_template
@@ -820,6 +821,45 @@ def handle_flush(user: str, items: list[dict]) -> None:
         if last_wa_msg_id and last_wa_msg_id.startswith("wamid."):
             send_typing(last_wa_msg_id)
 
+        # ── Extracao de dados da mensagem (modo classico) ────────────────────
+        # Extraindo dados estruturados para injetar no prompt dinamico
+        text_only = "\n".join(it.get("text", "") for it in items)
+        _ext_state = ConversationState(
+            phone=user,
+            name=contact.get("name", "") if contact else "",
+            items=[],
+            modality="",
+            bairro="",
+            endereco="",
+            horario="",
+            data_agendada="",
+            payment_method="",
+        )
+        _extracted = _extract_data_from_message(text_only, _ext_state)
+        _extracted_summary = ""
+        if _extracted:
+            _parts = []
+            if "name" in _extracted:
+                _parts.append(f"nome={_extracted['name']}")
+            if "items" in _extracted:
+                _parts.append(f"itens={_extracted['items']}")
+            if "modality" in _extracted:
+                _parts.append(f"modalidade={_extracted['modality']}")
+            if "endereco" in _extracted:
+                _parts.append(f"endereco={_extracted['endereco']}")
+            if "bairro" in _extracted:
+                _parts.append(f"bairro={_extracted['bairro']}")
+            if "horario" in _extracted:
+                _parts.append(f"horario={_extracted['horario']}")
+            if "data_agendada" in _extracted:
+                _parts.append(f"data={_extracted['data_agendada']}")
+            if "payment_method" in _extracted:
+                _parts.append(f"pagamento={_extracted['payment_method']}")
+            if "referencia" in _extracted:
+                _parts.append(f"referencia={_extracted['referencia']}")
+            _extracted_summary = ", ".join(_parts)
+            print(f"[extract] DADOS EXTRAIDOS: {_extracted_summary}")
+
         user_parts = _build_user_parts(items)
         text_only = "\n".join(it["text"] for it in items)
         
@@ -926,6 +966,37 @@ def handle_flush(user: str, items: list[dict]) -> None:
             f"\n\nO telefone (numero WhatsApp) do cliente e: {user}. "
             f"Use este numero ao enviar pedidos com send_order_to_cardapio."
         )
+
+        # Injeta dados extraidos da mensagem no prompt
+        if _extracted:
+            _ext_lines = []
+            if "name" in _extracted and not (contact and contact.get("name")):
+                _ext_lines.append(f"Nome do cliente: {_extracted['name']}")
+            if "items" in _extracted:
+                _ext_lines.append("Itens ja definidos pelo cliente:")
+                for _it in _extracted["items"]:
+                    _ext_lines.append(f"  - {_it['quantity']} un - {_it['name']}")
+            if "modality" in _extracted:
+                _ext_lines.append(f"Modalidade: {_extracted['modality']} (JA CONFIRMADA pelo cliente)")
+            if "endereco" in _extracted:
+                _ext_lines.append(f"Endereco: {_extracted['endereco']}")
+            if "bairro" in _extracted:
+                _ext_lines.append(f"Bairro: {_extracted['bairro']}")
+            if "horario" in _extracted:
+                _ext_lines.append(f"Horario: {_extracted['horario']}")
+            if "data_agendada" in _extracted:
+                _ext_lines.append(f"Data: {_extracted['data_agendada']}")
+            if "payment_method" in _extracted:
+                _ext_lines.append(f"Pagamento: {_extracted['payment_method']}")
+            if "referencia" in _extracted:
+                _ext_lines.append(f"Referencia: {_extracted['referencia']}")
+            if _ext_lines:
+                dynamic_prompt += (
+                    "\n\n=== DADOS JA EXTRAIDOS DA MENSAGEM DO CLIENTE ===\n"
+                    + "\n".join(_ext_lines)
+                    + "\n\n⚠️ NAO PERGUNTE dados que ja foram extraidos acima. Ja estao confirmados."
+                )
+                print(f"[flush] injetando dados extraidos: {_extracted_summary}")
 
         # REGRAS CRITICAS DE CONTROLE DE FLUXO
         dynamic_prompt += (
