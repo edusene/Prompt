@@ -82,6 +82,8 @@ Taxa retorno: R$ 2,00 (dinheiro/cartao) ou R$ 0,00 (Pix)."""
             prompt += f"\nHorario: {state.horario}"
         if state.data_agendada:
             prompt += f"\nData: {state.data_agendada}"
+        if state.payment_method:
+            prompt += f"\nPagamento: {state.payment_method}"
 
         if state.items:
             prompt += "\n\nItens do pedido:"
@@ -90,6 +92,29 @@ Taxa retorno: R$ 2,00 (dinheiro/cartao) ou R$ 0,00 (Pix)."""
 
         if state.current_time:
             prompt += f"\n\nData e hora atual (Porto Velho): {state.current_time}"
+
+        # SE TODOS OS DADOS DE LOGISTICA ESTAO COMPLETOS, avise para prosseguir
+        dados_faltando = []
+        if not state.modality:
+            dados_faltando.append("modalidade")
+        if not state.data_agendada:
+            dados_faltando.append("data")
+        if not state.horario:
+            dados_faltando.append("horario")
+        if state.modality == "entrega" and not state.bairro:
+            dados_faltando.append("bairro")
+        if state.modality == "entrega" and not state.endereco:
+            dados_faltando.append("endereco")
+
+        if not dados_faltando and state.items and state.modality:
+            prompt += (
+                "\n\n✅ TODOS OS DADOS DE LOGISTICA COMPLETOS!"
+                "\nNAO PERGUNTE nada ao cliente. Ja tem modalidade, endereco, data e horario."
+                "\nCalcule o frete (se entrega) e Va DIRETO para handoff ao agente pedido para apresentar resumo."
+            )
+        elif dados_faltando:
+            prompt += f"\n\n⚠️ DADOS FALTANDO: {', '.join(dados_faltando)}"
+            prompt += "\nPergunte ao cliente apenas os dados que FALTAM. NAO repita dados ja informados."
 
         return prompt
 

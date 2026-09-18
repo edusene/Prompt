@@ -91,7 +91,16 @@ Aguarde confirmacao explicita."""
             dados_faltando.append("bairro")
         if state.modality == "entrega" and not state.endereco:
             dados_faltando.append("endereco")
-        if dados_faltando:
+
+        # SE TODOS OS DADOS ESTAO COMPLETOS, avise para apresentar resumo imediatamente
+        if not dados_faltando and state.items and state.modality:
+            prompt += (
+                "\n\n✅ TODOS OS DADOS OBRIGATORIOS ESTAO COMPLETOS!"
+                "\nNAO PERGUNTE nada ao cliente. Va DIRETO para chamar calculate_order e apresentar o RESUMO do pedido."
+                "\nNAO diga 'deixa eu confirmar', NAO repita os dados, NAO faca perguntas."
+                "\nAPRESENTE O RESUMO IMEDIATAMENTE apos a validacao com calculate_order."
+            )
+        elif dados_faltando:
             prompt += f"\n\n⚠️ DADOS OBRIGATORIOS FALTANDO: {', '.join(dados_faltando)}"
             prompt += "\nNAO apresente resumo SEM TODOS os dados acima. Pergunte ao cliente os dados que faltam."
 
