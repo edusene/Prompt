@@ -1321,6 +1321,24 @@ def handle_flush(user: str, items: list[dict]) -> None:
             "peca o nome em seguida - nunca troque a resposta pela saudacao padrao."
         )
 
+        # Itens que a planilha lista mas o cardapio digital nao aceita. A lista
+        # sai do proprio codigo para nao envelhecer, e entra DEPOIS da base
+        # oficial: a planilha ainda traz esses produtos com preco, e sem este
+        # aviso o modelo os oferece normalmente.
+        try:
+            import cardapio_catalogo
+            _indisponiveis = sorted(cardapio_catalogo.BLOQUEADOS)
+        except Exception:
+            _indisponiveis = []
+        if _indisponiveis:
+            dynamic_prompt += (
+                "\n\n=== INDISPONIVEIS NO MOMENTO (vale sobre a base oficial) ===\n"
+                "Estes itens aparecem na planilha mas NAO estao disponiveis para venda. "
+                "NUNCA os ofereca e NUNCA informe preco deles. Se o cliente pedir, diga "
+                "que estao indisponiveis no momento e ofereca uma alternativa parecida:\n"
+                + "\n".join(f"- {nome}" for nome in _indisponiveis)
+            )
+
         # ── FICHA DO ATENDIMENTO (fica por ultimo de proposito: e o trecho que o
         # modelo le mais perto da resposta, onde pesa mais contra repergunta e
         # contra resumo apresentado antes da hora) ───────────────────────────

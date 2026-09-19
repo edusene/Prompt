@@ -116,6 +116,25 @@ def _normalizar_itens(items: list[dict]) -> tuple[list[dict], list[str], list[st
                     f"'{nome}': preco ajustado para {_brl(oficial['preco_unitario'])}/un "
                     f"pela tabela oficial ({oficial['base']})"
                 )
+
+            # Onde a planilha e o cardapio digital discordam, vale o preco do
+            # CARDAPIO: e o que o cliente ve ao abrir o menu. Cotar a planilha
+            # faria o agente prometer um valor que o cardapio nao pratica.
+            # Fica depois do ajuste acima para as duas mensagens nao se
+            # contradizerem no log.
+            try:
+                import cardapio_catalogo
+                do_cardapio = cardapio_catalogo.preco_do_cardapio(nome)
+            except Exception:
+                do_cardapio = None
+            if do_cardapio is not None and abs(do_cardapio - novo["price"]) > 0.001:
+                avisos.append(
+                    f"'{nome}': vale o preco do cardapio digital "
+                    f"{_brl(do_cardapio)}/un (a planilha diz {_brl(novo['price'])})"
+                )
+                novo["price"] = do_cardapio
+                oficial = dict(oficial, preco_unitario=do_cardapio)
+
             if oficial.get("ambiguo"):
                 avisos.append(
                     f"'{nome}' cobrado como {oficial['item_oficial']} "
