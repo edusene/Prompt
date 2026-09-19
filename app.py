@@ -3656,6 +3656,29 @@ def api_crm_automations_list():
     return jsonify(database.list_automations())
 
 
+def _exige_template_meta(days, hours, use_meta_template, meta_template_name) -> str:
+    """Erro quando o prazo passa das 24h e nao ha template aprovado.
+
+    Fora da janela de 24 horas o WhatsApp so entrega template aprovado: uma
+    automacao de dias com mensagem de texto falha em TODO envio e o usuario so
+    descobre pelo log, dias depois. Melhor recusar na hora de salvar.
+    """
+    try:
+        total_horas = int(days or 0) * 24 + int(hours or 0)
+    except (TypeError, ValueError):
+        return ""
+    if total_horas < 24:
+        return ""
+    if int(use_meta_template or 0) and str(meta_template_name or "").strip():
+        return ""
+    return (
+        f"Esta automacao dispara {total_horas}h depois da ultima interacao, "
+        "fora da janela de 24 horas do WhatsApp. Nesse prazo a Meta so entrega "
+        "template aprovado: marque 'Usar template aprovado pela Meta' e escolha "
+        "um template, ou reduza o prazo para menos de 24 horas."
+    )
+
+
 @app.post("/api/crm/automations")
 @login_required
 def api_crm_automations_create():
@@ -3663,6 +3686,12 @@ def api_crm_automations_create():
     name = data.get("name", "").strip()
     if not name:
         return jsonify({"error": "name required"}), 400
+    problema = _exige_template_meta(
+        data.get("days", 0), data.get("hours", 0),
+        data.get("use_meta_template", 0), data.get("meta_template_name", ""),
+    )
+    if problema:
+        return jsonify({"error": problema}), 400
     auto = database.create_automation(
         name=name,
         days=int(data.get("days", 0)),
@@ -3685,6 +3714,16 @@ def api_crm_automations_create():
 @login_required
 def api_crm_automations_update(auto_id):
     data = request.get_json(silent=True) or {}
+    # Valida o estado FINAL: o PUT pode mandar so alguns campos, e o resto
+    # continua valendo do que ja esta salvo.
+    atual = database.get_automation(auto_id) or {}
+    final = {**atual, **data}
+    problema = _exige_template_meta(
+        final.get("days", 0), final.get("hours", 0),
+        final.get("use_meta_template", 0), final.get("meta_template_name", ""),
+    )
+    if problema:
+        return jsonify({"error": problema}), 400
     database.update_automation(auto_id, **data)
     return jsonify({"ok": True})
 

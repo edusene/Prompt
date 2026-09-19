@@ -3532,23 +3532,41 @@ async function showCrmAutomationForm(auto = null) {
         }
     } catch(e) {}
 
+    // Tags em lista: antes era preciso digitar o ID numerico a mao.
+    let tags = [];
+    try {
+        const r = await api('/api/tags');
+        if (Array.isArray(r)) tags = r;
+    } catch(e) {}
+    const opcoesTag = (selecionada) => `<option value="">Nenhuma</option>` +
+        tags.map(tg => `<option value="${tg.id}" ${String(selecionada) === String(tg.id) ? 'selected' : ''}>${esc(tg.name)}</option>`).join('');
+
     document.getElementById('modal-body').innerHTML = `
         <form onsubmit="saveCrmAutomation(event, ${auto?.id || 'null'})">
             <div class="form-group"><label>Nome</label><input name="name" value="${esc(auto?.name || '')}" required></div>
             <div class="form-row">
-                <div class="form-group"><label>Dias</label><input type="number" name="days" value="${auto?.days || 0}" min="0"></div>
-                <div class="form-group"><label>Horas</label><input type="number" name="hours" value="${auto?.hours || 0}" min="0" max="23"></div>
+                <div class="form-group"><label>Dias</label><input type="number" name="days" value="${auto?.days || 0}" min="0" oninput="avisarJanela24h(this.form)"></div>
+                <div class="form-group"><label>Horas</label><input type="number" name="hours" value="${auto?.hours || 0}" min="0" max="23" oninput="avisarJanela24h(this.form)"></div>
             </div>
+            <div id="aviso-24h" class="form-aviso" style="display:none;background:#fff4e5;border:1px solid #ffb74d;border-radius:6px;padding:8px 10px;margin-bottom:12px;font-size:12px;line-height:1.45"></div>
             <div class="form-group"><label>Mensagem (use {{nome}} e {{numero}})</label><textarea name="message_template" rows="4" placeholder="Ola, {{nome}}! Tudo bem?">${esc(auto?.message_template || '')}</textarea></div>
             <div class="form-group">
-                <label><input type="checkbox" name="use_meta_template" value="1" ${auto?.use_meta_template ? 'checked' : ''}> Usar template aprovado pela Meta</label>
+                <label><input type="checkbox" name="use_meta_template" value="1" ${auto?.use_meta_template ? 'checked' : ''} onchange="avisarJanela24h(this.form)"> Usar template aprovado pela Meta</label>
             </div>
             <div class="form-group"><label>Template Meta</label>${metaTemplatesHtml}</div>
             <div class="form-row">
-                <div class="form-group"><label>Horario inicio</label><input name="send_window_start" value="${esc(auto?.send_window_start || '08:00')}"></div>
-                <div class="form-group"><label>Horario fim</label><input name="send_window_end" value="${esc(auto?.send_window_end || '18:00')}"></div>
+                <div class="form-group"><label>Horario inicio</label><input type="time" name="send_window_start" value="${esc(auto?.send_window_start || '08:00')}" required></div>
+                <div class="form-group"><label>Horario fim</label><input type="time" name="send_window_end" value="${esc(auto?.send_window_end || '18:00')}" required></div>
             </div>
-            <div class="form-group"><label>Ao enviar: Adicionar tag (ID)</label><input name="action_tag_add" value="${esc(auto?.action_tag_add || '')}" placeholder="ID da tag (opcional)"></div>
+            <p style="font-size:11px;color:var(--muted);margin:-8px 0 12px 0">Janela em horario de Porto Velho (UTC-4).</p>
+            <div class="form-row">
+                <div class="form-group"><label>Ao enviar: adicionar tag</label>
+                    <select name="action_tag_add">${opcoesTag(auto?.action_tag_add)}</select>
+                </div>
+                <div class="form-group"><label>Ao enviar: remover tag</label>
+                    <select name="action_tag_remove">${opcoesTag(auto?.action_tag_remove)}</select>
+                </div>
+            </div>
             <div class="form-group"><label>Ao enviar: Alterar status para</label>
                 <select name="action_status_change">
                     <option value="">Nao alterar</option>
@@ -3560,6 +3578,25 @@ async function showCrmAutomationForm(auto = null) {
             <button type="submit" class="btn-primary">Salvar</button>
         </form>`;
     document.getElementById('modal-overlay').style.display = 'flex';
+    avisarJanela24h(document.querySelector('#modal-body form'));
+}
+
+// Fora da janela de 24h do WhatsApp so template aprovado e entregue. Avisar no
+// formulario evita descobrir isso dias depois, num log de erro.
+function avisarJanela24h(form) {
+    if (!form) return;
+    const aviso = document.getElementById('aviso-24h');
+    if (!aviso) return;
+    const dias = parseInt(form.days?.value) || 0;
+    const horas = parseInt(form.hours?.value) || 0;
+    const total = dias * 24 + horas;
+    const usaTemplate = form.use_meta_template?.checked && (form.meta_template_name?.value || '').trim();
+    if (total >= 24 && !usaTemplate) {
+        aviso.innerHTML = `<strong>Precisa de template aprovado.</strong> Esta automacao dispara ${total}h depois da ultima interacao, fora da janela de 24 horas do WhatsApp. Nesse prazo a Meta so entrega template aprovado — marque a opcao abaixo e escolha um template, ou reduza o prazo.`;
+        aviso.style.display = 'block';
+    } else {
+        aviso.style.display = 'none';
+    }
 }
 
 async function saveCrmAutomation(e, id) {
@@ -3574,14 +3611,17 @@ async function saveCrmAutomation(e, id) {
         else data[k] = v;
     });
     setBtnLoading(btn, true, 'Salvando...');
-    if (id) {
-        await api(`/api/crm/automations/${id}`, { method: 'PUT', body: JSON.stringify(data) });
-        toast('Automacao atualizada', 'success');
-    } else {
-        await api('/api/crm/automations', { method: 'POST', body: JSON.stringify(data) });
-        toast('Automacao criada', 'success');
-    }
+    // Conferir a resposta: o backend recusa automacao de 24h+ sem template, e
+    // antes a tela dizia "criada" mesmo quando nada tinha sido salvo.
+    const resp = id
+        ? await api(`/api/crm/automations/${id}`, { method: 'PUT', body: JSON.stringify(data) })
+        : await api('/api/crm/automations', { method: 'POST', body: JSON.stringify(data) });
     setBtnLoading(btn, false);
+    if (!resp || resp.error) {
+        toast(friendlyError(resp?.error || 'Falha ao salvar automacao'), 'error');
+        return;
+    }
+    toast(id ? 'Automacao atualizada' : 'Automacao criada', 'success');
     closeModal();
     loadCrmAutomations();
 }

@@ -994,7 +994,8 @@ def get_dashboard_stats() -> dict:
     unread_messages = db.fetch_one(
         "SELECT COALESCE(SUM(unread_count),0) as cnt FROM conversations"
     )["cnt"]
-    today = datetime.utcnow().strftime("%Y-%m-%d")
+    import horario
+    today = horario.agora().strftime("%Y-%m-%d")
     messages_today = db.fetch_one(
         "SELECT COUNT(*) as cnt FROM messages WHERE created_at >= ?", (today,)
     )["cnt"]
@@ -1383,7 +1384,8 @@ def create_follow_up(automation_id: int, contact_id: int, scheduled_for: str) ->
     )
     if existing:
         return None
-    now = datetime.utcnow().isoformat()
+    import horario
+    now = horario.agora().isoformat()
     fu_id = db.execute_returning(
         "INSERT INTO crm_follow_ups (automation_id, contact_id, scheduled_for, created_at) VALUES (?,?,?,?)",
         (automation_id, contact_id, scheduled_for, now),
@@ -1394,7 +1396,14 @@ def create_follow_up(automation_id: int, contact_id: int, scheduled_for: str) ->
 
 
 def get_pending_follow_ups() -> list[dict]:
-    """Retorna follow-ups pendentes com dados da automação e contato."""
+    """Follow-ups pendentes que JA VENCERAM, com dados da automacao e contato.
+
+    O filtro por scheduled_for e o que faz o prazo valer: sem ele a consulta
+    devolvia todos os pendentes e o scheduler enviava tudo no tique seguinte,
+    ignorando os dias configurados na automacao.
+    """
+    import horario
+    agora = horario.agora().isoformat()
     return db.fetch_all(
         "SELECT fu.*, "
         "a.name as automation_name, a.message_template, a.use_meta_template, "
@@ -1405,7 +1414,9 @@ def get_pending_follow_ups() -> list[dict]:
         "JOIN crm_automations a ON fu.automation_id=a.id "
         "JOIN contacts c ON fu.contact_id=c.id "
         "WHERE fu.status='pendente' AND a.is_active=1 "
-        "ORDER BY fu.scheduled_for ASC"
+        "AND fu.scheduled_for <= ? "
+        "ORDER BY fu.scheduled_for ASC",
+        (agora,),
     )
 
 
@@ -1453,7 +1464,11 @@ def cancel_follow_ups_for_contact(contact_id: int) -> int:
         "UPDATE crm_follow_ups SET status='cancelado' WHERE contact_id=? AND status='pendente'",
         (contact_id,),
     )
-    return 0
+    # O docstring sempre prometeu a quantidade, mas o retorno era 0 fixo.
+    try:
+        return int(result or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def get_follow_ups_stats() -> dict:
@@ -1639,16 +1654,22 @@ def create_follow_ups_for_contact(contact_id: int) -> int:
     except Exception:
         return 0
 
+    import horario
+    # last_interaction_at e gravado em hora local (time.strftime), entao a
+    # comparacao tem de ser local tambem. Com utcnow() a diferenca de 4h fazia
+    # prazo curto parecer vencido, e o follow-up de "2 horas" saia em 1 minuto.
+    agora = horario.agora()
+
     automations = db.fetch_all("SELECT * FROM crm_automations WHERE is_active=1")
     created = 0
     for auto in automations:
         total_seconds = auto["days"] * 86400 + auto["hours"] * 3600
         if total_seconds <= 0:
-            scheduled_for = datetime.utcnow() + timedelta(minutes=1)
+            scheduled_for = agora + timedelta(minutes=1)
         else:
             scheduled_for = li_dt + timedelta(seconds=total_seconds)
-            if scheduled_for < datetime.utcnow():
-                scheduled_for = datetime.utcnow() + timedelta(minutes=1)
+            if scheduled_for < agora:
+                scheduled_for = agora + timedelta(minutes=1)
         fu = create_follow_up(auto["id"], contact_id, scheduled_for.isoformat())
         if fu:
             created += 1

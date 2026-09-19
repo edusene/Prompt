@@ -9,6 +9,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 import database
 import events
+import horario
 
 scheduler = BackgroundScheduler()
 
@@ -24,7 +25,7 @@ def _parse_time(time_str: str) -> tuple[int, int]:
 
 def _is_within_send_window(start_str: str, end_str: str) -> bool:
     """Verifica se o horário atual está dentro da janela de envio."""
-    now = datetime.utcnow()
+    now = horario.agora()
     current_minutes = now.hour * 60 + now.minute
     start_h, start_m = _parse_time(start_str)
     end_h, end_m = _parse_time(end_str)
@@ -38,12 +39,53 @@ def _is_within_send_window(start_str: str, end_str: str) -> bool:
 
 def _next_window_start(start_str: str) -> datetime:
     """Retorna o próximo horário de início da janela de envio."""
-    now = datetime.utcnow()
+    now = horario.agora()
     start_h, start_m = _parse_time(start_str)
     today_start = now.replace(hour=start_h, minute=start_m, second=0, microsecond=0)
     if today_start > now:
         return today_start
     return today_start + timedelta(days=1)
+
+
+def _para_datetime(valor: str):
+    """Converte o ISO guardado no banco, tolerando sufixo de fuso."""
+    if not valor:
+        return None
+    try:
+        return datetime.fromisoformat(
+            str(valor).replace("Z", "+00:00").replace("+00:00", "")
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _venceu(scheduled_for: str, agora: datetime) -> bool:
+    """O follow-up ja passou da hora marcada?
+
+    Sem data legivel, trata como vencido: melhor enviar um follow-up de data
+    duvidosa do que deixa-lo preso para sempre na fila.
+    """
+    marcado = _para_datetime(scheduled_for)
+    if marcado is None:
+        return True
+    return marcado <= agora
+
+
+def _explicar_erro(erro) -> str:
+    """Traduz a recusa da Meta para algo acionavel no log.
+
+    O codigo 131047 sozinho nao diz nada a quem olha o painel; a causa e sempre
+    a mesma e tem uma solucao concreta.
+    """
+    texto = str(erro or "Erro desconhecido")
+    marcas = ("131047", "re-engagement", "reengagement", "24 hour", "24-hour")
+    if any(m in texto.lower() for m in marcas):
+        return (
+            "A Meta recusou: passaram mais de 24h desde a ultima mensagem do "
+            "cliente, e nesse prazo so template aprovado e entregue. Configure "
+            "um template nesta automacao. (" + texto + ")"
+        )
+    return texto
 
 
 def _replace_variables(template: str, contact: dict) -> str:
@@ -61,7 +103,7 @@ def check_follow_ups():
         if not pending:
             return
 
-        now = datetime.utcnow()
+        now = horario.agora()
         now_iso = now.isoformat()
 
         for fu in pending:
@@ -79,6 +121,14 @@ def check_follow_ups():
                 action_tag_add = fu.get("action_tag_add", "")
                 action_tag_remove = fu.get("action_tag_remove", "")
                 action_status_change = fu.get("action_status_change", "")
+
+                # A hora ja chegou? A consulta do banco ja filtra, mas a guarda
+                # fica aqui tambem: sem ela, todo follow-up pendente saia no
+                # tique seguinte e o prazo configurado nao valia nada - o
+                # cliente mandava uma mensagem e recebia o follow-up um minuto
+                # depois.
+                if not _venceu(scheduled_for, now):
+                    continue
 
                 contact = database.get_contact_by_id(contact_id)
                 if not contact:
@@ -145,7 +195,7 @@ def check_follow_ups():
                     })
                     print(f"[crm] follow-up {fu_id} enviado para {phone}")
                 else:
-                    error_msg = result.get("error", "Erro desconhecido")
+                    error_msg = _explicar_erro(result.get("error", "Erro desconhecido"))
                     database.update_follow_up_status(fu_id, "erro", error_message=error_msg)
                     database.create_crm_log(
                         automation_id=automation_id,
