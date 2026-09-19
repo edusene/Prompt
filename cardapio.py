@@ -243,22 +243,25 @@ def calcular_pedido(items: list[dict], bairro: str = "", modalidade: str = "",
     if (modalidade or "").strip().lower() == "retirada":
         bairro = ""
 
+    # Preco vem da planilha nos DOIS modos. Isto rodava so no ramo de teste, e
+    # desligar o modo teste reabria o bug de o preco inventado pelo modelo ir
+    # direto para o pedido.
+    items, avisos_itens, nao_encontrados = _normalizar_itens(items)
+
+    # Sem preco oficial nao existe resumo: melhor a tool falhar e o agente
+    # consultar do que apresentar um total errado ao cliente.
+    if nao_encontrados:
+        return {
+            "success": False,
+            "error": (
+                "Itens fora do cardapio oficial: " + ", ".join(nao_encontrados) +
+                ". Use consultar_preco para achar o nome correto e chame "
+                "calculate_order de novo. NAO informe total ao cliente antes disso."
+            ),
+            "itens_nao_encontrados": nao_encontrados,
+        }
+
     if test_mode:
-        items, avisos_itens, nao_encontrados = _normalizar_itens(items)
-
-        # Sem preco oficial nao existe resumo: melhor a tool falhar e o agente
-        # consultar do que apresentar um total errado ao cliente.
-        if nao_encontrados:
-            return {
-                "success": False,
-                "error": (
-                    "Itens fora do cardapio oficial: " + ", ".join(nao_encontrados) +
-                    ". Use consultar_preco para achar o nome correto e chame "
-                    "calculate_order de novo. NAO informe total ao cliente antes disso."
-                ),
-                "itens_nao_encontrados": nao_encontrados,
-            }
-
         subtotal = 0.0
         for item in items or []:
             try:
@@ -332,7 +335,12 @@ def calcular_pedido(items: list[dict], bairro: str = "", modalidade: str = "",
                     if devida and not data.get("return_fee"):
                         data["return_fee"] = devida
                         data["total"] = round(float(data.get("total", 0)) + devida, 2)
-                    data.setdefault("resumo_formatado", montar_resumo(
+                    if avisos_itens:
+                        data["itens_ajustados"] = avisos_itens
+                    # Atribuicao, nao setdefault: o resumo com Dia, Modalidade e
+                    # taxa de retorno e o formato unico do atendimento e nao pode
+                    # ser substituido pelo que a API devolver.
+                    data["resumo_formatado"] = montar_resumo(
                         items,
                         data.get("subtotal", 0),
                         data.get("delivery_fee", 0),
@@ -345,7 +353,15 @@ def calcular_pedido(items: list[dict], bairro: str = "", modalidade: str = "",
                         cliente=cliente,
                         pagamento=pagamento,
                         endereco=endereco,
-                    ))
+                    )
+                    # Mesma guarda do modo teste: frete zerado numa entrega com
+                    # bairro informado quase sempre e bairro fora da tabela.
+                    if bairro and not data.get("delivery_fee"):
+                        data["aviso"] = (
+                            f"O bairro '{bairro}' nao retornou taxa de entrega. NAO informe "
+                            "uma taxa estimada: confirme o bairro com o cliente ou transfira "
+                            "para um atendente."
+                        )
                 return data
             return {"success": False, "error": data.get("error", f"HTTP {resp.status_code}")}
     except Exception as e:

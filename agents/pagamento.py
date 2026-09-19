@@ -160,7 +160,9 @@ Apos finalizar, encerre sem perguntas."""
                     for i in items
                 )
             if not total:
-                total = float(subtotal) + float(delivery_fee) - float(return_fee)
+                # A taxa de retorno SOMA, nao subtrai (mesmo erro que existia em
+                # app._send_order_handler).
+                total = float(subtotal) + float(delivery_fee) + float(return_fee)
 
             # Chama handler existente do app
             result_str = app._send_order_handler(

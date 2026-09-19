@@ -2317,39 +2317,28 @@ function _preserveCurrentSheetEdits() {
     preview.dataset.xlsxData = JSON.stringify(xlsxData);
 }
 
-// Coleta dados editados da planilha
+// Coleta dados editados da planilha.
+//
+// So a aba VISIVEL tem celulas no DOM. Antes, o laco sobre essas celulas rodava
+// dentro do map de todas as abas, entao os valores da aba aberta eram gravados
+// por indice em cima das outras: editar "CARDAPIO 1" (52x5) e salvar sobrescrevia
+// "BAIRRO 2" (50x3) e destruia a tabela de frete. Agora a consolidacao da aba
+// atual fica a cargo de _preserveCurrentSheetEdits() e as demais abas saem do
+// xlsxData intactas.
 function collectXlsxEdits() {
+    _preserveCurrentSheetEdits();
+
     const preview = document.querySelector('.knowledge-xlsx-preview');
     if (!preview) return null;
     const xlsxData = JSON.parse(preview.dataset.xlsxData || '{}');
     if (!xlsxData.sheets) return null;
-    
-    // Para cada aba, coleta os valores editados das celulas
-    const editedSheets = xlsxData.sheets.map((sheet, sheetIdx) => {
-        const pageState = _xlsxPageState.pages[sheetIdx] || { page: 0, perPage: 50 };
-        const perPage = pageState.perPage;
-        
-        // Deep clone das rows
-        const rows = (sheet.rows || []).map(r => [...r]);
-        const headers = sheet.headers || [];
-        
-        // Coleta edits de todas as paginas (as celulas editadas ficam no DOM)
-        const cells = preview.querySelectorAll(`.knowledge-xlsx-cell[data-row]`);
-        cells.forEach(cell => {
-            const rowIdx = parseInt(cell.dataset.row);
-            const colIdx = parseInt(cell.dataset.col);
-            if (rowIdx >= 0 && rowIdx < rows.length && colIdx >= 0 && colIdx < headers.length) {
-                rows[rowIdx][colIdx] = cell.textContent.trim();
-            }
-        });
-        
-        return {
-            name: sheet.name,
-            headers: headers,
-            rows: rows
-        };
-    });
-    
+
+    const editedSheets = xlsxData.sheets.map(sheet => ({
+        name: sheet.name,
+        headers: sheet.headers || [],
+        rows: (sheet.rows || []).map(r => [...r]),
+    }));
+
     return { sheets: editedSheets };
 }
 

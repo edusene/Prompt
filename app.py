@@ -525,7 +525,10 @@ def _send_order_handler(
             if not subtotal or float(subtotal) == 0:
                 subtotal = sum(float(item.get("quantity", 0)) * float(item.get("price", 0)) for item in items)
             if not total or float(total) == 0:
-                total = float(subtotal) + float(delivery_fee) - float(return_fee)
+                # A taxa de retorno SOMA. Estava subtraindo: enquanto ela era
+                # sempre zero nao aparecia, mas com a taxa real um pedido de
+                # R$ 74,00 era registrado no cardapio como R$ 70,00.
+                total = float(subtotal) + float(delivery_fee) + float(return_fee)
         except (ValueError, TypeError):
             pass
     print(f"[cardápio] TOOL send_order customer={customer_name} phone={customer_phone} total={total}")
@@ -3166,7 +3169,13 @@ def api_knowledge_prompt_put(filename):
     data = request.get_json(silent=True) or {}
     content = data.get("content", "")
     # Salva no banco
-    knowledge_rag.save_knowledge_raw(filename, content, description=f"Prompt do agente {filename.replace('.md','')}")
+    try:
+        knowledge_rag.save_knowledge_raw(
+            filename, content, description=f"Prompt do agente {filename.replace('.md','')}"
+        )
+    except knowledge_rag.ConteudoCorrompido as e:
+        print(f"[knowledge] RECUSADO {filename}: {e}")
+        return jsonify({"error": f"Conteudo recusado - {e}"}), 400
     # Salva no disco (pasta prompts/)
     prompts_dir = Path(__file__).parent / "prompts"
     fpath = prompts_dir / filename
