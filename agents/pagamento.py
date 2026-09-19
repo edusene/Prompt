@@ -82,8 +82,8 @@ Apos finalizar, encerre sem perguntas."""
         if state.bairro:
             prompt += f"\nBairro: {state.bairro}"
 
-        if state.current_time:
-            prompt += f"\n\nData e hora atual (Porto Velho): {state.current_time}"
+        # Calendario resolvido + diretivas da vez, sempre no fim do prompt.
+        prompt += state.bloco_runtime()
 
         return prompt
 

@@ -118,33 +118,113 @@ def _normalizar_itens(items: list[dict]) -> tuple[list[dict], list[str], list[st
     return normalizados, avisos, nao_encontrados
 
 
+_MODALIDADE_ROTULO = {
+    "entrega": "Entrega",
+    "retirada": "Retirada na fabrica",
+}
+
+# Prompt operacional, BLOCO 3: "entrega paga em Dinheiro, Cartao de Debito ou
+# Cartao de Credito tem taxa fixa de R$ 2,00. No Pix antecipado e na retirada,
+# e isenta". Fica em codigo porque estava so no texto: a tool devolvia
+# return_fee=0 sempre, e o total saia R$ 2,00 menor do que o devido.
+TAXA_RETORNO = 2.00
+
+_PAGAMENTOS_COM_RETORNO = {
+    "dinheiro", "cartao", "cartão", "cartao_debito", "cartao_credito",
+    "cartao_a_definir", "debito", "débito", "credito", "crédito",
+}
+
+
+def calcular_taxa_retorno(modalidade: str, pagamento: str) -> float:
+    """R$ 2,00 na entrega paga em dinheiro ou cartao; R$ 0,00 no resto.
+
+    Na retirada o pagamento e no balcao, entao nao ha retorno a cobrar. No Pix
+    o pagamento e antecipado e a taxa e isenta.
+    """
+    if (modalidade or "").strip().lower() != "entrega":
+        return 0.0
+    if (pagamento or "").strip().lower() in _PAGAMENTOS_COM_RETORNO:
+        return TAXA_RETORNO
+    return 0.0
+
+
+ENDERECO_FABRICA = "Av. Calama, 5892 - Igarapé"
+
+_PAGAMENTO_ROTULO = {
+    "pix": "Pix antecipado",
+    "dinheiro": "Dinheiro na entrega",
+    "cartao_debito": "Cartão de débito na entrega",
+    "cartao_credito": "Cartão de crédito na entrega",
+    "cartao": "Cartão na entrega",
+    "cartao_a_definir": "Cartão (confirmar se é débito ou crédito)",
+}
+
+
 def montar_resumo(items: list[dict], subtotal: float, delivery_fee: float,
-                  return_fee: float, total: float, bairro: str = "") -> str:
+                  return_fee: float, total: float, bairro: str = "",
+                  modalidade: str = "", dia: str = "", horario: str = "",
+                  cliente: str = "", pagamento: str = "", endereco: str = "") -> str:
     """Resumo pronto para o agente copiar, com os numeros ja calculados aqui.
 
-    O prompt manda o agente copiar este texto em vez de somar sozinho — era
-    exatamente onde apareciam totais errados.
+    Segue exatamente o modelo do BLOCO 5 do prompt operacional. Isso e
+    proposital: enquanto existiam dois formatos — o do prompt e o desta tool —
+    o modelo misturava os dois e, depois do "sim" do cliente, reapresentava o
+    resumo em vez de fechar o pedido. Um formato so, gerado aqui, com os
+    numeros vindos da tabela oficial.
+
+    Dia e horario aparecem sempre: antes o resumo trazia so itens e valores, e
+    o cliente confirmava sem nunca ter visto para que dia o pedido ia.
     """
-    linhas = ["*Resumo do pedido*"]
+    retirada = (modalidade or "").strip().lower() == "retirada"
+
+    linhas = [f"👤 Cliente: {cliente or '[Nome]'}"]
+    linhas.append(f"📅 Data: {dia or '[DIA - PERGUNTE AO CLIENTE]'}")
+    linhas.append(f"⏰ Horário: {horario or '[HORARIO]'}")
+
+    if retirada:
+        linhas.append(f"📍 Retirada: No balcão da fábrica ({ENDERECO_FABRICA})")
+    else:
+        linhas.append(f"📍 Bairro: {bairro or '[BAIRRO]'}")
+        linhas.append(f"📍 Endereço: {endereco or '[ENDERECO]'}")
+
+    linhas.append("Itens:")
     for item in items or []:
         nome = item.get("name", "")
         qtd = item.get("quantity", 0)
         preco = float(item.get("price", 0) or 0)
         if preco <= 0:
-            linhas.append(f"- {qtd} x {nome} (incluso no pacote)")
+            linhas.append(f"• {qtd} un - {nome} (incluso no pacote)")
         else:
-            linhas.append(f"- {qtd} x {nome} — {_brl(qtd * preco)}")
-    linhas.append(f"Subtotal: {_brl(subtotal)}")
-    if delivery_fee:
-        rotulo = f"Taxa de entrega ({bairro})" if bairro else "Taxa de entrega"
-        linhas.append(f"{rotulo}: {_brl(delivery_fee)}")
-    if return_fee:
-        linhas.append(f"Taxa de retorno: {_brl(return_fee)}")
-    linhas.append(f"*Total: {_brl(total)}*")
+            linhas.append(f"• {qtd} un - {nome} — {_brl(qtd * preco)}")
+
+    if retirada:
+        linhas.append(f"💰 Total: {_brl(total)}")
+        linhas.append("💳 Pagamento: Balcão da fábrica")
+    else:
+        linhas.append(f"💰 Subtotal: {_brl(subtotal)}")
+        if delivery_fee:
+            linhas.append(f"🚚 Frete: {_brl(delivery_fee)}")
+        # Taxa de retorno e obrigatoria em dinheiro/cartao na entrega
+        # (BLOCO 3 do prompt) e isenta no Pix.
+        if return_fee:
+            linhas.append(f"🛵 Taxa de retorno: {_brl(return_fee)}")
+        linhas.append(f"💵 Total: {_brl(total)}")
+        rotulo_pag = _PAGAMENTO_ROTULO.get(pagamento, pagamento) or "[PAGAMENTO]"
+        linhas.append(f"💳 Pagamento: {rotulo_pag}")
+
+    # A confirmacao cita dia e hora juntos: ultima chance de o cliente corrigir
+    # o dia antes de o pedido entrar na producao.
+    if dia and horario:
+        linhas.append(f"Posso confirmar o seu pedido para {dia} às {horario}? 💛")
+    else:
+        linhas.append("Posso confirmar o seu pedido? 💛")
+
     return "\n".join(linhas)
 
 
-def calcular_pedido(items: list[dict], bairro: str = "") -> dict:
+def calcular_pedido(items: list[dict], bairro: str = "", modalidade: str = "",
+                    dia: str = "", horario: str = "", pagamento: str = "",
+                    cliente: str = "", endereco: str = "") -> dict:
     """Valida o pedido e calcula subtotal, frete e total.
 
     O frete vem da tabela oficial (facts.lookup_frete), nao mais de regex sobre
@@ -156,6 +236,12 @@ def calcular_pedido(items: list[dict], bairro: str = "") -> dict:
         ou error
     """
     test_mode = (os.getenv("CARDÁPIO_TEST_MODE", "true") or os.getenv("CARD_TEST_MODE", "true")).lower() == "true"
+
+    # Retirada nao tem frete. O modelo as vezes manda o bairro do cliente mesmo
+    # na retirada, e a taxa entrava no total sem aparecer no resumo — o cliente
+    # via "25 coxinhas R$ 20,00" e um total de R$ 28,00.
+    if (modalidade or "").strip().lower() == "retirada":
+        bairro = ""
 
     if test_mode:
         items, avisos_itens, nao_encontrados = _normalizar_itens(items)
@@ -198,16 +284,21 @@ def calcular_pedido(items: list[dict], bairro: str = "") -> dict:
                 frete_nao_encontrado = True
                 print(f"[cardapio] frete NAO ENCONTRADO na tabela oficial para: '{bairro}'")
 
-        total = subtotal + delivery_fee
+        return_fee = calcular_taxa_retorno(modalidade, pagamento)
+        total = subtotal + delivery_fee + return_fee
         resultado = {
             "success": True,
             "subtotal": round(subtotal, 2),
             "delivery_fee": round(delivery_fee, 2),
-            "return_fee": 0,
+            "return_fee": round(return_fee, 2),
             "total": round(total, 2),
             "bairro_oficial": bairro_oficial,
             "frete_nao_encontrado": frete_nao_encontrado,
-            "resumo_formatado": montar_resumo(items, subtotal, delivery_fee, 0, total, bairro_oficial),
+            "resumo_formatado": montar_resumo(
+                items, subtotal, delivery_fee, return_fee, total, bairro_oficial,
+                modalidade=modalidade, dia=dia, horario=horario,
+                cliente=cliente, pagamento=pagamento, endereco=endereco,
+            ),
         }
         if avisos_itens:
             resultado["itens_ajustados"] = avisos_itens
@@ -235,6 +326,12 @@ def calcular_pedido(items: list[dict], bairro: str = "") -> dict:
             print(f"[cardápio] calculateOrder status={resp.status_code} response={json.dumps(data, ensure_ascii=False)[:300]}")
             if resp.status_code == 200:
                 if isinstance(data, dict) and data.get("success"):
+                    # A API remota nao conhece a modalidade nem a forma de
+                    # pagamento, entao a taxa de retorno e conferida aqui.
+                    devida = calcular_taxa_retorno(modalidade, pagamento)
+                    if devida and not data.get("return_fee"):
+                        data["return_fee"] = devida
+                        data["total"] = round(float(data.get("total", 0)) + devida, 2)
                     data.setdefault("resumo_formatado", montar_resumo(
                         items,
                         data.get("subtotal", 0),
@@ -242,6 +339,12 @@ def calcular_pedido(items: list[dict], bairro: str = "") -> dict:
                         data.get("return_fee", 0),
                         data.get("total", 0),
                         bairro,
+                        modalidade=modalidade,
+                        dia=dia,
+                        horario=horario,
+                        cliente=cliente,
+                        pagamento=pagamento,
+                        endereco=endereco,
                     ))
                 return data
             return {"success": False, "error": data.get("error", f"HTTP {resp.status_code}")}

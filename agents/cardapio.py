@@ -140,8 +140,8 @@ Nunca misture sabores na mesma porcao."""
             for item in state.items:
                 prompt += f"\n- {item.get('quantity', 0)} un - {item.get('name', '?')}"
 
-        if state.current_time:
-            prompt += f"\n\nData e hora atual (Porto Velho): {state.current_time}"
+        # Calendario resolvido + diretivas da vez, sempre no fim do prompt.
+        prompt += state.bloco_runtime()
 
         return prompt
 

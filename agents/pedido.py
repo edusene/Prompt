@@ -48,7 +48,10 @@ Aguarde confirmacao explicita."""
         )
 
         # Detecta se resumo foi apresentado
-        if "Posso confirmar" in response or "confirmar o seu pedido" in response:
+        if any(
+            marca in response
+            for marca in ("Posso confirmar", "confirmar o seu pedido", "Confirma o pedido")
+        ):
             state.resumo_apresentado = True
 
         return response
@@ -83,21 +86,10 @@ Aguarde confirmacao explicita."""
         if state.taxa_retorno > 0:
             prompt += f"\nTaxa de retorno: R$ {state.taxa_retorno:.2f} (INCLUIR no resumo - SE obrigatorio para cartao/dinheiro)"
 
-        if state.current_time:
-            prompt += f"\n\nData e hora atual (Porto Velho): {state.current_time}"
-
         # Status dos dados obrigatorios
-        dados_faltando = []
-        if not state.modality:
-            dados_faltando.append("modalidade (entrega ou retirada)")
-        if not state.data_agendada:
-            dados_faltando.append("data")
-        if not state.horario:
-            dados_faltando.append("horario")
-        if state.modality == "entrega" and not state.bairro:
-            dados_faltando.append("bairro")
-        if state.modality == "entrega" and not state.endereco:
-            dados_faltando.append("endereco")
+        # Uma lista so, vinda do estado: a ordem das perguntas (modalidade
+        # antes de endereco, data antes de horario) e a mesma em todo agente.
+        dados_faltando = state.dados_faltando()
 
         # SE TODOS OS DADOS ESTAO COMPLETOS, avise para apresentar resumo imediatamente
         if not dados_faltando and state.items and state.modality:
@@ -110,6 +102,9 @@ Aguarde confirmacao explicita."""
         elif dados_faltando:
             prompt += f"\n\n⚠️ DADOS OBRIGATORIOS FALTANDO: {', '.join(dados_faltando)}"
             prompt += "\nNAO apresente resumo SEM TODOS os dados acima. Pergunte ao cliente os dados que faltam."
+
+        # Calendario resolvido + diretivas da vez, sempre no fim do prompt.
+        prompt += state.bloco_runtime()
 
         return prompt
 
@@ -170,47 +165,45 @@ Aguarde confirmacao explicita."""
 
     def _get_tool_handlers(self, state: ConversationState) -> dict:
         def _calculate(items: list, bairro: str = "", **kwargs) -> str:
-            result = cardapio.calcular_pedido(items, bairro or state.bairro)
+            # A tool se recusa a fechar conta com dado faltando. O prompt ja
+            # dizia isso; como instrucao ela era ignorada, como retorno de tool
+            # nao ha resumo para o modelo copiar.
+            faltando = state.dados_faltando()
+            if faltando:
+                return json.dumps({
+                    "success": False,
+                    "erro": "DADOS_INCOMPLETOS",
+                    "faltando": faltando,
+                    "instrucao": (
+                        f"NAO apresente resumo nem valores. Pergunte ao cliente "
+                        f"apenas: {faltando[0]}. Uma pergunta so."
+                    ),
+                }, ensure_ascii=False)
+
+            result = cardapio.calcular_pedido(
+                items, bairro or state.bairro,
+                modalidade=state.modality,
+                dia=state.data_agendada,
+                horario=state.horario,
+                pagamento=state.payment_method,
+                cliente=state.name,
+                endereco=state.endereco,
+            )
             if result.get("success"):
                 state.subtotal = result.get("subtotal", 0)
                 # So atualiza frete se o novo valor for > 0 ou se ainda nao foi calculado
                 new_fee = result.get("delivery_fee", 0)
                 if new_fee > 0 or state.frete == 0:
                     state.frete = new_fee
-                # Calcula taxa de retorno baseado no pagamento
-                if state.payment_method in ("dinheiro", "cartao", "cartao_debito", "cartao_credito"):
-                    state.taxa_retorno = 2.00
-                else:
-                    state.taxa_retorno = 0.00
-                # Recalcula total incluindo taxa de retorno
+                # A regra da taxa de retorno mora em cardapio.calcular_taxa_retorno,
+                # para nao existir em duas versoes que divergem com o tempo.
+                state.taxa_retorno = result.get("return_fee", 0)
                 state.total = state.subtotal + state.frete + state.taxa_retorno
 
-                # Monta resumo COMPLETO formatado para o LLM copiar
-                itens_texto = ""
-                for item in state.items:
-                    itens_texto += f"• {item.get('quantity', 0)} un - {item.get('name', '?')}\n"
-
-                resumo_valores = (
-                    f"Subtotal: R$ {state.subtotal:.2f}\n"
-                    f"Frete: R$ {state.frete:.2f}\n"
-                )
-                if state.taxa_retorno > 0:
-                    resumo_valores += f"Taxa de retorno: R$ {state.taxa_retorno:.2f}\n"
-                resumo_valores += f"Total: R$ {state.total:.2f}\n"
-
-                result["resumo_formatado"] = (
-                    f"=== RESUMO PRONTO - COPIE EXATAMENTE ===\n"
-                    f"Cliente: {state.name or '[NOME DO CLIENTE]'}\n"
-                    f"Data: {state.data_agendada or '[DATA]'}\n"
-                    f"Horario: {state.horario or '[HORARIO]'}\n"
-                    f"Bairro: {state.bairro or '[BAIRRO]'}\n"
-                    f"Endereco: {state.endereco or '[ENDERECO]'}\n"
-                    f"\nItens:\n{itens_texto}\n"
-                    f"{resumo_valores}\n"
-                    f"Pagamento: {state.payment_method or '[PAGAMENTO]'}\n"
-                    f"\nPosso confirmar o seu pedido? 💛\n"
-                    f"=== FIM DO RESUMO ==="
-                )
+                # O resumo vem pronto de cardapio.montar_resumo, no mesmo
+                # formato do BLOCO 5 do prompt operacional. Existir um
+                # segundo formato aqui era o que fazia o modelo misturar os
+                # dois e reapresentar o resumo depois do 'sim' do cliente.
                 result["subtotal"] = state.subtotal
                 result["delivery_fee"] = state.frete
                 result["return_fee"] = state.taxa_retorno

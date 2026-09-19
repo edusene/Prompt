@@ -96,21 +96,10 @@ Taxa retorno: R$ 2,00 (dinheiro/cartao) ou R$ 0,00 (Pix)."""
             for item in state.items:
                 prompt += f"\n- {item.get('quantity', 0)} un - {item.get('name', '?')}"
 
-        if state.current_time:
-            prompt += f"\n\nData e hora atual (Porto Velho): {state.current_time}"
-
         # SE TODOS OS DADOS DE LOGISTICA ESTAO COMPLETOS, avise para prosseguir
-        dados_faltando = []
-        if not state.modality:
-            dados_faltando.append("modalidade")
-        if not state.data_agendada:
-            dados_faltando.append("data")
-        if not state.horario:
-            dados_faltando.append("horario")
-        if state.modality == "entrega" and not state.bairro:
-            dados_faltando.append("bairro")
-        if state.modality == "entrega" and not state.endereco:
-            dados_faltando.append("endereco")
+        # Uma lista so, vinda do estado: a ordem das perguntas (modalidade
+        # antes de endereco, data antes de horario) e a mesma em todo agente.
+        dados_faltando = state.dados_faltando()
 
         if not dados_faltando and state.items and state.modality:
             prompt += (
@@ -121,6 +110,9 @@ Taxa retorno: R$ 2,00 (dinheiro/cartao) ou R$ 0,00 (Pix)."""
         elif dados_faltando:
             prompt += f"\n\n⚠️ DADOS FALTANDO: {', '.join(dados_faltando)}"
             prompt += "\nPergunte ao cliente apenas os dados que FALTAM. NAO repita dados ja informados."
+
+        # Calendario resolvido + diretivas da vez, sempre no fim do prompt.
+        prompt += state.bloco_runtime()
 
         return prompt
 
@@ -137,13 +129,37 @@ Taxa retorno: R$ 2,00 (dinheiro/cartao) ou R$ 0,00 (Pix)."""
     def _update_state(self, state: ConversationState, message: str, response: str):
         """Atualiza estado baseado na interacao."""
         import re
-        msg_lower = message.lower().strip()
+        import horario
+        from agents.conversation import detectar_modalidade, detectar_data
 
-        # Detecta modalidade
-        if "entrega" in msg_lower:
-            state.modality = "entrega"
-        elif "retirada" in msg_lower or "balcao" in msg_lower or "fabrica" in msg_lower:
-            state.modality = "retirada"
+        # Detecta modalidade.
+        # O teste antigo era `"entrega" in msg_lower`: bastava o cliente
+        # perguntar a taxa de entrega para o pedido virar entrega sem ninguem
+        # ter perguntado nada.
+        if not state.modality:
+            modalidade = detectar_modalidade(message)
+            if modalidade:
+                state.modality = modalidade
+                state.modalidade_confirmada = True
+
+        # Detecta horario (apenas numeros no formato HH:MM ou HHhMM)
+        m = re.search(r'(\d{1,2})\s*[h:]\s*(\d{2})', message)
+        if m:
+            state.horario = m.group(0).strip()
+
+        # Detecta data. Vale para entrega e retirada, e sempre vira um dia
+        # concreto: o rotulo "hoje" sozinho nunca chega ao resumo.
+        data = detectar_data(message)
+        if data:
+            state.data_iso = data.isoformat()
+            state.data_agendada = horario.formatar_data(data)
+            state.data_confirmada = True
+
+        # Bairro e endereco so fazem sentido depois de o cliente escolher
+        # entrega — antes disso, capturar isso e o que fazia o agente falar de
+        # frete sem ter perguntado a modalidade.
+        if state.modality != "entrega":
+            return
 
         # Detecta bairro de varias formas
         if not state.bairro:
@@ -165,21 +181,6 @@ Taxa retorno: R$ 2,00 (dinheiro/cartao) ou R$ 0,00 (Pix)."""
             m = re.search(r'(?:rua|av\.?|avenida|alameda|travessa)\s+[^,]+,?\s*\d+', message, re.IGNORECASE)
             if m:
                 state.endereco = m.group(0).strip()
-
-        # Detecta horario (apenas numeros no formato HH:MM ou HHhMM)
-        m = re.search(r'(\d{1,2})\s*[h:]\s*(\d{2})', message)
-        if m:
-            state.horario = m.group(0).strip()
-
-        # Detecta data - SO se for claramente uma resposta de data
-        # Nao detecta "hoje" em frases como "hoje eu queria saber..."
-        msg_stripped = msg_lower.rstrip("?!.,;:")
-        if msg_stripped in ("hoje", "hoje sim", "sim hoje"):
-            state.data_agendada = "hoje"
-        elif msg_stripped in ("amanha", "amanhã", "amanha sim", "sim amanha"):
-            state.data_agendada = "amanha"
-        elif re.match(r'^\d{1,2}/\d{1,2}(/\d{2,4})?$', msg_stripped):
-            state.data_agendada = msg_stripped
 
     def _get_tools(self) -> list:
         return [

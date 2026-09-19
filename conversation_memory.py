@@ -18,7 +18,7 @@ import database
 # Campos que o cliente pode corrigir durante a conversa (a fala mais recente vence)
 _CAMPOS_REVISAVEIS = (
     "name", "modality", "bairro", "endereco", "referencia",
-    "horario", "data_agendada", "payment_method",
+    "horario", "data_agendada", "data_iso", "payment_method",
 )
 
 _CAMPOS = _CAMPOS_REVISAVEIS + ("items",)
@@ -35,8 +35,10 @@ _ROTULOS = {
     "payment_method": "Forma de pagamento",
 }
 
-# O que e obrigatorio antes do resumo, por modalidade
-_OBRIGATORIOS_COMUNS = ("name", "items", "modality", "data_agendada", "horario", "payment_method")
+# O que e obrigatorio antes do resumo, por modalidade.
+# Pagamento NAO entra aqui: na retirada e no balcao, e o prompt operacional
+# proibe perguntar. Ele e exigido so na entrega (ver faltando()).
+_OBRIGATORIOS_COMUNS = ("name", "items", "modality", "data_agendada", "horario")
 _OBRIGATORIOS_ENTREGA = ("bairro", "endereco")
 
 
@@ -50,9 +52,17 @@ def _empty() -> dict:
         "referencia": "",
         "horario": "",
         "data_agendada": "",
+        # Dia resolvido (AAAA-MM-DD). data_agendada e o texto que vai para a
+        # tela ("hoje, sexta-feira (19/09)"); data_iso e o dia de verdade, usado
+        # para validar o expediente.
+        "data_iso": "",
         "payment_method": "",
         "frete": None,
         "pedido_enviado": False,
+        # A saudacao sai uma vez so, e na primeira resposta.
+        "saudacao_feita": False,
+        # Aviso de "estamos fechados" ja dado nesta conversa.
+        "aviso_horario_dado": False,
         "updated_at": "",
     }
 
@@ -119,6 +129,51 @@ def merge(memoria: dict, extraido: dict, novo_da_mensagem: dict | None = None) -
     return memoria, mudancas
 
 
+# Como a pergunta do agente aparece, por campo que ela preenche. Serve para
+# ler a resposta seca do cliente ("Eduardo", "Olaria"), que as regras de
+# extracao nao pegam por nao ter nenhuma palavra-chave em volta. Sem isto o
+# agente perguntava, o cliente respondia, e ele perguntava de novo.
+_PERGUNTAS_POR_CAMPO = {
+    "name": ("seu nome", "qual e o nome", "qual é o nome", "como posso te chamar",
+             "com quem eu falo", "com quem falo"),
+    "bairro": ("qual bairro", "qual o bairro", "qual é o bairro", "qual e o bairro",
+               "nome do bairro", "em que bairro", "de que bairro"),
+}
+
+# Respostas curtas que nunca sao um nome proprio nem um bairro.
+_NAO_E_RESPOSTA = {
+    "sim", "nao", "não", "ok", "blz", "beleza", "pode", "pode ser", "isso",
+    "certo", "claro", "obrigado", "obrigada", "entrega", "retirada", "hoje",
+    "amanha", "amanhã", "pix", "dinheiro", "cartao", "cartão", "debito",
+    "débito", "credito", "crédito",
+}
+
+
+def capturar_resposta_direta(memoria: dict, pergunta_anterior: str, texto: str) -> str:
+    """Preenche o campo que a pergunta anterior pediu, a partir da resposta seca.
+
+    Retorna o nome do campo preenchido, ou "" se a mensagem nao for uma
+    resposta direta. So age em campo ainda vazio: nunca sobrescreve um dado
+    que o cliente ja tinha dado.
+    """
+    pergunta = (pergunta_anterior or "").lower()
+    candidato = (texto or "").strip().strip(".!,;:")
+    if not pergunta or not candidato:
+        return ""
+    if candidato.lower() in _NAO_E_RESPOSTA or any(c.isdigit() for c in candidato):
+        return ""
+    if not (0 < len(candidato.split()) <= 3) or len(candidato) < 2:
+        return ""
+
+    for campo, marcas in _PERGUNTAS_POR_CAMPO.items():
+        if memoria.get(campo):
+            continue
+        if any(m in pergunta for m in marcas):
+            memoria[campo] = candidato.title()
+            return campo
+    return ""
+
+
 def faltando(memoria: dict) -> list[str]:
     """Campos obrigatorios ainda nao coletados, na ordem do funil."""
     obrigatorios = list(_OBRIGATORIOS_COMUNS)
@@ -126,7 +181,69 @@ def faltando(memoria: dict) -> list[str]:
         # endereco so faz sentido depois de saber que e entrega
         idx = obrigatorios.index("modality") + 1
         obrigatorios[idx:idx] = list(_OBRIGATORIOS_ENTREGA)
+        # Na retirada o pagamento e no balcao e perguntar e proibido; so a
+        # entrega precisa da forma de pagamento antes do resumo.
+        obrigatorios.append("payment_method")
     return [c for c in obrigatorios if not memoria.get(c)]
+
+
+def _itens_ambiguos(memoria: dict) -> list[str]:
+    """Itens cujo nome serve para o sabor de pacote E para o salgado grande.
+
+    "Enroladinho de Salsicha" e "Rissole de Carne" existem nas duas familias do
+    cardapio, e "coxinha" casa tanto com o sabor quanto com a Coxinha de Frango
+    com Catupiry. A diferenca de preco e grande (R$ 0,80/un no pacote contra
+    R$ 9,00/un avulso), entao o agente confirma em vez de escolher sozinho.
+
+    So vale para quantidade ABAIXO de 25: de 25 para cima a leitura de pacote e
+    segura (ninguem pede 50 coxinhas grandes a R$ 9,00 cada) e perguntar seria
+    so atrito. A duvida real e o pedido pequeno, onde as duas leituras fazem
+    sentido.
+    """
+    try:
+        import facts
+    except Exception:
+        return []
+
+    avisos = []
+    for item in memoria.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        nome = str(item.get("name", ""))
+        try:
+            qtd = int(float(item.get("quantity", 0) or 0))
+        except (ValueError, TypeError):
+            continue
+        if qtd >= 25:
+            continue
+        try:
+            oficial = facts.resolve_unit_price(nome, qtd)
+        except Exception:
+            continue
+        if oficial and oficial.get("ambiguo"):
+            avisos.append(
+                f"{qtd} x '{nome}': pode ser {oficial['item_oficial']} "
+                f"(R$ {oficial['preco_unitario']:.2f}/un) ou "
+                f"{oficial['alternativa']}"
+            )
+    return avisos
+
+
+def pendencia_de_item(memoria: dict) -> str:
+    """Duvida sobre O QUE o cliente pediu. Tem prioridade sobre o funil.
+
+    Confirmar o produto depois de ja ter coletado endereco e horario obriga a
+    refazer a conta do pedido inteiro, entao esta pergunta fura a fila.
+    """
+    ambiguos = _itens_ambiguos(memoria)
+    if not ambiguos:
+        return ""
+    return (
+        "ITEM AMBIGUO - o mesmo nome existe como sabor de pacote e como salgado "
+        "grande avulso, com precos bem diferentes: " + "; ".join(ambiguos)
+        + ". Pergunte ao cliente qual das duas opcoes ele quer, citando as duas "
+        "com o preco, ANTES de seguir para entrega/retirada."
+    )
 
 
 def pendencia_de_detalhe(memoria: dict) -> str:
@@ -169,6 +286,7 @@ def render_ficha(memoria: dict) -> str:
 
     pendentes = faltando(memoria)
     detalhe = pendencia_de_detalhe(memoria)
+    duvida_item = pendencia_de_item(memoria)
     bloco = ["=== FICHA DESTE ATENDIMENTO (memoria do cliente) ==="]
     if linhas:
         bloco.append("JA CONFIRMADO PELO CLIENTE - nao pergunte de novo, nao altere:")
@@ -182,15 +300,48 @@ def render_ficha(memoria: dict) -> str:
             "consultar_preco/calculate_order - nunca do seu calculo."
         )
 
+    if duvida_item:
+        bloco.append(duvida_item)
     if detalhe:
         bloco.append(detalhe)
 
-    if pendentes:
+    # Duas coisas nunca podem ser preenchidas por deducao: a modalidade e o
+    # dia. Sao as duas que o agente vinha assumindo sozinho.
+    if not memoria.get("modality"):
+        bloco.append(
+            "MODALIDADE NAO DEFINIDA: o cliente ainda nao disse se e ENTREGA ou "
+            "RETIRADA. Ate ele dizer, e PROIBIDO falar em endereco, bairro, "
+            "frete ou taxa de entrega, e proibido inclui-los no resumo. "
+            "Cliente PERGUNTAR sobre entrega nao e o cliente ESCOLHER entrega."
+        )
+    if not memoria.get("data_agendada"):
+        bloco.append(
+            "DIA NAO DEFINIDO: o cliente nao disse para qual DIA e o pedido. "
+            'E PROIBIDO assumir "hoje". Pergunte o dia.'
+        )
+    else:
+        bloco.append(
+            f"DIA DO PEDIDO: {memoria['data_agendada']}. Escreva sempre assim, "
+            'com dia da semana e data — nunca so "hoje". O cliente precisa VER '
+            "o dia que esta confirmando, e a confirmacao final cita dia E horario."
+        )
+
+    if duvida_item:
+        # Fura a fila do funil: o que o cliente pediu precisa estar definido
+        # antes de coletar entrega, dia e horario.
+        bloco.append(
+            "PROXIMA PERGUNTA OBRIGATORIA: esclarecer o ITEM AMBIGUO acima. "
+            "Nao pergunte modalidade, endereco, dia, horario nem pagamento "
+            "nesta mensagem, e nao apresente resumo."
+        )
+    elif pendentes:
         bloco.append("AINDA FALTA COLETAR, nesta ordem:")
         bloco += [f"- {_ROTULOS[c]}" for c in pendentes]
         bloco.append(
             f"PROXIMA PERGUNTA OBRIGATORIA: {_ROTULOS[pendentes[0]]}. "
-            "Pergunte SO isso nesta mensagem."
+            "Faca SO essa pergunta nesta mensagem - uma pergunta por mensagem. "
+            "Saudacao e resposta a uma duvida do cliente nao contam como pergunta "
+            "e podem vir na mesma mensagem."
         )
         bloco.append(
             "PROIBIDO nesta mensagem: apresentar resumo do pedido, informar total "
@@ -199,7 +350,9 @@ def render_ficha(memoria: dict) -> str:
     elif detalhe:
         bloco.append(
             "PROXIMA PERGUNTA OBRIGATORIA: o detalhe pendente acima. "
-            "Pergunte SO isso nesta mensagem."
+            "Faca SO essa pergunta nesta mensagem - uma pergunta por mensagem. "
+            "Saudacao e resposta a uma duvida do cliente nao contam como pergunta "
+            "e podem vir na mesma mensagem."
         )
     else:
         bloco.append(

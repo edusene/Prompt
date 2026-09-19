@@ -32,6 +32,10 @@ class ConversationState:
     referencia: str = ""
     horario: str = ""
     data_agendada: str = ""
+    # Data resolvida em ISO (AAAA-MM-DD). data_agendada guarda o que o cliente
+    # escreveu ("hoje"); data_iso guarda o dia de verdade. Sem essa separacao,
+    # "hoje" seguia para o resumo sem nunca virar um dia concreto na tela.
+    data_iso: str = ""
 
     # Dados de pagamento
     payment_method: str = ""
@@ -49,11 +53,24 @@ class ConversationState:
     pedido_confirmado: bool = False
     pedido_enviado: bool = False
 
+    # A saudacao so pode sair uma vez, e tem de sair na PRIMEIRA resposta —
+    # inclusive quando o cliente ja manda o pedido inteiro de uma vez, que era
+    # justamente o caso em que ela era pulada.
+    saudacao_feita: bool = False
+    # Aviso de "estamos fechados" ja dado nesta conversa.
+    aviso_horario_dado: bool = False
+    # Modalidade dita pelo cliente, nao inferida por uma palavra solta.
+    modalidade_confirmada: bool = False
+    # Data dita pelo cliente. Falso = ainda precisa perguntar o DIA.
+    data_confirmada: bool = False
+
     # Tempo atual (injetado pelo ConversationManager)
     current_time: str = ""
 
     # Carregado em cada mensagem; nao e persistido no estado da conversa.
     knowledge_context: str = ""
+    calendario: str = ""
+    diretivas_runtime: str = ""
 
     # Historico
     history: list = field(default_factory=list)
@@ -75,6 +92,7 @@ class ConversationState:
             "referencia": self.referencia,
             "horario": self.horario,
             "data_agendada": self.data_agendada,
+            "data_iso": self.data_iso,
             "payment_method": self.payment_method,
             "troco_para": self.troco_para,
             "subtotal": self.subtotal,
@@ -85,10 +103,57 @@ class ConversationState:
             "resumo_apresentado": self.resumo_apresentado,
             "pedido_confirmado": self.pedido_confirmado,
             "pedido_enviado": self.pedido_enviado,
+            "saudacao_feita": self.saudacao_feita,
+            "aviso_horario_dado": self.aviso_horario_dado,
+            "modalidade_confirmada": self.modalidade_confirmada,
+            "data_confirmada": self.data_confirmada,
             "history": self.history[-20:],
             "collected_data": self.collected_data,
             "last_bot_message": self.last_bot_message,
         }
+
+    # ── Contexto de execucao injetado no system prompt de todos os agentes ──
+
+    def dados_faltando(self) -> list:
+        """Dados obrigatorios ainda nao coletados, na ordem em que devem ser
+        perguntados.
+
+        A ordem importa: modalidade vem ANTES de bairro e endereco, senao o
+        agente comeca a falar de frete de entrega sem o cliente ter dito que
+        queria entrega. Data vem ANTES de horario.
+        """
+        faltando = []
+        if not self.name:
+            faltando.append("nome do cliente")
+        if not self.items:
+            faltando.append("itens do pedido")
+        if not self.modality:
+            faltando.append("modalidade (entrega ou retirada)")
+        elif self.modality == "entrega":
+            if not self.bairro:
+                faltando.append("bairro")
+            if not self.endereco:
+                faltando.append("rua e numero")
+        if not self.data_iso or not self.data_confirmada:
+            faltando.append("data (o DIA do pedido)")
+        if not self.horario:
+            faltando.append("horario")
+        return faltando
+
+    def bloco_runtime(self) -> str:
+        """Calendario + diretivas da vez, para o fim do system prompt.
+
+        Fica no fim de proposito: e a ultima coisa que o modelo le antes de
+        responder, e vence o que o prompt em markdown disser em contrario.
+        """
+        partes = []
+        if self.calendario:
+            partes.append("=== CALENDARIO E EXPEDIENTE (FATOS, NAO INTERPRETE) ===\n" + self.calendario)
+        elif self.current_time:
+            partes.append(f"Data e hora atual (Porto Velho): {self.current_time}")
+        if self.diretivas_runtime:
+            partes.append("=== DIRETIVAS OBRIGATORIAS DESTA RESPOSTA ===\n" + self.diretivas_runtime)
+        return ("\n\n" + "\n\n".join(partes)) if partes else ""
 
     @classmethod
     def from_dict(cls, data: dict) -> "ConversationState":
@@ -213,6 +278,86 @@ _PRECO_UNITARIO = {
 }
 
 
+# ── Modalidade ──────────────────────────────────────────────────────────────
+
+_MODALIDADE_PERGUNTA = re.compile(
+    r"\b(quanto|qual|quais|tem|voces|vcs|fazem|faz|taxa|valor|preco|custa|cobram|"
+    r"funciona|como)\b"
+)
+
+_ENTREGA_EXPLICITA = re.compile(
+    r"(?:\b(?:pra|para|pode|podem|quero|queria|gostaria|vai ser|vou querer|e|eh|"
+    r"seria|prefiro)\s+(?:de\s+)?entreg\w*)"
+    r"|\bme\s+entreg\w*"
+    r"|\bentregar\s+(?:em|na|no|hoje|amanha)"
+    r"|\bdelivery\b"
+    r"|\breceber\s+em\s+casa\b"
+    r"|\blevar?\s+(?:na|em)\s+(?:minha\s+)?casa\b"
+    r"|\btrazer\s+(?:em|na|no|aqui)\b"
+)
+
+_RETIRADA_EXPLICITA = re.compile(
+    r"\bretirad\w*\b"
+    r"|\bretirar\b"
+    r"|\b(?:vou|posso|prefiro|quero|queria)\s+buscar\b"
+    r"|\beu\s+busco\b"
+    r"|\beu\s+pego\b"
+    r"|\bna\s+fabrica\b"
+    r"|\bno\s+balcao\b"
+)
+
+
+def detectar_modalidade(message: str) -> str:
+    """'entrega', 'retirada' ou '' quando o cliente ainda nao escolheu.
+
+    O teste anterior era um `"entrega" in mensagem` cru: "quanto fica a taxa de
+    entrega?" ja marcava o pedido como entrega, e o agente seguia cobrando frete
+    sem nunca ter perguntado entrega ou retirada. Aqui so conta intencao
+    explicita — pergunta sobre entrega nao escolhe nada.
+    """
+    import horario as _horario
+
+    t = _horario._norm(message)
+    if not t:
+        return ""
+
+    if _RETIRADA_EXPLICITA.search(t):
+        return "retirada"
+    if _ENTREGA_EXPLICITA.search(t):
+        return "entrega"
+
+    # Pergunta sobre entrega nao e escolha de entrega.
+    if "?" in message or _MODALIDADE_PERGUNTA.search(t):
+        return ""
+
+    # Resposta curta e seca a "entrega ou retirada?".
+    curto = t.rstrip(" .!,")
+    if curto in ("entrega", "e entrega", "eh entrega", "entrega mesmo", "entregar"):
+        return "entrega"
+    if curto in ("retirada", "e retirada", "eh retirada", "retirar", "vou buscar", "busco"):
+        return "retirada"
+
+    return ""
+
+
+# ── Data ────────────────────────────────────────────────────────────────────
+
+# "hoje eu queria saber..." fala de hoje sem agendar nada para hoje.
+_HOJE_NAO_AGENDAMENTO = re.compile(
+    r"\bhoje\s+(?:eu\s+)?(?:queria|quero|gostaria|to|estou|tava|estava)\s+"
+    r"(?:saber|perguntar|ver|conversar)"
+)
+
+
+def detectar_data(message: str, now=None):
+    """Data absoluta que o cliente pediu, ou None."""
+    import horario as _horario
+
+    if _HOJE_NAO_AGENDAMENTO.search(_horario._norm(message)):
+        return None
+    return _horario.resolver_data(message, now)
+
+
 def _extract_data_from_message(message: str, state: "ConversationState") -> dict:
     """Extrai dados estruturados da mensagem do cliente (nome, itens, modalidade, endereco, horario, pagamento).
 
@@ -222,9 +367,11 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
     extracted = {}
 
     # ── Nome ────────────────────────────────────────────────────────────────
+    # "sou a Ana" nao era reconhecido — so "sou o". O resultado era perguntar o
+    # nome de novo para metade dos clientes, logo depois de eles o dizerem.
     name_patterns = [
-        r"(?:sou o|meu nome (?:e|é)|me chamo|aqui (?:e|é)|aqui o)\s+([A-ZÀ-Ú][a-zà-ú]+)",
-        r"(?:Oi|Ola|Olá|Bom dia|Boa tarde|Boa noite)[^,!,.]*[,!,.]?\s*(?:sou o|meu nome (?:e|é)|me chamo)\s+([A-ZÀ-Ú][a-zà-ú]+)",
+        r"(?:sou (?:o|a)?|meu nome (?:e|é)|me chamo|aqui (?:e|é)|aqui (?:o|a)|quem fala (?:e|é))\s+([A-ZÀ-Ú][a-zà-ú]+)",
+        r"(?:Oi|Ola|Olá|Bom dia|Boa tarde|Boa noite)[^,!,.]*[,!,.]?\s*(?:sou (?:o|a)?|meu nome (?:e|é)|me chamo)\s+([A-ZÀ-Ú][a-zà-ú]+)",
     ]
     for pat in name_patterns:
         m = re.search(pat, message, re.IGNORECASE)
@@ -234,41 +381,50 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
 
     # ── Modalidade ──────────────────────────────────────────────────────────
     if not state.modality:
-        if re.search(r'\b(entregar|entrega|receber em casa|levar na casa|chegar na casa)\b', msg_lower):
-            extracted["modality"] = "entrega"
-        elif re.search(r'\b(retirar|retirada|buscar|ir buscar|na fabrica|na fábrica|balcao|balcão)\b', msg_lower):
-            extracted["modality"] = "retirada"
+        modalidade = detectar_modalidade(message)
+        if modalidade:
+            extracted["modality"] = modalidade
 
     # ── Horario ─────────────────────────────────────────────────────────────
     if not state.horario:
-        # Padrões: "18h", "18:00", "as 18h", "às 18h", "hoje as 18h"
-        time_match = re.search(r'(?:as?|às?)\s*(\d{1,2})[h:](\d{2})?', msg_lower)
+        # Padrões: "18h", "18:00", "as 18h", "às 18h", "hoje as 18h".
+        # O "as"/"às" era obrigatorio, entao o cliente que respondia so "16h" a
+        # pergunta de horario nao era entendido e a pergunta se repetia. O "h"
+        # ou ":" logo apos os digitos continua obrigatorio, para numero de rua
+        # ("Av. Calama, 3234") nao virar horario.
+        time_match = re.search(r'\b(?:as|às|a|à)?\s*(\d{1,2})\s*[h:](\d{2})?\b', msg_lower)
         if time_match:
             hour = time_match.group(1)
             minute = time_match.group(2) or "00"
             extracted["horario"] = f"{hour}h{minute}" if minute != "00" else f"{hour}h"
 
     # ── Data ────────────────────────────────────────────────────────────────
-    if not state.data_agendada:
-        if re.search(r'\b(hoje)\b', msg_lower):
-            extracted["data_agendada"] = "hoje"
-        elif re.search(r'\b(amanhã|amanha)\b', msg_lower):
-            extracted["data_agendada"] = "amanha"
-        elif re.search(r'\b(segunda|terca|terça|quarta|quinta|sexta|sabado|sábado)\b', msg_lower):
-            day_match = re.search(r'\b(segunda|terca|terça|quarta|quinta|sexta|sabado|sábado)\b', msg_lower)
-            if day_match:
-                extracted["data_agendada"] = day_match.group(1)
-        else:
-            date_match = re.search(r'(\d{1,2})[/.](\d{1,2})(?:[/.](\d{2,4}))?', msg_lower)
-            if date_match:
-                extracted["data_agendada"] = date_match.group(0)
+    # A data so entra no pedido se o cliente disser o dia. Nunca ha default
+    # para "hoje": um pedido cair no dia errado e pior do que uma pergunta a
+    # mais.
+    if not state.data_iso:
+        import horario as _horario
+        _now = None
+        if state.current_time:
+            try:
+                _now = _horario.datetime.strptime(state.current_time, "%d/%m/%Y %H:%M")
+            except Exception:
+                _now = None
+        data = detectar_data(message, _now)
+        if data:
+            extracted["data_iso"] = data.isoformat()
+            extracted["data_agendada"] = _horario.formatar_data(data, _now)
 
     # ── Endereco ────────────────────────────────────────────────────────────
     if not state.endereco:
         # Padrão: "Av. Calama, 3234" ou "Av. Calama 3234" ou "Rua X, 123"
         # Para antes de "bairro" ou no final da string
         addr_match = re.search(
-            r'((?:Av\.|Avenida|Rua|Al\.|Alameda|Travessa|Tv\.|Estrada)\s+[^\.,]+(?:[,\s]+\d+)?)',
+            # O ponto da abreviacao era obrigatorio, entao "Av Calama 100" —
+            # como o cliente escreve de verdade — nao era reconhecido e o
+            # agente ficava pedindo o endereco que ja tinha recebido.
+            r'(\b(?:Av\.?|Avenida|R\.|Rua|Al\.?|Alameda|Travessa|Tv\.?|'
+            r'Estrada|Rod\.?|Rodovia|Pra[cç]a)\s+[^\.,]+(?:[,\s]+\d+)?)',
             message, re.IGNORECASE
         )
         if addr_match:
@@ -305,8 +461,15 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
     # ── Itens ───────────────────────────────────────────────────────────────
     if not state.items:
         # Padrão: "50 coxinhas", "25 kibes", "100 esfirras"
+        # O fim do nome do produto so era reconhecido em virgula, " e " ou fim
+        # da mensagem. Com isso "quero 25 coxinhas pra retirar as 16h" nao
+        # extraia item nenhum — o pedido sumia e a Sandrinha perguntava de novo
+        # o que o cliente ja tinha dito. Aqui o nome termina tambem em ponto e
+        # nas preposicoes que costumam vir depois do produto.
         item_pattern = re.findall(
-            r'(\d+)\s*(?:unidades?|un\.?|pcs\.?)?\s*(de\s+)?([a-záàãâéêíóôõúç\s]+?)(?:\s*(?:,|e\b|$))',
+            r'(\d+)\s*(?:unidades?|un\.?|pcs\.?)?\s*(de\s+)?([a-záàãâéêíóôõúç\s]+?)'
+            r'(?:\s*(?:[,;.!?]|\be\b|\bpra\b|\bpara\b|\bcom\b|\bno\b|\bna\b|\bem\b'
+            r'|\bhoje\b|\bamanh[aã]\b|\bàs\b|\bas\b|$))',
             msg_lower
         )
         items_found = []
@@ -413,10 +576,12 @@ class ConversationManager:
         state = ConversationState.load_from_db(phone)
         state.phone = phone
 
-        # 1.1 Injeta horario atual (fuso de Porto Velho = UTC-4)
-        from datetime import datetime, timedelta
-        _now = (datetime.utcnow() - timedelta(hours=4)).strftime("%d/%m/%Y %H:%M")
-        state.current_time = _now
+        # 1.1 Injeta calendario e expediente ja resolvidos (fuso de Porto Velho)
+        import horario
+        now = horario.agora()
+        state.current_time = now.strftime("%d/%m/%Y %H:%M")
+        state.calendario = horario.contexto_para_prompt(now)
+        expediente = horario.status(now)
 
         # Conhecimento obrigatorio no contexto: os agentes nao dependem de uma
         # decisao do LLM de chamar a tool antes de responder.
@@ -434,6 +599,7 @@ class ConversationManager:
                 print(f"[extract] itens: {state.items}")
             if "modality" in extracted and not state.modality:
                 state.modality = extracted["modality"]
+                state.modalidade_confirmada = True
                 print(f"[extract] modalidade: {state.modality}")
             if "endereco" in extracted and not state.endereco:
                 state.endereco = extracted["endereco"]
@@ -444,9 +610,11 @@ class ConversationManager:
             if "horario" in extracted and not state.horario:
                 state.horario = extracted["horario"]
                 print(f"[extract] horario: {state.horario}")
-            if "data_agendada" in extracted and not state.data_agendada:
-                state.data_agendada = extracted["data_agendada"]
-                print(f"[extract] data: {state.data_agendada}")
+            if "data_iso" in extracted and not state.data_iso:
+                state.data_iso = extracted["data_iso"]
+                state.data_agendada = extracted.get("data_agendada", state.data_agendada)
+                state.data_confirmada = True
+                print(f"[extract] data: {state.data_agendada} ({state.data_iso})")
             if "payment_method" in extracted and not state.payment_method:
                 state.payment_method = extracted["payment_method"]
                 print(f"[extract] pagamento: {state.payment_method}")
@@ -467,6 +635,41 @@ class ConversationManager:
             "text": message,
             "timestamp": time.time(),
         })
+
+        # 3.1 Fora do expediente: avisa ANTES de qualquer coisa.
+        # Isso sai em codigo, nao em instrucao de prompt, porque era exatamente
+        # a regra que o modelo pulava quando o cliente mandava o pedido pronto
+        # na primeira mensagem.
+        if not expediente["aberto"] and not state.aviso_horario_dado:
+            state.aviso_horario_dado = True
+            saudacao = horario.saudacao(now)
+            nome = f", {state.name}" if state.name else ""
+            resposta = f"{saudacao}{nome}! Aqui e a Sandrinha da BALBS.\n\n{expediente['mensagem']}"
+            if not expediente["aceita_hoje"] and state.data_iso == now.date().isoformat():
+                # O cliente pediu para hoje, mas hoje ja nao cabe: a data volta
+                # a ser uma pergunta em aberto em vez de seguir errada.
+                state.data_iso = ""
+                state.data_agendada = ""
+                state.data_confirmada = False
+            return self._finalizar(state, resposta)
+
+        # 3.2 Data + horario incompativeis com o expediente: corrige na hora.
+        if state.data_iso and state.horario:
+            from datetime import date as _date
+            ok, motivo = horario.validar_agendamento(
+                _date.fromisoformat(state.data_iso), state.horario, now
+            )
+            if not ok and motivo and not motivo.startswith("Falta"):
+                if "horario" in motivo.lower() or "intervalo" in motivo.lower() or "20h00" in motivo:
+                    state.horario = ""
+                else:
+                    state.data_iso = ""
+                    state.data_agendada = ""
+                    state.data_confirmada = False
+                return self._finalizar(state, motivo)
+
+        # 3.3 Diretivas desta resposta (vao para o fim do system prompt)
+        state.diretivas_runtime = self._montar_diretivas(state, expediente, now)
 
         # 4. Router classifica
         from agents.router import classify_intent
@@ -506,18 +709,88 @@ class ConversationManager:
 
         response = agent.process(message, state, media)
 
-        # 7. Adiciona resposta ao historico
+        return self._finalizar(state, response)
+
+    def _finalizar(self, state: ConversationState, response: str) -> str:
+        """Grava a resposta no historico e persiste o estado.
+
+        Caminho unico de saida: as respostas dadas em codigo (expediente,
+        agendamento invalido) passam pelos mesmos registros das respostas do
+        modelo, inclusive a marca de que a saudacao ja saiu.
+        """
         state.history.append({
             "role": "assistant",
             "text": response,
             "timestamp": time.time(),
         })
         state.last_bot_message = response
-
-        # 8. Salva estado
+        state.saudacao_feita = True
         state.save_to_db()
-
         return response
+
+    def _montar_diretivas(self, state: ConversationState, expediente: dict, now) -> str:
+        """Regras que valem so para esta resposta, ja resolvidas em codigo.
+
+        Sao poucas e concretas de proposito: uma saudacao, uma proxima
+        pergunta, uma lista de coisas que nao podem ser assumidas. O prompt em
+        markdown descreve o fluxo; isto aqui decide o passo.
+        """
+        import horario
+
+        linhas = []
+
+        if not state.saudacao_feita:
+            nome = f", {state.name}" if state.name else ""
+            linhas.append(
+                f'1. Esta e a PRIMEIRA resposta desta conversa. Comece por '
+                f'"{horario.saudacao(now)}{nome}!" e apresente-se como Sandrinha da '
+                f'BALBS. Nao pule a saudacao mesmo que o cliente ja tenha mandado '
+                f'o pedido inteiro.'
+            )
+        else:
+            linhas.append("1. A saudacao ja foi feita. NAO cumprimente de novo.")
+
+        faltando = state.dados_faltando()
+        if faltando:
+            linhas.append(
+                f"2. Ainda faltam: {', '.join(faltando)}. Pergunte APENAS "
+                f'"{faltando[0]}" nesta mensagem, uma pergunta so. Nao pergunte o '
+                f"resto agora e nao apresente resumo nem total."
+            )
+        else:
+            linhas.append(
+                "2. Todos os dados obrigatorios estao coletados. Chame "
+                "calculate_order e apresente o resumo."
+            )
+
+        if not state.modality:
+            linhas.append(
+                "3. A modalidade NAO foi definida. E proibido falar em entrega, "
+                "endereco, bairro, frete ou taxa de entrega antes do cliente "
+                "responder se e entrega ou retirada."
+            )
+        else:
+            linhas.append(f"3. Modalidade ja definida pelo cliente: {state.modality}.")
+
+        if not state.data_iso:
+            linhas.append(
+                "4. O cliente NAO informou o DIA do pedido. E proibido assumir "
+                '"hoje". Pergunte para qual dia e o pedido.'
+            )
+        else:
+            linhas.append(
+                f"4. Dia do pedido: {state.data_agendada}. Escreva o dia assim, por "
+                f"extenso com a data, em toda confirmacao e no resumo — nunca so "
+                f'"hoje".'
+            )
+
+        if not expediente["aceita_hoje"]:
+            linhas.append(
+                "5. NAO aceite pedido para hoje. Ofereca "
+                f"{horario.formatar_data(expediente['sugestao_data'], now)}."
+            )
+
+        return "\n".join(linhas)
 
     def reset_conversation(self, phone: str):
         """Reseta conversa."""

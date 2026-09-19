@@ -11,7 +11,7 @@ import time
 import threading
 import hmac
 import hashlib
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -35,6 +35,7 @@ import database
 import events
 import meta
 import cardapio
+import horario
 import parse_knowledge
 import scheduler as crm_scheduler
 from agents.conversation import _extract_data_from_message, ConversationState
@@ -482,10 +483,15 @@ def _check_transfer_keywords(items: list[dict]) -> str | None:
 # Flag para controlar pedidos já enviados (evita duplicação)
 _orders_sent: set[str] = set()
 
-def _calculate_order_handler(items: list[dict], bairro: str = "", **kwargs) -> str:
+def _calculate_order_handler(items: list[dict], bairro: str = "", modalidade: str = "",
+                             dia: str = "", horario: str = "", pagamento: str = "",
+                             cliente: str = "", endereco: str = "", **kwargs) -> str:
     """Handler para a tool calculate_order."""
     print(f"[cardápio] TOOL calculate_order items={items} bairro={bairro}")
-    result = cardapio.calcular_pedido(items, bairro)
+    result = cardapio.calcular_pedido(
+        items, bairro, modalidade=modalidade, dia=dia, horario=horario,
+        pagamento=pagamento, cliente=cliente, endereco=endereco,
+    )
     if result.get("success"):
         return json.dumps(result, ensure_ascii=False)
     return json.dumps(result, ensure_ascii=False)
@@ -647,7 +653,22 @@ def split_reply(text: str) -> list[str]:
                     current = (current + " " + piece).strip() if current else piece
             if current:
                 chunks.append(current.strip())
-    return [c for c in chunks if c]
+
+    # O modelo as vezes repete a mesma frase em dois paragrafos seguidos —
+    # imitando o texto do prompt operacional, que vem do .docx com trechos
+    # duplicados. Para o cliente isso chega como a mesma pergunta duas vezes.
+    unicos: list[str] = []
+    vistos: set[str] = set()
+    for c in chunks:
+        if not c:
+            continue
+        chave = " ".join(c.lower().split())
+        if chave in vistos:
+            print(f"[split] paragrafo repetido descartado: {c[:60]!r}")
+            continue
+        vistos.add(chave)
+        unicos.append(c)
+    return unicos
 
 
 # ── Multimodal parts builder ─────────────────────────────────────────────────
@@ -973,6 +994,24 @@ def _auditar_valores(user: str, reply: str, consultados: list) -> None:
         print(f"[auditoria] WARN falhou: {e}")
 
 
+def _responder_direto(user: str, items: list[dict], texto: str) -> None:
+    """Envia uma resposta decidida em codigo, sem passar pelo LLM.
+
+    Usado para as regras de negocio fechadas (fora do expediente, horario
+    invalido): elas nao dependem de o modelo lembrar de aplica-las, mas ainda
+    precisam do mesmo registro em memoria e no painel que qualquer resposta —
+    inclusive a mensagem do cliente, que neste caminho ainda nao foi gravada.
+    """
+    memory.append_multimodal(user, "user", _build_user_parts(items))
+    memory.append(user, "assistant", texto)
+    for chunk in split_reply(texto) or [texto]:
+        res = send_text(user, chunk)
+        if not res.get("ok"):
+            print(f"[flush] ERRO ao enviar p/ {user}: {res.get('error')}")
+            continue
+        send_msg_out_to_panel(user, chunk)
+
+
 def handle_flush(user: str, items: list[dict]) -> None:
     try:
         global_mode = int(database.get_setting("agent_mode", "1"))
@@ -1053,6 +1092,47 @@ def handle_flush(user: str, items: list[dict]) -> None:
             except Exception as e:
                 print(f"[memoria] WARN nao atualizou contato: {e}")
 
+        # ── Expediente e agendamento (decididos em codigo) ───────────────────
+        # Estas duas respostas saem sem passar pelo LLM porque sao regras de
+        # negocio fechadas, e eram justamente as que o modelo pulava quando o
+        # cliente mandava o pedido pronto na primeira mensagem.
+        _agora = horario.agora()
+        _expediente = horario.status(_agora)
+
+        if not _expediente["aberto"] and not _memoria.get("aviso_horario_dado"):
+            _memoria["aviso_horario_dado"] = True
+            if not _expediente["aceita_hoje"] and _memoria.get("data_iso") == _agora.date().isoformat():
+                # Cliente pediu para hoje, mas hoje ja nao cabe: o dia volta a
+                # ser pergunta em aberto em vez de seguir errado.
+                _memoria["data_iso"] = ""
+                _memoria["data_agendada"] = ""
+            _nome = f", {_memoria['name']}" if _memoria.get("name") else ""
+            _resposta = (
+                f"{horario.saudacao(_agora)}{_nome}! Aqui e a Sandrinha da BALBS.\n\n"
+                f"{_expediente['mensagem']}"
+            )
+            _memoria["saudacao_feita"] = True
+            conversation_memory.save(user, _memoria)
+            _responder_direto(user, items, _resposta)
+            return
+
+        if _memoria.get("data_iso") and _memoria.get("horario"):
+            _ok, _motivo = horario.validar_agendamento(
+                date.fromisoformat(_memoria["data_iso"]), _memoria["horario"], _agora
+            )
+            if not _ok and _motivo and not _motivo.startswith("Falta"):
+                # Limpa so o campo que nao cabe, para o agente reperguntar esse
+                # e nao a ficha inteira.
+                if "horario" in _motivo.lower() or "intervalo" in _motivo.lower() or "20h00" in _motivo:
+                    _memoria["horario"] = ""
+                else:
+                    _memoria["data_iso"] = ""
+                    _memoria["data_agendada"] = ""
+                _memoria["saudacao_feita"] = True
+                conversation_memory.save(user, _memoria)
+                _responder_direto(user, items, _motivo)
+                return
+
         user_parts = _build_user_parts(items)
 
         # --- INÍCIO DETECÇÃO DE CONFIRMAÇÃO ---
@@ -1062,6 +1142,21 @@ def handle_flush(user: str, items: list[dict]) -> None:
             if m.get("role") == "assistant":
                 last_assistant_text = (m.get("parts", [{}])[0].get("text", "") or "")
                 break
+
+        # Resposta seca a pergunta anterior ("Eduardo", "Olaria"): a extracao
+        # por palavra-chave nao pega, e sem isto o agente perguntava, o cliente
+        # respondia, e ele perguntava de novo.
+        _campo_direto = conversation_memory.capturar_resposta_direta(
+            _memoria, last_assistant_text, text_only
+        )
+        if _campo_direto:
+            conversation_memory.save(user, _memoria)
+            print(f"[memoria] {user}: {_campo_direto}={_memoria[_campo_direto]} (resposta direta)")
+            if _campo_direto == "name":
+                try:
+                    database.upsert_contact(user, name=_memoria["name"])
+                except Exception as e:
+                    print(f"[memoria] WARN nao atualizou contato: {e}")
 
         is_short_reply = len(text_only.strip()) <= 60
         confirmation_keywords = ["sim", "isso", "isso mesmo", "esse", "essa", "esse mesmo", "1 mesmo", "uma mesmo", "1 de 25", "1 de 25 mesmo", "pode ser", "correto", "exatamente", "é isso", "quero esse", "ok", "manda", "confirmo"]
@@ -1109,17 +1204,38 @@ def handle_flush(user: str, items: list[dict]) -> None:
             )
 
         # ── CONTEUDO DINAMICO (no final, para preservar o cache do prefixo) ──
-        _now_dt = datetime.utcnow() - timedelta(hours=4)
-        _now = _now_dt.strftime("%d/%m/%Y %H:%M")
-        _tomorrow = (_now_dt + timedelta(days=1)).strftime("%d/%m/%Y")
-        _dias = ("segunda-feira", "terca-feira", "quarta-feira", "quinta-feira",
-                 "sexta-feira", "sabado", "domingo")
+        # Calendario e expediente ja resolvidos em codigo: saudacao, dia da
+        # semana e "estamos abertos?" sao conta, nao interpretacao de texto.
         dynamic_prompt += (
-            f"\n\nData e hora atual (Porto Velho): {_now} ({_dias[_now_dt.weekday()]}). "
-            f"Data de amanha (se agendar): {_tomorrow}."
-            f"\nO telefone (numero WhatsApp) do cliente e: {user} "
+            "\n\n=== CALENDARIO E EXPEDIENTE (FATOS, NAO INTERPRETE) ===\n"
+            + horario.contexto_para_prompt(_agora)
+            + f"\nO telefone (numero WhatsApp) do cliente e: {user} "
             f"(use em send_order_to_cardapio)."
         )
+
+        # Saudacao: uma vez so, e na primeira resposta — inclusive quando o
+        # cliente manda o pedido inteiro de uma vez, que era justamente o caso
+        # em que ela era pulada. A diretiva e montada aqui mas so entra no
+        # prompt DEPOIS da ficha: a ficha termina com "pergunte SO isso", e o
+        # modelo lia isso como proibicao de cumprimentar.
+        if not _memoria.get("saudacao_feita"):
+            _nome_saud = f", {_memoria['name']}" if _memoria.get("name") else ""
+            _diretiva_saudacao = (
+                f"\n\n=== ABERTURA DESTA MENSAGEM (vale sobre tudo acima) ===\n"
+                f'Esta e a PRIMEIRA resposta da conversa. A mensagem COMECA por '
+                f'"{horario.saudacao(_agora)}{_nome_saud}!" seguido de uma '
+                f"apresentacao curta como Sandrinha da BALBS, e so depois vem a "
+                f"pergunta pendente. Cumprimentar nao conta como pergunta e nao "
+                f'viola o "pergunte so isso": as duas coisas vao na MESMA '
+                f"mensagem. Nao pule a saudacao mesmo que o cliente ja tenha "
+                f"mandado o pedido inteiro de uma vez."
+            )
+            _memoria["saudacao_feita"] = True
+            conversation_memory.save(user, _memoria)
+        else:
+            _diretiva_saudacao = (
+                "\n\nA saudacao ja foi feita nesta conversa. NAO cumprimente de novo."
+            )
 
         if is_confirmation and last_assistant_text:
             dynamic_prompt += (
@@ -1160,9 +1276,19 @@ def handle_flush(user: str, items: list[dict]) -> None:
             "Assados 30,00/25 = 1,20), nunca o preco do pacote."
             "\n7. Se for entrega e o bairro nao estiver na tabela oficial, diga que precisa "
             "confirmar a taxa com a equipe - nao chute frete."
-            "\n8. HORARIO: use a saudacao conforme a hora atual informada acima. Fora do "
-            "expediente (ver HORARIO na base), avise antes de iniciar o pedido e ofereca "
-            "agendamento."
+            "\n8. CALENDARIO: saudacao, dia da semana e situacao do expediente ja vem "
+            "resolvidos no bloco CALENDARIO E EXPEDIENTE. Copie de la; nunca calcule de "
+            "cabeca. Se o bloco disser para nao aceitar pedido para hoje, nao aceite."
+            "\n8.1 DIA DO PEDIDO (corrige o BLOCO 5): onde o modelo de resumo diz "
+            "'Data: [Data agendada ou \"Hoje\"]', leia 'Data: [dia que o CLIENTE disse]'. "
+            "Nao existe 'ou Hoje': se o cliente nao disse o dia, voce PERGUNTA o dia. "
+            "Isso vale tambem na ENTREGA, cuja lista de coleta do BLOCO 3 esquece a Data "
+            "- colete Nome, Bairro, Rua com Numero, Ponto de Referencia, DATA, Horario e "
+            "Forma de Pagamento. Ao escrever a data, use sempre o dia por extenso com a "
+            "data (\"hoje, sexta-feira (19/09)\"), e cite dia E horario na confirmacao."
+            "\n8.2 MODALIDADE: nunca assuma entrega nem retirada. Enquanto o cliente nao "
+            "escolher, nao fale em endereco, bairro, frete ou taxa de entrega. Cliente "
+            "PERGUNTAR sobre entrega nao e o cliente ESCOLHER entrega."
             "\n9. Quando o cliente define a quantidade (ex: '50 coxinhas'), aceite o lote "
             "correspondente e nao questione o formato."
             "\n10. SEMPRE responda primeiro a pergunta que o cliente fez (preco, frete, "
@@ -1176,6 +1302,9 @@ def handle_flush(user: str, items: list[dict]) -> None:
         # modelo le mais perto da resposta, onde pesa mais contra repergunta e
         # contra resumo apresentado antes da hora) ───────────────────────────
         dynamic_prompt += "\n\n" + conversation_memory.render_ficha(_memoria)
+
+        # Depois da ficha de proposito: e a ultima linha que o modelo le.
+        dynamic_prompt += _diretiva_saudacao
 
         # Verifica se a IA transferiu durante a chamada (via tool)
         _transfer_done = False
@@ -1218,7 +1347,32 @@ def handle_flush(user: str, items: list[dict]) -> None:
             return _consultar_preco_handler(produto=produto, formato=formato, **kwargs)
 
         def _calculate_handler(items: list = None, bairro: str = "", **kwargs) -> str:
-            resultado = _calculate_order_handler(items or [], bairro, **kwargs)
+            # A tool se recusa a fechar conta com dado faltando. Como instrucao
+            # de prompt isso era ignorado; como retorno de tool nao ha resumo
+            # para o modelo copiar.
+            pendentes = conversation_memory.faltando(_memoria)
+            if pendentes:
+                rotulos = [conversation_memory._ROTULOS[c] for c in pendentes]
+                return json.dumps({
+                    "success": False,
+                    "erro": "DADOS_INCOMPLETOS",
+                    "faltando": rotulos,
+                    "instrucao": (
+                        f"NAO apresente resumo nem total. Pergunte ao cliente "
+                        f"apenas: {rotulos[0]}. Uma pergunta so."
+                    ),
+                }, ensure_ascii=False)
+
+            resultado = _calculate_order_handler(
+                items or [], bairro,
+                modalidade=_memoria.get("modality", ""),
+                dia=_memoria.get("data_agendada", ""),
+                horario=_memoria.get("horario", ""),
+                pagamento=_memoria.get("payment_method", ""),
+                cliente=_memoria.get("name", ""),
+                endereco=_memoria.get("endereco", ""),
+                **kwargs,
+            )
             try:
                 dados = json.loads(resultado)
                 for campo in ("subtotal", "delivery_fee", "return_fee", "total"):
@@ -2690,7 +2844,11 @@ def api_knowledge_create():
     existing = knowledge_rag.get_file(filename)
     if existing:
         return jsonify({"error": "Arquivo ja existe"}), 409
-    knowledge_rag.save_knowledge_raw(filename, content, description=description)
+    try:
+        knowledge_rag.save_knowledge_raw(filename, content, description=description)
+    except knowledge_rag.ConteudoCorrompido as e:
+        print(f"[knowledge] RECUSADO {filename}: {e}")
+        return jsonify({"error": f"Conteudo recusado - {e}"}), 400
     print(f"[knowledge] criado: {filename}")
     return jsonify({"ok": True, "filename": filename})
 
@@ -2701,7 +2859,14 @@ def api_knowledge_update(filename):
     data = request.get_json(silent=True) or {}
     content = data.get("content", "")
     description = data.get("description", "").strip()
-    knowledge_rag.save_knowledge_raw(filename, content, description=description)
+    try:
+        knowledge_rag.save_knowledge_raw(filename, content, description=description)
+    except knowledge_rag.ConteudoCorrompido as e:
+        # Barra aqui: salvar o texto remontado por cima do original foi o que
+        # destruiu o prompt operacional uma vez. O arquivo local tambem nao e
+        # tocado, entao nada se perde.
+        print(f"[knowledge] RECUSADO {filename}: {e}")
+        return jsonify({"error": f"Conteudo recusado - {e}"}), 400
 
     # Salva de volta no arquivo local (.docx ou .txt/.md)
     if filename.endswith('.docx'):

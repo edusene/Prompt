@@ -3,6 +3,7 @@ knowledge_rag.py — Knowledge base via RAG no Supabase (pgvector + OpenAI embed
 Chunking, embedding e busca semântica para injetar contexto no LLM.
 """
 
+import re
 import os
 import math
 from openai import OpenAI
@@ -135,11 +136,48 @@ def chunk_text(text: str, max_len: int = 900, overlap_lines: int = 1) -> list[st
 # ── Knowledge CRUD ───────────────────────────────────────────────────────────
 
 
+class ConteudoCorrompido(ValueError):
+    """Conteudo com a assinatura do chunker antigo (sobreposicao de 50 chars)."""
+
+
+# Trecho longo repetido 3x ou mais em sequencia na mesma linha. E a marca que o
+# chunker antigo deixava ao remontar o texto: "...avul sa, sem lote minimo de
+# 25. cobranca unitaria avul sa, sem lote minimo de 25. cobranca unitaria avul".
+# Prosa normal nao repete 25+ caracteres tres vezes seguidas.
+_ASSINATURA_OVERLAP = re.compile(r"(.{25,}?)\1{2,}")
+
+
+def detectar_corrupcao(content: str) -> str:
+    """Descreve a corrupcao encontrada no texto, ou "" se estiver limpo.
+
+    O prompt operacional foi destruido uma vez assim: o conteudo remontado dos
+    chunks foi salvo de volta por cima do original, e cada edicao seguinte pela
+    aba Knowledge amplificou o estrago. Salvar e o ponto onde da para barrar.
+    """
+    linhas_ruins = []
+    for n, linha in enumerate((content or "").split("\n"), start=1):
+        m = _ASSINATURA_OVERLAP.search(linha)
+        if m:
+            linhas_ruins.append((n, m.group(1).strip()[:60]))
+    if not linhas_ruins:
+        return ""
+    amostra = "; ".join(f"linha {n}: ...{t}..." for n, t in linhas_ruins[:3])
+    return (
+        f"{len(linhas_ruins)} linha(s) com trecho repetido em sequencia "
+        f"({amostra}). Isso e sinal de texto remontado dos chunks do RAG, nao "
+        f"de conteudo real - salvar assim apagaria o original."
+    )
+
+
 def save_knowledge(filename: str, content: str, description: str = "") -> None:
     """Salva knowledge no banco: deleta antigo, chunka, embeda, insere."""
     content = (content or "").strip()
     if not content:
         return
+
+    problema = detectar_corrupcao(content)
+    if problema:
+        raise ConteudoCorrompido(f"{filename}: {problema}")
 
     # Deleta chunks anteriores deste arquivo
     database.delete_knowledge_file(filename)
@@ -436,6 +474,10 @@ def save_knowledge_raw(filename: str, content: str, description: str = "") -> No
     content = (content or "").strip()
     if not content:
         return
+
+    problema = detectar_corrupcao(content)
+    if problema:
+        raise ConteudoCorrompido(f"{filename}: {problema}")
 
     database.delete_knowledge_file(filename)
 
