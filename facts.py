@@ -317,6 +317,20 @@ def preco_unitario_da_categoria(categoria: str) -> tuple[float | None, str]:
     return melhor, origem
 
 
+def buscar_linha(categoria: str, item: str) -> dict | None:
+    """A linha exata da planilha, identificada por categoria + item.
+
+    O nome sozinho nao identifica um produto: "Enroladinho de Salsicha" e sabor
+    de lote (R$ 0,80/un) e tambem salgado grande (R$ 9,00/un). Quem precisa
+    mexer num produto especifico usa este par.
+    """
+    cat, it = normalize(categoria), normalize(item)
+    for p in get()["produtos"]:
+        if normalize(p["categoria"]) == cat and normalize(p["item"]) == it:
+            return p
+    return None
+
+
 def resolve_unit_price(nome: str, quantity: int = 1) -> dict | None:
     """Preco unitario oficial de um item do pedido.
 
@@ -324,10 +338,28 @@ def resolve_unit_price(nome: str, quantity: int = 1) -> dict | None:
     um pedido inteiro ja saiu com subtotal R$ 0,00 por causa disso. Aqui o valor
     vem sempre do cardapio.
 
+    Item marcado como indisponivel na planilha nao tem preco: devolve None, e
+    quem chamou trata como item fora do cardapio. Antes a coluna Disponivel era
+    lida e exposta, mas ninguem a consultava na hora de precificar - dava para
+    fechar pedido de produto desativado.
+
     Retorna {"preco_unitario", "item_oficial", "base"} ou None se o item nao
-    estiver no cardapio.
+    estiver no cardapio ou estiver indisponivel.
     """
-    candidatos = lookup_preco(nome)
+    todos = lookup_preco(nome)
+    if not todos:
+        return None
+
+    # Se o item pedido EXISTE e esta desativado, o pedido para aqui. Filtrar a
+    # lista em vez de parar deixaria o casamento aproximado escorregar para
+    # outro produto: sem esta checagem, "Panqueca de Carne" (indisponivel)
+    # acabava precificada como "Rissole de Carne" a R$ 9,00.
+    alvo_exato = normalize(nome)
+    exatos = [p for p in todos if normalize(p["item"]) == alvo_exato]
+    if exatos and not any(p.get("disponivel", True) for p in exatos):
+        return None
+
+    candidatos = [p for p in todos if p.get("disponivel", True)]
     if not candidatos:
         return None
 

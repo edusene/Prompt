@@ -106,88 +106,75 @@ SABORES = {
 # quando o cardapio nao tem o mesmo tamanho de embalagem.
 MAPA = {
     "Rissole de Carne": {
-        "nome_base44": "Rissoles de Carne (grande)", "context": "unidade",
+        "categoria": "Salgados Grandes", "nome_base44": "Rissoles de Carne (grande)", "context": "unidade",
         "quantidade_teste": 1, "preco_esperado": 9.00,
     },
     "Rissole de Queijo e Presunto": {
-        "nome_base44": "Rissole de Queijo e Presunto", "context": "unidade",
+        "categoria": "Salgados Grandes", "nome_base44": "Rissole de Queijo e Presunto", "context": "unidade",
         "quantidade_teste": 1, "preco_esperado": 9.00,
     },
     "Empada de Frango": {
-        "nome_base44": "Empada de Frango (grande)", "context": "unidade",
+        "categoria": "Salgados Grandes", "nome_base44": "Empada de Frango (grande)", "context": "unidade",
         "quantidade_teste": 1, "preco_esperado": 9.00,
     },
     "Empada de Camarão": {
-        "nome_base44": "Empada de Camarão (grande)", "context": "unidade",
+        "categoria": "Salgados Grandes", "nome_base44": "Empada de Camarão (grande)", "context": "unidade",
         "quantidade_teste": 1, "preco_esperado": 9.00,
     },
     "Saltenha Assada": {
-        "nome_base44": "Saltenha Assada", "context": "unidade",
+        "categoria": "Salgados Grandes", "nome_base44": "Saltenha Assada", "context": "unidade",
         "quantidade_teste": 1, "preco_esperado": 9.00,
     },
     "Bomba de Carne de Sol": {
-        "nome_base44": "Bomba de carne de sol", "context": "unidade",
+        "categoria": "Salgados Grandes", "nome_base44": "Bomba de carne de sol", "context": "unidade",
         "quantidade_teste": 1, "preco_esperado": 10.00,
     },
     "Quiche de Frango": {
-        "nome_base44": "Quiche de Frango", "context": "unidade",
+        "categoria": "Salgados Grandes", "nome_base44": "Quiche de Frango", "context": "unidade",
         "quantidade_teste": 1, "preco_esperado": 12.00,
     },
     "Bolo de Milho": {
-        "nome_base44": "Bolo de Milho", "context": "unidade",
+        "categoria": "Bolos e Doces", "nome_base44": "Bolo de Milho", "context": "unidade",
         "quantidade_teste": 1, "preco_esperado": 30.00,
     },
     # Recuperados: existiam no cardapio com outro nome.
     "Coxinha de Frango com Catupiry": {
-        "nome_base44": "Coxinha de frango (grande)", "context": "unidade",
+        "categoria": "Salgados Grandes", "nome_base44": "Coxinha de frango (grande)", "context": "unidade",
         "quantidade_teste": 1, "preco_esperado": 9.00,
     },
     "Quiche de Carne de Sol": {
-        "nome_base44": "Quiche carne de sol", "context": "unidade",
+        "categoria": "Salgados Grandes", "nome_base44": "Quiche carne de sol", "context": "unidade",
         "quantidade_teste": 1, "preco_esperado": 12.00,
     },
     "Guaraná Tuchaua 2 Litros": {
-        "nome_base44": "Refrigerante Tuchaua 2L", "context": "unidade",
+        "categoria": "Bebidas", "nome_base44": "Refrigerante Tuchaua 2L", "context": "unidade",
         "quantidade_teste": 1, "preco_esperado": 12.00,
     },
     "Bandeja de Brigadeiros (16 un)": {
-        "nome_base44": "Bandeja com 16 Docinhos", "context": "unidade",
+        "categoria": "Bolos e Doces", "nome_base44": "Bandeja com 16 Docinhos", "context": "unidade",
         "quantidade_teste": 1, "preco_esperado": 20.80,
     },
     # O cardapio digital nao tem cento de brigadeiro: 1 cento = 2 meios centos.
     "Cento de Brigadeiros (100 un)": {
-        "nome_base44": "Meio Cento de brigadeiro", "context": "unidade",
+        "categoria": "Bolos e Doces", "nome_base44": "Meio Cento de brigadeiro", "context": "unidade",
         "fator": 2, "quantidade_teste": 2, "preco_esperado": 130.00,
     },
     "Meio Cento de Brigadeiros (50 un)": {
-        "nome_base44": "Meio Cento de brigadeiro", "context": "unidade",
+        "categoria": "Bolos e Doces", "nome_base44": "Meio Cento de brigadeiro", "context": "unidade",
         "quantidade_teste": 1, "preco_esperado": 65.00,
     },
     "Refrigerante Lata": {
-        "nome_base44": "Refrigerante Lata", "context": "unidade",
+        "categoria": "Bebidas", "nome_base44": "Refrigerante Lata", "context": "unidade",
         "quantidade_teste": 1, "preco_esperado": 7.00,
     },
     "Refrigerante 600ml": {
-        "nome_base44": "Refrigerante 600ml", "context": "unidade",
+        "categoria": "Bebidas", "nome_base44": "Refrigerante 600ml", "context": "unidade",
         "quantidade_teste": 1, "preco_esperado": 8.00,
     },
     "Enroladinho de Salsicha": {
-        "nome_base44": "Enroladinho de Salsicha", "context": "unidade",
+        "categoria": "Salgados Grandes", "nome_base44": "Enroladinho de Salsicha", "context": "unidade",
         "quantidade_teste": 1, "preco_esperado": 8.00,
     },
-}
-
-
-# ── Preco do cardapio digital, quando diverge da planilha ───────────────────
-# Decisao: vale o preco do CARDAPIO, que e o que o cliente ve ao abrir o menu.
-# Aplicado em cardapio._normalizar_itens para o agente cotar o mesmo valor nos
-# dois modos. A planilha continua divergindo ate o dono acertar; e o que o
-# verificar_catalogo.py reporta.
-PRECO_CARDAPIO = {
-    "Enroladinho de Salsicha": 8.00,          # planilha: 9,00 (unidade grande)
-    "Meio Cento de Brigadeiros (50 un)": 65.00,  # planilha: 70,00
-    "Refrigerante Lata": 7.00,                # planilha: 6,00
-    "Refrigerante 600ml": 8.00,               # planilha: 7,00
 }
 
 
@@ -195,17 +182,17 @@ PRECO_CARDAPIO = {
 # Conferido com varias grafias; nenhuma casou com o produto certo. So o dono
 # resolve, cadastrando no cardapio digital.
 BLOQUEADOS = {
-    "Panqueca de Carne": "nao existe no cardapio digital",
-    "Panqueca de Frango": "nao existe no cardapio digital",
-    "Saltenha Frita": "o cardapio so tem 'Mini Saltenha Frita' (R$ 2,00, minimo 10), que e outro produto",
-    "Pastel queijo": "nao esta na lista de sabores de fritos do cardapio digital",
-    "Croquete de carne": "o cardapio digital so tem croquete de MACAXEIRA como sabor de lote",
-    "Cento de Beijinhos (100 un)": "o cardapio digital nao tem beijinho; a busca cai em brigadeiro",
-    "Meio Cento de Beijinhos (50 un)": "o cardapio digital nao tem beijinho; a busca cai na bandeja de 16 docinhos",
-    "Cento Misto Brigadeiro e Beijinho (100 un)": "o cardapio digital nao tem misto; a busca cai em brigadeiro",
-    "Meio Cento Misto (50 un)": "o cardapio digital nao tem misto; a busca cai em brigadeiro",
-    "Refrigerante 2 Litros": "o cardapio so tem 2L do Tuchaua; a busca cai na lata",
-    "Suco 500ml": "o cardapio digital so tem 'Suco Natural 300 ml', de tamanho diferente",
+    "Panqueca de Carne": ("Salgados Grandes", "nao existe no cardapio digital"),
+    "Panqueca de Frango": ("Salgados Grandes", "nao existe no cardapio digital"),
+    "Saltenha Frita": ("Salgados Grandes", "o cardapio so tem 'Mini Saltenha Frita' (R$ 2,00, minimo 10), que e outro produto"),
+    "Pastel queijo": ("Fritos", "nao esta na lista de sabores de fritos do cardapio digital"),
+    "Croquete de carne": ("Fritos", "o cardapio digital so tem croquete de MACAXEIRA como sabor de lote"),
+    "Cento de Beijinhos (100 un)": ("Bolos e Doces", "o cardapio digital nao tem beijinho; a busca cai em brigadeiro"),
+    "Meio Cento de Beijinhos (50 un)": ("Bolos e Doces", "o cardapio digital nao tem beijinho; a busca cai na bandeja de 16 docinhos"),
+    "Cento Misto Brigadeiro e Beijinho (100 un)": ("Bolos e Doces", "o cardapio digital nao tem misto; a busca cai em brigadeiro"),
+    "Meio Cento Misto (50 un)": ("Bolos e Doces", "o cardapio digital nao tem misto; a busca cai em brigadeiro"),
+    "Refrigerante 2 Litros": ("Bebidas", "o cardapio so tem 2L do Tuchaua; a busca cai na lata"),
+    "Suco 500ml": ("Bebidas", "o cardapio digital so tem 'Suco Natural 300 ml', de tamanho diferente"),
 }
 
 
@@ -220,11 +207,6 @@ def _achar(mapa: dict, nome: str):
         if _norm(chave) == alvo:
             return valor
     return None
-
-
-def preco_do_cardapio(nome: str) -> float | None:
-    """Preco que o cardapio digital cobra, quando difere da planilha."""
-    return _achar(PRECO_CARDAPIO, nome)
 
 
 def _linha_da_planilha(nome: str) -> dict | None:
@@ -271,9 +253,9 @@ def traduzir(items: list[dict]) -> tuple[list[dict], list[str]]:
         if not nome or qtd <= 0:
             continue
 
-        motivo = _achar(BLOQUEADOS, nome)
-        if motivo:
-            bloqueados.append(f"{nome}: {motivo}")
+        bloqueio = _achar(BLOQUEADOS, nome)
+        if bloqueio:
+            bloqueados.append(f"{nome}: {bloqueio[1]}")
             continue
 
         linha = _linha_da_planilha(nome)

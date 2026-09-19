@@ -97,6 +97,9 @@ def _casos() -> list[dict]:
             "context": destino.get("context", ""),
             "quantidade": destino["quantidade_teste"],
             "preco_esperado": destino["preco_esperado"],
+            # Categoria + item e a identidade real de um produto: sem ela nao da
+            # para achar a linha certa na planilha quando o nome se repete.
+            "categoria": destino.get("categoria", ""),
         })
     return casos
 
@@ -150,35 +153,109 @@ def _conferir_sabores(url: str) -> list[str]:
     return achados
 
 
-def _atualizar_preco(chave: str, tipo: str, novo_preco: float) -> bool:
-    """Reescreve preco_esperado de um mapeamento ja declarado, no arquivo.
+PLANILHA = Path(__file__).parent / "PLANILHA CARDAPIO E BAIRROS EDUARDO.xlsx"
+ABA_CARDAPIO = "CARDAPIO 1"
+LINHA_CABECALHO = 2   # os dados comecam na 3
+COL_CATEGORIA, COL_ITEM, COL_PRECO, COL_DISPONIVEL = 1, 2, 4, 5
 
-    Mexe so no numero: a chave e o nome do produto ficam como estao.
+
+def _backup_planilha() -> Path:
+    """Copia a planilha antes de gravar. E documento do dono."""
+    import shutil
+    from datetime import datetime
+    destino = PLANILHA.parent / "uploads" / "backup"
+    destino.mkdir(parents=True, exist_ok=True)
+    carimbo = datetime.now().strftime("%Y%m%d-%H%M%S")
+    caminho = destino / f"{PLANILHA.stem}-{carimbo}{PLANILHA.suffix}"
+    shutil.copy2(PLANILHA, caminho)
+    return caminho
+
+
+def _achar_linha(ws, categoria: str, item: str) -> int | None:
+    """Linha da planilha por categoria + item.
+
+    O nome sozinho nao identifica: "Enroladinho de Salsicha" esta na linha 8
+    como sabor de lote e na 25 como salgado grande.
     """
-    # newline="" nos dois lados: sem isso a reescrita troca a quebra de linha do
-    # arquivo inteiro e o diff do git fica ilegivel por causa de dois precos.
-    with open(ARQUIVO_CATALOGO, encoding="utf-8", newline="") as fh:
-        texto = fh.read()
-    # Bloco da entrada: da chave ate a primeira chave de fechamento.
-    padrao = re.compile(
-        r'("' + re.escape(chave) + r'":\s*\{.*?"preco_esperado":\s*)([\d.]+)',
-        re.DOTALL,
-    )
-    novo_texto, n = padrao.subn(
-        lambda m: f"{m.group(1)}{novo_preco:.2f}", texto, count=1
-    )
-    if not n:
-        return False
-    # PRECO_CARDAPIO, quando o item estiver la, acompanha o mesmo valor.
-    padrao_preco = re.compile(
-        r'("' + re.escape(chave) + r'":\s*)([\d.]+)(,\s*#[^\n]*\n)'
-    )
-    novo_texto = padrao_preco.sub(
-        lambda m: f"{m.group(1)}{novo_preco:.2f}{m.group(3)}", novo_texto
-    )
-    with open(ARQUIVO_CATALOGO, "w", encoding="utf-8", newline="") as fh:
-        fh.write(novo_texto)
-    return True
+    alvo_cat, alvo_item = facts.normalize(categoria), facts.normalize(item)
+    for linha in range(LINHA_CABECALHO + 1, ws.max_row + 1):
+        cat = facts.normalize(str(ws.cell(row=linha, column=COL_CATEGORIA).value or ""))
+        it = facts.normalize(str(ws.cell(row=linha, column=COL_ITEM).value or ""))
+        if cat == alvo_cat and it == alvo_item:
+            return linha
+    return None
+
+
+def aplicar_na_planilha(precos: list[tuple], disponibilidade: list[tuple]) -> list[str]:
+    """Grava preco e disponibilidade na planilha e no knowledge.
+
+    `precos`: [(categoria, item, novo_preco)]
+    `disponibilidade`: [(categoria, item, True/False)]
+
+    Escrever aqui, e nao num override em codigo, e o que mantem UMA fonte de
+    verdade: a tool consultar_preco, a base injetada no prompt e o calculo do
+    pedido leem todos desta planilha. Enquanto a correcao vivia so no calculo,
+    o agente cotava R$ 6,00 e cobrava R$ 7,00.
+    """
+    if not precos and not disponibilidade:
+        return []
+
+    import openpyxl
+    import knowledge_rag
+    import parse_knowledge
+
+    mudancas = []
+    backup = _backup_planilha()
+    mudancas.append(f"backup da planilha em {backup.name}")
+
+    wb = openpyxl.load_workbook(str(PLANILHA))
+    ws = wb[ABA_CARDAPIO]
+
+    for categoria, item, novo in precos:
+        linha = _achar_linha(ws, categoria, item)
+        if linha is None:
+            mudancas.append(f"NAO ACHOU na planilha: {categoria} | {item}")
+            continue
+        celula = ws.cell(row=linha, column=COL_PRECO)
+        antigo = celula.value
+        # A planilha guarda preco como texto ("6.00"); manter o formato.
+        celula.value = f"{novo:.2f}" if isinstance(antigo, str) else novo
+        mudancas.append(
+            f"linha {linha} | {categoria} | {item}: preco {antigo} -> {celula.value}"
+        )
+
+    for categoria, item, disponivel in disponibilidade:
+        linha = _achar_linha(ws, categoria, item)
+        if linha is None:
+            mudancas.append(f"NAO ACHOU na planilha: {categoria} | {item}")
+            continue
+        celula = ws.cell(row=linha, column=COL_DISPONIVEL)
+        antigo = str(celula.value or "").strip().upper()
+        novo_valor = "SIM" if disponivel else "NAO"
+        if antigo == novo_valor:
+            continue
+        celula.value = novo_valor
+        mudancas.append(
+            f"linha {linha} | {categoria} | {item}: disponivel {antigo} -> {novo_valor}"
+        )
+
+    wb.save(str(PLANILHA))
+    wb.close()
+
+    # Regenera o texto do knowledge a partir da planilha ja corrigida.
+    # save_knowledge limpa os caches, entao tool e base injetada passam a ver o
+    # valor novo sem reiniciar o app.
+    texto = parse_knowledge.xlsx_to_text(str(PLANILHA))
+    descricao = ""
+    try:
+        import database
+        descricao = database.get_knowledge_file_description(PLANILHA.name) or ""
+    except Exception:
+        pass
+    knowledge_rag.save_knowledge(PLANILHA.name, texto, description=descricao)
+    facts.invalidate()
+    mudancas.append(f"knowledge regravado a partir da planilha ({len(texto)} chars)")
+    return mudancas
 
 
 def _sugerir(url: str, nome: str) -> list[str]:
@@ -203,12 +280,33 @@ def _sugerir(url: str, nome: str) -> list[str]:
     return achados
 
 
+def _divergencia_de_preco(caso: dict, subtotal_api: float):
+    """(preco_na_planilha, preco_no_cardapio) por unidade da PLANILHA, ou None.
+
+    O `fator` importa: 1 "Cento de Brigadeiros" da planilha equivale a 2 meios
+    centos do cardapio, entao o teste usa quantidade 2 e o preco de R$ 130,00
+    corresponde a UMA unidade da planilha, nao a duas.
+    """
+    linha = facts.buscar_linha(caso["categoria"], caso["chave"])
+    if linha is None or linha.get("preco") is None:
+        return None
+    destino = cardapio_catalogo.MAPA.get(caso["chave"], {})
+    fator = int(destino.get("fator", 1)) or 1
+    unidades_planilha = max(caso["quantidade"] / fator, 1)
+    no_cardapio = round(subtotal_api / unidades_planilha, 2)
+    na_planilha = round(float(linha["preco"]), 2)
+    if abs(na_planilha - no_cardapio) <= 0.01:
+        return None
+    return na_planilha, no_cardapio
+
+
 def main(corrigir: bool = False) -> int:
     url = _url()
     print(f"Conferindo o cardapio digital em {url}")
     print(f"Modo: {'VERIFICAR E CORRIGIR PRECO' if corrigir else 'somente verificar'}\n")
 
-    ok, divergentes, corrigidos = [], [], []
+    ok, divergentes = [], []
+    precos_a_gravar: list[tuple] = []
     for caso in _casos():
         r = consultar(url, caso["nome_api"], caso["quantidade"], caso["context"])
         if r.get("erro"):
@@ -218,20 +316,47 @@ def main(corrigir: bool = False) -> int:
             divergentes.append((caso, r["motivo"] or "item invalido"))
             continue
         if abs(r["subtotal"] - caso["preco_esperado"]) > 0.01:
-            if corrigir and _atualizar_preco(caso["chave"], caso["tipo"], r["subtotal"]):
-                corrigidos.append(
-                    f"{caso['rotulo']}: R$ {caso['preco_esperado']:.2f} -> "
-                    f"R$ {r['subtotal']:.2f}"
-                )
-            else:
-                divergentes.append((
-                    caso,
-                    f"preco diferente: cardapio R$ {r['subtotal']:.2f}, "
-                    f"esperado R$ {caso['preco_esperado']:.2f} "
-                    f"(casou com '{r['casou_com']}')",
-                ))
+            divergentes.append((
+                caso,
+                f"preco diferente: cardapio R$ {r['subtotal']:.2f}, "
+                f"esperado R$ {caso['preco_esperado']:.2f} "
+                f"(casou com '{r['casou_com']}')",
+            ))
             continue
         ok.append((caso, r))
+
+        # A planilha diverge do cardapio? Este e o desencontro que fazia o
+        # agente cotar um valor e cobrar outro: a tool le a planilha, o pedido
+        # usava o preco do cardapio.
+        if caso["tipo"] == "unidade" and caso.get("categoria"):
+            divergencia = _divergencia_de_preco(caso, r["subtotal"])
+            if divergencia is not None:
+                na_planilha, no_cardapio = divergencia
+                if corrigir:
+                    precos_a_gravar.append(
+                        (caso["categoria"], caso["chave"], no_cardapio)
+                    )
+                else:
+                    divergentes.append((
+                        caso,
+                        f"a PLANILHA diz R$ {na_planilha:.2f} e o cardapio cobra "
+                        f"R$ {no_cardapio:.2f} - rode com --corrigir",
+                    ))
+
+    # Disponibilidade: o que esta em BLOQUEADOS vira NAO na planilha; o resto,
+    # SIM. E isto que faz a trava valer para a tool e para a base injetada, e
+    # nao so no calculo do pedido.
+    disponibilidade: list[tuple] = []
+    if corrigir:
+        for nome, (categoria, _motivo) in cardapio_catalogo.BLOQUEADOS.items():
+            disponibilidade.append((categoria, nome, False))
+        for nome, destino in cardapio_catalogo.MAPA.items():
+            if destino.get("categoria"):
+                disponibilidade.append((destino["categoria"], nome, True))
+
+    corrigidos = []
+    if corrigir and (precos_a_gravar or disponibilidade):
+        corrigidos = aplicar_na_planilha(precos_a_gravar, disponibilidade)
 
     print(f"=== {len(ok)} item(ns) conferem ===")
     for caso, r in ok:

@@ -30,3 +30,6 @@ Thumbs.db
 
 # Backup local da base de conhecimento (dados do negocio)
 backup_knowledge_pre_reindex.json
+
+# Backups automaticos da planilha (verificar_catalogo.py --corrigir)
+uploads/backup/
