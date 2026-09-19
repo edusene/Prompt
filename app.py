@@ -533,7 +533,8 @@ def _send_order_handler(
             pass
     print(f"[cardápio] TOOL send_order customer={customer_name} phone={customer_phone} total={total}")
 
-    test_mode = (database.get_setting("CARDÁPIO_TEST_MODE", "true") or os.getenv("CARDÁPIO_TEST_MODE", "true") or os.getenv("CARD_TEST_MODE", "true")).lower() == "true"
+    # Uma fonte so para o flag (ver cardapio.em_modo_teste).
+    test_mode = cardapio.em_modo_teste()
     is_test = 1 if test_mode else 0
 
     # Detecta phone do contexto da conversa (user variable do escopo pai)
@@ -547,7 +548,20 @@ def _send_order_handler(
     except Exception:
         pass
 
-    if test_mode:
+    # Pix exige conferencia do comprovante por uma pessoa antes de entrar no
+    # cardapio (regra do dono; sem human_confirmed a API devolve 400). O pedido
+    # fica gravado aqui aguardando o botao de validar no painel.
+    aguardando_pix = (payment_method or "").strip().lower().startswith("pix")
+
+    if aguardando_pix and not test_mode:
+        result = {
+            "success": True,
+            "order_id": "",
+            "display_id": "",
+            "status": "aguardando_pix",
+        }
+        print(f"[cardápio] PIX - pedido retido para conferencia do comprovante")
+    elif test_mode:
         # Modo teste: simula resposta sem enviar para o cardápio real
         import random as _rnd
         _test_id = f"TEST-{__import__('uuid').uuid4().hex[:8]}"
@@ -628,6 +642,12 @@ def _send_order_handler(
         # Limita o tamanho do set para evitar memory leak
         if len(_orders_sent) > 1000:
             _orders_sent.clear()
+        if result.get("status") == "aguardando_pix":
+            return (
+                "Pedido registrado e aguardando o comprovante do Pix. Envie a chave "
+                "Pix ao cliente e diga que a producao e liberada assim que a equipe "
+                "conferir o pagamento. NAO diga que o pedido ja foi finalizado."
+            )
         return f"Pedido enviado com sucesso para o cardapio digital. Numero do pedido: {display_id}. Status: {result.get('status', 'enviado')}."
     else:
         return f"Erro ao enviar pedido para o cardapio: {result.get('error', 'desconhecido')}"
@@ -1388,6 +1408,25 @@ def handle_flush(user: str, items: list[dict]) -> None:
             return resultado
 
         def _send_handler(**kwargs) -> str:
+            # Campos que nao dependem do modelo lembrar de preencher.
+            # whatsapp_message_id e a chave de idempotencia do cardapio: com ela,
+            # reenviar o mesmo pedido nunca cria duplicata. Deixar isso a cargo
+            # do LLM e justamente perder a garantia.
+            if last_wa_msg_id:
+                kwargs["whatsapp_message_id"] = last_wa_msg_id
+            kwargs["payment_method"] = kwargs.get("payment_method") or _memoria.get("payment_method", "")
+            kwargs["delivery_address"] = kwargs.get("delivery_address") or (
+                f"{_memoria.get('endereco', '')}, {_memoria.get('bairro', '')}".strip(", ")
+                if _memoria.get("modality") == "entrega" else "Retirada"
+            )
+            # Data do agendamento vem da ficha (ja resolvida em dia absoluto),
+            # nao do texto livre do modelo.
+            if _memoria.get("data_iso"):
+                kwargs["scheduled_date"] = _memoria["data_iso"]
+                kwargs["is_scheduled"] = True
+            # Sabores do pacote saem dos itens da ficha.
+            kwargs["items"] = kwargs.get("items") or _memoria.get("items") or []
+
             resultado = _send_order_handler(**kwargs)
             conversation_memory.registrar_pedido_enviado(user, _memoria)
             return resultado
@@ -3676,6 +3715,62 @@ def api_cardapio_order_detail(order_id):
         except Exception:
             order["api_response"] = {}
     return jsonify(order)
+
+
+@app.post("/api/cardapio/orders/<int:order_id>/validar-pix")
+@login_required
+def api_cardapio_order_validar_pix(order_id):
+    """Confere o comprovante do Pix e so entao manda o pedido ao cardapio.
+
+    Pela regra do dono, pedido no Pix so grava com human_confirmed=true. O
+    agente deixa o pedido em 'aguardando_pix' e quem valida e uma pessoa, aqui.
+    """
+    order = database.obter_cardapio_order(order_id)
+    if not order:
+        return jsonify({"error": "Pedido nao encontrado"}), 404
+    if order.get("status") != "aguardando_pix":
+        return jsonify({"error": f"Pedido nao esta aguardando Pix (status: {order.get('status')})"}), 400
+
+    items = order.get("items")
+    if isinstance(items, str):
+        try:
+            items = json.loads(items)
+        except Exception:
+            items = []
+
+    resultado = cardapio.criar_pedido(
+        customer_name=order.get("customer_name", ""),
+        customer_phone=order.get("customer_phone", ""),
+        items=items or [],
+        total=float(order.get("total") or 0),
+        customer_confirmed=True,
+        human_confirmed=True,
+        delivery_address=order.get("delivery_address", ""),
+        payment_method=order.get("payment_method", ""),
+        subtotal=float(order.get("subtotal") or 0),
+        delivery_fee=float(order.get("delivery_fee") or 0),
+        return_fee=float(order.get("return_fee") or 0),
+        notes=order.get("notes", ""),
+        whatsapp_message_id=order.get("whatsapp_message_id", ""),
+    )
+
+    if not resultado.get("success"):
+        database.atualizar_cardapio_order(
+            order_id, error_message=resultado.get("error", ""), api_response=resultado
+        )
+        return jsonify({"error": resultado.get("error", "Falha ao enviar")}), 502
+
+    database.atualizar_cardapio_order(
+        order_id,
+        status=resultado.get("status", "pendente"),
+        order_id_externo=resultado.get("order_id", ""),
+        display_id=resultado.get("display_id", ""),
+        api_response=resultado,
+        error_message="",
+    )
+    print(f"[cardápio] Pix validado por humano, pedido {resultado.get('display_id')} enviado")
+    return jsonify({"ok": True, "display_id": resultado.get("display_id", ""),
+                    "status": resultado.get("status", "pendente")})
 
 
 @app.delete("/api/cardapio/orders/<int:order_id>")

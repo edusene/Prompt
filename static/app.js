@@ -3736,9 +3736,25 @@ async function loadCardapioOrders() {
             <td><span class="cardapio-status-badge ${statusClass}">${esc(o.status)}</span></td>
             <td><span class="cardapio-mode-badge ${modeClass}">${o.is_test ? 'Teste' : 'Prod'}</span></td>
             <td>${dt}</td>
-            <td><button class="btn-sm btn-secondary" onclick="viewCardapioOrder(${o.id})">Ver</button></td>
+            <td>
+                <button class="btn-sm btn-secondary" onclick="viewCardapioOrder(${o.id})">Ver</button>
+                ${o.status === 'aguardando_pix' ? `<button class="btn-sm btn-primary" onclick="validarPixCardapioOrder(${o.id})">Validar Pix</button>` : ''}
+            </td>
         </tr>`;
     }).join('');
+}
+
+// Pedido no Pix so entra no cardapio depois que alguem confere o comprovante
+// (regra do dono: sem human_confirmed a API devolve 400).
+async function validarPixCardapioOrder(id) {
+    if (!confirm('Confirma que o comprovante do Pix foi conferido? O pedido sera enviado ao cardapio.')) return;
+    const r = await api(`/api/cardapio/orders/${id}/validar-pix`, { method: 'POST' });
+    if (!r || r.error) {
+        toast(friendlyError(r?.error || 'Falha ao enviar'), 'error');
+        return;
+    }
+    toast(`Pedido ${r.display_id || ''} enviado ao cardapio`, 'success');
+    loadCardapioOrders();
 }
 
 async function viewCardapioOrder(id) {

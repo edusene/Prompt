@@ -8,8 +8,28 @@ import json
 import httpx
 
 
+def em_modo_teste() -> bool:
+    """Le o modo teste da MESMA fonte que app._send_order_handler: o banco.
+
+    Ler so de os.environ nao serve: varios modulos chamam
+    load_dotenv(override=True) — db.py no import e meta.reload_config() depois
+    de salvar o .env pelo painel — e isso devolve a variavel ao valor do
+    arquivo, revertendo em silencio o modo producao ligado pelo painel.
+    O banco e onde o painel grava, entao e ele que manda.
+    """
+    valor = ""
+    try:
+        import database
+        valor = database.get_setting("CARDÁPIO_TEST_MODE", "") or ""
+    except Exception:
+        valor = ""
+    if not valor:
+        valor = os.getenv("CARDÁPIO_TEST_MODE", "") or os.getenv("CARD_TEST_MODE", "") or "true"
+    return valor.strip().lower() == "true"
+
+
 def _get_base_url() -> str:
-    test_mode = (os.getenv("CARDÁPIO_TEST_MODE", "true") or os.getenv("CARD_TEST_MODE", "true")).lower() == "true"
+    test_mode = em_modo_teste()
     if test_mode:
         url = os.getenv("CARDÁPIO_API_URL_TEST", "") or os.getenv("CARD_API_URL_TEST", "")
         if not url:
@@ -235,7 +255,7 @@ def calcular_pedido(items: list[dict], bairro: str = "", modalidade: str = "",
         dict com success, subtotal, delivery_fee, total, resumo_formatado
         ou error
     """
-    test_mode = (os.getenv("CARDÁPIO_TEST_MODE", "true") or os.getenv("CARD_TEST_MODE", "true")).lower() == "true"
+    test_mode = em_modo_teste()
 
     # Retirada nao tem frete. O modelo as vezes manda o bairro do cliente mesmo
     # na retirada, e a taxa entrava no total sem aparecer no resumo — o cliente
@@ -259,6 +279,24 @@ def calcular_pedido(items: list[dict], bairro: str = "", modalidade: str = "",
                 "calculate_order de novo. NAO informe total ao cliente antes disso."
             ),
             "itens_nao_encontrados": nao_encontrados,
+        }
+
+    # Traducao para o cardapio digital. Os dois catalogos divergem em varios
+    # itens (ver cardapio_catalogo.BLOQUEADOS); fechar pedido com um deles
+    # cobraria do cliente um valor que o cardapio nao reconhece.
+    import cardapio_catalogo
+    items_api, bloqueados = cardapio_catalogo.traduzir(items)
+
+    if bloqueados and not test_mode:
+        return {
+            "success": False,
+            "error": (
+                "Estes itens nao podem ser fechados pelo agente: "
+                + "; ".join(bloqueados)
+                + ". Informe ao cliente que precisa confirmar com a equipe e "
+                "transfira o atendimento. NAO informe total."
+            ),
+            "itens_bloqueados": bloqueados,
         }
 
     if test_mode:
@@ -305,6 +343,13 @@ def calcular_pedido(items: list[dict], bairro: str = "", modalidade: str = "",
         }
         if avisos_itens:
             resultado["itens_ajustados"] = avisos_itens
+        if bloqueados:
+            # Em modo teste nada e enviado, entao isto avisa sem travar:
+            # o mesmo pedido em producao seria recusado.
+            resultado["aviso_catalogo"] = (
+                "Estes itens divergem do cardapio digital e seriam recusados em "
+                "producao: " + "; ".join(bloqueados)
+            )
         if frete_nao_encontrado:
             resultado["aviso"] = (
                 f"O bairro '{bairro}' nao esta na tabela oficial de entrega. NAO informe "
@@ -318,7 +363,9 @@ def calcular_pedido(items: list[dict], bairro: str = "", modalidade: str = "",
         return {"success": False, "error": "CARDÁPIO_API_URL nao configurada"}
 
     url = f"{base_url}/functions/calculateOrder"
-    payload = {"items": items}
+    # Itens no formato do cardapio digital: pacote pelo nome + sabores em
+    # selected_flavors, quantidade em unidades.
+    payload = {"items": items_api}
     if bairro:
         payload["bairro"] = bairro
 
@@ -327,43 +374,57 @@ def calcular_pedido(items: list[dict], bairro: str = "", modalidade: str = "",
             resp = client.post(url, json=payload)
             data = resp.json()
             print(f"[cardápio] calculateOrder status={resp.status_code} response={json.dumps(data, ensure_ascii=False)[:300]}")
-            if resp.status_code == 200:
-                if isinstance(data, dict) and data.get("success"):
-                    # A API remota nao conhece a modalidade nem a forma de
-                    # pagamento, entao a taxa de retorno e conferida aqui.
-                    devida = calcular_taxa_retorno(modalidade, pagamento)
-                    if devida and not data.get("return_fee"):
-                        data["return_fee"] = devida
-                        data["total"] = round(float(data.get("total", 0)) + devida, 2)
-                    if avisos_itens:
-                        data["itens_ajustados"] = avisos_itens
-                    # Atribuicao, nao setdefault: o resumo com Dia, Modalidade e
-                    # taxa de retorno e o formato unico do atendimento e nao pode
-                    # ser substituido pelo que a API devolver.
-                    data["resumo_formatado"] = montar_resumo(
-                        items,
-                        data.get("subtotal", 0),
-                        data.get("delivery_fee", 0),
-                        data.get("return_fee", 0),
-                        data.get("total", 0),
-                        bairro,
-                        modalidade=modalidade,
-                        dia=dia,
-                        horario=horario,
-                        cliente=cliente,
-                        pagamento=pagamento,
-                        endereco=endereco,
-                    )
-                    # Mesma guarda do modo teste: frete zerado numa entrega com
-                    # bairro informado quase sempre e bairro fora da tabela.
-                    if bairro and not data.get("delivery_fee"):
-                        data["aviso"] = (
-                            f"O bairro '{bairro}' nao retornou taxa de entrega. NAO informe "
-                            "uma taxa estimada: confirme o bairro com o cliente ou transfira "
-                            "para um atendente."
-                        )
-                return data
-            return {"success": False, "error": data.get("error", f"HTTP {resp.status_code}")}
+            if resp.status_code != 200 or not isinstance(data, dict):
+                return {"success": False, "error": f"HTTP {resp.status_code}"}
+
+            # A resposta do cardapio digital nao tem campo "success" e usa
+            # deliveryFee em camelCase. Sem traduzir, todo pedido em producao
+            # saia com success=None e sem resumo.
+            invalidos = [
+                f"{i.get('name')}: {i.get('reason') or 'nao aceito'}"
+                for i in (data.get("items") or []) if not i.get("valid")
+            ]
+            if invalidos:
+                return {
+                    "success": False,
+                    "error": "O cardapio digital recusou estes itens: "
+                             + "; ".join(invalidos)
+                             + ". NAO informe total ao cliente; confirme com a equipe.",
+                    "itens_recusados": invalidos,
+                }
+
+            subtotal = float(data.get("subtotal") or 0)
+            delivery_fee = float(data.get("deliveryFee") or data.get("delivery_fee") or 0)
+            return_fee = calcular_taxa_retorno(modalidade, pagamento)
+            total = round(subtotal + delivery_fee + return_fee, 2)
+
+            resultado = {
+                "success": True,
+                "subtotal": round(subtotal, 2),
+                "delivery_fee": round(delivery_fee, 2),
+                "return_fee": round(return_fee, 2),
+                "total": total,
+                "bairro_oficial": bairro,
+                "resposta_cardapio": data,
+                "resumo_formatado": montar_resumo(
+                    items, subtotal, delivery_fee, return_fee, total, bairro,
+                    modalidade=modalidade, dia=dia, horario=horario,
+                    cliente=cliente, pagamento=pagamento, endereco=endereco,
+                ),
+            }
+            if avisos_itens:
+                resultado["itens_ajustados"] = avisos_itens
+            # Mesma guarda do modo teste: frete zerado numa entrega com bairro
+            # informado quase sempre e bairro fora da tabela.
+            if bairro and not delivery_fee:
+                resultado["aviso"] = (
+                    f"O bairro '{bairro}' nao retornou taxa de entrega. NAO informe "
+                    "uma taxa estimada: confirme o bairro com o cliente ou transfira "
+                    "para um atendente."
+                )
+            print(f"[cardapio] calculateOrder (producao): subtotal={subtotal} "
+                  f"frete={delivery_fee} retorno={return_fee} total={total}")
+            return resultado
     except Exception as e:
         print(f"[cardápio] calculateOrder ERRO: {e}")
         return {"success": False, "error": str(e)}
@@ -398,6 +459,29 @@ def criar_pedido(
     api_key = _get_api_key()
     if not api_key:
         return {"success": False, "error": "BALBS_AGENTE_API_KEY nao configurada"}
+
+    # Regra do dono do cardapio: pedido no Pix so grava com human_confirmed,
+    # depois de alguem conferir o comprovante. Sem isso a chamada volta 400.
+    if (payment_method or "").strip().lower().startswith("pix") and not human_confirmed:
+        return {
+            "success": False,
+            "error": (
+                "Pedido no Pix exige conferencia do comprovante por uma pessoa "
+                "antes de entrar no cardapio (human_confirmed)."
+            ),
+            "aguardando_validacao_humana": True,
+        }
+
+    # Itens no formato do cardapio digital (pacote + selected_flavors).
+    import cardapio_catalogo
+    items, bloqueados = cardapio_catalogo.traduzir(items)
+    if bloqueados:
+        return {
+            "success": False,
+            "error": "Itens sem equivalente confiavel no cardapio digital: "
+                     + "; ".join(bloqueados),
+            "itens_bloqueados": bloqueados,
+        }
 
     url = f"{base_url}/functions/createOrderFromAgent"
 
