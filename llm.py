@@ -160,5 +160,23 @@ def generate_reply(
                 print(f"[llm] cache tokens (tool round {rounds}): {_cached}/{_total} cached ({_cached*100//_total}% hit)")
 
     text = (choice.message.content or "").strip()
+
+    if not text:
+        # O modelo terminou sem texto: estourou os rounds de tool, ou o limite
+        # de tokens no meio de uma tool call. Sem isto o cliente recebe
+        # silencio - nenhuma mensagem chega no WhatsApp. A segunda chamada vai
+        # sem tools, obrigando uma resposta em prosa com o que ja foi apurado.
+        print(f"[llm] resposta VAZIA (finish_reason={choice.finish_reason}); "
+              f"refazendo sem tools")
+        try:
+            retry = _client.chat.completions.create(
+                model=OPENAI_MODEL,
+                messages=messages,
+                max_completion_tokens=1024,
+            )
+            text = (retry.choices[0].message.content or "").strip()
+        except Exception as e:
+            print(f"[llm] ERRO na segunda tentativa: {e}")
+
     print(f"[llm] reply len={len(text)}")
     return text

@@ -655,7 +655,64 @@ def _send_order_handler(
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
+def _sem_repeticao_consecutiva(texto: str) -> str:
+    """Remove um trecho que o modelo repetiu logo em seguida a si mesmo.
+
+    O modelo as vezes emite a mesma frase duas vezes. Quando a copia vem depois
+    de uma linha em branco, a deduplicacao por paragrafo pega; quando vem
+    separada por UMA quebra de linha, por um espaco ou colada, passava direto e
+    o cliente recebia a pergunta duplicada.
+
+    So colapsa repeticao CONSECUTIVA e IDENTICA de um trecho longo: duas linhas
+    diferentes de um resumo, ou dois itens parecidos, nao sao tocados.
+    """
+    import re as _re
+
+    def _chave(s: str) -> str:
+        return " ".join(s.lower().split())
+
+    # 1) linhas iguais em sequencia
+    linhas, anterior = [], ""
+    for linha in texto.split("\n"):
+        if linha.strip() and len(linha.strip()) >= 25 and _chave(linha) == anterior:
+            continue
+        linhas.append(linha)
+        if linha.strip():
+            anterior = _chave(linha)
+    texto = "\n".join(linhas)
+
+    # 2) frases iguais em sequencia, dentro da mesma linha.
+    #    O separador vai num grupo de captura para ser recolocado como estava:
+    #    juntar tudo com espaco apagava as linhas em branco e mudava a divisao
+    #    das mensagens enviadas ao cliente.
+    partes = _re.split(r"((?<=[.!?])\s+)", texto)
+    frases, anterior = [], ""
+    for i in range(0, len(partes), 2):
+        frase = partes[i]
+        separador = partes[i + 1] if i + 1 < len(partes) else ""
+        if len(frase.strip()) >= 30 and _chave(frase) == anterior:
+            continue
+        frases.append(frase + separador)
+        if frase.strip():
+            anterior = _chave(frase)
+    texto = "".join(frases)
+
+    # 3 e 4) a mensagem INTEIRA e um bloco repetido, com ou sem separador
+    #    ("A. B. A. B."). As frases se alternam, entao a checagem consecutiva
+    #    acima nao pega. Ancorado nas duas pontas, e so para bloco que pareca
+    #    texto de verdade: sem essa guarda, algo degenerado como "A A A A..."
+    #    tambem casava e era truncado.
+    def _colapsar(m):
+        bloco = m.group(1)
+        palavras = {p for p in _re.findall(r"\w+", bloco.lower()) if len(p) >= 2}
+        return bloco if len(palavras) >= 5 else m.group(0)
+
+    texto = _re.sub(r"^(.{40,}?)(?:\s*\1)+$", _colapsar, texto.strip(), flags=_re.DOTALL)
+    return texto
+
+
 def split_reply(text: str) -> list[str]:
+    text = _sem_repeticao_consecutiva(text or "")
     paragraphs = text.split("\n\n")
     chunks: list[str] = []
     for para in paragraphs:
