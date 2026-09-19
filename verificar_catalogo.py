@@ -186,6 +186,60 @@ def _achar_linha(ws, categoria: str, item: str) -> int | None:
     return None
 
 
+def _mesmo_preco(valor_celula, novo: float) -> bool:
+    """A celula ja tem esse preco? Compara numero, nao texto.
+
+    A planilha guarda preco como string ("6.00"), entao comparar direto marcaria
+    toda execucao como alteracao.
+    """
+    try:
+        return abs(float(str(valor_celula).replace(",", ".")) - novo) <= 0.001
+    except (TypeError, ValueError):
+        return False
+
+
+def _planejar(ws, precos: list[tuple], disponibilidade: list[tuple]):
+    """O que precisa mudar na planilha, sem escrever nada ainda.
+
+    Devolve (mudancas, avisos). `mudancas` traz so o que realmente difere:
+    celula que ja esta com o valor certo nao entra. E isso que deixa o
+    --corrigir seguro de rodar quantas vezes quiser.
+    """
+    mudancas, avisos = [], []
+
+    for categoria, item, novo in precos:
+        linha = _achar_linha(ws, categoria, item)
+        if linha is None:
+            avisos.append(f"NAO ACHOU na planilha: {categoria} | {item}")
+            continue
+        celula = ws.cell(row=linha, column=COL_PRECO)
+        if _mesmo_preco(celula.value, novo):
+            continue
+        # A planilha guarda preco como texto ("6.00"); manter o formato.
+        valor = f"{novo:.2f}" if isinstance(celula.value, str) else novo
+        mudancas.append((
+            linha, COL_PRECO, valor,
+            f"linha {linha} | {categoria} | {item}: preco {celula.value} -> {valor}",
+        ))
+
+    for categoria, item, disponivel in disponibilidade:
+        linha = _achar_linha(ws, categoria, item)
+        if linha is None:
+            avisos.append(f"NAO ACHOU na planilha: {categoria} | {item}")
+            continue
+        celula = ws.cell(row=linha, column=COL_DISPONIVEL)
+        atual = str(celula.value or "").strip().upper()
+        valor = "SIM" if disponivel else "NAO"
+        if atual == valor:
+            continue
+        mudancas.append((
+            linha, COL_DISPONIVEL, valor,
+            f"linha {linha} | {categoria} | {item}: disponivel {atual} -> {valor}",
+        ))
+
+    return mudancas, avisos
+
+
 def aplicar_na_planilha(precos: list[tuple], disponibilidade: list[tuple]) -> list[str]:
     """Grava preco e disponibilidade na planilha e no knowledge.
 
@@ -196,6 +250,9 @@ def aplicar_na_planilha(precos: list[tuple], disponibilidade: list[tuple]) -> li
     verdade: a tool consultar_preco, a base injetada no prompt e o calculo do
     pedido leem todos desta planilha. Enquanto a correcao vivia so no calculo,
     o agente cotava R$ 6,00 e cobrava R$ 7,00.
+
+    Nada a mudar, nada e gravado: sem backup, sem reescrever o .xlsx e sem
+    regerar embeddings. Rodar de novo sem diferenca nao custa nada.
     """
     if not precos and not disponibilidade:
         return []
@@ -204,41 +261,17 @@ def aplicar_na_planilha(precos: list[tuple], disponibilidade: list[tuple]) -> li
     import knowledge_rag
     import parse_knowledge
 
-    mudancas = []
-    backup = _backup_planilha()
-    mudancas.append(f"backup da planilha em {backup.name}")
-
     wb = openpyxl.load_workbook(str(PLANILHA))
     ws = wb[ABA_CARDAPIO]
+    mudancas, avisos = _planejar(ws, precos, disponibilidade)
 
-    for categoria, item, novo in precos:
-        linha = _achar_linha(ws, categoria, item)
-        if linha is None:
-            mudancas.append(f"NAO ACHOU na planilha: {categoria} | {item}")
-            continue
-        celula = ws.cell(row=linha, column=COL_PRECO)
-        antigo = celula.value
-        # A planilha guarda preco como texto ("6.00"); manter o formato.
-        celula.value = f"{novo:.2f}" if isinstance(antigo, str) else novo
-        mudancas.append(
-            f"linha {linha} | {categoria} | {item}: preco {antigo} -> {celula.value}"
-        )
+    if not mudancas:
+        wb.close()
+        return avisos
 
-    for categoria, item, disponivel in disponibilidade:
-        linha = _achar_linha(ws, categoria, item)
-        if linha is None:
-            mudancas.append(f"NAO ACHOU na planilha: {categoria} | {item}")
-            continue
-        celula = ws.cell(row=linha, column=COL_DISPONIVEL)
-        antigo = str(celula.value or "").strip().upper()
-        novo_valor = "SIM" if disponivel else "NAO"
-        if antigo == novo_valor:
-            continue
-        celula.value = novo_valor
-        mudancas.append(
-            f"linha {linha} | {categoria} | {item}: disponivel {antigo} -> {novo_valor}"
-        )
-
+    backup = _backup_planilha()
+    for linha, coluna, valor, _descricao in mudancas:
+        ws.cell(row=linha, column=coluna).value = valor
     wb.save(str(PLANILHA))
     wb.close()
 
@@ -254,8 +287,13 @@ def aplicar_na_planilha(precos: list[tuple], disponibilidade: list[tuple]) -> li
         pass
     knowledge_rag.save_knowledge(PLANILHA.name, texto, description=descricao)
     facts.invalidate()
-    mudancas.append(f"knowledge regravado a partir da planilha ({len(texto)} chars)")
-    return mudancas
+
+    return (
+        [f"backup da planilha em {backup.name}"]
+        + [texto_mudanca for *_resto, texto_mudanca in mudancas]
+        + avisos
+        + [f"knowledge regravado a partir da planilha ({len(texto)} chars)"]
+    )
 
 
 def _sugerir(url: str, nome: str) -> list[str]:
@@ -280,6 +318,41 @@ def _sugerir(url: str, nome: str) -> list[str]:
     return achados
 
 
+_cache_planilha: dict | None = None
+
+
+def precos_da_planilha() -> dict:
+    """{(categoria, item) normalizados: (preco, disponivel)} lido do .xlsx.
+
+    A comparacao tem de olhar o ARQUIVO, nao o `facts`: o facts le o documento
+    do knowledge, que e gerado a partir do .xlsx. Se os dois saem de sincronia,
+    comparar pelo facts olha para a fonte errada e a divergencia passa batido -
+    enquanto a gravacao, que vem do .xlsx, propaga o valor errado ao knowledge.
+    """
+    global _cache_planilha
+    if _cache_planilha is not None:
+        return _cache_planilha
+
+    import openpyxl
+    wb = openpyxl.load_workbook(str(PLANILHA), read_only=True, data_only=True)
+    ws = wb[ABA_CARDAPIO]
+    tabela = {}
+    for linha in ws.iter_rows(min_row=LINHA_CABECALHO + 1, values_only=True):
+        if not linha or not linha[COL_ITEM - 1]:
+            continue
+        categoria = facts.normalize(str(linha[COL_CATEGORIA - 1] or ""))
+        item = facts.normalize(str(linha[COL_ITEM - 1] or ""))
+        try:
+            preco = float(str(linha[COL_PRECO - 1]).replace(",", "."))
+        except (TypeError, ValueError):
+            preco = None
+        disponivel = str(linha[COL_DISPONIVEL - 1] or "").strip().upper() != "NAO"
+        tabela[(categoria, item)] = (preco, disponivel)
+    wb.close()
+    _cache_planilha = tabela
+    return tabela
+
+
 def _divergencia_de_preco(caso: dict, subtotal_api: float):
     """(preco_na_planilha, preco_no_cardapio) por unidade da PLANILHA, ou None.
 
@@ -287,14 +360,15 @@ def _divergencia_de_preco(caso: dict, subtotal_api: float):
     centos do cardapio, entao o teste usa quantidade 2 e o preco de R$ 130,00
     corresponde a UMA unidade da planilha, nao a duas.
     """
-    linha = facts.buscar_linha(caso["categoria"], caso["chave"])
-    if linha is None or linha.get("preco") is None:
+    chave = (facts.normalize(caso["categoria"]), facts.normalize(caso["chave"]))
+    na_planilha, _disponivel = precos_da_planilha().get(chave, (None, True))
+    if na_planilha is None:
         return None
     destino = cardapio_catalogo.MAPA.get(caso["chave"], {})
     fator = int(destino.get("fator", 1)) or 1
     unidades_planilha = max(caso["quantidade"] / fator, 1)
     no_cardapio = round(subtotal_api / unidades_planilha, 2)
-    na_planilha = round(float(linha["preco"]), 2)
+    na_planilha = round(na_planilha, 2)
     if abs(na_planilha - no_cardapio) <= 0.01:
         return None
     return na_planilha, no_cardapio
