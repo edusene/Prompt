@@ -64,6 +64,10 @@ def _empty() -> dict:
         "saudacao_feita": False,
         # Aviso de "estamos fechados" ja dado nesta conversa.
         "aviso_horario_dado": False,
+        # Quando o ultimo pedido foi fechado. Sobrevive a limpeza da ficha: e o
+        # que distingue "quero mais 30 coxinhas" logo apos um pedido de um
+        # pedido novo dias depois.
+        "ultimo_pedido_em": "",
         "updated_at": "",
     }
 
@@ -328,6 +332,19 @@ def render_ficha(memoria: dict) -> str:
     else:
         bloco.append("Nenhum dado coletado ainda.")
 
+    # Janela em que "quero mais 30 coxinhas" e ambiguo: pode ser acrescimo ao
+    # pedido que acabou de ir para a producao, ou pedido novo. Sem este aviso o
+    # modelo aplicava a regra de alteracao do BLOCO 0 e transferia para humano.
+    minutos = pedido_recente(memoria)
+    if minutos is not None:
+        bloco.append(
+            f"ATENCAO - o cliente fechou um pedido ha {minutos} minuto(s). Se ele "
+            "pedir mais itens agora, NAO presuma nem transfira: PERGUNTE se e "
+            "para somar ao pedido que acabou de sair ou se e um pedido novo. "
+            "Somar ao anterior e alteracao (BLOCO 0: transfira). Pedido novo e "
+            "atendimento normal: siga o funil desde a modalidade."
+        )
+
     if memoria.get("items"):
         bloco.append(
             "Os itens acima sao o que o cliente pediu. O preco deles vem de "
@@ -406,6 +423,32 @@ def registrar_frete(phone: str, memoria: dict, valor: float) -> None:
 # O prompt manda nao repetir pergunta ja respondida, e endereco raramente muda.
 _CAMPOS_DO_CLIENTE = ("name", "bairro", "endereco", "referencia")
 
+# Por quanto tempo depois de um pedido sair ainda faz sentido perguntar se o
+# cliente quer SOMAR ao que acabou de ir para a producao. Passado isso, pedir
+# mais coisa so pode ser pedido novo. O proprio prompt estima 30 a 40 minutos
+# de entrega, entao meia hora cobre a janela em que da para ajustar.
+MINUTOS_PEDIDO_RECENTE = 30
+
+
+def pedido_recente(memoria: dict, agora=None) -> int | None:
+    """Minutos desde o ultimo pedido fechado, se ainda estiver na janela.
+
+    Fora da janela devolve None: nao ha pedido em producao para alterar, e
+    perguntar "e novo ou e alteracao?" so atrapalharia quem volta dias depois.
+    """
+    quando = memoria.get("ultimo_pedido_em")
+    if not quando:
+        return None
+    agora = agora or _dt.datetime.now()
+    try:
+        saiu = _dt.datetime.fromisoformat(str(quando))
+    except (TypeError, ValueError):
+        return None
+    minutos = (agora - saiu).total_seconds() / 60
+    if 0 <= minutos <= MINUTOS_PEDIDO_RECENTE:
+        return int(minutos)
+    return None
+
 
 def registrar_pedido_enviado(phone: str, memoria: dict) -> None:
     """Fecha o pedido e deixa a ficha pronta para o proximo.
@@ -414,6 +457,10 @@ def registrar_pedido_enviado(phone: str, memoria: dict) -> None:
     pedido do mesmo cliente saia com o endereco e o pagamento do anterior e com
     a data do pedido antigo - que ja tinha passado, e ainda travava o
     atendimento no portao de agendamento.
+
+    Guarda a hora do fechamento: e ela que diz, logo depois, se "agora quero 30
+    coxinhas" pode ser um acrescimo ao pedido que acabou de sair ou ja e outro
+    pedido.
     """
     limpa = _empty()
     for campo in _CAMPOS_DO_CLIENTE:
@@ -422,6 +469,7 @@ def registrar_pedido_enviado(phone: str, memoria: dict) -> None:
     # A sessao continua a mesma: o cliente acabou de falar com a gente.
     for campo in _CAMPOS_DE_SESSAO:
         limpa[campo] = memoria.get(campo, False)
+    limpa["ultimo_pedido_em"] = _dt.datetime.now().isoformat(timespec="seconds")
 
     memoria.clear()
     memoria.update(limpa)
