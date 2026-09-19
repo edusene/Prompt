@@ -11,6 +11,7 @@ Efeito pratico: o agente nao repergunta o que ja sabe nem inventa o que nao foi
 dito — para cada campo ele ve "preenchido" ou "FALTA PERGUNTAR".
 """
 
+import datetime as _dt
 import time
 
 import database
@@ -67,6 +68,33 @@ def _empty() -> dict:
     }
 
 
+# Depois deste tempo parado — ou virando o dia — a conversa recomeça: o cliente
+# e cumprimentado de novo e volta a ser avisado se a fabrica estiver fechada.
+HORAS_ATE_NOVA_SESSAO = 6
+
+# Marcas que valem por CONVERSA, nao pela vida do cliente.
+_CAMPOS_DE_SESSAO = ("saudacao_feita", "aviso_horario_dado")
+
+
+def _sessao_expirou(updated_at: str, agora=None) -> bool:
+    """A ultima mensagem foi em outro dia ou ha muitas horas?
+
+    Sem isto, `saudacao_feita` ficava True para sempre: o cliente era
+    cumprimentado uma unica vez na vida e nunca mais, e quem ja tinha ouvido
+    "estamos fechados" nunca mais era avisado.
+    """
+    if not updated_at:
+        return False
+    agora = agora or _dt.datetime.now()
+    try:
+        ultima = _dt.datetime.fromisoformat(str(updated_at))
+    except (TypeError, ValueError):
+        return False
+    if ultima.date() != agora.date():
+        return True
+    return (agora - ultima) >= _dt.timedelta(hours=HORAS_ATE_NOVA_SESSAO)
+
+
 def load(phone: str) -> dict:
     """Carrega a memoria estruturada do cliente (vazia se nao houver)."""
     data = _empty()
@@ -79,6 +107,12 @@ def load(phone: str) -> dict:
         for key in data:
             if key in stored and stored[key] not in (None, ""):
                 data[key] = stored[key]
+
+        if _sessao_expirou(stored.get("updated_at", "")):
+            for campo in _CAMPOS_DE_SESSAO:
+                data[campo] = False
+            print(f"[memoria] {phone}: conversa nova (ultima em "
+                  f"{stored.get('updated_at')}) - saudacao volta a valer")
     return data
 
 
@@ -368,6 +402,29 @@ def registrar_frete(phone: str, memoria: dict, valor: float) -> None:
     save(phone, memoria)
 
 
+# O que sobrevive ao fim de um pedido: sao dados do CLIENTE, nao do pedido.
+# O prompt manda nao repetir pergunta ja respondida, e endereco raramente muda.
+_CAMPOS_DO_CLIENTE = ("name", "bairro", "endereco", "referencia")
+
+
 def registrar_pedido_enviado(phone: str, memoria: dict) -> None:
-    memoria["pedido_enviado"] = True
+    """Fecha o pedido e deixa a ficha pronta para o proximo.
+
+    Antes isto so marcava `pedido_enviado = True` e guardava o resto. O segundo
+    pedido do mesmo cliente saia com o endereco e o pagamento do anterior e com
+    a data do pedido antigo - que ja tinha passado, e ainda travava o
+    atendimento no portao de agendamento.
+    """
+    limpa = _empty()
+    for campo in _CAMPOS_DO_CLIENTE:
+        if memoria.get(campo):
+            limpa[campo] = memoria[campo]
+    # A sessao continua a mesma: o cliente acabou de falar com a gente.
+    for campo in _CAMPOS_DE_SESSAO:
+        limpa[campo] = memoria.get(campo, False)
+
+    memoria.clear()
+    memoria.update(limpa)
     save(phone, memoria)
+    print(f"[memoria] {phone}: pedido fechado, ficha limpa "
+          f"(mantidos: {', '.join(c for c in _CAMPOS_DO_CLIENTE if limpa.get(c))})")

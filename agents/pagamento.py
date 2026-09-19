@@ -47,7 +47,10 @@ Apos finalizar, encerre sem perguntas."""
             tool_handlers=tool_handlers,
         )
 
-        # Detecta se pedido foi enviado
+        # Detecta se o pedido foi enviado. Aqui so MARCA: quem limpa a ficha e
+        # o handler da tool, que sabe que o envio aconteceu de verdade. O modelo
+        # pode dizer "Pedido finalizado" sem ter chamado a tool, e apagar os
+        # dados nesse caso perderia o pedido.
         if "Pedido finalizado" in response or "enviado com sucesso" in response:
             state.pedido_enviado = True
 
@@ -180,7 +183,10 @@ Apos finalizar, encerre sem perguntas."""
                 notes=notes,
             )
 
-            state.pedido_enviado = True
+            # Fecha o pedido: limpa itens, data, horario e pagamento e
+            # mantem os dados do cliente. Sem isto o pedido seguinte sai
+            # com o endereco e a data do anterior.
+            state.fechar_pedido()
             return result_str
 
         return {"send_order_to_cardapio": _send_order}

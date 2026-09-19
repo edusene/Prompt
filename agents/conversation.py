@@ -165,21 +165,65 @@ class ConversationState:
         """Salva estado no banco de dados."""
         try:
             import database
-            database.save_conversation_state(self.phone, self.to_dict())
+            estado = self.to_dict()
+            # Carimbo em hora LOCAL, igual ao conversation_memory.save: e o que
+            # _sessao_expirou compara. A coluna updated_at da tabela guarda UTC
+            # e nao volta na leitura (get_conversation_state devolve so o JSON).
+            estado["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+            database.save_conversation_state(self.phone, estado)
         except Exception as e:
             print(f"[state] Erro ao salvar: {e}")
 
     @classmethod
     def load_from_db(cls, phone: str) -> "ConversationState":
-        """Carrega estado do banco de dados."""
+        """Carrega estado do banco de dados.
+
+        A saudacao e o aviso de expediente valem por CONVERSA: passado o tempo
+        de sessao, voltam a valer. Sem isso o cliente era cumprimentado uma
+        unica vez na vida. Mesma regra do caminho classico
+        (conversation_memory._sessao_expirou).
+        """
         try:
             import database
             data = database.get_conversation_state(phone)
             if data:
-                return cls.from_dict(data)
+                estado = cls.from_dict(data)
+                try:
+                    import conversation_memory
+                    if conversation_memory._sessao_expirou(data.get("updated_at", "")):
+                        estado.saudacao_feita = False
+                        estado.aviso_horario_dado = False
+                        print(f"[state] {phone}: conversa nova, saudacao volta a valer")
+                except Exception:
+                    pass
+                return estado
         except Exception as e:
             print(f"[state] Erro ao carregar: {e}")
         return cls(phone=phone)
+
+    def fechar_pedido(self) -> None:
+        """Limpa os dados do pedido, mantendo os do cliente.
+
+        Sem isto o pedido seguinte sai com o endereco e o pagamento do anterior
+        e com a data antiga, que ja passou.
+        """
+        self.items = []
+        self.modality = ""
+        self.data_agendada = ""
+        self.data_iso = ""
+        self.data_confirmada = False
+        self.horario = ""
+        self.payment_method = ""
+        self.troco_para = 0
+        self.subtotal = self.frete = self.taxa_retorno = self.total = 0
+        self.modalidade_confirmada = False
+        self.upsell_oferecido = False
+        self.resumo_apresentado = False
+        self.pedido_confirmado = False
+        self.pedido_enviado = False
+        self.phase = "triagem"
+        self.active_agent = "triagem"
+        # name, bairro, endereco e referencia ficam: sao dados do cliente.
 
 
 # ── Mapeamento de produtos para categorias ──────────────────────────────────
@@ -644,7 +688,7 @@ class ConversationManager:
             state.aviso_horario_dado = True
             saudacao = horario.saudacao(now)
             nome = f", {state.name}" if state.name else ""
-            resposta = f"{saudacao}{nome}! Aqui e a Sandrinha da BALBS.\n\n{expediente['mensagem']}"
+            resposta = f"{saudacao}{nome}! Aqui é a Sandrinha da BALBS.\n\n{expediente['mensagem']}"
             if not expediente["aceita_hoje"] and state.data_iso == now.date().isoformat():
                 # O cliente pediu para hoje, mas hoje ja nao cabe: a data volta
                 # a ser uma pergunta em aberto em vez de seguir errada.

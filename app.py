@@ -1188,7 +1188,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
                 _memoria["data_agendada"] = ""
             _nome = f", {_memoria['name']}" if _memoria.get("name") else ""
             _resposta = (
-                f"{horario.saudacao(_agora)}{_nome}! Aqui e a Sandrinha da BALBS.\n\n"
+                f"{horario.saudacao(_agora)}{_nome}! Aqui é a Sandrinha da BALBS.\n\n"
                 f"{_expediente['mensagem']}"
             )
             _memoria["saudacao_feita"] = True

@@ -23,9 +23,12 @@ FECHAMENTO = (20, 0)
 INTERVALO_INICIO = (12, 1)
 INTERVALO_FIM = (13, 59)
 
+# Acentuados: estes nomes vao direto para a tela do cliente ("Data: hoje,
+# sabado (19/09)" destoava do resto do texto). O dicionario de ENTRADA abaixo
+# continua sem acento de proposito: ele compara texto ja normalizado.
 _DIAS = [
-    "segunda-feira", "terca-feira", "quarta-feira",
-    "quinta-feira", "sexta-feira", "sabado", "domingo",
+    "segunda-feira", "terça-feira", "quarta-feira",
+    "quinta-feira", "sexta-feira", "sábado", "domingo",
 ]
 
 _DIAS_ENTRADA = {
@@ -81,7 +84,7 @@ def formatar_data(d: date, now: datetime | None = None) -> str:
     if delta == 0:
         prefixo = "hoje, "
     elif delta == 1:
-        prefixo = "amanha, "
+        prefixo = "amanhã, "
     else:
         prefixo = ""
     return f"{prefixo}{nome_dia(d)} ({d.strftime('%d/%m')})"
@@ -116,7 +119,7 @@ def status(now: datetime | None = None) -> dict:
             "aceita_hoje": False,
             "sugestao_data": proximo,
             "mensagem": (
-                "Aos domingos a gente nao abre! Posso deixar seu pedido agendado "
+                "Aos domingos a gente não abre! Posso deixar seu pedido agendado "
                 f"para {formatar_data(proximo, now)}? 😊"
             ),
         }
@@ -128,8 +131,8 @@ def status(now: datetime | None = None) -> dict:
             "aceita_hoje": True,
             "sugestao_data": now.date(),
             "mensagem": (
-                "A gente comeca a atender as 07h40! Ja posso deixar seu pedido "
-                "anotado para hoje a partir desse horario? 😊"
+                "A gente começa a atender às 07h40! Já posso deixar seu pedido "
+                "anotado para hoje a partir desse horário? 😊"
             ),
         }
 
@@ -141,7 +144,7 @@ def status(now: datetime | None = None) -> dict:
             "aceita_hoje": False,
             "sugestao_data": proximo,
             "mensagem": (
-                "Nossa producao ja encerrou por hoje! Posso deixar seu pedido "
+                "Nossa produção já encerrou por hoje! Posso deixar seu pedido "
                 f"agendado para {formatar_data(proximo, now)}, a partir das 07h40? 💛"
             ),
         }
@@ -153,7 +156,7 @@ def status(now: datetime | None = None) -> dict:
             "aceita_hoje": True,
             "sugestao_data": now.date(),
             "mensagem": (
-                "Estamos no intervalo de almoco ate as 14h00! Posso ja adiantar "
+                "Estamos no intervalo de almoço até às 14h00! Posso já adiantar "
                 "o seu pedido para as 14h? 😊"
             ),
         }
@@ -247,12 +250,12 @@ def validar_agendamento(
         return False, "Falta a data do pedido."
 
     if data_pedido < now.date():
-        return False, "Essa data ja passou. Para qual dia voce quer o pedido? 😊"
+        return False, "Essa data já passou. Para qual dia você quer o pedido? 😊"
 
     if not eh_dia_util(data_pedido):
         proximo = proximo_dia_util(data_pedido + timedelta(days=1))
         return False, (
-            "Aos domingos a gente nao abre! Posso deixar para "
+            "Aos domingos a gente não abre! Posso deixar para "
             f"{formatar_data(proximo, now)}? 😊"
         )
 
@@ -264,26 +267,26 @@ def validar_agendamento(
 
     if minuto_pedido < _minutos(*ABERTURA):
         return False, (
-            "A gente so comeca as 07h40! Pode ser a partir desse horario? 😊"
+            "A gente só começa às 07h40! Pode ser a partir desse horário? 😊"
         )
 
     if minuto_pedido >= _minutos(*FECHAMENTO):
         return False, (
-            "Nosso atendimento vai ate as 20h00! Qual horario antes disso "
-            "funciona melhor pra voce? 😊"
+            "Nosso atendimento vai até às 20h00! Qual horário antes disso "
+            "funciona melhor pra você? 😊"
         )
 
     if _minutos(*INTERVALO_INICIO) <= minuto_pedido <= _minutos(*INTERVALO_FIM):
         return False, (
-            "Das 12h01 as 13h59 estamos no intervalo de almoco! Pode ser as 14h "
+            "Das 12h01 às 13h59 estamos no intervalo de almoço! Pode ser às 14h "
             "ou prefere antes das 12h? 😊"
         )
 
     # Horario de hoje que ja passou nao e agendamento, e pedido perdido.
     if data_pedido == now.date() and minuto_pedido <= _minutos(now.hour, now.minute):
         return False, (
-            f"Esse horario de hoje ja passou (agora sao {now.strftime('%Hh%M')})! "
-            "Qual outro horario fica bom? 😊"
+            f"Esse horário de hoje já passou (agora são {now.strftime('%Hh%M')})! "
+            "Qual outro horário fica bom? 😊"
         )
 
     return True, ""

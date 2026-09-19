@@ -1,0 +1,22 @@
+As mensagens e as ligações são protegidas com a criptografia de ponta a ponta e ficam somente entre você e os participantes desta conversa. Nem mesmo o WhatsApp pode lê-las ou ouvi-las.
+[9/18/26, 10:47:04 AM] - Esta empresa usa um serviço seguro da Meta para gerenciar esta conversa. Clique para saber mais.
+[9/18/26, 11:33:19 AM] - Esta empresa agora usa um serviço seguro da Meta para gerenciar esta conversa. Clique para saber mais.
+[9/19/26, 11:22:48 AM] Você: Oi Sandrinha, sou o Balbino. Quero pedir 50 coxinhas e 25 kibes pra entregar hoje às 18h na Av. Calama, 3234, bairro Olaria. Vou pagar no cartão.
+[9/19/26, 11:23:12 AM] Sandrinha: Olá, Balbino! Você já informou que vai pagar no cartão, só preciso saber se será cartão de débito ou crédito?
+[9/19/26, 11:23:26 AM] Você: no Débito
+[9/19/26, 11:23:48 AM] Sandrinha: 👤 Cliente: Balbino
+📅 Data: hoje, sabado (19/09)
+⏰ Horário: 18h
+📍 Bairro: Olaria
+📍 Endereço: Av. Calama, 3234
+Itens:
+• 50 un - Coxinha frango — R$ 40,00
+• 25 un - Quibe — R$ 20,00
+💰 Subtotal: R$ 60,00
+🚚 Frete: R$ 12,00
+🛵 Taxa de retorno: R$ 2,00
+💵 Total: R$ 74,00
+💳 Pagamento: Cartão de débito na entrega
+Posso confirmar o seu pedido para hoje, sabado (19/09) às 18h? 💛
+[9/19/26, 11:24:20 AM] Você: Pode confirmar
+[9/19/26, 11:24:47 AM] Sandrinha: Pedido finalizado com sucesso! Muito obrigado por escolher a BALBS! 💛
