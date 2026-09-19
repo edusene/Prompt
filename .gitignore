@@ -33,3 +33,6 @@ backup_knowledge_pre_reindex.json
 
 # Backups automaticos da planilha (verificar_catalogo.py --corrigir)
 uploads/backup/
+
+# Exports de conversa do WhatsApp usados em teste (dados de cliente)
+chat*.txt
