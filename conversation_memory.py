@@ -129,6 +129,16 @@ def faltando(memoria: dict) -> list[str]:
     return [c for c in obrigatorios if not memoria.get(c)]
 
 
+def pendencia_de_detalhe(memoria: dict) -> str:
+    """Campo preenchido que ainda precisa de um detalhe, nao de nova coleta."""
+    if memoria.get("payment_method") == "cartao_a_definir":
+        return (
+            "O cliente ja disse que paga com CARTAO. Falta so saber se e DEBITO "
+            "ou CREDITO - pergunte exatamente isso, nunca 'qual a forma de pagamento'."
+        )
+    return ""
+
+
 def _formatar_itens(items) -> str:
     if not items:
         return ""
@@ -158,6 +168,7 @@ def render_ficha(memoria: dict) -> str:
         linhas.append(f"- Frete ja calculado: R$ {float(memoria['frete']):.2f}".replace(".", ","))
 
     pendentes = faltando(memoria)
+    detalhe = pendencia_de_detalhe(memoria)
     bloco = ["=== FICHA DESTE ATENDIMENTO (memoria do cliente) ==="]
     if linhas:
         bloco.append("JA CONFIRMADO PELO CLIENTE - nao pergunte de novo, nao altere:")
@@ -171,6 +182,9 @@ def render_ficha(memoria: dict) -> str:
             "consultar_preco/calculate_order - nunca do seu calculo."
         )
 
+    if detalhe:
+        bloco.append(detalhe)
+
     if pendentes:
         bloco.append("AINDA FALTA COLETAR, nesta ordem:")
         bloco += [f"- {_ROTULOS[c]}" for c in pendentes]
@@ -181,6 +195,11 @@ def render_ficha(memoria: dict) -> str:
         bloco.append(
             "PROIBIDO nesta mensagem: apresentar resumo do pedido, informar total "
             "ou chamar send_order_to_cardapio - a ficha ainda tem pendencias."
+        )
+    elif detalhe:
+        bloco.append(
+            "PROXIMA PERGUNTA OBRIGATORIA: o detalhe pendente acima. "
+            "Pergunte SO isso nesta mensagem."
         )
     else:
         bloco.append(

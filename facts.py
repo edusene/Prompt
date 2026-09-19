@@ -285,6 +285,121 @@ def bairro_names() -> list[str]:
     return [b["nome"] for b in get()["bairros"]]
 
 
+_UNIDADES_RE = re.compile(r"(\d+)\s*un", re.IGNORECASE)
+
+
+def _unidades_do_formato(item: dict) -> int:
+    """Quantas unidades cabem na linha de preco ('Porcao (25 un)' -> 25)."""
+    match = _UNIDADES_RE.search(item["item"]) or _UNIDADES_RE.search(item["formato"])
+    return int(match.group(1)) if match else 1
+
+
+def preco_unitario_da_categoria(categoria: str) -> tuple[float | None, str]:
+    """Preco por unidade de uma categoria vendida em lote (Fritos, Assados).
+
+    Fritos: porcao de 25 por R$ 20,00 -> R$ 0,80 a unidade. O sabor nao tem
+    preco proprio no cardapio ("Incluso no Pacote"), entao e daqui que sai o
+    valor de '50 coxinhas'.
+    """
+    alvo = normalize(categoria)
+    melhor = None
+    origem = ""
+    for p in get()["produtos"]:
+        if normalize(p["categoria"]) != alvo or p["preco"] is None:
+            continue
+        unidades = _unidades_do_formato(p)
+        if unidades <= 1:
+            continue
+        unitario = p["preco"] / unidades
+        if melhor is None or unitario < melhor:
+            melhor = unitario
+            origem = f"{p['item']} = {_brl(p['preco'])} ({unidades} un)"
+    return melhor, origem
+
+
+def resolve_unit_price(nome: str, quantity: int = 1) -> dict | None:
+    """Preco unitario oficial de um item do pedido.
+
+    Existe porque o modelo manda (ou omite) o preco na tool calculate_order — e
+    um pedido inteiro ja saiu com subtotal R$ 0,00 por causa disso. Aqui o valor
+    vem sempre do cardapio.
+
+    Retorna {"preco_unitario", "item_oficial", "base"} ou None se o item nao
+    estiver no cardapio.
+    """
+    candidatos = lookup_preco(nome)
+    if not candidatos:
+        return None
+
+    alvo = normalize(nome)
+
+    def _como_sabor(p: dict, exato: bool) -> dict | None:
+        unitario, origem = preco_unitario_da_categoria(p["categoria"])
+        if unitario is None:
+            return None
+        return {
+            "preco_unitario": round(unitario, 2),
+            "item_oficial": p["item"],
+            "base": f"{p['categoria']}: {origem}",
+            "exato": exato,
+        }
+
+    def _como_linha(p: dict, exato: bool) -> dict:
+        return {
+            "preco_unitario": p["preco"],
+            "item_oficial": p["item"],
+            "base": f"{p['item']} ({p['formato']}) = {_brl(p['preco'])}",
+            "exato": exato,
+        }
+
+    # 1) nome ambiguo: existe como sabor de lote E como salgado grande avulso
+    #    ("coxinha" e "rissole de carne" sao os dois). Quem decide e a
+    #    quantidade: a partir de 25 e lote, abaixo disso e avulso. Esta checagem
+    #    vem antes do match exato justamente porque o nome bate dos dois lados.
+    sabores = [p for p in candidatos if p["preco"] is None and alvo in normalize(p["item"])]
+    avulsos = [
+        p for p in candidatos
+        if p["preco"] is not None and "unidade" in normalize(p["formato"])
+        and alvo in normalize(p["item"])
+    ]
+
+    if sabores and avulsos:
+        escolhido = _como_sabor(sabores[0], False) if quantity >= 25 else _como_linha(avulsos[0], False)
+        if escolhido:
+            outro = avulsos[0] if quantity >= 25 else sabores[0]
+            escolhido["ambiguo"] = True
+            escolhido["alternativa"] = f"{outro['item']} ({outro['categoria']})"
+            return escolhido
+
+    # 2) nome bate exatamente com uma linha do cardapio
+    for p in candidatos:
+        if normalize(p["item"]) != alvo:
+            continue
+        if p["preco"] is not None:
+            return _como_linha(p, True)
+        resolvido = _como_sabor(p, True)
+        if resolvido:
+            return resolvido
+
+    if sabores:
+        resolvido = _como_sabor(sabores[0], False)
+        if resolvido:
+            return resolvido
+
+    # 3) qualquer linha com preco definido
+    for p in candidatos:
+        if p["preco"] is not None:
+            return _como_linha(p, False)
+
+    # 4) sabor aproximado: preco por unidade da categoria dele
+    for p in candidatos:
+        resolvido = _como_sabor(p, False)
+        if resolvido:
+            return resolvido
+
+    return None
+
+
 def _brl(value: float) -> str:
     return ("R$ %.2f" % value).replace(".", ",")
 

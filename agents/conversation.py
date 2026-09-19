@@ -129,12 +129,21 @@ _PRODUTOS_FRI_COCOQ = {
     "pastel carne": "Pastel Carne",
     "pastel queijo": "Pastel Queijo",
     "quibe": "Quibe",
+    # Como o cliente escreve de verdade. Sem estes apelidos, "25 kibes" nao era
+    # reconhecido e o item sumia da ficha do atendimento.
+    "kibe": "Quibe",
+    "quibes": "Quibe",
+    "kibes": "Quibe",
     "rissole": "Rissole de Carne",
+    "rissoles": "Rissole de Carne",
+    "risole": "Rissole de Carne",
     "rissole de carne": "Rissole de Carne",
     "churros": "Churros",
     "croquete": "Croquete de Carne",
     "croquete de carne": "Croquete de Carne",
     "misto": "Misto",
+    "esfiha": "Esfirra de Carne",
+    "esfilha": "Esfirra de Carne",
 }
 
 _PRODUTOS_ASSADOS = {
@@ -285,9 +294,13 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
             extracted["payment_method"] = "cartao_debito"
         elif re.search(r'\b(dinheiro|na entrega|pagar na entrega)\b', msg_lower):
             extracted["payment_method"] = "dinheiro"
-        elif re.search(r'\b(cartão|cartao|maestro|visa|elo)\b', msg_lower):
-            # Cartao sem especificar debito/credito - NAO extrai, deixa o agente perguntar
-            pass
+        elif re.search(r'\b(cartão|cartao|maquininha|maestro|visa|elo)\b', msg_lower):
+            # Cartao sem dizer se e debito ou credito. Antes isso nao era
+            # extraido de jeito nenhum e a ficha continuava pedindo "forma de
+            # pagamento" mesmo depois de o cliente responder "cartao" duas
+            # vezes. Agora fica registrado como pendente de detalhe: a pergunta
+            # passa a ser debito ou credito, e nao a mesma de novo.
+            extracted["payment_method"] = "cartao_a_definir"
 
     # ── Itens ───────────────────────────────────────────────────────────────
     if not state.items:
@@ -337,7 +350,19 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
                         break
 
             if matched_name and qty > 0:
-                unit_price = _PRECO_UNITARIO.get(matched_name, 0.0)
+                # O preco oficial vem da planilha; o mapa local so entra se a
+                # tabela estiver indisponivel (evita tabela de preco duplicada
+                # no codigo, que envelhece sem ninguem perceber).
+                unit_price = 0.0
+                try:
+                    import facts
+                    oficial = facts.resolve_unit_price(matched_name, qty)
+                    if oficial:
+                        unit_price = oficial["preco_unitario"]
+                except Exception:
+                    pass
+                if not unit_price:
+                    unit_price = _PRECO_UNITARIO.get(matched_name, 0.0)
                 items_found.append({
                     "name": matched_name,
                     "quantity": qty,

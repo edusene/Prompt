@@ -10,6 +10,7 @@ Uso:
     python test_agente.py                  # bateria padrao de perguntas
     python test_agente.py "sua pergunta"   # pergunta avulsa
     python test_agente.py --fluxo          # conversa completa de pedido
+    python test_agente.py --chat           # cliente manda tudo na primeira mensagem
 """
 
 import sys
@@ -48,6 +49,8 @@ def _instalar_stubs():
     database.save_message = lambda *a, **k: None
     database.get_recent_messages = lambda phone, limit=20: []
     database.get_setting = lambda key, default="": {"agent_mode": "1"}.get(key, default)
+    # Sem este stub o teste tenta gravar pedido em cardapio_orders no banco real
+    database.criar_cardapio_order = lambda *a, **k: print("  [pedido registrado (simulado)]")
 
     conversation_memory.load = lambda phone: dict(_ficha) or conversation_memory._empty()
     conversation_memory.save = lambda phone, data: _ficha.update(data)
@@ -91,6 +94,15 @@ FLUXO = [
     "vou pagar no pix",
 ]
 
+# Conversa real (chat.txt, 18/09): o cliente manda tudo de uma vez. Antes o
+# subtotal saia R$ 0,00 e o agente respondia "houve um erro na consulta dos precos".
+FLUXO_TUDO_DE_UMA_VEZ = [
+    "Oi Sandrinha, sou o Balbino. Quero pedir 50 coxinhas e 25 kibes pra entregar "
+    "hoje as 18h na Av. Calama, 3234, bairro Olaria. Vou pagar no cartao.",
+    "Credito",
+    "Sim",
+]
+
 
 def main() -> int:
     if not facts.is_loaded():
@@ -102,7 +114,9 @@ def main() -> int:
     _ficha.clear()
 
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    if "--fluxo" in sys.argv:
+    if "--chat" in sys.argv:
+        roteiro = FLUXO_TUDO_DE_UMA_VEZ
+    elif "--fluxo" in sys.argv:
         roteiro = FLUXO
     elif args:
         roteiro = args
@@ -110,7 +124,7 @@ def main() -> int:
         roteiro = PERGUNTAS
 
     for texto in roteiro:
-        if "--fluxo" not in sys.argv:
+        if "--fluxo" not in sys.argv and "--chat" not in sys.argv:
             memory.reset(TELEFONE)
             _ficha.clear()
         enviar(texto)

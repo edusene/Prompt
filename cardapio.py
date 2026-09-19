@@ -34,36 +34,75 @@ def _brl(value: float) -> str:
     return ("R$ %.2f" % float(value or 0)).replace(".", ",")
 
 
-def _normalizar_itens(items: list[dict]) -> tuple[list[dict], list[str]]:
-    """Evita cobrar duas vezes o mesmo salgado.
+def _normalizar_itens(items: list[dict]) -> tuple[list[dict], list[str], list[str]]:
+    """Define o preco de cada item pela TABELA OFICIAL, nao pelo que o modelo mandou.
 
-    No cardapio, o preco esta no FORMATO (Porcao 25 / Meio Cento / Cento) e o
-    sabor vem "Incluso no Pacote". Quando o agente monta o pedido com a linha do
-    pacote E a linha do sabor, o sabor nao pode somar de novo — era assim que o
-    total saia dobrado.
+    Duas coisas acontecem aqui:
+
+    1. Preco vem sempre do cardapio. O modelo pode mandar o item sem 'price'
+       (ja aconteceu: 50 coxinhas + 25 quibes fecharam com subtotal R$ 0,00) ou
+       com um valor inventado. O que ele manda e ignorado quando a tabela sabe
+       responder.
+    2. Sabor nao soma junto com o pacote. No cardapio o preco esta no FORMATO
+       (Porcao 25 / Meio Cento / Cento) e o sabor vem "Incluso no Pacote"; se o
+       pedido traz a linha do pacote E a linha do sabor, o sabor entra zerado.
+
+    Retorna (itens, avisos, nao_encontrados).
     """
     if not items:
-        return [], []
+        return [], [], []
 
     try:
         import facts
-    except Exception:
-        return list(items), []
+    except Exception as e:
+        print(f"[cardapio] WARN tabela de precos indisponivel: {e}")
+        return list(items), [], []
 
     normalizados = []
     avisos = []
+    nao_encontrados = []
     tem_pacote = False
     indices_sabor = []
 
     for idx, item in enumerate(items):
         novo = dict(item)
-        correspondencias = facts.lookup_preco(str(item.get("name", "")))
-        melhor = correspondencias[0] if correspondencias else None
-        if melhor and facts.normalize(melhor["item"]) == facts.normalize(str(item.get("name", ""))):
-            if melhor["preco"] is None:
+        nome = str(item.get("name", ""))
+        try:
+            quantidade = int(float(item.get("quantity", 0) or 0))
+        except (ValueError, TypeError):
+            quantidade = 0
+
+        correspondencias = facts.lookup_preco(nome)
+        exata = next(
+            (c for c in correspondencias if facts.normalize(c["item"]) == facts.normalize(nome)),
+            None,
+        )
+        if exata is not None:
+            if exata["preco"] is None:
                 indices_sabor.append(idx)
             else:
                 tem_pacote = True
+
+        oficial = facts.resolve_unit_price(nome, quantidade)
+        if oficial is None:
+            nao_encontrados.append(nome)
+            print(f"[cardapio] item FORA do cardapio: '{nome}'")
+        else:
+            informado = float(item.get("price", 0) or 0)
+            novo["price"] = oficial["preco_unitario"]
+            novo["name"] = novo.get("name") or oficial["item_oficial"]
+            if abs(informado - oficial["preco_unitario"]) > 0.001:
+                avisos.append(
+                    f"'{nome}': preco ajustado para {_brl(oficial['preco_unitario'])}/un "
+                    f"pela tabela oficial ({oficial['base']})"
+                )
+            if oficial.get("ambiguo"):
+                avisos.append(
+                    f"'{nome}' cobrado como {oficial['item_oficial']} "
+                    f"({_brl(oficial['preco_unitario'])}/un) por causa da quantidade "
+                    f"({quantidade}). Existe tambem '{oficial['alternativa']}' - "
+                    "confirme com o cliente qual ele quer antes de fechar."
+                )
         normalizados.append(novo)
 
     if tem_pacote and indices_sabor:
@@ -72,9 +111,11 @@ def _normalizar_itens(items: list[dict]) -> tuple[list[dict], list[str]]:
             if float(normalizados[idx].get("price", 0) or 0) > 0:
                 avisos.append(f"'{nome}' e sabor do pacote: nao cobrado separadamente")
                 normalizados[idx]["price"] = 0
+
+    if avisos:
         print(f"[cardapio] itens normalizados: {avisos}")
 
-    return normalizados, avisos
+    return normalizados, avisos, nao_encontrados
 
 
 def montar_resumo(items: list[dict], subtotal: float, delivery_fee: float,
@@ -117,7 +158,20 @@ def calcular_pedido(items: list[dict], bairro: str = "") -> dict:
     test_mode = (os.getenv("CARDÁPIO_TEST_MODE", "true") or os.getenv("CARD_TEST_MODE", "true")).lower() == "true"
 
     if test_mode:
-        items, avisos_itens = _normalizar_itens(items)
+        items, avisos_itens, nao_encontrados = _normalizar_itens(items)
+
+        # Sem preco oficial nao existe resumo: melhor a tool falhar e o agente
+        # consultar do que apresentar um total errado ao cliente.
+        if nao_encontrados:
+            return {
+                "success": False,
+                "error": (
+                    "Itens fora do cardapio oficial: " + ", ".join(nao_encontrados) +
+                    ". Use consultar_preco para achar o nome correto e chame "
+                    "calculate_order de novo. NAO informe total ao cliente antes disso."
+                ),
+                "itens_nao_encontrados": nao_encontrados,
+            }
 
         subtotal = 0.0
         for item in items or []:
