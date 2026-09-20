@@ -297,6 +297,46 @@ cadastro nenhum e voltava `deliveryFee: 0`, enquanto `consultar_frete` ja tinha
 dito R$ 12,00 ao cliente. Hoje o apelido e resolvido antes da chamada e, se a
 API discordar da tabela, a tabela vence e a divergencia fica no log.
 
+### Conferir a credencial do cardapio
+
+`createOrderFromAgent` exige `x-api-key`; `calculateOrder` nao. Por isso o
+`verificar_catalogo.py` passava mesmo com a chave errada — ele so chama o
+endpoint publico, e esta escrito no docstring dele. Resultado: a primeira vez
+que se descobria que a chave nao servia era quando o pedido de um cliente real
+falhava, depois de ele ja ter confirmado.
+
+```bash
+python verificar_credencial.py            # veredito
+python verificar_credencial.py --detalhe  # mostra cada sonda
+```
+
+Tambem em `GET /api/cardapio/health` (logado) e no botao **Testar chave** da aba
+Cardapio. O botao dispara sozinho quando alguem desliga o modo teste: e o
+instante em que uma chave errada deixa de ser inofensiva.
+
+Nao cria pedido. Sao tres POSTs com um corpo que **nao tem nenhum dos cinco
+campos obrigatorios**, mudando so o header:
+
+| Sonda | Header | Esperado |
+|---|---|---|
+| 1 | nenhum | 401 — o endpoint exige chave |
+| 2 | chave inventada | 401 — chave errada e mesmo recusada |
+| 3 | a nossa chave | 401 = recusada; resto = aceita |
+
+A sonda 2 e o grupo de controle. Sem ela, um 401 por outro motivo (rota
+renomeada, gateway fora) acusaria a chave e mandaria o dono atras do problema
+errado; e se o endpoint parasse de validar, um "aceita" nao provaria nada. Se a
+sonda 2 passar, o veredito e `inconclusivo`, nunca `aceita`.
+
+Estados: `aceita`, `recusada`, `nao_configurada`, `inconclusivo`,
+`indisponivel` (rede fora ou 5xx — nunca confundido com recusa). O retorno diz
+tambem a **origem da chave** (`banco` ou `ambiente`): sem isso, trocar a chave
+no painel e continuar vendo 401 nao teria explicacao.
+
+> O corpo da sonda (`cardapio._SONDA_DE_CREDENCIAL`) precisa continuar sem
+> campo de pedido. No dia em que ele descrever um pedido valido, cada clique em
+> "Testar chave" vira comanda na fabrica.
+
 ### Palavra-chave de reset (#reset)
 
 Mandar `#reset` no WhatsApp reinicia o atendimento daquele numero: reativa a

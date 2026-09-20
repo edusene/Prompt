@@ -4173,6 +4173,18 @@ def api_cardapio_stats():
     return jsonify(database.cardapio_orders_stats())
 
 
+@app.get("/api/cardapio/health")
+@login_required
+def api_cardapio_health():
+    """Diz se o cardapio digital aceita a nossa chave, sem criar pedido.
+
+    Mesmo contrato de /api/knowledge/health: sempre HTTP 200, e a falha aparece
+    em 'ok' e 'problemas'. Antes disto, a unica forma de saber que a chave
+    estava errada era o pedido de um cliente real falhar no WhatsApp.
+    """
+    return jsonify(cardapio.verificar_credencial())
+
+
 @app.get("/api/cardapio/settings")
 @login_required
 def api_cardapio_settings_get():

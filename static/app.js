@@ -3888,6 +3888,35 @@ async function deleteCardapioOrder(id) {
     }
 }
 
+// Testa a chave do cardapio sem criar pedido. A rota responde 200 mesmo quando
+// a chave e recusada: devolver 401 aqui faria o api() acima deslogar o operador
+// justamente na tela que explica o 401.
+async function testarCredencialCardapio() {
+    const box = document.getElementById('cardapio-credencial');
+    if (box) box.innerHTML = '<p class="muted">Testando a chave...</p>';
+
+    const r = await api('/api/cardapio/health');
+    if (!r) return;
+
+    if (r.ok) {
+        toast('Chave aceita pelo cardapio', 'success');
+    } else {
+        toast('Chave nao passou: ' + r.estado, 'error');
+    }
+    if (!box) return;
+
+    const cor = r.ok ? '#22c55e' : '#ef4444';
+    const linhas = (r.problemas || []).map(p => `<li>${p}</li>`).join('');
+    box.innerHTML = `
+        <div style="border-left:3px solid ${cor};background:var(--bg-soft,#f8f8f8);padding:12px 16px;margin-bottom:16px;border-radius:4px">
+            <strong style="color:${cor}">${r.ok ? 'Chave aceita' : 'Chave: ' + r.estado}</strong>
+            <div class="muted" style="font-size:12px;margin-top:4px">
+                ${r.chave_mascarada || '(nao configurada)'} &middot; origem: ${r.origem_da_chave} &middot; modo: ${r.modo}
+            </div>
+            ${linhas ? `<ul style="margin:8px 0 0;padding-left:18px;font-size:13px">${linhas}</ul>` : ''}
+        </div>`;
+}
+
 async function toggleCardapioTestMode(checked) {
     const res = await api('/api/cardapio/settings', {
         method: 'PUT',
@@ -3896,6 +3925,9 @@ async function toggleCardapioTestMode(checked) {
     if (res && res.ok) {
         _cardapioTestMode = checked;
         toast(checked ? 'Modo teste ativado - pedidos NAO serao enviados ao cardapio real' : 'Modo producao ativado - pedidos serao enviados ao cardapio real', checked ? 'warning' : 'success');
+        // Desligar o modo teste e o momento exato em que uma chave errada
+        // deixa de ser inofensiva e vira pedido perdido. Confere na hora.
+        if (!checked) testarCredencialCardapio();
     }
 }
 

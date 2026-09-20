@@ -18,8 +18,13 @@ import httpx
 URL_CARDAPIO_PADRAO = "https://balbs-cardapio.base44.app"
 
 
-def _config(*nomes: str, padrao: str = "") -> str:
-    """Le uma configuracao do cardapio: banco primeiro, depois ambiente.
+def _config_com_origem(*nomes: str, padrao: str = "") -> tuple[str, str]:
+    """(valor, origem) de uma configuracao do cardapio.
+
+    Origem e "banco", "ambiente", "padrao" ou "ausente". Ela importa no
+    diagnostico: sem saber de onde veio o valor testado, o dono troca a chave
+    no painel, continua vendo 401 e nao tem como desconfiar de que outra fonte
+    esta vencendo.
 
     O banco vem antes porque e onde o painel grava. Ler so de os.environ nao
     serve: varios modulos chamam load_dotenv(override=True) — db.py no import e
@@ -41,14 +46,18 @@ def _config(*nomes: str, padrao: str = "") -> str:
             except Exception:
                 valor = ""
             if valor:
-                return valor
+                return valor, "banco"
 
     for nome in nomes:
         valor = (os.getenv(nome, "") or "").strip()
         if valor:
-            return valor
+            return valor, "ambiente"
 
-    return padrao
+    return padrao, ("padrao" if padrao else "ausente")
+
+
+def _config(*nomes: str, padrao: str = "") -> str:
+    return _config_com_origem(*nomes, padrao=padrao)[0]
 
 
 def em_modo_teste() -> bool:
@@ -77,6 +86,146 @@ def _headers() -> dict:
         "Content-Type": "application/json",
         "x-api-key": _get_api_key(),
     }
+
+
+def _mascarar(valor: str) -> str:
+    return (valor[:4] + "****" + valor[-4:]) if len(valor) > 8 else "****"
+
+
+# Corpo da sonda de credencial. NAO TEM NENHUM dos cinco campos obrigatorios do
+# createOrderFromAgent (customer_name, customer_phone, items, total,
+# customer_confirmed) — e isso e o que torna a sonda segura.
+#
+# NAO ACRESCENTE CAMPOS AQUI. A partir do momento em que este corpo descrever um
+# pedido valido, a sonda passa a criar comanda de verdade na fabrica toda vez
+# que alguem clicar em "testar chave".
+_SONDA_DE_CREDENCIAL = {"__sonda_de_credencial__": True}
+
+
+_CHAVE_INVALIDA = "chave-invalida-de-diagnostico"
+
+_RECUSA = (401, 403)
+
+
+def _sondar(client, url: str, rotulo: str, chave: str | None) -> dict:
+    """Uma batida no endpoint. `chave=None` manda sem o header."""
+    headers = {"Content-Type": "application/json"}
+    if chave is not None:
+        headers["x-api-key"] = chave
+    try:
+        resp = client.post(url, json=_SONDA_DE_CREDENCIAL, headers=headers)
+    except Exception as e:
+        return {"rotulo": rotulo, "status": None, "resposta": f"{type(e).__name__}: {e}"}
+    return {"rotulo": rotulo, "status": resp.status_code, "resposta": (resp.text or "")[:120]}
+
+
+def verificar_credencial() -> dict:
+    """Diz se o cardapio digital aceita a nossa chave, sem criar pedido nenhum.
+
+    A funcao remota valida a chave ANTES de olhar o corpo, entao um POST com um
+    corpo sem campo obrigatorio nenhum separa autenticacao de validacao: 401
+    significa chave recusada, e qualquer outra resposta significa que a chave
+    passou pelo portao.
+
+    Mas uma sonda so nao basta. Se o endpoint devolvesse 401 por outro motivo
+    (rota renomeada, gateway fora do ar, WAF), o diagnostico acusaria a chave e
+    mandaria o dono atras do problema errado. Por isso vao TRES sondas, iguais
+    no corpo e diferentes so no header:
+
+        1. sem header algum        -> tem de dar 401 (o endpoint exige chave)
+        2. com uma chave invalida  -> tem de dar 401 (chave errada e recusada)
+        3. com a nossa chave       -> 401 = recusada; resto = aceita
+
+    Se a sonda 2 NAO for recusada, o endpoint nao esta conferindo chave
+    nenhuma e nao da para afirmar nada sobre a nossa: o veredito e
+    'inconclusivo', nunca 'aceita'.
+
+    Existe porque ate aqui nao havia como conferir a credencial: a primeira vez
+    que se descobria que a chave estava errada era quando o pedido de um cliente
+    real falhava no WhatsApp. verificar_catalogo.py nao serve — ele so chama
+    calculateOrder, que e publico e passa ate sem chave.
+
+    Devolve sempre um dict, nunca levanta.
+    """
+    base_url = _get_base_url()
+    chave, origem = _config_com_origem("BALBS_AGENTE_API_KEY", "BALBS_AGENTE_APIKEY")
+
+    resultado = {
+        "ok": False,
+        "estado": "nao_configurada",
+        "modo": "teste" if em_modo_teste() else "producao",
+        "base_url": base_url,
+        "chave_configurada": bool(chave),
+        "chave_mascarada": _mascarar(chave) if chave else "",
+        "origem_da_chave": origem,
+        "sondas": [],
+        "problemas": [],
+    }
+
+    if not base_url:
+        resultado["problemas"].append(
+            "URL do cardapio nao configurada: preencha CARDAPIO_API_URL na aba "
+            "Cardapio do painel."
+        )
+        return resultado
+
+    if not chave:
+        resultado["problemas"].append(
+            "BALBS_AGENTE_API_KEY nao configurada: preencha a chave na aba "
+            "Cardapio do painel ou como variavel de ambiente."
+        )
+        return resultado
+
+    url = f"{base_url}/functions/createOrderFromAgent"
+    with httpx.Client(timeout=20) as client:
+        sem = _sondar(client, url, "sem chave", None)
+        invalida = _sondar(client, url, "chave invalida", _CHAVE_INVALIDA)
+        nossa = _sondar(client, url, "nossa chave", chave)
+    resultado["sondas"] = [sem, invalida, nossa]
+
+    if nossa["status"] is None:
+        resultado["estado"] = "indisponivel"
+        resultado["problemas"].append(
+            f"Nao consegui falar com o cardapio ({nossa['resposta']}). Isto nao "
+            "e problema de chave."
+        )
+    elif invalida["status"] not in _RECUSA:
+        # O grupo de controle falhou: nao da para separar chave boa de ruim.
+        resultado["estado"] = "inconclusivo"
+        resultado["problemas"].append(
+            "O endpoint aceitou ate uma chave invalida, entao este teste nao "
+            "consegue afirmar nada sobre a nossa. Confira com o desenvolvedor "
+            "se o createOrderFromAgent ainda valida a chave."
+        )
+    elif nossa["status"] in _RECUSA:
+        resultado["estado"] = "recusada"
+        resultado["problemas"].append(
+            f"O cardapio recusou a nossa chave ({nossa['status']}), e recusou "
+            "tambem uma chave inventada — ou seja, a validacao funciona e o "
+            "nosso valor e que nao confere. Peca ao desenvolvedor o valor do "
+            "segredo BALBS_AGENTE_API_KEY no app do cardapio e confirme que a "
+            "funcao foi republicada depois de criar o segredo."
+        )
+    elif nossa["status"] >= 500:
+        # 5xx nao responde a pergunta: o erro pode ter acontecido antes ou
+        # depois da checagem da chave. Luz verde aqui seria mentira.
+        resultado["estado"] = "indisponivel"
+        resultado["problemas"].append(
+            f"O cardapio respondeu HTTP {nossa['status']} e nao deu para "
+            "concluir nada sobre a chave. Tente de novo em alguns minutos; se "
+            "persistir, o problema e no app do cardapio, nao na credencial."
+        )
+    else:
+        # A chave passou pelo portao que recusou a invalida. O 400 que costuma
+        # vir aqui e a validacao reclamando do corpo vazio — exatamente o que a
+        # sonda queria provocar.
+        resultado["estado"] = "aceita"
+        resultado["ok"] = True
+
+    print(f"[cardapio] verificar_credencial: estado={resultado['estado']} "
+          f"sondas={[s['status'] for s in resultado['sondas']]} "
+          f"origem={origem} modo={resultado['modo']}")
+    return resultado
 
 
 def _brl(value: float) -> str:
@@ -594,9 +743,15 @@ def criar_pedido(
                     "display_id": data.get("display_id", ""),
                     "status": data.get("status", "pendente"),
                 }
+            erro = data.get("error", data.get("message", f"HTTP {resp.status_code}"))
+            if resp.status_code in _RECUSA:
+                # "Unauthorized" sozinho no log nao diz a ninguem o que fazer.
+                erro = (f"{erro} (HTTP {resp.status_code}: o cardapio recusou a "
+                        "nossa chave). Rode 'Testar chave' na aba Cardapio do "
+                        "painel, ou python verificar_credencial.py")
             return {
                 "success": False,
-                "error": data.get("error", data.get("message", f"HTTP {resp.status_code}")),
+                "error": erro,
                 "status_code": resp.status_code,
             }
     except Exception as e:
