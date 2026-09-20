@@ -1031,6 +1031,103 @@ def perform_transfer(phone: str, reason: str = "", send_message: bool = True) ->
     return True
 
 
+# ── Reset ─────────────────────────────────────────────────────────────────────
+
+_PALAVRA_RESET_PADRAO = "#reset"
+
+_MENSAGEM_RESET_PADRAO = (
+    "Prontinho, recomecei o atendimento do zero! 💛 Eu sou a Sandrinha da "
+    "BALBS. Qual delícia você quer pedir?"
+)
+
+
+def palavra_de_reset() -> str:
+    return (database.get_setting("reset_keyword", "") or _PALAVRA_RESET_PADRAO).strip().lower()
+
+
+def e_pedido_de_reset(texto: str) -> bool:
+    """A mensagem e a palavra-chave de reset?
+
+    Token inteiro, nao trecho: "#reset" e "#reset por favor" contam, mas uma
+    frase que apenas cite a palavra no meio de outra ("resetar o pedido") nao.
+    """
+    chave = palavra_de_reset()
+    if not chave:
+        return False
+    limpo = (texto or "").strip().lower()
+    return limpo == chave or chave in limpo.split()
+
+
+def perform_reset(phone: str, origem: str = "cliente", avisar: bool = True) -> None:
+    """Zera o atendimento e devolve a conversa para a Sandrinha.
+
+    O espelho de perform_transfer: la a conversa sai do agente e vai para uma
+    pessoa; aqui ela volta. Existe porque o transbordo so tinha ida — depois de
+    um transbordo o numero ficava preso em modo humano ate alguem abrir o
+    painel, que e exatamente o que o dono nao quer ter de fazer.
+    """
+    agora_iso = datetime.utcnow().isoformat()
+
+    contact = database.get_contact(phone) or database.upsert_contact(phone)
+    database.update_contact(contact["id"], auto_mode=1)
+
+    conv = database.get_or_create_conversation(phone)
+    # reset_at corta o historico lido do banco; transferred_at volta a NULL
+    # para a conversa sair da fila de atendimento humano do painel.
+    database.update_conversation(conv["id"], reset_at=agora_iso, transferred_at=None)
+
+    # Historico em memoria + ficha do atendimento.
+    memory.reset(phone)
+
+    # Um pedido reenviado depois do reset nao pode ser barrado como duplicata.
+    for chave in [k for k in _orders_sent if k.startswith(f"{phone}:")]:
+        _orders_sent.discard(chave)
+
+    database.save_message(
+        conversation_id=conv["id"],
+        phone=phone,
+        direction="internal",
+        body=f"Atendimento reiniciado por {origem} ({palavra_de_reset()}) em "
+             f"{datetime.utcnow().strftime('%d/%m %H:%M')} — agente reativado",
+        sender="system",
+        msg_type="system",
+    )
+
+    events.emit("conversation_updated", {
+        "conversation_id": conv["id"],
+        "auto_mode": 1,
+        "transferred": False,
+        "reset_at": agora_iso,
+    })
+
+    print(f"[reset] user={phone} atendimento zerado e agente reativado ({origem})")
+
+    if not avisar:
+        return
+
+    resposta = database.get_setting("reset_message", "") or _MENSAGEM_RESET_PADRAO
+    res = send_text(phone, resposta)
+    if res.get("ok"):
+        database.save_message(
+            conversation_id=conv["id"],
+            phone=phone,
+            direction="out",
+            body=resposta,
+            sender="agent",
+            msg_type="text",
+        )
+        database.update_conversation(conv["id"], last_message_at=time.strftime("%Y-%m-%dT%H:%M:%S"))
+        # A saudacao acabou de sair: a Sandrinha nao repete na proxima mensagem.
+        try:
+            ficha = conversation_memory.load(phone)
+            ficha["saudacao_feita"] = True
+            conversation_memory.save(phone, ficha)
+        except Exception as e:
+            print(f"[reset] WARN nao marcou saudacao de {phone}: {e}")
+    else:
+        print(f"[reset] WARN falha ao confirmar reset p/ {phone}: {res.get('error')}")
+
+
 # ── Flush handler ─────────────────────────────────────────────────────────────
 
 _VALOR_RE = __import__("re").compile(r"R\$\s*(\d{1,3}(?:\.\d{3})*(?:,\d{2})?|\d+(?:[.,]\d{1,2})?)")
@@ -2054,6 +2151,17 @@ def webhook():
             else:
                 print(f"[webhook] MSG DUPLICADA msg_id={message_id}")
 
+            # #reset vem ANTES do buffer e antes de qualquer checagem de modo:
+            # ele precisa funcionar justamente quando a conversa esta em modo
+            # humano, que e onde handle_flush desiste logo no inicio. Tambem
+            # nao entra no debounce - a palavra nao e conversa, e comando.
+            if e_pedido_de_reset(body):
+                try:
+                    perform_reset(number, origem="cliente")
+                except Exception as e:
+                    print(f"[reset] ERRO ao reiniciar {number}: {e}")
+                continue
+
             buffer.add(number, body,
                        msg_id=saved["id"] if saved else None,
                        wa_message_id=str(message_id) if message_id else "",
@@ -2427,6 +2535,38 @@ def api_set_transfer_message():
     return jsonify({"ok": True, "transfer_message": msg})
 
 
+@app.get("/api/settings/reset")
+@login_required
+def api_get_reset_settings():
+    return jsonify({
+        "reset_keyword": palavra_de_reset(),
+        "reset_message": database.get_setting("reset_message", "") or _MENSAGEM_RESET_PADRAO,
+    })
+
+
+@app.put("/api/settings/reset")
+@login_required
+def api_set_reset_settings():
+    data = request.get_json(silent=True) or {}
+    if "reset_keyword" in data:
+        chave = str(data["reset_keyword"]).strip().lower()
+        # Palavra de uma peca so: o reconhecimento e por token, entao uma chave
+        # com espaco nunca seria reconhecida.
+        if not chave or len(chave.split()) != 1:
+            return jsonify({"error": "reset_keyword deve ser uma palavra unica, sem espacos"}), 400
+        database.set_setting("reset_keyword", chave)
+    if "reset_message" in data:
+        msg = str(data["reset_message"]).strip()
+        if not msg:
+            return jsonify({"error": "reset_message não pode ser vazio"}), 400
+        database.set_setting("reset_message", msg)
+    return jsonify({
+        "ok": True,
+        "reset_keyword": palavra_de_reset(),
+        "reset_message": database.get_setting("reset_message", "") or _MENSAGEM_RESET_PADRAO,
+    })
+
+
 # ── Sub-agentes ──────────────────────────────────────────────────────────────
 
 @app.get("/api/settings/sub-agents")
@@ -2456,10 +2596,17 @@ def api_set_sub_agents():
 @app.post("/api/conversations/<phone>/reset")
 @login_required
 def api_reset_conversation(phone: str):
-    """Reseta estado da conversa de um usuario (sub-agentes)."""
+    """Mesmo reset da palavra-chave, disparado pelo painel.
+
+    Antes isto so apagava a ficha (conversation_state), o que deixava a
+    conversa em modo humano e com o historico antigo: quem clicava aqui depois
+    de um transbordo continuava sem a Sandrinha. Agora faz o reset inteiro.
+    Para o comportamento antigo, silencioso, passe {"avisar": false}.
+    """
+    data = request.get_json(silent=True) or {}
     try:
-        database.delete_conversation_state(phone)
-        return jsonify({"ok": True, "message": f"Estado da conversa de {phone} resetado"})
+        perform_reset(phone, origem="painel", avisar=bool(data.get("avisar", True)))
+        return jsonify({"ok": True, "message": f"Atendimento de {phone} reiniciado"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

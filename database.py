@@ -101,6 +101,18 @@ def init_db() -> None:
         except Exception:
             pass
 
+    # Migração: reset_at marca onde o atendimento recomecou (#reset). O
+    # historico enviado ao LLM e cortado nesse ponto; sem a coluna, o corte
+    # viveria so em memoria e o Render reiniciando trazia a conversa velha de
+    # volta do banco.
+    cvcols = db.table_columns("conversations")
+    if "reset_at" not in cvcols:
+        try:
+            db.execute("ALTER TABLE conversations ADD COLUMN reset_at TEXT DEFAULT NULL")
+            print("[db] coluna reset_at adicionada em conversations")
+        except Exception:
+            pass
+
     # Migração CRM: adiciona crm_status e last_interaction_at na tabela contacts
     ccols2 = db.table_columns("contacts")
     if "crm_status" not in ccols2:
@@ -601,7 +613,8 @@ def list_conversations(status: str = "", archived: bool | None = None,
 
 def update_conversation(conv_id: int, **fields: Any) -> None:
     allowed = ("status", "assigned_to", "priority", "unread_count", "last_message_at",
-               "archived", "muted", "pinned", "favorite", "transferred_at")
+               "archived", "muted", "pinned", "favorite", "transferred_at",
+               "reset_at")
     sets = []
     vals = []
     for k, v in fields.items():
@@ -1296,13 +1309,48 @@ def insert_knowledge_chunks_batch(records: list[dict]) -> None:
 # ── Memory Recovery (load history from DB into memory on restart) ────────────
 
 
-def get_recent_messages(phone: str, limit: int = 20) -> list[dict]:
-    """Retorna últimas mensagens no formato para memory.py."""
-    rows = db.fetch_all(
-        "SELECT direction, body FROM messages WHERE phone=? AND body <> '' "
-        "ORDER BY created_at DESC, id DESC LIMIT ?",
-        (phone, limit),
+def get_reset_at(phone: str) -> str:
+    """Instante do ultimo #reset dessa conversa (vazio se nunca houve)."""
+    row = db.fetch_one(
+        "SELECT cv.reset_at FROM conversations cv "
+        "JOIN contacts ct ON ct.id = cv.contact_id "
+        "WHERE ct.phone=? ORDER BY cv.id DESC LIMIT 1",
+        (phone,),
     )
+    return (row or {}).get("reset_at") or ""
+
+
+def get_recent_messages(phone: str, limit: int = 20) -> list[dict]:
+    """Retorna últimas mensagens no formato para memory.py.
+
+    Mensagens anteriores ao ultimo #reset ficam de fora: o ponto do #reset e
+    justamente "esqueca o que veio antes". Elas continuam no banco e no painel,
+    so nao voltam para o contexto do agente.
+
+    Notas internas (direction='internal') tambem ficam de fora. Elas sao
+    recado de sistema para a equipe — "Transferido pelo agente em 19/09
+    22h26" — e entravam no historico como se a Sandrinha tivesse dito aquilo
+    ao cliente.
+    """
+    corte = ""
+    try:
+        corte = get_reset_at(phone)
+    except Exception as e:
+        print(f"[db] WARN nao leu reset_at de {phone}: {e}")
+    if corte:
+        rows = db.fetch_all(
+            "SELECT direction, body FROM messages WHERE phone=? AND body <> '' "
+            "AND direction IN ('in','out') AND created_at > ? "
+            "ORDER BY created_at DESC, id DESC LIMIT ?",
+            (phone, corte, limit),
+        )
+    else:
+        rows = db.fetch_all(
+            "SELECT direction, body FROM messages WHERE phone=? AND body <> '' "
+            "AND direction IN ('in','out') "
+            "ORDER BY created_at DESC, id DESC LIMIT ?",
+            (phone, limit),
+        )
     if not rows:
         return []
     messages = []

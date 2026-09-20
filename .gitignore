@@ -36,3 +36,9 @@ uploads/backup/
 
 # Exports de conversa do WhatsApp usados em teste (dados de cliente)
 chat*.txt
+
+# Prints enviados por WhatsApp na raiz do projeto: o de 19/09 tinha a chave
+# do cardapio em texto claro. Imagens do painel ficam em static/.
+/*.jpeg
+/*.jpg
+/*.png

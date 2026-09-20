@@ -297,6 +297,30 @@ cadastro nenhum e voltava `deliveryFee: 0`, enquanto `consultar_frete` ja tinha
 dito R$ 12,00 ao cliente. Hoje o apelido e resolvido antes da chamada e, se a
 API discordar da tabela, a tabela vence e a divergencia fica no log.
 
+### Palavra-chave de reset (#reset)
+
+Mandar `#reset` no WhatsApp reinicia o atendimento daquele numero: reativa a
+Sandrinha (`auto_mode=1`), tira a conversa da fila humana, limpa a ficha e
+corta o historico que vai ao modelo. Existe porque o transbordo so tinha ida —
+depois de um transbordo o numero ficava preso em modo humano ate alguem abrir
+o painel.
+
+| Onde | Como |
+|---|---|
+| WhatsApp | manda `#reset` (palavra inteira; `#reset por favor` vale, `resetar` nao) |
+| Painel / API | `POST /api/conversations/<phone>/reset`, com `{"avisar": false}` para nao avisar o cliente |
+| Trocar a palavra | `PUT /api/settings/reset` com `reset_keyword` (uma palavra, sem espaco) e/ou `reset_message` |
+
+O comando e tratado no webhook, **antes** do buffer e antes de qualquer
+checagem de modo: ele precisa funcionar justamente quando a conversa esta em
+modo humano, que e onde `handle_flush` desiste logo na primeira linha.
+
+Nada e apagado do banco. O corte e a coluna `conversations.reset_at`, que
+`get_recent_messages` usa como piso — o painel continua mostrando a conversa
+inteira, so o agente e que recomeca do zero. Por isso o corte e uma coluna e
+nao uma variavel: com o Render reiniciando, um corte em memoria traria a
+conversa velha de volta do banco na primeira mensagem.
+
 ### Manutencao da base
 
 ```bash
