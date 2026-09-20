@@ -8,39 +8,68 @@ import json
 import httpx
 
 
-def em_modo_teste() -> bool:
-    """Le o modo teste da MESMA fonte que app._send_order_handler: o banco.
+# URL do cardapio digital. Fica aqui como ultimo recurso de proposito: o nome
+# da variavel tem acento (CARDÁPIO_API_URL) e, num painel de deploy como o
+# Render, um nome fora do ASCII nao sobrevive — a variavel simplesmente nao
+# existe no processo. Com o banco sem o valor e o .env ausente no servidor,
+# _get_base_url devolvia "" e TODO pedido em producao morria em
+# "CARDÁPIO_API_URL nao configurada", que o agente traduzia para o cliente como
+# "estou com dificuldade tecnica para calcular o valor do seu pedido".
+URL_CARDAPIO_PADRAO = "https://balbs-cardapio.base44.app"
 
-    Ler so de os.environ nao serve: varios modulos chamam
-    load_dotenv(override=True) — db.py no import e meta.reload_config() depois
-    de salvar o .env pelo painel — e isso devolve a variavel ao valor do
-    arquivo, revertendo em silencio o modo producao ligado pelo painel.
-    O banco e onde o painel grava, entao e ele que manda.
+
+def _config(*nomes: str, padrao: str = "") -> str:
+    """Le uma configuracao do cardapio: banco primeiro, depois ambiente.
+
+    O banco vem antes porque e onde o painel grava. Ler so de os.environ nao
+    serve: varios modulos chamam load_dotenv(override=True) — db.py no import e
+    meta.reload_config() depois de salvar o .env pelo painel — e isso devolve a
+    variavel ao valor do arquivo, revertendo em silencio o que foi salvo.
+
+    Cada configuracao aceita varios nomes: o oficial com acento e os apelidos
+    em ASCII puro, para o caso de o ambiente nao aceitar o nome acentuado.
     """
-    valor = ""
     try:
         import database
-        valor = database.get_setting("CARDÁPIO_TEST_MODE", "") or ""
     except Exception:
-        valor = ""
-    if not valor:
-        valor = os.getenv("CARDÁPIO_TEST_MODE", "") or os.getenv("CARD_TEST_MODE", "") or "true"
+        database = None
+
+    if database is not None:
+        for nome in nomes:
+            try:
+                valor = (database.get_setting(nome, "") or "").strip()
+            except Exception:
+                valor = ""
+            if valor:
+                return valor
+
+    for nome in nomes:
+        valor = (os.getenv(nome, "") or "").strip()
+        if valor:
+            return valor
+
+    return padrao
+
+
+def em_modo_teste() -> bool:
+    """Le o modo teste da MESMA fonte que app._send_order_handler: o banco."""
+    valor = _config("CARDÁPIO_TEST_MODE", "CARDAPIO_TEST_MODE", "CARD_TEST_MODE",
+                    padrao="true")
     return valor.strip().lower() == "true"
 
 
 def _get_base_url() -> str:
-    test_mode = em_modo_teste()
-    if test_mode:
-        url = os.getenv("CARDÁPIO_API_URL_TEST", "") or os.getenv("CARD_API_URL_TEST", "")
-        if not url:
-            url = os.getenv("CARDÁPIO_API_URL", "") or os.getenv("CARD_API_URL", "")
-        return url.rstrip("/")
-    url = os.getenv("CARDÁPIO_API_URL", "") or os.getenv("CARD_API_URL", "")
+    if em_modo_teste():
+        url = _config("CARDÁPIO_API_URL_TEST", "CARDAPIO_API_URL_TEST", "CARD_API_URL_TEST")
+        if url:
+            return url.rstrip("/")
+    url = _config("CARDÁPIO_API_URL", "CARDAPIO_API_URL", "CARD_API_URL",
+                  padrao=URL_CARDAPIO_PADRAO)
     return url.rstrip("/")
 
 
 def _get_api_key() -> str:
-    return os.getenv("BALBS_AGENTE_API_KEY", "")
+    return _config("BALBS_AGENTE_API_KEY", "BALBS_AGENTE_APIKEY")
 
 
 def _headers() -> dict:
@@ -258,6 +287,31 @@ def montar_resumo(items: list[dict], subtotal: float, delivery_fee: float,
     return "\n".join(linhas)
 
 
+def _resolver_frete(bairro: str) -> tuple[float, str, bool]:
+    """(taxa, bairro_oficial, nao_encontrado) a partir da tabela oficial.
+
+    Roda nos dois modos. Ficava so no ramo de teste, e em producao o bairro
+    seguia cru para a API: "agenor" ou "bairro olaria" nao casavam com nenhum
+    cadastro de la e voltavam com deliveryFee = 0, enquanto consultar_frete ja
+    tinha dito R$ 12,00 ao cliente. A tabela oficial e a mesma fonte das duas
+    respostas, entao e ela que resolve o apelido antes de qualquer chamada.
+    """
+    if not bairro:
+        return 0.0, bairro, False
+    try:
+        import facts
+        encontrado = facts.lookup_frete(bairro)
+    except Exception as e:
+        print(f"[cardapio] ERRO ao consultar tabela de frete: {e}")
+        encontrado = None
+    if not encontrado:
+        print(f"[cardapio] frete NAO ENCONTRADO na tabela oficial para: '{bairro}'")
+        return 0.0, bairro, True
+    taxa = float(encontrado["taxa"])
+    print(f"[cardapio] frete oficial: {encontrado['bairro']} = R$ {taxa:.2f} ({encontrado['match']})")
+    return taxa, encontrado["bairro"], False
+
+
 def calcular_pedido(items: list[dict], bairro: str = "", modalidade: str = "",
                     dia: str = "", horario: str = "", pagamento: str = "",
                     cliente: str = "", endereco: str = "") -> dict:
@@ -323,23 +377,7 @@ def calcular_pedido(items: list[dict], bairro: str = "", modalidade: str = "",
             except (ValueError, TypeError):
                 pass
 
-        delivery_fee = 0.0
-        frete_nao_encontrado = False
-        bairro_oficial = bairro
-        if bairro:
-            try:
-                import facts
-                encontrado = facts.lookup_frete(bairro)
-            except Exception as e:
-                print(f"[cardapio] ERRO ao consultar tabela de frete: {e}")
-                encontrado = None
-            if encontrado:
-                delivery_fee = float(encontrado["taxa"])
-                bairro_oficial = encontrado["bairro"]
-                print(f"[cardapio] frete oficial: {bairro_oficial} = R$ {delivery_fee:.2f} ({encontrado['match']})")
-            else:
-                frete_nao_encontrado = True
-                print(f"[cardapio] frete NAO ENCONTRADO na tabela oficial para: '{bairro}'")
+        delivery_fee, bairro_oficial, frete_nao_encontrado = _resolver_frete(bairro)
 
         return_fee = calcular_taxa_retorno(modalidade, pagamento)
         total = subtotal + delivery_fee + return_fee
@@ -378,16 +416,19 @@ def calcular_pedido(items: list[dict], bairro: str = "", modalidade: str = "",
     if not base_url:
         return {"success": False, "error": "CARDÁPIO_API_URL nao configurada"}
 
+    # O bairro vai resolvido pela tabela oficial, nao como o cliente digitou.
+    delivery_fee, bairro_oficial, frete_nao_encontrado = _resolver_frete(bairro)
+
     url = f"{base_url}/functions/calculateOrder"
     # Itens no formato do cardapio digital: pacote pelo nome + sabores em
     # selected_flavors, quantidade em unidades.
     payload = {"items": items_api}
-    if bairro:
-        payload["bairro"] = bairro
+    if bairro_oficial:
+        payload["bairro"] = bairro_oficial
 
     try:
         with httpx.Client(timeout=30) as client:
-            resp = client.post(url, json=payload)
+            resp = client.post(url, json=payload, headers=_headers())
             data = resp.json()
             print(f"[cardápio] calculateOrder status={resp.status_code} response={json.dumps(data, ensure_ascii=False)[:300]}")
             if resp.status_code != 200 or not isinstance(data, dict):
@@ -410,7 +451,15 @@ def calcular_pedido(items: list[dict], bairro: str = "", modalidade: str = "",
                 }
 
             subtotal = float(data.get("subtotal") or 0)
-            delivery_fee = float(data.get("deliveryFee") or data.get("delivery_fee") or 0)
+            # O frete e o da tabela oficial — a mesma que consultar_frete usou
+            # para responder ao cliente. Quando os dois discordam, prevalece a
+            # tabela e a divergencia fica no log para o dono reconciliar; assim
+            # o total nunca contradiz o valor ja informado na conversa.
+            frete_api = float(data.get("deliveryFee") or data.get("delivery_fee") or 0)
+            if bairro_oficial and abs(frete_api - delivery_fee) > 0.001:
+                print(f"[cardapio] DIVERGENCIA de frete em '{bairro_oficial}': "
+                      f"tabela=R$ {delivery_fee:.2f} cardapio=R$ {frete_api:.2f} "
+                      f"- usando a tabela")
             return_fee = calcular_taxa_retorno(modalidade, pagamento)
             total = round(subtotal + delivery_fee + return_fee, 2)
 
@@ -420,21 +469,22 @@ def calcular_pedido(items: list[dict], bairro: str = "", modalidade: str = "",
                 "delivery_fee": round(delivery_fee, 2),
                 "return_fee": round(return_fee, 2),
                 "total": total,
-                "bairro_oficial": bairro,
+                "bairro_oficial": bairro_oficial,
+                "frete_nao_encontrado": frete_nao_encontrado,
                 "resposta_cardapio": data,
                 "resumo_formatado": montar_resumo(
-                    items, subtotal, delivery_fee, return_fee, total, bairro,
+                    items, subtotal, delivery_fee, return_fee, total, bairro_oficial,
                     modalidade=modalidade, dia=dia, horario=horario,
                     cliente=cliente, pagamento=pagamento, endereco=endereco,
                 ),
             }
             if avisos_itens:
                 resultado["itens_ajustados"] = avisos_itens
-            # Mesma guarda do modo teste: frete zerado numa entrega com bairro
-            # informado quase sempre e bairro fora da tabela.
-            if bairro and not delivery_fee:
+            # Mesma guarda do modo teste: bairro fora da tabela nao vira frete
+            # estimado.
+            if frete_nao_encontrado:
                 resultado["aviso"] = (
-                    f"O bairro '{bairro}' nao retornou taxa de entrega. NAO informe "
+                    f"O bairro '{bairro}' nao esta na tabela oficial de entrega. NAO informe "
                     "uma taxa estimada: confirme o bairro com o cliente ou transfira "
                     "para um atendente."
                 )

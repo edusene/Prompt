@@ -40,13 +40,18 @@ def embed_batch(texts: list[str]) -> list[list[float]]:
     return [e.embedding for e in result.data]
 
 
+import parse_knowledge as _parse_knowledge
+
 # ── Chunking ─────────────────────────────────────────────────────────────────
 
 # Arquivos que sao INSTRUCOES do agente (prompts), nao dados consultaveis.
 # Eles nunca entram no bloco de knowledge injetado no system prompt: o prompt
 # operacional ja e carregado por parse_knowledge e os .md sao dos sub-agentes.
 PROMPT_FILES = {
-    "PROMPTS EDUARDO 13.09.26.docx",
+    # Todas as versoes do prompt operacional, nao so a vigente: uma versao
+    # antiga que tenha sobrado na base tambem e instrucao, e injeta-la junto
+    # aos DADOS traria de volta as regras que o dono acabou de substituir.
+    *_parse_knowledge.PROMPT_DOCX_VERSOES,
     "triagem.md",
     "cardapio.md",
     "pedido.md",

@@ -28,7 +28,12 @@ import parse_knowledge  # noqa: E402
 BASE = Path(__file__).parent
 
 XLSX = "PLANILHA CARDAPIO E BAIRROS EDUARDO.xlsx"
-DOCX = "PROMPTS EDUARDO 13.09.26.docx"
+DOCX = parse_knowledge.PROMPT_DOCX_NAME
+# Versoes anteriores do prompt: sao APAGADAS da base. O agente le a primeira
+# versao que encontrar, e duas na base valem como duas instrucoes diferentes
+# para a mesma coisa — foi assim que o prompt antigo continuou valendo depois
+# de o dono mandar o novo.
+DOCX_OBSOLETOS = tuple(n for n in parse_knowledge.PROMPT_DOCX_VERSOES if n != DOCX)
 AGENT_PROMPTS = ("triagem.md", "cardapio.md", "pedido.md", "logistica.md", "pagamento.md", "crise.md", "router.md")
 
 
@@ -134,6 +139,15 @@ def main() -> int:
     for filename, content in sorted(sources.items()):
         atual = _undo_overlap(filename)
         descricao = database.get_knowledge_file_description(filename)
+        if not descricao and filename == DOCX:
+            # Prompt novo herda a descricao da versao que substitui, senao a
+            # aba Knowledge do painel mostra o arquivo mais importante sem
+            # legenda nenhuma.
+            for obsoleto in DOCX_OBSOLETOS:
+                descricao = database.get_knowledge_file_description(obsoleto)
+                if descricao:
+                    break
+            descricao = descricao or "Prompt principal do agente BALBS"
         chunks = knowledge_rag.chunk_text(content)
         print(
             f"  - {filename}: origem={len(content)} chars, "
@@ -142,6 +156,13 @@ def main() -> int:
         if dry_run:
             continue
         knowledge_rag.save_knowledge_raw(filename, content, description=descricao)
+
+    for obsoleto in DOCX_OBSOLETOS:
+        if not database.get_knowledge_document(obsoleto) and not database.get_knowledge_chunks(obsoleto):
+            continue
+        print(f"[reindex] removendo versao antiga do prompt: {obsoleto}")
+        if not dry_run:
+            knowledge_rag.delete_file(obsoleto)
 
     if dry_run:
         print("[reindex] dry-run: nada gravado")

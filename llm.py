@@ -12,6 +12,43 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
 
 _client = OpenAI(api_key=OPENAI_API_KEY)
 
+# Temperatura baixa por decisao do dono: a Sandrinha so pode repetir o que esta
+# no catalogo e no prompt operacional, nunca variar de redacao a ponto de
+# inventar produto, preco ou regra. Lida a cada chamada (e nao uma vez no
+# import) para o painel poder mexer sem redeploy.
+_TEMPERATURA_PADRAO = "0.1"
+
+# Familias que so aceitam a temperatura default (gpt-5, o1, o3...). Mandar
+# temperature para elas devolve 400 e derruba a resposta inteira.
+_SEM_TEMPERATURA: set[str] = set()
+
+
+def _temperatura() -> float:
+    bruto = os.getenv("OPENAI_TEMPERATURE", _TEMPERATURA_PADRAO)
+    try:
+        return max(0.0, min(2.0, float(str(bruto).replace(",", "."))))
+    except (TypeError, ValueError):
+        print(f"[llm] OPENAI_TEMPERATURE invalida ({bruto!r}); usando {_TEMPERATURA_PADRAO}")
+        return float(_TEMPERATURA_PADRAO)
+
+
+def _create(**kwargs):
+    """chat.completions.create com temperatura, tolerante a modelo que a recusa."""
+    modelo = kwargs.get("model", "")
+    if modelo not in _SEM_TEMPERATURA:
+        kwargs.setdefault("temperature", _temperatura())
+    try:
+        return _client.chat.completions.create(**kwargs)
+    except Exception as e:
+        if "temperature" not in str(e).lower() or "temperature" not in kwargs:
+            raise
+        # Modelo da familia de raciocinio: aceita so o default. Anota para nao
+        # gastar uma chamada perdida a cada mensagem.
+        print(f"[llm] modelo {modelo} nao aceita temperature; seguindo sem ela")
+        _SEM_TEMPERATURA.add(modelo)
+        kwargs.pop("temperature", None)
+        return _client.chat.completions.create(**kwargs)
+
 
 def _convert_history(history: list[dict]) -> list[dict]:
     """Converte histórico do formato interno para formato OpenAI.
@@ -91,7 +128,7 @@ def generate_reply(
         kwargs["tools"] = tools
         kwargs["tool_choice"] = "auto"
 
-    response = _client.chat.completions.create(**kwargs)
+    response = _create(**kwargs)
     choice = response.choices[0]
 
     # Log de cache hits (prompt caching)
@@ -143,7 +180,7 @@ def generate_reply(
             })
 
         # Gera resposta final (ou próxima tool call) com o resultado da tool
-        response = _client.chat.completions.create(
+        response = _create(
             model=OPENAI_MODEL,
             messages=messages,
             max_completion_tokens=1024,
@@ -169,7 +206,7 @@ def generate_reply(
         print(f"[llm] resposta VAZIA (finish_reason={choice.finish_reason}); "
               f"refazendo sem tools")
         try:
-            retry = _client.chat.completions.create(
+            retry = _create(
                 model=OPENAI_MODEL,
                 messages=messages,
                 max_completion_tokens=1024,
@@ -178,5 +215,5 @@ def generate_reply(
         except Exception as e:
             print(f"[llm] ERRO na segunda tentativa: {e}")
 
-    print(f"[llm] reply len={len(text)}")
+    print(f"[llm] reply len={len(text)} temp={_temperatura()}")
     return text

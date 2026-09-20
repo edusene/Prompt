@@ -52,6 +52,16 @@ def _instalar_stubs():
     # Sem este stub o teste tenta gravar pedido em cardapio_orders no banco real
     database.criar_cardapio_order = lambda *a, **k: print("  [pedido registrado (simulado)]")
 
+    # E sem este, com o modo producao ligado, a bateria de teste criaria pedido
+    # DE VERDADE no cardapio digital — a fabrica veria a comanda na tela.
+    # calculateOrder continua real: ele so calcula, e e justamente o caminho
+    # que se quer testar.
+    app.cardapio.criar_pedido = lambda **k: (
+        print(f"  [createOrderFromAgent BLOQUEADO no teste: {k.get('customer_name')} "
+              f"R$ {k.get('total')}]"),
+        {"success": True, "order_id": "TESTE", "display_id": "T000", "status": "simulado"},
+    )[1]
+
     conversation_memory.load = lambda phone: dict(_ficha) or conversation_memory._empty()
     conversation_memory.save = lambda phone, data: _ficha.update(data)
 

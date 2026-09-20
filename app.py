@@ -60,7 +60,11 @@ def _get_conversation_manager():
     return _conversation_manager
 
 # ── Config ──────────────────────────────────────────────────────────────────
-BUFFER_SECONDS = float(os.getenv("BUFFER_SECONDS", "8"))
+# Janela de debounce: tempo de silencio do cliente antes de o agente responder.
+# Era 8s e sozinha ja comia quase metade do tempo de resposta — com o modelo e
+# as tools, a Sandrinha levava ~21s para responder. O alvo do dono e a primeira
+# mensagem chegar entre 5 e 10 segundos.
+BUFFER_SECONDS = float(os.getenv("BUFFER_SECONDS", "3"))
 PORT = int(os.getenv("PORT", "5000"))
 SECRET_KEY = os.getenv("SECRET_KEY", "troque_esta_chave_secreta_aleatoria")
 DATAFY_WEBHOOK_SECRET = os.getenv("DATAFY_WEBHOOK_SECRET", "")
@@ -1074,7 +1078,60 @@ def _auditar_valores(user: str, reply: str, consultados: list) -> None:
         print(f"[auditoria] WARN falhou: {e}")
 
 
-def _responder_direto(user: str, items: list[dict], texto: str) -> None:
+# Ritmo de digitacao entre as mensagens divididas por split_reply.
+# Antes toda mensagem esperava 1 + len/200 segundos, inclusive a PRIMEIRA: o
+# cliente ja tinha esperado o debounce e o modelo, e ainda levava mais ~2s para
+# ver a primeira linha. Agora a primeira sai quase imediata e so as seguintes
+# tem a pausa curta que imita digitacao.
+PAUSA_PRIMEIRA = float(os.getenv("PAUSA_PRIMEIRA_SEG", "0.4"))
+PAUSA_MIN = float(os.getenv("PAUSA_MIN_SEG", "0.8"))
+PAUSA_MAX = float(os.getenv("PAUSA_MAX_SEG", "2.0"))
+
+# Piso do tempo de resposta pedido pelo dono: a Sandrinha responde entre 5 e 10
+# segundos. O teto sai do debounce curto e do ritmo acima; o piso existe porque
+# resposta pronta e curta saia em ~4s, e resposta instantanea entrega que do
+# outro lado nao tem ninguem digitando. Conta do ponto de vista do cliente,
+# entao o debounce ja consumido entra na conta.
+RESPOSTA_MIN_SEG = float(os.getenv("RESPOSTA_MIN_SEG", "5.0"))
+
+
+def _pausa_digitacao(indice: int, chunk: str) -> float:
+    if indice == 0:
+        return PAUSA_PRIMEIRA
+    return min(PAUSA_MAX, max(PAUSA_MIN, len(chunk) / 200))
+
+
+def _esperar_piso(inicio: float | None) -> None:
+    """Segura a primeira mensagem ate fechar RESPOSTA_MIN_SEG desde o cliente."""
+    if inicio is None:
+        return
+    decorrido = BUFFER_SECONDS + (time.monotonic() - inicio)
+    if decorrido < RESPOSTA_MIN_SEG:
+        time.sleep(RESPOSTA_MIN_SEG - decorrido)
+
+
+def enviar_em_blocos(user: str, texto: str, inicio: float | None = None) -> None:
+    """Envia a resposta ja dividida, com o ritmo de digitacao, e espelha no painel.
+
+    `inicio` e o time.monotonic() do comeco do flush; com ele a primeira
+    mensagem respeita o piso de RESPOSTA_MIN_SEG.
+    """
+    chunks = split_reply(texto) or ([texto] if texto else [])
+    for indice, chunk in enumerate(chunks):
+        pausa = _pausa_digitacao(indice, chunk)
+        if pausa > 0:
+            time.sleep(pausa)
+        if indice == 0:
+            _esperar_piso(inicio)
+        res = send_text(user, chunk)
+        if not res.get("ok"):
+            print(f"[flush] ERRO ao enviar p/ {user}: {res.get('error')}")
+            continue
+        send_msg_out_to_panel(user, chunk)
+
+
+def _responder_direto(user: str, items: list[dict], texto: str,
+                     inicio: float | None = None) -> None:
     """Envia uma resposta decidida em codigo, sem passar pelo LLM.
 
     Usado para as regras de negocio fechadas (fora do expediente, horario
@@ -1084,15 +1141,11 @@ def _responder_direto(user: str, items: list[dict], texto: str) -> None:
     """
     memory.append_multimodal(user, "user", _build_user_parts(items))
     memory.append(user, "assistant", texto)
-    for chunk in split_reply(texto) or [texto]:
-        res = send_text(user, chunk)
-        if not res.get("ok"):
-            print(f"[flush] ERRO ao enviar p/ {user}: {res.get('error')}")
-            continue
-        send_msg_out_to_panel(user, chunk)
+    enviar_em_blocos(user, texto, inicio)
 
 
 def handle_flush(user: str, items: list[dict]) -> None:
+    _inicio = time.monotonic()
     try:
         global_mode = int(database.get_setting("agent_mode", "1"))
         if not global_mode:
@@ -1123,11 +1176,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
                 reply = manager.handle_message(phone=user, message=message_text)
                 if reply:
                     memory.append(user, "assistant", reply)
-                    chunks = split_reply(reply)
-                    for chunk in chunks:
-                        time.sleep(1 + len(chunk) / 200)
-                        send_text(user, chunk)
-                        send_msg_out_to_panel(user, chunk)
+                    enviar_em_blocos(user, reply, _inicio)
                 return
 
         # ── Modo classico (prompt unico) ─────────────────────────────────────
@@ -1193,7 +1242,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
             )
             _memoria["saudacao_feita"] = True
             conversation_memory.save(user, _memoria)
-            _responder_direto(user, items, _resposta)
+            _responder_direto(user, items, _resposta, _inicio)
             return
 
         if _memoria.get("data_iso") and _memoria.get("horario"):
@@ -1210,7 +1259,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
                     _memoria["data_agendada"] = ""
                 _memoria["saudacao_feita"] = True
                 conversation_memory.save(user, _memoria)
-                _responder_direto(user, items, _motivo)
+                _responder_direto(user, items, _motivo, _inicio)
                 return
 
         user_parts = _build_user_parts(items)
@@ -1521,14 +1570,10 @@ def handle_flush(user: str, items: list[dict]) -> None:
             # Envia a resposta do LLM (pode conter info do knowledge)
             if reply:
                 memory.append(user, "assistant", reply)
-                chunks = split_reply(reply)
-                for chunk in chunks:
-                    time.sleep(1 + len(chunk) / 200)
-                    send_text(user, chunk)
-                    send_msg_out_to_panel(user, chunk)
+                enviar_em_blocos(user, reply, _inicio)
             # Agora envia a mensagem de transferência
             transfer_msg = database.get_setting("transfer_message", "") or _DEFAULT_TRANSFER_MESSAGE
-            time.sleep(1)
+            time.sleep(PAUSA_MIN)
             send_text(user, transfer_msg)
             try:
                 conv = database.get_or_create_conversation(user)
@@ -1540,17 +1585,10 @@ def handle_flush(user: str, items: list[dict]) -> None:
         memory.append(user, "assistant", reply)
         print(f"[flush] user={user} reply_len={len(reply)}")
 
-        chunks = split_reply(reply)
-        if not chunks:
+        if not reply:
             return
 
-        for chunk in chunks:
-            time.sleep(1 + len(chunk) / 200)
-            res = send_text(user, chunk)
-            if not res.get("ok"):
-                print(f"[flush] ERRO ao enviar p/ {user}: {res.get('error')}")
-                continue
-            send_msg_out_to_panel(user, chunk)
+        enviar_em_blocos(user, reply, _inicio)
 
         # Meta: indicador some automaticamente apos 25s ou envio
 
@@ -3479,6 +3517,7 @@ _ENV_KEYS = [
     ("WEBHOOK_URL", "URL Webhook", False),
     ("OPENAI_API_KEY", "OpenAI API Key", True),
     ("OPENAI_MODEL", "Modelo OpenAI", False),
+    ("OPENAI_TEMPERATURE", "Temperatura (0.0 a 2.0)", False),
     ("BUFFER_SECONDS", "Buffer (segundos)", False),
     ("MAX_HISTORY", "Max Historico", False),
     ("SYSTEM_PROMPT", "System Prompt", False),

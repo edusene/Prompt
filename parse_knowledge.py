@@ -9,11 +9,21 @@ import re
 from pathlib import Path
 
 _dir = Path(__file__).parent
-_PROMPT_DOCX = _dir / "PROMPTS EDUARDO 13.09.26.docx"
+
+# Versao vigente do prompt operacional, na frente das anteriores. Esta lista e
+# a unica fonte do nome do arquivo: knowledge_rag e reindex_knowledge importam
+# daqui. Quando o dono mandar uma versao nova, basta poe-la no topo — as
+# antigas ficam como reserva para o caso de a base ainda nao ter sido
+# reindexada, e o agente nunca roda sem prompt operacional.
+PROMPT_DOCX_VERSOES = (
+    "PROMPTS ATUALIZADO PARA ENVIAR EDUARDO 18.09.26.docx",
+    "PROMPTS EDUARDO 13.09.26.docx",
+)
+PROMPT_DOCX_NAME = PROMPT_DOCX_VERSOES[0]
+
 _DADOS_XLSX = _dir / "PLANILHA CARDAPIO E BAIRROS EDUARDO.xlsx"
 
 # Nomes dos arquivos como serao salvos no knowledge DB
-_PROMPT_DB_NAME = "PROMPTS EDUARDO 13.09.26.docx"
 _DADOS_DB_NAME = "PLANILHA CARDAPIO E BAIRROS EDUARDO.xlsx"
 
 
@@ -31,24 +41,32 @@ def _read_from_db(filename: str) -> str:
 
 
 def _read_docx() -> str:
-    """Le o .docx e retorna o texto completo. Tenta DB primeiro, depois local."""
-    # Tenta do banco de dados
-    content = _read_from_db(_PROMPT_DB_NAME)
-    if content:
-        return content
+    """Le o prompt operacional: banco primeiro, disco depois, da versao mais
+    nova para a mais antiga."""
+    for nome in PROMPT_DOCX_VERSOES:
+        content = _read_from_db(nome)
+        if content:
+            return content
 
-    # Fallback: arquivo local
     try:
         from docx import Document
     except ImportError:
         print("[parse_knowledge] python-docx nao instalado, pulando prompt docx")
         return ""
-    if not _PROMPT_DOCX.exists():
-        print(f"[parse_knowledge] arquivo nao encontrado: {_PROMPT_DOCX.name}")
-        return ""
-    doc = Document(str(_PROMPT_DOCX))
-    lines = [p.text for p in doc.paragraphs if p.text.strip()]
-    return "\n".join(lines)
+
+    for nome in PROMPT_DOCX_VERSOES:
+        caminho = _dir / nome
+        if not caminho.exists():
+            continue
+        doc = Document(str(caminho))
+        linhas = [p.text for p in doc.paragraphs if p.text.strip()]
+        texto = "\n".join(linhas)
+        if texto.strip():
+            print(f"[parse_knowledge] lido do disco: {nome} ({len(texto)} chars)")
+            return texto
+
+    print(f"[parse_knowledge] nenhum prompt operacional encontrado em disco nem no banco")
+    return ""
 
 
 def _adaptar_prompt_docx(texto: str) -> str:
@@ -59,6 +77,10 @@ def _adaptar_prompt_docx(texto: str) -> str:
     texto = re.sub(r".*syncWhatsAppConversation.*\n?", "", texto)
     # Substitui createOrder por send_order_to_cardapio (referencias textuais)
     texto = texto.replace("createOrder", "send_order_to_cardapio")
+    # DeliveryFee era a funcao de frete do workflow antigo. Aqui o frete sai da
+    # tool consultar_frete; deixar o nome antigo no prompt fazia o modelo citar
+    # uma ferramenta que nao existe em vez de chamar a que existe.
+    texto = re.sub(r"\bDeliveryFee\b", "consultar_frete", texto)
     # Substitui sendWhatsAppMessage por "resposta direta do agente"
     texto = re.sub(
         r".*sendWhatsAppMessage.*\n?",

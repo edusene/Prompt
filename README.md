@@ -48,7 +48,8 @@ Edite `.env` e preencha:
 | `WEBHOOK_VERIFY_TOKEN` | Token secreto para verificacao do webhook |
 | `OPENAI_API_KEY` | Chave da OpenAI |
 | `OPENAI_MODEL` | Modelo OpenAI (padrao: `gpt-4o-mini`) |
-| `BUFFER_SECONDS` | Segundos de debounce (padrao: `8`) |
+| `OPENAI_TEMPERATURE` | Temperatura do modelo (padrao: `0.1`) |
+| `BUFFER_SECONDS` | Segundos de debounce (padrao: `3`) |
 | `MAX_HISTORY` | Maximo de mensagens no historico (padrao: `40`) |
 | `SYSTEM_PROMPT` | Instrucao de sistema para o LLM |
 | `PORT` | Porta do Flask (padrao: `5000`) |
@@ -213,6 +214,9 @@ Meta envia webhooks para notificacoes:
 | `WEBHOOK_VERIFY_TOKEN` | Token secreto |
 | `OPENAI_API_KEY` | Chave OpenAI |
 | `OPENAI_MODEL` | `gpt-4o-mini` |
+| `OPENAI_TEMPERATURE` | `0.1` |
+| `CARDAPIO_API_URL` | `https://balbs-cardapio.base44.app` (apelido ASCII de `CARDÁPIO_API_URL`) |
+| `BALBS_AGENTE_API_KEY` | Chave do cardapio digital |
 | `SYSTEM_PROMPT` | Instrucao base do agente |
 | `PORT` | `5000` |
 | `ADMIN_USER` | `admin` |
@@ -229,7 +233,8 @@ Meta envia webhooks para notificacoes:
 
 O que o agente le antes de responder, em ordem:
 
-1. **Prompt operacional** (`PROMPTS EDUARDO ... .docx`, carregado por `parse_knowledge`)
+1. **Prompt operacional** (o `.docx` no topo de `parse_knowledge.PROMPT_DOCX_VERSOES`,
+   carregado por `parse_knowledge`)
 2. **Base oficial** (`knowledge_rag.get_full_knowledge_content()`) — só os arquivos de
    DADOS. Arquivos de prompt (o .docx e os `prompts/*.md` dos sub-agentes) ficam de
    fora: injetá-los junto duplicava instruções e gerava regras conflitantes.
@@ -253,6 +258,44 @@ todo valor em `R$` que nao venha da base (`[auditoria] valores SEM ORIGEM na bas
 endereco, bairro, data, horario e pagamento, e devolve ao prompt uma ficha com o que ja
 foi coletado e qual a **proxima pergunta obrigatoria**. O historico de mensagens sozinho
 nao bastava: a janela expirava e o agente reperguntava o que ja sabia.
+
+### Tempo de resposta e temperatura
+
+O cliente ve a resposta entre **5 e 10 segundos**. O tempo se divide em:
+
+| Etapa | Variavel | Padrao |
+|---|---|---|
+| Debounce (silencio do cliente antes de responder) | `BUFFER_SECONDS` | `3` |
+| Pausa antes da 1a mensagem | `PAUSA_PRIMEIRA_SEG` | `0.4` |
+| Pausa entre as mensagens seguintes | `PAUSA_MIN_SEG` / `PAUSA_MAX_SEG` | `0.8` / `2.0` |
+| Piso total, contado do cliente | `RESPOSTA_MIN_SEG` | `5.0` |
+
+`app.enviar_em_blocos()` e o unico caminho de envio: ele divide, aplica o ritmo,
+respeita o piso e espelha no painel. Antes cada trecho esperava `1 + len/200`
+segundos — inclusive o primeiro — e com o debounce de 8s a resposta levava ~21s.
+
+`OPENAI_TEMPERATURE` (padrao `0.1`) prende o modelo ao catalogo. `llm._create()`
+aplica a temperatura e, se o modelo for de uma familia que so aceita o valor
+default (gpt-5, o1, o3), repete a chamada sem ela em vez de derrubar a resposta.
+
+### O cardapio digital em producao
+
+`CARDÁPIO_TEST_MODE` (gravado pelo painel no banco) decide entre calcular
+localmente e chamar a API do cardapio. Toda configuracao do cardapio e lida por
+`cardapio._config()`, **banco primeiro, ambiente depois**, e cada uma aceita o
+nome oficial com acento e apelidos em ASCII (`CARDAPIO_API_URL`,
+`CARD_API_URL`). Isso importa: nome de variavel fora do ASCII nao sobrevive em
+painel de deploy. Com o modo producao ligado pelo painel e a URL so no `.env`
+— que nao existe no servidor — `_get_base_url()` devolvia `""` e todo pedido
+morria em "CARDÁPIO_API_URL nao configurada", que o agente traduzia ao cliente
+como "estou com dificuldade tecnica para calcular o valor do seu pedido".
+`cardapio.URL_CARDAPIO_PADRAO` e a rede de seguranca final.
+
+O **frete sai sempre da tabela oficial** (`facts.lookup_frete`), nos dois modos.
+Em producao o bairro era mandado cru para a API: "agenor" nao casava com
+cadastro nenhum e voltava `deliveryFee: 0`, enquanto `consultar_frete` ja tinha
+dito R$ 12,00 ao cliente. Hoje o apelido e resolvido antes da chamada e, se a
+API discordar da tabela, a tabela vence e a divergencia fica no log.
 
 ### Manutencao da base
 
