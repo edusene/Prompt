@@ -238,58 +238,62 @@ def validar_agendamento(
     data_pedido: date | None,
     horario_texto: str,
     now: datetime | None = None,
-) -> tuple[bool, str]:
+) -> tuple[bool, str, date | None]:
     """Checa se data + horario cabem no expediente.
 
-    Retorna (ok, mensagem). Quando nao cabe, a mensagem ja traz a alternativa
-    para o cliente — a recusa nunca sai sem uma saida.
+    Retorna (ok, mensagem, data_sugerida). Quando nao cabe, a mensagem ja traz
+    a alternativa para o cliente — a recusa nunca sai sem uma saida — e, se a
+    alternativa for um DIA (e nao um horario no mesmo dia), ele vem no terceiro
+    campo. Quem chama precisa dele: sem guardar o dia oferecido, o "pode sim"
+    do cliente logo depois nao tinha data nenhuma para preencher e a pergunta
+    era repetida.
     """
     now = now or agora()
 
     if data_pedido is None:
-        return False, "Falta a data do pedido."
+        return False, "Falta a data do pedido.", None
 
     if data_pedido < now.date():
-        return False, "Essa data já passou. Para qual dia você quer o pedido? 😊"
+        return False, "Essa data já passou. Para qual dia você quer o pedido? 😊", None
 
     if not eh_dia_util(data_pedido):
         proximo = proximo_dia_util(data_pedido + timedelta(days=1))
         return False, (
             "Aos domingos a gente não abre! Posso deixar para "
             f"{formatar_data(proximo, now)}? 😊"
-        )
+        ), proximo
 
     hm = parse_horario(horario_texto)
     if hm is None:
-        return False, "Falta o horario do pedido."
+        return False, "Falta o horario do pedido.", None
 
     minuto_pedido = _minutos(*hm)
 
     if minuto_pedido < _minutos(*ABERTURA):
         return False, (
             "A gente só começa às 07h40! Pode ser a partir desse horário? 😊"
-        )
+        ), None
 
     if minuto_pedido >= _minutos(*FECHAMENTO):
         return False, (
             "Nosso atendimento vai até às 20h00! Qual horário antes disso "
             "funciona melhor pra você? 😊"
-        )
+        ), None
 
     if _minutos(*INTERVALO_INICIO) <= minuto_pedido <= _minutos(*INTERVALO_FIM):
         return False, (
             "Das 12h01 às 13h59 estamos no intervalo de almoço! Pode ser às 14h "
             "ou prefere antes das 12h? 😊"
-        )
+        ), None
 
     # Horario de hoje que ja passou nao e agendamento, e pedido perdido.
     if data_pedido == now.date() and minuto_pedido <= _minutos(now.hour, now.minute):
         return False, (
             f"Esse horário de hoje já passou (agora são {now.strftime('%Hh%M')})! "
             "Qual outro horário fica bom? 😊"
-        )
+        ), None
 
-    return True, ""
+    return True, "", None
 
 
 def contexto_para_prompt(now: datetime | None = None) -> str:

@@ -68,6 +68,10 @@ def _empty() -> dict:
         # que distingue "quero mais 30 coxinhas" logo apos um pedido de um
         # pedido novo dias depois.
         "ultimo_pedido_em": "",
+        # Data (ISO) que o AGENTE ofereceu e o cliente ainda nao aceitou. Sem
+        # isto, "Pode sim" depois de "Posso deixar para segunda-feira (21/09)?"
+        # nao preenchia data nenhuma e a Sandrinha perguntava o dia de novo.
+        "data_proposta": "",
         "updated_at": "",
     }
 
@@ -99,6 +103,24 @@ def _sessao_expirou(updated_at: str, agora=None) -> bool:
     return (agora - ultima) >= _dt.timedelta(hours=HORAS_ATE_NOVA_SESSAO)
 
 
+def _pedido_abandonado(updated_at: str, agora=None) -> bool:
+    """O pedido pela metade ja pode ser descartado?
+
+    Criterio diferente do da saudacao de proposito. A saudacao volta a valer
+    tambem na virada do dia; o PEDIDO nao pode sumir so porque o relogio passou
+    da meia-noite — quem esta montando um pedido as 23h50 e continua as 00h05
+    perderia tudo no meio da conversa. Aqui vale so o silencio longo.
+    """
+    if not updated_at:
+        return False
+    agora = agora or _dt.datetime.now()
+    try:
+        ultima = _dt.datetime.fromisoformat(str(updated_at))
+    except (TypeError, ValueError):
+        return False
+    return (agora - ultima) >= _dt.timedelta(hours=HORAS_ATE_NOVA_SESSAO)
+
+
 def load(phone: str) -> dict:
     """Carrega a memoria estruturada do cliente (vazia se nao houver)."""
     data = _empty()
@@ -112,11 +134,25 @@ def load(phone: str) -> dict:
             if key in stored and stored[key] not in (None, ""):
                 data[key] = stored[key]
 
-        if _sessao_expirou(stored.get("updated_at", "")):
+        marca = stored.get("updated_at", "")
+        if _pedido_abandonado(marca):
+            # Pedido montado pela metade e abandonado ontem NAO volta hoje. So
+            # os campos de sessao eram zerados aqui, entao itens, data, horario
+            # e pagamento de uma conversa antiga ressuscitavam: o cliente dizia
+            # "ola boa noite" e a Sandrinha ja respondia com um resumo cheio de
+            # dados que ele nunca informou nesta conversa.
+            tinha = [c for c in ("items", "data_iso", "horario", "payment_method",
+                                 "modality") if data.get(c)]
+            if tinha:
+                print(f"[memoria] {phone}: pedido abandonado descartado "
+                      f"({', '.join(tinha)}) - parado desde {marca}")
+            data = _so_dados_do_cliente(data)
+
+        if _sessao_expirou(marca):
             for campo in _CAMPOS_DE_SESSAO:
                 data[campo] = False
             print(f"[memoria] {phone}: conversa nova (ultima em "
-                  f"{stored.get('updated_at')}) - saudacao volta a valer")
+                  f"{marca}) - saudacao volta a valer")
     return data
 
 
@@ -450,6 +486,17 @@ def pedido_recente(memoria: dict, agora=None) -> int | None:
     return None
 
 
+def _so_dados_do_cliente(memoria: dict) -> dict:
+    """Ficha zerada mantendo so o que e do CLIENTE, nao do pedido."""
+    limpa = _empty()
+    for campo in _CAMPOS_DO_CLIENTE:
+        if memoria.get(campo):
+            limpa[campo] = memoria[campo]
+    if memoria.get("ultimo_pedido_em"):
+        limpa["ultimo_pedido_em"] = memoria["ultimo_pedido_em"]
+    return limpa
+
+
 def registrar_pedido_enviado(phone: str, memoria: dict) -> None:
     """Fecha o pedido e deixa a ficha pronta para o proximo.
 
@@ -462,10 +509,7 @@ def registrar_pedido_enviado(phone: str, memoria: dict) -> None:
     coxinhas" pode ser um acrescimo ao pedido que acabou de sair ou ja e outro
     pedido.
     """
-    limpa = _empty()
-    for campo in _CAMPOS_DO_CLIENTE:
-        if memoria.get(campo):
-            limpa[campo] = memoria[campo]
+    limpa = _so_dados_do_cliente(memoria)
     # A sessao continua a mesma: o cliente acabou de falar com a gente.
     for campo in _CAMPOS_DE_SESSAO:
         limpa[campo] = memoria.get(campo, False)

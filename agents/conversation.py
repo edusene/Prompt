@@ -700,7 +700,7 @@ class ConversationManager:
         # 3.2 Data + horario incompativeis com o expediente: corrige na hora.
         if state.data_iso and state.horario:
             from datetime import date as _date
-            ok, motivo = horario.validar_agendamento(
+            ok, motivo, _sugestao = horario.validar_agendamento(
                 _date.fromisoformat(state.data_iso), state.horario, now
             )
             if not ok and motivo and not motivo.startswith("Falta"):

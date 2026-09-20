@@ -11,6 +11,7 @@ import time
 import threading
 import hmac
 import hashlib
+import re as _re_mod
 from datetime import datetime, timedelta, date
 from pathlib import Path
 
@@ -487,6 +488,20 @@ def _check_transfer_keywords(items: list[dict]) -> str | None:
 # Flag para controlar pedidos já enviados (evita duplicação)
 _orders_sent: set[str] = set()
 
+# Prefixo do retorno de send_order_to_cardapio quando a API recusa o pedido.
+# Existe porque o modelo nao e confiavel aqui: na conversa de 19/09 a API
+# devolveu 401, o handler avisou do erro, e a Sandrinha respondeu "Pedido
+# agendado! Muito obrigado por escolher a BALBS!" — o cliente foi embora
+# achando que tinha pedido e a fabrica nunca viu a comanda. Hoje quem decide o
+# que o cliente le nesse caso e o codigo, nao o modelo.
+FALHA_NO_ENVIO = "FALHA_NO_ENVIO"
+
+MENSAGEM_PEDIDO_NAO_ENTROU = (
+    "Consegui montar seu pedido certinho, mas não consegui registrar aqui no "
+    "sistema agora. Já estou chamando nossa equipe para confirmar com você e "
+    "garantir que nada se perca. Um instante! 💛"
+)
+
 def _calculate_order_handler(items: list[dict], bairro: str = "", modalidade: str = "",
                              dia: str = "", horario: str = "", pagamento: str = "",
                              cliente: str = "", endereco: str = "", **kwargs) -> str:
@@ -654,7 +669,14 @@ def _send_order_handler(
             )
         return f"Pedido enviado com sucesso para o cardapio digital. Numero do pedido: {display_id}. Status: {result.get('status', 'enviado')}."
     else:
-        return f"Erro ao enviar pedido para o cardapio: {result.get('error', 'desconhecido')}"
+        # O prefixo e contrato com _send_handler: e por ele que o codigo sabe
+        # que o pedido NAO entrou, sem depender de o modelo admitir.
+        return (
+            f"{FALHA_NO_ENVIO}: {result.get('error', 'desconhecido')}. "
+            "O pedido NAO entrou no cardapio e a cozinha NAO recebeu nada. "
+            "E PROIBIDO dizer ao cliente que o pedido foi confirmado, agendado "
+            "ou finalizado. Avise que a equipe vai confirmar e encerre."
+        )
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -1095,6 +1117,40 @@ PAUSA_MAX = float(os.getenv("PAUSA_MAX_SEG", "2.0"))
 RESPOSTA_MIN_SEG = float(os.getenv("RESPOSTA_MIN_SEG", "5.0"))
 
 
+# Concordancia curta com o que a Sandrinha acabou de oferecer. Deliberadamente
+# estreito: so mensagem curta e so as formas que nao carregam informacao nova,
+# para nao roubar a vez de uma resposta que traz dado ("pode ser dia 23").
+_CONCORDANCIAS = {
+    "sim", "s", "sim pode", "pode", "pode sim", "pode ser", "pode por favor",
+    "por favor", "ok", "okay", "blz", "beleza", "isso", "isso mesmo", "claro",
+    "certo", "ta bom", "tá bom", "tabom", "fechou", "confirma", "confirmo",
+    "manda ver", "bora", "aceito", "perfeito", "otimo", "ótimo", "combinado",
+    "sim por favor", "pode deixar", "tudo bem", "uhum", "aham",
+}
+
+
+# Horario dentro da concordancia ("pode sim, as 11h"). O horario ja e extraido
+# para a ficha por outro caminho, entao aqui ele e apenas descontado: o que
+# interessa e se o que sobra e um "sim".
+_SO_HORARIO = _re_mod.compile(
+    r'\b(?:as|às|ás|para|pra|pro|ao|meio\s*dia|manha|manhã|tarde|noite'
+    r'|\d{1,2}(?::\d{2})?\s*(?:h|hs|hrs|horas?)?)\b',
+    _re_mod.IGNORECASE | _re_mod.UNICODE,
+)
+
+
+def _e_concordancia(texto: str) -> bool:
+    limpo = _re_mod.sub(r"[^\w\s]", " ", (texto or "").lower(), flags=_re_mod.UNICODE)
+    limpo = " ".join(limpo.split())
+    if not limpo:
+        return False
+    if limpo in _CONCORDANCIAS:
+        return True
+    # "pode sim, as 11h": tira o horario e reavalia o que sobrou.
+    sem_horario = " ".join(_SO_HORARIO.sub(" ", limpo).split())
+    return bool(sem_horario) and sem_horario in _CONCORDANCIAS
+
+
 def _pausa_digitacao(indice: int, chunk: str) -> float:
     if indice == 0:
         return PAUSA_PRIMEIRA
@@ -1221,6 +1277,25 @@ def handle_flush(user: str, items: list[dict]) -> None:
             except Exception as e:
                 print(f"[memoria] WARN nao atualizou contato: {e}")
 
+        # Cliente aceitando o dia que a propria Sandrinha ofereceu ("Posso
+        # deixar para segunda-feira (21/09)?" -> "Pode sim"). Sem isto a
+        # concordancia nao virava data e o dia era perguntado de novo, duas e
+        # tres vezes seguidas.
+        if _memoria.get("data_proposta") and not _memoria.get("data_iso"):
+            if _e_concordancia(text_only):
+                _proposta = _memoria["data_proposta"]
+                try:
+                    _d = date.fromisoformat(_proposta)
+                except (TypeError, ValueError):
+                    _d = None
+                if _d:
+                    _memoria["data_iso"] = _proposta
+                    _memoria["data_agendada"] = horario.formatar_data(_d, horario.agora())
+                    _memoria["data_proposta"] = ""
+                    conversation_memory.save(user, _memoria)
+                    print(f"[memoria] {user}: cliente aceitou o dia oferecido "
+                          f"-> {_memoria['data_agendada']}")
+
         # ── Expediente e agendamento (decididos em codigo) ───────────────────
         # Estas duas respostas saem sem passar pelo LLM porque sao regras de
         # negocio fechadas, e eram justamente as que o modelo pulava quando o
@@ -1241,12 +1316,15 @@ def handle_flush(user: str, items: list[dict]) -> None:
                 f"{_expediente['mensagem']}"
             )
             _memoria["saudacao_feita"] = True
+            # Guarda o dia oferecido na mensagem para o "pode sim" seguinte.
+            if _expediente.get("sugestao_data") and not _memoria.get("data_iso"):
+                _memoria["data_proposta"] = _expediente["sugestao_data"].isoformat()
             conversation_memory.save(user, _memoria)
             _responder_direto(user, items, _resposta, _inicio)
             return
 
         if _memoria.get("data_iso") and _memoria.get("horario"):
-            _ok, _motivo = horario.validar_agendamento(
+            _ok, _motivo, _sugestao = horario.validar_agendamento(
                 date.fromisoformat(_memoria["data_iso"]), _memoria["horario"], _agora
             )
             if not _ok and _motivo and not _motivo.startswith("Falta"):
@@ -1257,6 +1335,9 @@ def handle_flush(user: str, items: list[dict]) -> None:
                 else:
                     _memoria["data_iso"] = ""
                     _memoria["data_agendada"] = ""
+                    # A recusa ja ofereceu outro dia; guarda para o "pode sim".
+                    if _sugestao:
+                        _memoria["data_proposta"] = _sugestao.isoformat()
                 _memoria["saudacao_feita"] = True
                 conversation_memory.save(user, _memoria)
                 _responder_direto(user, items, _motivo, _inicio)
@@ -1437,6 +1518,8 @@ def handle_flush(user: str, items: list[dict]) -> None:
 
         # Verifica se a IA transferiu durante a chamada (via tool)
         _transfer_done = False
+        # Preenchido quando o cardapio recusa o pedido (ver FALHA_NO_ENVIO).
+        _pedido_nao_entrou = ""
 
         def _transfer_handler(reason: str = "", **kwargs) -> str:
             nonlocal _transfer_done
@@ -1534,6 +1617,13 @@ def handle_flush(user: str, items: list[dict]) -> None:
             kwargs["items"] = kwargs.get("items") or _memoria.get("items") or []
 
             resultado = _send_order_handler(**kwargs)
+            if str(resultado).startswith(FALHA_NO_ENVIO):
+                # Ficha NAO e fechada: o pedido nao saiu, e os dados precisam
+                # continuar na mao do atendente que vai assumir.
+                nonlocal _pedido_nao_entrou
+                _pedido_nao_entrou = str(resultado)
+                print(f"[cardápio] pedido NAO entrou para {user}: {resultado[:120]}")
+                return resultado
             conversation_memory.registrar_pedido_enviado(user, _memoria)
             return resultado
 
@@ -1563,6 +1653,19 @@ def handle_flush(user: str, items: list[dict]) -> None:
             return
 
         _auditar_valores(user, reply, _valores_consultados)
+
+        # Pedido recusado pelo cardapio: o que o modelo escreveu e descartado.
+        # Ele ja respondeu "Pedido agendado!" por cima de um 401 — nao ha
+        # instrucao de prompt que valha mais do que nao mentir para o cliente.
+        if _pedido_nao_entrou:
+            print(f"[flush] user={user} pedido recusado pelo cardapio; "
+                  f"descartando resposta do modelo e transferindo")
+            reply = MENSAGEM_PEDIDO_NAO_ENTROU
+            if not _transfer_done:
+                perform_transfer(user, reason=f"pedido nao entrou no cardapio: "
+                                              f"{_pedido_nao_entrou[:160]}",
+                                 send_message=False)
+                _transfer_done = True
 
         # Se a IA transferiu, envia a resposta do LLM (knowledge/explicação) e depois a msg de transferência
         if _transfer_done:
