@@ -12,12 +12,16 @@ _dir = Path(__file__).parent
 
 # Versao vigente do prompt operacional, na frente das anteriores. Esta lista e
 # a unica fonte do nome do arquivo: knowledge_rag e reindex_knowledge importam
-# daqui. Quando o dono mandar uma versao nova, basta poe-la no topo — as
-# antigas ficam como reserva para o caso de a base ainda nao ter sido
-# reindexada, e o agente nunca roda sem prompt operacional.
+# daqui. Quando o dono mandar uma versao nova, basta poe-la no topo.
+#
+# As versoes antigas continuam listadas depois de o arquivo sair do repositorio
+# e da base. Nao e resto: e o que faz reindex_knowledge.DOCX_OBSOLETOS apagar a
+# versao antiga se alguem reenvia-la pela aba Knowledge do painel, e o que faz
+# knowledge_rag.PROMPT_FILES trata-la como INSTRUCAO e nao como dado — sem
+# isso, um reenvio acidental volta a valer junto com a versao certa.
 PROMPT_DOCX_VERSOES = (
     "PROMPTS ATUALIZADO PARA ENVIAR EDUARDO 18.09.26.docx",
-    "PROMPTS EDUARDO 13.09.26.docx",
+    "PROMPTS EDUARDO 13.09.26.docx",  # substituida em 19/09/2026
 )
 PROMPT_DOCX_NAME = PROMPT_DOCX_VERSOES[0]
 
