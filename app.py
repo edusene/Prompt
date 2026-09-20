@@ -1456,6 +1456,16 @@ def handle_flush(user: str, items: list[dict]) -> None:
         _campo_direto = conversation_memory.capturar_resposta_direta(
             _memoria, last_assistant_text, text_only
         )
+        # Troco tem captura propria: capturar_resposta_direta descarta qualquer
+        # candidato com digito, guarda que e justamente o que impede "50" de
+        # virar nome ou bairro.
+        _troco_capturado = conversation_memory.capturar_troco(
+            _memoria, last_assistant_text, text_only
+        )
+        if _troco_capturado:
+            conversation_memory.save(user, _memoria)
+            print(f"[memoria] {user}: troco_para={_troco_capturado}")
+
         if _campo_direto:
             conversation_memory.save(user, _memoria)
             print(f"[memoria] {user}: {_campo_direto}={_memoria[_campo_direto]} (resposta direta)")
@@ -1642,6 +1652,15 @@ def handle_flush(user: str, items: list[dict]) -> None:
         # a resposta final contra os numeros oficiais.
         _valores_consultados: list[float] = []
 
+        # O troco foi o CLIENTE que disse, entao repeti-lo nao e preco
+        # inventado. Sem isto a auditoria acusaria "R$ 100,00 SEM ORIGEM na
+        # base" toda vez que a Sandrinha confirmasse o troco, e o log que serve
+        # para achar preco inventado viraria ruido.
+        try:
+            _valores_consultados.append(float(_memoria.get("troco_para") or 0))
+        except (TypeError, ValueError):
+            pass
+
         def _frete_handler(bairro: str = "", **kwargs) -> str:
             resultado = facts.lookup_frete(bairro)
             if resultado:
@@ -1680,6 +1699,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
                 pagamento=_memoria.get("payment_method", ""),
                 cliente=_memoria.get("name", ""),
                 endereco=_memoria.get("endereco", ""),
+                troco=_memoria.get("troco_para", ""),
                 **kwargs,
             )
             try:
@@ -1689,6 +1709,11 @@ def handle_flush(user: str, items: list[dict]) -> None:
                         _valores_consultados.append(float(dados[campo]))
                 if dados.get("delivery_fee"):
                     conversation_memory.registrar_frete(user, _memoria, float(dados["delivery_fee"]))
+                # O total fica na ficha porque a regra do troco ("maior que o
+                # total") so pode ser conferida contra ele.
+                if dados.get("total"):
+                    _memoria["total"] = float(dados["total"])
+                    conversation_memory.save(user, _memoria)
             except Exception:
                 pass
             return resultado
@@ -1712,6 +1737,34 @@ def handle_flush(user: str, items: list[dict]) -> None:
                 kwargs["is_scheduled"] = True
             # Sabores do pacote saem dos itens da ficha.
             kwargs["items"] = kwargs.get("items") or _memoria.get("items") or []
+
+            # Troco: a API nao tem campo change_for, entao ele vai na observacao
+            # do pedido - unico lugar que chega a comanda do entregador.
+            if (kwargs.get("payment_method") or "").strip().lower() == "dinheiro"                     and not _memoria.get("troco_para"):
+                if "troco" in (last_assistant_text or "").lower():
+                    # Ja perguntamos e a resposta nao foi entendida. Registrar e
+                    # seguir e melhor do que travar o pedido num laco.
+                    _memoria["troco_para"] = "nao_informado"
+                    conversation_memory.save(user, _memoria)
+                else:
+                    # NAO usar o prefixo FALHA_NO_ENVIO: ele e contrato com o
+                    # codigo que descarta a resposta do modelo e transfere para
+                    # humano. Aqui nao houve falha, falta um dado.
+                    return json.dumps({
+                        "success": False,
+                        "erro": "FALTA_TROCO",
+                        "instrucao": (
+                            "Pagamento em dinheiro sem troco definido. Pergunte "
+                            "'Precisa de troco para quanto? 💵' e so entao envie "
+                            "o pedido."
+                        ),
+                    }, ensure_ascii=False)
+
+            kwargs["notes"] = cardapio.montar_notes(
+                _memoria.get("troco_para", ""),
+                float(_memoria.get("total") or kwargs.get("total") or 0),
+                kwargs.get("notes", ""),
+            )
 
             resultado = _send_order_handler(**kwargs)
             if str(resultado).startswith(FALHA_NO_ENVIO):

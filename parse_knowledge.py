@@ -85,6 +85,19 @@ def _adaptar_prompt_docx(texto: str) -> str:
     # tool consultar_frete; deixar o nome antigo no prompt fazia o modelo citar
     # uma ferramenta que nao existe em vez de chamar a que existe.
     texto = re.sub(r"\bDeliveryFee\b", "consultar_frete", texto)
+    # change_for nao existe no contrato do cardapio digital: a lista oficial de
+    # campos do desenvolvedor nao tem esse campo. Na versao V7 a unica mencao
+    # cai na mesma linha do ${ .trigger }, que a regra acima ja apaga inteira —
+    # isto aqui e para a proxima versao do documento, em que a mencao pode vir
+    # sozinha. O troco vai na observacao do pedido, montada em codigo.
+    texto = re.sub(
+        r",?\s*change_for\b",
+        "", texto,
+    )
+    texto = texto.replace(
+        "registre troco = 0.00 e prossiga",
+        "registre que ele tem o valor trocado e prossiga",
+    )
     # Substitui sendWhatsAppMessage por "resposta direta do agente"
     texto = re.sub(
         r".*sendWhatsAppMessage.*\n?",

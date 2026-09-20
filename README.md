@@ -337,6 +337,48 @@ no painel e continuar vendo 401 nao teria explicacao.
 > campo de pedido. No dia em que ele descrever um pedido valido, cada clique em
 > "Testar chave" vira comanda na fabrica.
 
+### Troco
+
+A lista oficial de campos do `createOrderFromAgent` **nao tem `change_for`**. O
+prompt V7 tem uma TRAVA DE TROCO completa, entao o valor ia ate o fim da
+conversa e morria ali: o entregador nunca ficava sabendo. Hoje ele vai no
+`notes` do pedido, que e o unico campo livre que chega a comanda.
+
+Observacao POR ITEM nao serve: `cardapio_catalogo.traduzir()` reconstroi cada
+item do zero (`name`, `quantity`, `selected_flavors`) e descarta `price` e
+`notes`. So o `notes` de nivel de pedido sobrevive.
+
+`troco_para` na ficha e **string**, com quatro estados — `""` nao perguntado,
+`"nao"` cliente tem trocado, `"100.00"` valor, `"nao_informado"` perguntamos e
+nao deu para entender. Float nao serve: `0.0` e falsy e sumiria no `merge`, no
+`load` e em toda checagem por truthiness.
+
+| Etapa | Onde |
+|---|---|
+| Captura ("para 100", "1.000", "cem", "nao precisa", "tenho trocado") | `conversation_memory.capturar_troco` |
+| Validacao troco > total | `conversation_memory.pendencia_de_detalhe` |
+| Troco no espelho do pedido | `cardapio._rotulo_pagamento` |
+| Texto que vai a comanda | `cardapio.montar_notes` |
+| Portao final | `app._send_handler` |
+
+`capturar_resposta_direta` **nao** serve aqui: ela descarta candidato com
+digito, guarda que e o que impede "50" de virar nome ou bairro. A captura do
+troco tem dois gatilhos — o cliente falar "troco", ou o agente ter perguntado
+do troco na mensagem anterior. Sem a segunda amarra, "quero 100 coxinhas"
+viraria troco de R$ 100. O valor e lido do texto CRU: `facts.normalize` apaga
+pontuacao e "1.000" viraria "1 000".
+
+O troco **nao** entra em `faltando()`. Entraria em deadlock: `calculate_order`
+se recusa a rodar com campo faltando, mas a regra "troco maior que o total"
+precisa do total, que so existe depois do `calculate_order`. A cobranca fica em
+`pendencia_de_detalhe` (que roda com o total ja na mao) mais um portao em
+`_send_handler`.
+
+Esse portao tem escape: se a pergunta do troco ja foi feita e a resposta nao
+casou com nada, o troco vira `"nao_informado"` e o pedido sai com "Troco:
+cliente nao informou". Sem isso, uma frase fora do padrao ("pode ser uma nota
+de cem pila") travaria o pedido num laco de reperguntas.
+
 ### Palavra-chave de reset (#reset)
 
 Mandar `#reset` no WhatsApp reinicia o atendimento daquele numero: reativa a

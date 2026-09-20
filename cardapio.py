@@ -374,10 +374,58 @@ _PAGAMENTO_ROTULO = {
 }
 
 
+def montar_notes(troco_para: str, total: float, observacao: str = "") -> str:
+    """Observacao do pedido, com o troco que a API nao tem campo para receber.
+
+    A lista oficial de campos do createOrderFromAgent nao inclui `change_for`.
+    Como o prompt manda a Sandrinha coletar o troco, ele vai aqui: e o unico
+    lugar que chega a comanda. Observacao POR ITEM nao serve — cardapio_catalogo
+    .traduzir() reconstroi cada item do zero e descarta 'price' e 'notes'.
+
+    O texto do modelo e preservado; o troco vem antes por ser o que o entregador
+    precisa ler mesmo se a comanda truncar.
+    """
+    troco_para = (troco_para or "").strip()
+    if troco_para == "nao":
+        parte = "Cliente tem o valor trocado - nao precisa de troco"
+    elif troco_para == "nao_informado":
+        parte = "Troco: cliente nao informou"
+    elif troco_para:
+        try:
+            valor = float(troco_para)
+        except (TypeError, ValueError):
+            parte = ""
+        else:
+            parte = f"Troco para {_brl(valor)}"
+            if total and valor > total:
+                parte += f" (total {_brl(total)} - levar {_brl(valor - total)} de troco)"
+    else:
+        parte = ""
+
+    return " | ".join(p for p in (parte, (observacao or "").strip()) if p)
+
+
+def _rotulo_pagamento(pagamento: str, troco_para: str = "") -> str:
+    """Forma de pagamento como o BLOCO 5 pede: com o troco, se houver."""
+    rotulo = _PAGAMENTO_ROTULO.get(pagamento, pagamento) or "[PAGAMENTO]"
+    troco_para = (troco_para or "").strip()
+    if (pagamento or "").strip().lower() != "dinheiro" or not troco_para:
+        return rotulo
+    if troco_para == "nao":
+        return f"{rotulo} (cliente tem o valor trocado)"
+    if troco_para == "nao_informado":
+        return rotulo
+    try:
+        return f"{rotulo} (troco para {_brl(float(troco_para))})"
+    except (TypeError, ValueError):
+        return rotulo
+
+
 def montar_resumo(items: list[dict], subtotal: float, delivery_fee: float,
                   return_fee: float, total: float, bairro: str = "",
                   modalidade: str = "", dia: str = "", horario: str = "",
-                  cliente: str = "", pagamento: str = "", endereco: str = "") -> str:
+                  cliente: str = "", pagamento: str = "", endereco: str = "",
+                  troco: str = "") -> str:
     """Resumo pronto para o agente copiar, com os numeros ja calculados aqui.
 
     Segue exatamente o modelo do BLOCO 5 do prompt operacional. Isso e
@@ -423,8 +471,7 @@ def montar_resumo(items: list[dict], subtotal: float, delivery_fee: float,
         if return_fee:
             linhas.append(f"🛵 Taxa de retorno: {_brl(return_fee)}")
         linhas.append(f"💵 Total: {_brl(total)}")
-        rotulo_pag = _PAGAMENTO_ROTULO.get(pagamento, pagamento) or "[PAGAMENTO]"
-        linhas.append(f"💳 Pagamento: {rotulo_pag}")
+        linhas.append(f"💳 Pagamento: {_rotulo_pagamento(pagamento, troco)}")
 
     # A confirmacao cita dia e hora juntos: ultima chance de o cliente corrigir
     # o dia antes de o pedido entrar na producao.
@@ -463,7 +510,7 @@ def _resolver_frete(bairro: str) -> tuple[float, str, bool]:
 
 def calcular_pedido(items: list[dict], bairro: str = "", modalidade: str = "",
                     dia: str = "", horario: str = "", pagamento: str = "",
-                    cliente: str = "", endereco: str = "") -> dict:
+                    cliente: str = "", endereco: str = "", troco: str = "") -> dict:
     """Valida o pedido e calcula subtotal, frete e total.
 
     O frete vem da tabela oficial (facts.lookup_frete), nao mais de regex sobre
@@ -542,6 +589,7 @@ def calcular_pedido(items: list[dict], bairro: str = "", modalidade: str = "",
                 items, subtotal, delivery_fee, return_fee, total, bairro_oficial,
                 modalidade=modalidade, dia=dia, horario=horario,
                 cliente=cliente, pagamento=pagamento, endereco=endereco,
+                troco=troco,
             ),
         }
         if avisos_itens:
@@ -625,6 +673,7 @@ def calcular_pedido(items: list[dict], bairro: str = "", modalidade: str = "",
                     items, subtotal, delivery_fee, return_fee, total, bairro_oficial,
                     modalidade=modalidade, dia=dia, horario=horario,
                     cliente=cliente, pagamento=pagamento, endereco=endereco,
+                troco=troco,
                 ),
             }
             if avisos_itens:

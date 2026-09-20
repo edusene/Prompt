@@ -12,6 +12,7 @@ dito — para cada campo ele ve "preenchido" ou "FALTA PERGUNTAR".
 """
 
 import datetime as _dt
+import re as _re
 import time
 
 import database
@@ -34,6 +35,7 @@ _ROTULOS = {
     "data_agendada": "Data",
     "horario": "Horario",
     "payment_method": "Forma de pagamento",
+    "troco_para": "Troco",
 }
 
 # O que e obrigatorio antes do resumo, por modalidade.
@@ -58,7 +60,17 @@ def _empty() -> dict:
         # para validar o expediente.
         "data_iso": "",
         "payment_method": "",
+        # Troco, so para pagamento em dinheiro. E STRING de proposito, com
+        # quatro estados: "" nao perguntado, "nao" cliente tem trocado,
+        # "100.00" precisa de troco para esse valor, "nao_informado"
+        # perguntamos e nao deu para entender a resposta.
+        # Float nao serve: 0.0 e falsy e sumiria no merge, no load e em toda
+        # checagem por truthiness; "nao" atravessa os tres intacto.
+        "troco_para": "",
         "frete": None,
+        # Total da ultima calculate_order. Guardado porque a regra do troco
+        # ("precisa ser maior que o total") so pode ser conferida contra ele.
+        "total": 0,
         "pedido_enviado": False,
         # A saudacao sai uma vez so, e na primeira resposta.
         "saudacao_feita": False,
@@ -200,6 +212,12 @@ def merge(memoria: dict, extraido: dict, novo_da_mensagem: dict | None = None) -
         memoria["items"] = itens_novos
         mudancas.append(f"items={itens_novos}")
 
+    # Troco so existe para dinheiro. Quem pediu troco para 100 e depois trocou
+    # para Pix nao pode levar essa observacao para a comanda.
+    if memoria.get("troco_para") and memoria.get("payment_method") != "dinheiro":
+        memoria["troco_para"] = ""
+        mudancas.append("troco_para=(limpo, pagamento nao e mais dinheiro)")
+
     return memoria, mudancas
 
 
@@ -245,6 +263,123 @@ def capturar_resposta_direta(memoria: dict, pergunta_anterior: str, texto: str) 
         if any(m in pergunta for m in marcas):
             memoria[campo] = candidato.title()
             return campo
+    return ""
+
+
+_NEGATIVAS_DE_TROCO = (
+    "nao precisa", "nao vou precisar", "nao preciso", "sem troco", "tenho trocado",
+    "ta trocado", "esta trocado", "valor certo", "valor exato", "certinho",
+    "tenho o valor", "levo certo", "pago certinho", "trocado", "nao", "certo",
+)
+
+_EXTENSO_DE_TROCO = {
+    "vinte": 20, "trinta": 30, "quarenta": 40, "cinquenta": 50, "sessenta": 60,
+    "setenta": 70, "oitenta": 80, "noventa": 90, "cem": 100, "cento": 100,
+    "duzentos": 200, "trezentos": 300, "quatrocentos": 400, "quinhentos": 500,
+    "mil": 1000,
+}
+
+_NUMERO_RE = _re.compile(r"\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+(?:[.,]\d{1,2})?|\d+")
+
+
+def _brl(valor: float) -> str:
+    return ("R$ %.2f" % float(valor or 0)).replace(".", ",")
+
+
+def _sem_acento(texto: str) -> str:
+    try:
+        import facts
+        return facts.normalize(texto or "")
+    except Exception:
+        return (texto or "").strip().lower()
+
+
+def _valor_em_reais(texto: str) -> float | None:
+    """Le o primeiro valor monetario do texto CRU, no formato brasileiro.
+
+    Cru de proposito: _sem_acento apaga pontuacao ("1.000" vira "1 000",
+    "R$ 100,00" vira "r 100 00"), e sem o ponto e a virgula nao da para
+    distinguir milhar de centavo.
+    """
+    achado = _NUMERO_RE.search(texto or "")
+    if not achado:
+        return None
+    bruto = achado.group(0)
+    if "." in bruto and "," in bruto:        # 1.000,50
+        bruto = bruto.replace(".", "").replace(",", ".")
+    elif "," in bruto:                        # 100,50
+        bruto = bruto.replace(",", ".")
+    elif bruto.count(".") == 1 and len(bruto.split(".")[1]) == 3:
+        bruto = bruto.replace(".", "")        # 1.000
+    try:
+        valor = float(bruto)
+    except ValueError:
+        return None
+    return valor if valor > 0 else None
+
+
+def capturar_troco(memoria: dict, pergunta_anterior: str, texto: str) -> str:
+    """Grava o troco na ficha a partir da resposta do cliente.
+
+    Devolve o valor gravado ("nao", "100.00") ou "" quando a mensagem nao e
+    sobre troco.
+
+    `capturar_resposta_direta` nao serve aqui: ela descarta qualquer candidato
+    que tenha digito — guarda deliberada, que e o que impede "50" de virar nome
+    ou bairro. Afrouxar aquela funcao estragaria as duas coisas.
+
+    Dois gatilhos, e e a combinacao deles que evita falso positivo:
+      - o CLIENTE falou "troco" -> vale sempre;
+      - o AGENTE perguntou do troco na mensagem anterior -> ai uma resposta
+        seca ("100", "nao precisa") conta.
+    Sem a segunda amarra, "quero 100 coxinhas" viraria troco de R$ 100.
+
+    Nao valida contra o total: isso e trabalho de pendencia_de_detalhe, que
+    roda quando o total ja existe. Guardar um valor invalido e melhor do que
+    perder a resposta do cliente em silencio.
+    """
+    if memoria.get("payment_method") != "dinheiro":
+        return ""
+    if memoria.get("troco_para"):
+        return ""
+
+    limpo = _sem_acento(texto)
+    if not limpo:
+        return ""
+
+    cliente_falou_troco = "troco" in limpo
+    agente_perguntou = "troco" in _sem_acento(pergunta_anterior)
+    if not (cliente_falou_troco or agente_perguntou):
+        return ""
+
+    # "tenho troco" / "vou precisar de troco" nao sao negativa; "nao preciso de
+    # troco" e. Por isso a negativa e testada antes do numero, mas so casa se a
+    # frase inteira for curta o bastante para nao carregar outra informacao.
+    palavras = limpo.split()
+    if len(palavras) <= 6:
+        for marca in _NEGATIVAS_DE_TROCO:
+            if limpo == marca or limpo.startswith(marca + " ") or f" {marca}" in f" {limpo}":
+                if not any(p.isdigit() for p in limpo):
+                    memoria["troco_para"] = "nao"
+                    return "nao"
+
+    valor = _valor_em_reais(texto)
+    if valor is None:
+        for palavra, numero in _EXTENSO_DE_TROCO.items():
+            if palavra in palavras:
+                valor = float(numero)
+                break
+
+    if valor is not None:
+        memoria["troco_para"] = f"{valor:.2f}"
+        return memoria["troco_para"]
+
+    # Perguntamos e nao deu para entender. Fica registrado para nao reperguntar
+    # em laco; o pedido sai com "cliente nao informou" nas observacoes.
+    if agente_perguntou:
+        print(f"[memoria] troco nao entendido em {texto!r}")
+        memoria["troco_para"] = "nao_informado"
+        return "nao_informado"
     return ""
 
 
@@ -327,6 +462,30 @@ def pendencia_de_detalhe(memoria: dict) -> str:
             "O cliente ja disse que paga com CARTAO. Falta so saber se e DEBITO "
             "ou CREDITO - pergunte exatamente isso, nunca 'qual a forma de pagamento'."
         )
+
+    # O troco entra aqui, e nao em faltando(), porque depende do total: exigi-lo
+    # antes travaria o calculate_order, que e justamente quem calcula o total.
+    if memoria.get("payment_method") == "dinheiro":
+        total = float(memoria.get("total") or 0)
+        troco = memoria.get("troco_para", "")
+        if total > 0 and not troco:
+            return (
+                f"Pagamento em dinheiro e o total ja esta calculado "
+                f"({_brl(total)}). Pergunte: 'Precisa de troco para quanto? 💵' "
+                "antes de fechar o pedido."
+            )
+        try:
+            valor = float(troco)
+        except (TypeError, ValueError):
+            valor = None
+        if valor is not None and total > 0 and valor <= total:
+            return (
+                f"O cliente pediu troco para {_brl(valor)}, mas o total e "
+                f"{_brl(total)}. Diga exatamente: 'O total do seu pedido deu "
+                f"{_brl(total)}. O valor para troco precisa ser maior que o "
+                "total da compra. Dinheiro para quanto? 💵'. NAO envie o pedido "
+                "antes de o cliente corrigir."
+            )
     return ""
 
 
@@ -357,6 +516,14 @@ def render_ficha(memoria: dict) -> str:
 
     if memoria.get("frete") is not None:
         linhas.append(f"- Frete ja calculado: R$ {float(memoria['frete']):.2f}".replace(".", ","))
+
+    troco = memoria.get("troco_para", "")
+    if troco == "nao":
+        linhas.append("- Troco: cliente tem o valor trocado (nao precisa)")
+    elif troco == "nao_informado":
+        linhas.append("- Troco: perguntado, cliente nao informou - nao pergunte de novo")
+    elif troco:
+        linhas.append(f"- Troco para: {_brl(float(troco))}")
 
     pendentes = faltando(memoria)
     detalhe = pendencia_de_detalhe(memoria)
