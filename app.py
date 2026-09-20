@@ -1248,6 +1248,56 @@ def _e_concordancia(texto: str) -> bool:
     return bool(sem_horario) and sem_horario in _CONCORDANCIAS
 
 
+# Marcas de que a mensagem anterior do agente FOI o espelho do pedido. Ambas
+# saem de montar_resumo e do modelo do BLOCO 5.
+_MARCAS_DE_RESUMO = ("posso confirmar o seu pedido", "resumo do pedido")
+
+# Aceites listados no BLOCO 5 do prompt operacional, mais os que aparecem na
+# pratica. Mais largo que _CONCORDANCIAS de proposito: aqui existe o contexto
+# de que a pergunta anterior foi "Posso confirmar o seu pedido?", e e ele que
+# segura o falso positivo.
+_ACEITES_DE_PEDIDO = (
+    "sim", "pode", "confirma", "confirmo", "confirmado", "fechou", "fechado",
+    "beleza", "blz", "manda ver", "manda", "ta bom", "tudo certo", "certo",
+    "isso", "isso mesmo", "ok", "okay", "bora", "aceito", "perfeito", "otimo",
+    "combinado", "positivo", "exato", "correto", "pode mandar", "pode fechar",
+)
+
+# Se aparecer qualquer uma destas, NAO e aceite limpo: o cliente esta mexendo
+# no pedido, e forcar o fechamento gravaria a comanda errada.
+_RESSALVAS_NO_ACEITE = (
+    "nao", "mas", "muda", "mudar", "troca", "trocar", "errou", "errado",
+    "cancela", "cancelar", "espera", "aguarda", "so que", "porem", "antes",
+    "acrescenta", "adiciona", "tira", "remove", "retira", "corrige", "ajusta",
+)
+
+
+def _confirmou_o_resumo(ultima_do_agente: str, texto_do_cliente: str) -> bool:
+    """O cliente esta aceitando o espelho que acabou de receber?
+
+    Existe porque o modelo, depois do "sim", chamava calculate_order de novo e
+    reapresentava o MESMO resumo em vez de fechar - o cliente tinha de
+    confirmar duas vezes. So vale com os dois lados: o agente pediu confirmacao
+    E a resposta e um aceite sem ressalva.
+    """
+    # facts.normalize tira acento e pontuacao: sem isso "ta bom" nao casa com
+    # o "tá bom" que o cliente escreve.
+    anterior = " ".join(facts.normalize(ultima_do_agente or "").split())
+    if not any(facts.normalize(m) in anterior for m in _MARCAS_DE_RESUMO):
+        return False
+
+    limpo = " ".join(facts.normalize(texto_do_cliente or "").split())
+    if not limpo or len(limpo.split()) > 8:
+        return False
+
+    palavras = limpo.split()
+    if any(r in palavras or r in limpo for r in _RESSALVAS_NO_ACEITE):
+        return False
+
+    return any(a == limpo or a in palavras or f" {a} " in f" {limpo} "
+               for a in _ACEITES_DE_PEDIDO)
+
+
 def _pausa_digitacao(indice: int, chunk: str) -> float:
     if indice == 0:
         return PAUSA_PRIMEIRA
@@ -1623,6 +1673,21 @@ def handle_flush(user: str, items: list[dict]) -> None:
         # Depois da ficha de proposito: e a ultima linha que o modelo le.
         dynamic_prompt += _diretiva_saudacao
 
+        # Cliente aceitou o espelho: a unica acao valida agora e fechar. Sem
+        # isto o modelo chamava calculate_order de novo e reapresentava o MESMO
+        # resumo, obrigando o cliente a confirmar duas vezes.
+        _aceitou_o_resumo = _confirmou_o_resumo(last_assistant_text, text_only)
+        if _aceitou_o_resumo:
+            print(f"[flush] user={user} cliente confirmou o resumo - fechamento obrigatorio")
+            dynamic_prompt += (
+                "\n\n=== O CLIENTE ACABOU DE CONFIRMAR O RESUMO ==="
+                "\nA mensagem dele e o aceite do espelho que voce mandou. "
+                "NAO reapresente o resumo, NAO repita os valores e NAO chame "
+                "calculate_order de novo. Chame send_order_to_cardapio AGORA, "
+                "com os dados da ficha, e responda apenas a mensagem de "
+                "encerramento do BLOCO 5 - sem nenhum ponto de interrogacao."
+            )
+
         # Verifica se a IA transferiu durante a chamada (via tool)
         _transfer_done = False
         # Preenchido quando o cardapio recusa o pedido (ver FALHA_NO_ENVIO).
@@ -1675,6 +1740,19 @@ def handle_flush(user: str, items: list[dict]) -> None:
             return _consultar_preco_handler(produto=produto, formato=formato, **kwargs)
 
         def _calculate_handler(items: list = None, bairro: str = "", **kwargs) -> str:
+            # Depois do aceite nao existe resumo para recalcular. Como o modelo
+            # copia o resumo_formatado que esta no retorno, a unica forma de ele
+            # parar de reapresenta-lo e a tool nao devolver resumo nenhum.
+            if _aceitou_o_resumo:
+                return json.dumps({
+                    "success": False,
+                    "erro": "RESUMO_JA_CONFIRMADO",
+                    "instrucao": (
+                        "O cliente ja confirmou este resumo. Nao ha nada a "
+                        "recalcular. Chame send_order_to_cardapio agora."
+                    ),
+                }, ensure_ascii=False)
+
             # A tool se recusa a fechar conta com dado faltando. Como instrucao
             # de prompt isso era ignorado; como retorno de tool nao ha resumo
             # para o modelo copiar.
@@ -1691,8 +1769,39 @@ def handle_flush(user: str, items: list[dict]) -> None:
                     ),
                 }, ensure_ascii=False)
 
+            # O modelo as vezes manda o ROTULO do formato no lugar do sabor
+            # ("Meio cento (50 un)"), copiado da saida de consultar_preco. O que
+            # sobra depois de tirar o rotulo e vazio, e ai o sabor de verdade
+            # esta na ficha - que e a fonte dos outros campos deste mesmo
+            # handler (modalidade, dia, pagamento, cliente, endereco).
+            _itens = []
+            for _item in (items or []):
+                _bruto = str(_item.get("name", ""))
+                _limpo = cardapio.nome_sem_rotulo_de_formato(_bruto)
+                if not _limpo:
+                    continue
+                _novo = dict(_item, name=_limpo)
+                # Com o rotulo no nome, a quantidade vem em PACOTES ("quantity":
+                # 1 para um meio cento). Abaixo de 25 nao existe pedido de lote,
+                # entao um numero pequeno so pode ser contagem de pacote.
+                _unidades = cardapio.unidades_do_rotulo(_bruto)
+                try:
+                    _qtd = int(float(_novo.get("quantity", 0) or 0))
+                except (ValueError, TypeError):
+                    _qtd = 0
+                if _unidades and 0 < _qtd < 25:
+                    _novo["quantity"] = _qtd * _unidades
+                    print(f"[cardápio] quantidade em pacotes: {_bruto!r} "
+                          f"{_qtd} x {_unidades} un -> {_novo['quantity']} un")
+                _itens.append(_novo)
+            _uteis = _itens
+            if (items or []) and not _uteis and _memoria.get("items"):
+                print(f"[cardápio] itens do modelo eram so rotulo de formato "
+                      f"({[i.get('name') for i in (items or [])]}); usando os da ficha")
+                _itens = _memoria["items"]
+
             resultado = _calculate_order_handler(
-                items or [], bairro,
+                _itens, bairro,
                 modalidade=_memoria.get("modality", ""),
                 dia=_memoria.get("data_agendada", ""),
                 horario=_memoria.get("horario", ""),

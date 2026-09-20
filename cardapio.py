@@ -247,6 +247,87 @@ def _e_linha_de_pacote(linha: dict) -> bool:
     return str(linha.get("item", "")).strip() in formatos
 
 
+def unidades_do_rotulo(nome: str) -> int:
+    """Quantas unidades o rotulo de formato no nome representa (0 se nao ha).
+
+    "Meio cento (50 un) Coxinha frango" -> 50. Serve para consertar a
+    quantidade: quando o modelo usa o rotulo, ele conta PACOTES ("quantity": 1
+    para um meio cento), e uma quantidade dessas nao e multipla de 25 — o
+    de-para recusava o item e o atendimento ia para um humano.
+    """
+    if nome_sem_rotulo_de_formato(nome) == (nome or "").strip():
+        return 0            # nenhum rotulo foi recortado
+    import re as _re
+    achado = _re.search(r"\(\s*(\d+)\s*un", nome or "", flags=_re.IGNORECASE)
+    if achado:
+        return int(achado.group(1))
+    alvo = (nome or "").lower()
+    if "meio cento" in alvo:
+        return 50
+    if "cento" in alvo:
+        return 100
+    if "porcao" in alvo or "porção" in alvo:
+        return 25
+    return 0
+
+
+def nome_sem_rotulo_de_formato(nome: str) -> str:
+    """Tira o rotulo do FORMATO do nome do item, deixando so o sabor.
+
+    consultar_preco devolve linhas como "Meio cento (50 un) = R$ 40,00", e o
+    modelo copiava o rotulo como se fosse o produto: mandava
+    "Meio cento (50 un)" ou "Meio cento (50 un) Coxinha frango" no lugar de
+    "Coxinha frango". O de-para nao reconhece isso, o item era BLOQUEADO e o
+    atendimento ia para um humano antes de existir resumo — o pedido nunca
+    fechava, e nao por falta do sabor, so pelo rotulo grudado no nome.
+
+    Devolve "" quando sobra apenas o rotulo: nesse caso quem chama usa os itens
+    da ficha, que e onde o sabor de verdade esta guardado.
+    """
+    texto = (nome or "").strip()
+    if not texto:
+        return ""
+
+    try:
+        import cardapio_catalogo
+        formatos = cardapio_catalogo._FORMATOS
+    except Exception:
+        formatos = {"Porção (25 un)", "Meio cento (50 un)", "Cento (100 un)"}
+
+    # Nome que ja e um produto da tabela oficial sai intacto. Sem esta guarda o
+    # recorte mutilava itens legitimos: "Cento de Brigadeiros (100 un)" existe
+    # no cardapio e viraria "de Brigadeiros".
+    #
+    # As linhas de FORMATO ficam de fora da guarda: elas estao na planilha, mas
+    # carregam o preco do lote, nao um sabor. Pedir "Meio cento (50 un)" nao
+    # diz de que sabor, e e exatamente o caso que precisa cair na ficha.
+    try:
+        import facts
+        alvo = facts.normalize(texto)
+        e_formato = any(facts.normalize(f) == alvo for f in formatos)
+        if not e_formato and any(
+            facts.normalize(p["item"]) == alvo for p in facts.get()["produtos"]
+        ):
+            return texto
+    except Exception:
+        pass
+
+    import re as _re
+    for formato in sorted(formatos, key=len, reverse=True):
+        # Compara sem acento e sem pontuacao, mas recorta do texto original.
+        padrao = _re.escape(formato).replace(r"\ ", r"\s*")
+        padrao = padrao.replace("ç", "[cç]").replace("ã", "[aã]").replace("Ç", "[CÇ]")
+        texto = _re.sub(padrao, " ", texto, flags=_re.IGNORECASE)
+
+    # Sobra de rotulo solto: "(50 un)", "50 un", "meio cento", "cento"
+    texto = _re.sub(r"\(\s*\d+\s*un\.?\s*\)", " ", texto, flags=_re.IGNORECASE)
+    texto = _re.sub(r"\b\d+\s*un\.?\b", " ", texto, flags=_re.IGNORECASE)
+    texto = _re.sub(r"\bmeio\s+cento\b|\bcento\b|\bpor[cç][aã]o\b", " ", texto,
+                    flags=_re.IGNORECASE)
+    texto = " ".join(texto.replace("-", " ").split()).strip(" -,")
+    return texto
+
+
 def _normalizar_itens(items: list[dict]) -> tuple[list[dict], list[str], list[str]]:
     """Define o preco de cada item pela TABELA OFICIAL, nao pelo que o modelo mandou.
 
@@ -279,7 +360,10 @@ def _normalizar_itens(items: list[dict]) -> tuple[list[dict], list[str], list[st
 
     for idx, item in enumerate(items):
         novo = dict(item)
-        nome = str(item.get("name", ""))
+        nome = nome_sem_rotulo_de_formato(str(item.get("name", "")))
+        if nome != str(item.get("name", "")):
+            print(f"[cardapio] nome do item limpo: {item.get('name')!r} -> {nome!r}")
+            novo["name"] = nome
         try:
             quantidade = int(float(item.get("quantity", 0) or 0))
         except (ValueError, TypeError):
@@ -303,7 +387,19 @@ def _normalizar_itens(items: list[dict]) -> tuple[list[dict], list[str], list[st
         else:
             informado = float(item.get("price", 0) or 0)
             novo["price"] = oficial["preco_unitario"]
-            novo["name"] = novo.get("name") or oficial["item_oficial"]
+            # O NOME tambem passa a ser o oficial, pela mesma razao do preco: a
+            # tabela sabe responder e o que veio de fora nao manda. Antes so
+            # preenchia nome vazio, entao um quase-acerto como "Coxinha" (a
+            # planilha diz "Coxinha frango") pegava o preco certo e seguia com
+            # o nome errado - e o de-para, que casa por nome exato, bloqueava o
+            # item e jogava o atendimento para um humano.
+            if oficial.get("item_oficial"):
+                if facts.normalize(nome) != facts.normalize(oficial["item_oficial"]):
+                    print(f"[cardapio] nome oficial: {nome!r} -> "
+                          f"{oficial['item_oficial']!r}")
+                novo["name"] = oficial["item_oficial"]
+            else:
+                novo["name"] = novo.get("name") or nome
             if abs(informado - oficial["preco_unitario"]) > 0.001:
                 avisos.append(
                     f"'{nome}': preco ajustado para {_brl(oficial['preco_unitario'])}/un "

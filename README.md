@@ -337,6 +337,34 @@ no painel e continuar vendo 401 nao teria explicacao.
 > campo de pedido. No dia em que ele descrever um pedido valido, cada clique em
 > "Testar chave" vira comanda na fabrica.
 
+### Fechamento do pedido
+
+Depois do "sim" o modelo chamava `calculate_order` de novo e reapresentava o
+MESMO espelho, obrigando o cliente a confirmar duas vezes. Duas travas:
+
+- `app._confirmou_o_resumo()` exige os dois lados — a mensagem anterior do
+  agente tem de ser um espelho (`Resumo do Pedido` / `Posso confirmar o seu
+  pedido`) **e** a resposta tem de ser um aceite curto sem ressalva. "sim mas
+  muda o sabor", "errou a quantidade" e "espera" nao contam.
+- Quando ele dispara, `calculate_order` **nao devolve resumo nenhum** (erro
+  `RESUMO_JA_CONFIRMADO`) e o prompt ganha uma ultima linha mandando fechar.
+  A tool e o que resolve: enquanto o `resumo_formatado` estivesse no retorno,
+  o modelo ia copia-lo.
+
+Tres defeitos vizinhos, que faziam o pedido nem chegar ao resumo — o modelo
+transferia para um humano antes disso:
+
+| Sintoma | Causa | Onde |
+|---|---|---|
+| item `"Meio cento (50 un)"` | o modelo copiava o ROTULO do formato, da saida de `consultar_preco`, como se fosse o produto | `cardapio.nome_sem_rotulo_de_formato` + fallback para os itens da ficha |
+| `"quantity": 1` para meio cento | com o rotulo no nome, a quantidade vinha em PACOTES, e 1 nao e multiplo de 25 | `cardapio.unidades_do_rotulo` |
+| `"Coxinha"` bloqueado | `_normalizar_itens` so preenchia nome VAZIO, entao um quase-acerto pegava o preco certo e seguia com o nome errado; o de-para casa por nome exato | `_normalizar_itens` passa a usar sempre `item_oficial` |
+
+O nome oficial segue a mesma regra do preco: a tabela sabe responder, entao o
+que veio de fora nao manda. `nome_sem_rotulo_de_formato` nao toca em nome que
+ja e produto da planilha — sem essa guarda, "Cento de Brigadeiros (100 un)",
+que e produto de verdade, virava "de Brigadeiros".
+
 ### Troco
 
 A lista oficial de campos do `createOrderFromAgent` **nao tem `change_for`**. O
