@@ -3752,6 +3752,20 @@ async function loadCardapioStats() {
     `;
 }
 
+// Status em que o pedido NAO chegou ao cardapio. Espelha
+// database.STATUS_DE_FALHA no backend - quando um status novo de falha nascer
+// la, tem de entrar aqui tambem.
+const CARDAPIO_STATUS_FALHA = ['erro', 'perdido'];
+
+// A regra era "erro -> vermelho, enviado -> verde, QUALQUER OUTRA COISA ->
+// pendente". Um status de falha novo caia no else e um pedido perdido
+// aparecia em laranja, como se ainda fosse entrar em producao.
+function cardapioStatusClasse(status) {
+    if (CARDAPIO_STATUS_FALHA.includes(status)) return 'cardapio-status-erro';
+    if (status === 'enviado') return 'cardapio-status-ok';
+    return 'cardapio-status-pendente';
+}
+
 async function loadCardapioOrders() {
     const tbody = document.getElementById('cardapio-orders-body');
     if (!tbody) return;
@@ -3765,7 +3779,7 @@ async function loadCardapioOrders() {
         const dt = o.created_at ? new Date(o.created_at + 'Z').toLocaleString('pt-BR') : '-';
         const items = Array.isArray(o.items) ? o.items : [];
         const itemsSummary = items.map(i => `${i.quantity}x ${i.name}`).join(', ');
-        const statusClass = o.status === 'erro' ? 'cardapio-status-erro' : o.status === 'enviado' ? 'cardapio-status-ok' : 'cardapio-status-pendente';
+        const statusClass = cardapioStatusClasse(o.status);
         const modeClass = o.is_test ? 'cardapio-mode-test' : 'cardapio-mode-prod';
         return `<tr>
             <td>${o.id}</td>
@@ -3815,7 +3829,7 @@ async function viewCardapioOrder(id) {
 
     const apiResp = order.api_response || {};
     const dt = order.created_at ? new Date(order.created_at + 'Z').toLocaleString('pt-BR') : '-';
-    const statusClass = order.status === 'erro' ? 'cardapio-status-erro' : order.status === 'enviado' ? 'cardapio-status-ok' : 'cardapio-status-pendente';
+    const statusClass = cardapioStatusClasse(order.status);
 
     const body = `
         <div class="cardapio-detail">
