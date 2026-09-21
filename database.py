@@ -1829,24 +1829,36 @@ def contar_cardapio_orders(test_only: int | None = None) -> int:
     return row["cnt"] if row else 0
 
 
+# Status em que o pedido NAO chegou ao cardapio. Fica numa lista explicita
+# porque o contador de sucesso era "status != 'erro'": uma lista negativa de um
+# item so. Bastou existir um segundo status de falha ('perdido') para um pedido
+# que nunca existiu ser contado como sucesso e somar no faturamento do painel.
+STATUS_DE_FALHA = ("erro", "perdido")
+
+
 def cardapio_orders_stats() -> dict:
     """Estatísticas dos pedidos do cardápio."""
+    marcadores = ",".join("?" for _ in STATUS_DE_FALHA)
     total = db.fetch_one("SELECT COUNT(*) as cnt FROM cardapio_orders")["cnt"]
     today = datetime.utcnow().strftime("%Y-%m-%d")
     today_count = db.fetch_one(
         "SELECT COUNT(*) as cnt FROM cardapio_orders WHERE created_at >= ?", (today,)
     )["cnt"]
     success = db.fetch_one(
-        "SELECT COUNT(*) as cnt FROM cardapio_orders WHERE status != 'erro'"
+        f"SELECT COUNT(*) as cnt FROM cardapio_orders WHERE status NOT IN ({marcadores})",
+        STATUS_DE_FALHA,
     )["cnt"]
     errors = db.fetch_one(
-        "SELECT COUNT(*) as cnt FROM cardapio_orders WHERE status = 'erro'"
+        f"SELECT COUNT(*) as cnt FROM cardapio_orders WHERE status IN ({marcadores})",
+        STATUS_DE_FALHA,
     )["cnt"]
     test_count = db.fetch_one(
         "SELECT COUNT(*) as cnt FROM cardapio_orders WHERE is_test = 1"
     )["cnt"]
     total_value_row = db.fetch_one(
-        "SELECT COALESCE(SUM(total), 0) as val FROM cardapio_orders WHERE status != 'erro'"
+        f"SELECT COALESCE(SUM(total), 0) as val FROM cardapio_orders "
+        f"WHERE status NOT IN ({marcadores})",
+        STATUS_DE_FALHA,
     )
     total_value = float(total_value_row["val"]) if total_value_row else 0
     return {
