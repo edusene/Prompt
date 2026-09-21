@@ -3893,7 +3893,13 @@ async function deleteCardapioOrder(id) {
 // justamente na tela que explica o 401.
 async function testarCredencialCardapio() {
     const box = document.getElementById('cardapio-credencial');
-    if (box) box.innerHTML = '<p class="muted">Testando a chave...</p>';
+    if (box) {
+        box.innerHTML = `
+            <div class="cardapio-credencial">
+                <div class="cardapio-credencial-titulo">${spinHTML('Testando a chave...')}</div>
+                <div class="cardapio-credencial-meta">3 chamadas ao cardapio, sem criar pedido</div>
+            </div>`;
+    }
 
     const r = await api('/api/cardapio/health');
     if (!r) return;
@@ -3905,16 +3911,28 @@ async function testarCredencialCardapio() {
     }
     if (!box) return;
 
-    const cor = r.ok ? '#22c55e' : '#ef4444';
-    const linhas = (r.problemas || []).map(p => `<li>${p}</li>`).join('');
+    const linhas = (r.problemas || []).map(p => `<li>${esc(p)}</li>`).join('');
     box.innerHTML = `
-        <div style="border-left:3px solid ${cor};background:var(--bg-soft,#f8f8f8);padding:12px 16px;margin-bottom:16px;border-radius:4px">
-            <strong style="color:${cor}">${r.ok ? 'Chave aceita' : 'Chave: ' + r.estado}</strong>
-            <div class="muted" style="font-size:12px;margin-top:4px">
-                ${r.chave_mascarada || '(nao configurada)'} &middot; origem: ${r.origem_da_chave} &middot; modo: ${r.modo}
+        <div class="cardapio-credencial ${r.ok ? 'ok' : 'erro'}">
+            <button class="cardapio-credencial-fechar" onclick="fecharCredencialCardapio()"
+                    title="Fechar" aria-label="Fechar">&times;</button>
+            <div class="cardapio-credencial-titulo">
+                ${r.ok ? 'Chave aceita' : 'Chave: ' + esc(r.estado || '')}
             </div>
-            ${linhas ? `<ul style="margin:8px 0 0;padding-left:18px;font-size:13px">${linhas}</ul>` : ''}
+            <div class="cardapio-credencial-meta">
+                ${esc(r.chave_mascarada || '(nao configurada)')} &middot;
+                origem: ${esc(r.origem_da_chave || '')} &middot;
+                modo: ${esc(r.modo || '')}
+            </div>
+            ${linhas ? `<ul>${linhas}</ul>` : ''}
         </div>`;
+}
+
+// Esvazia o aviso. O botao "Testar chave" continua funcionando: ele reescreve
+// este mesmo container, entao dar close e testar de novo e o fluxo normal.
+function fecharCredencialCardapio() {
+    const box = document.getElementById('cardapio-credencial');
+    if (box) box.innerHTML = '';
 }
 
 async function toggleCardapioTestMode(checked) {

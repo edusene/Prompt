@@ -4107,6 +4107,73 @@ select option {
    ══════════════════════════════════════════════════════════════════════════════ */
 
 /* Stats grid for cardápio view */
+/* Resultado do teste da chave do cardapio.
+   Usa as variaveis do tema: a primeira versao tinha um fallback claro
+   (#f8f8f8) num painel escuro, e o texto do diagnostico ficava cinza sobre
+   branco - ilegivel justamente na linha que explica o erro. */
+.cardapio-credencial {
+    position: relative;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--text-muted);
+    border-radius: var(--radius-md);
+    padding: 14px 44px 14px 18px;
+    margin-bottom: 20px;
+    box-shadow: var(--shadow-sm);
+    animation: toastIn 0.3s ease;
+}
+.cardapio-credencial.ok { border-left-color: var(--success); }
+.cardapio-credencial.erro { border-left-color: var(--danger); }
+
+.cardapio-credencial-titulo {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 4px;
+}
+.cardapio-credencial.ok .cardapio-credencial-titulo { color: var(--success); }
+.cardapio-credencial.erro .cardapio-credencial-titulo { color: var(--danger); }
+
+.cardapio-credencial-meta {
+    font-size: 12px;
+    /* Um tom acima de --text-muted (#64748b), que sobre este fundo da 3.6:1 e
+       nao se le. Este da 6.7:1. Aqui importa mais que no resto do painel: e a
+       linha que diz QUAL chave foi testada e de onde ela veio. */
+    color: #94a3b8;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.cardapio-credencial ul {
+    margin: 10px 0 0;
+    padding-left: 18px;
+}
+.cardapio-credencial li {
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--text);
+    margin-bottom: 6px;
+}
+.cardapio-credencial li:last-child { margin-bottom: 0; }
+
+.cardapio-credencial-fechar {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 20px;
+    line-height: 1;
+    padding: 2px 6px;
+    border-radius: var(--radius-sm);
+    transition: var(--transition-fast);
+}
+.cardapio-credencial-fechar:hover {
+    color: var(--text);
+    background: var(--bg-card-hover);
+}
+
 .cardapio-stats {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
