@@ -42,3 +42,6 @@ chat*.txt
 /*.jpeg
 /*.jpg
 /*.png
+
+# Transcricoes de audio e prints trocados por WhatsApp: correspondencia, nao codigo
+Audio*.txt
