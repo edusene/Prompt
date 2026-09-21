@@ -13,8 +13,13 @@ Nao cria pedido. Sao tres POSTs no createOrderFromAgent com um corpo que nao
 tem nenhum dos campos obrigatorios; muda so o header. Ver
 cardapio.verificar_credencial para o porque de serem tres.
 
-    python verificar_credencial.py             # veredito
+    python verificar_credencial.py             # testa a chave configurada
     python verificar_credencial.py --detalhe   # mostra cada sonda
+    python verificar_credencial.py --chave "VALOR"   # testa um valor avulso
+
+--chave nao grava nada: serve para conferir uma chave nova assim que o
+desenvolvedor do cardapio manda uma. So vale a pena salvar no painel a que
+passou no teste.
 
 Exit: 0 aceita | 1 recusada ou nao configurada | 2 indisponivel ou inconclusivo
 """
@@ -32,8 +37,18 @@ _EXIT = {
 }
 
 
-def main(detalhe: bool = False) -> int:
-    r = cardapio.verificar_credencial()
+def _chave_do_argv(argv: list[str]) -> str:
+    if "--chave" not in argv:
+        return ""
+    i = argv.index("--chave")
+    if i + 1 >= len(argv):
+        print("!!  --chave exige o valor logo depois. Ex: --chave \"B4s...\"")
+        raise SystemExit(2)
+    return argv[i + 1]
+
+
+def main(detalhe: bool = False, chave_candidata: str = "") -> int:
+    r = cardapio.verificar_credencial(chave_candidata)
 
     print("=== Credencial do cardapio digital ===")
     print(f"  modo     : {r['modo']}")
@@ -51,6 +66,9 @@ def main(detalhe: bool = False) -> int:
     print()
     if r["ok"]:
         print("OK  a chave foi aceita pelo cardapio.")
+        if r["origem_da_chave"] == "informada":
+            print("    Esta chave veio por --chave e NAO foi salva. Para passar")
+            print("    a valer, cole na aba Cardapio do painel.")
         if r["modo"] == "teste":
             print("~~  modo TESTE ligado: pedido nenhum e enviado de verdade.")
             print("    Ligue o modo producao na aba Cardapio do painel.")
@@ -64,4 +82,7 @@ def main(detalhe: bool = False) -> int:
 if __name__ == "__main__":
     from dotenv import load_dotenv
     load_dotenv(override=True)
-    sys.exit(main(detalhe="--detalhe" in sys.argv))
+    sys.exit(main(
+        detalhe="--detalhe" in sys.argv,
+        chave_candidata=_chave_do_argv(sys.argv),
+    ))

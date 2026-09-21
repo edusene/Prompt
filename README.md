@@ -306,9 +306,14 @@ que se descobria que a chave nao servia era quando o pedido de um cliente real
 falhava, depois de ele ja ter confirmado.
 
 ```bash
-python verificar_credencial.py            # veredito
-python verificar_credencial.py --detalhe  # mostra cada sonda
+python verificar_credencial.py                  # veredito
+python verificar_credencial.py --detalhe        # mostra cada sonda
+python verificar_credencial.py --chave "VALOR"  # testa um valor avulso
 ```
+
+`--chave` nao grava nada. Serve para conferir uma chave nova no segundo em que
+o desenvolvedor do cardapio manda uma: so vale a pena salvar no painel a que
+passou no teste.
 
 Tambem em `GET /api/cardapio/health` (logado) e no botao **Testar chave** da aba
 Cardapio. O botao dispara sozinho quando alguem desliga o modo teste: e o

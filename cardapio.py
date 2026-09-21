@@ -119,8 +119,12 @@ def _sondar(client, url: str, rotulo: str, chave: str | None) -> dict:
     return {"rotulo": rotulo, "status": resp.status_code, "resposta": (resp.text or "")[:120]}
 
 
-def verificar_credencial() -> dict:
+def verificar_credencial(chave_candidata: str = "") -> dict:
     """Diz se o cardapio digital aceita a nossa chave, sem criar pedido nenhum.
+
+    `chave_candidata` testa um valor avulso sem grava-lo em lugar nenhum. E o
+    caminho para conferir uma chave nova assim que o desenvolvedor do cardapio
+    manda uma, antes de mexer no painel: so vale a pena salvar a que passou.
 
     A funcao remota valida a chave ANTES de olhar o corpo, entao um POST com um
     corpo sem campo obrigatorio nenhum separa autenticacao de validacao: 401
@@ -148,7 +152,10 @@ def verificar_credencial() -> dict:
     Devolve sempre um dict, nunca levanta.
     """
     base_url = _get_base_url()
-    chave, origem = _config_com_origem("BALBS_AGENTE_API_KEY", "BALBS_AGENTE_APIKEY")
+    if chave_candidata.strip():
+        chave, origem = chave_candidata.strip(), "informada"
+    else:
+        chave, origem = _config_com_origem("BALBS_AGENTE_API_KEY", "BALBS_AGENTE_APIKEY")
 
     resultado = {
         "ok": False,
