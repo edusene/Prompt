@@ -338,6 +338,13 @@ Estados: `aceita`, `recusada`, `nao_configurada`, `inconclusivo`,
 tambem a **origem da chave** (`banco` ou `ambiente`): sem isso, trocar a chave
 no painel e continuar vendo 401 nao teria explicacao.
 
+O valor da chave pode ficar em qualquer uma destas gavetas locais
+(`cardapio._NOMES_DA_CHAVE`): `BALBS_AGENTE_API_KEY`, `NOVOAGENTE` ou
+`BALBS_AGENTE_APIKEY`. **O nome nao viaja na requisicao** — o que sai e sempre
+`x-api-key: <valor>`. Quem escolhe contra qual segredo comparar e o codigo do
+`createOrderFromAgent`, no servidor do cardapio; renomear a gaveta aqui nao
+muda um byte do que o cardapio recebe.
+
 > O corpo da sonda (`cardapio._SONDA_DE_CREDENCIAL`) precisa continuar sem
 > campo de pedido. No dia em que ele descrever um pedido valido, cada clique em
 > "Testar chave" vira comanda na fabrica.

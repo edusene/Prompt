@@ -77,8 +77,17 @@ def _get_base_url() -> str:
     return url.rstrip("/")
 
 
+# Nomes sob os quais a chave do cardapio pode estar guardada AQUI. Sao gavetas
+# locais: o nome nao viaja na requisicao, que leva sempre o header x-api-key.
+# Quem escolhe qual segredo comparar e a funcao createOrderFromAgent, no
+# servidor do cardapio. NOVOAGENTE entra na lista porque foi o nome do segredo
+# que o desenvolvedor criou para esta integracao; se um dia ele apontar a
+# funcao para esse segredo, basta o valor estar em qualquer uma destas gavetas.
+_NOMES_DA_CHAVE = ("BALBS_AGENTE_API_KEY", "NOVOAGENTE", "BALBS_AGENTE_APIKEY")
+
+
 def _get_api_key() -> str:
-    return _config("BALBS_AGENTE_API_KEY", "BALBS_AGENTE_APIKEY")
+    return _config(*_NOMES_DA_CHAVE)
 
 
 def _headers() -> dict:
@@ -155,7 +164,7 @@ def verificar_credencial(chave_candidata: str = "") -> dict:
     if chave_candidata.strip():
         chave, origem = chave_candidata.strip(), "informada"
     else:
-        chave, origem = _config_com_origem("BALBS_AGENTE_API_KEY", "BALBS_AGENTE_APIKEY")
+        chave, origem = _config_com_origem(*_NOMES_DA_CHAVE)
 
     resultado = {
         "ok": False,
