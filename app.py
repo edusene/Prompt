@@ -1993,13 +1993,59 @@ def handle_flush(user: str, items: list[dict]) -> None:
         # 09:46): "Pedido agendado!" sem nenhum registro em cardapio_orders.
         if (_aceitou_o_resumo and not _pedido_saiu and not _pedido_nao_entrou
                 and not _transfer_done and _parece_fechamento(reply)):
-            print(f"[flush] user={user} modelo ANUNCIOU fechamento sem chamar a "
-                  f"tool; descartando a resposta e transferindo")
-            reply = MENSAGEM_PEDIDO_NAO_ENTROU
-            perform_transfer(user, reason="modelo disse que fechou o pedido sem "
-                                          "chamar send_order_to_cardapio",
-                             send_message=False)
-            _transfer_done = True
+            # Antes de transferir, TENTA ENVIAR. A ficha tem tudo o que o
+            # pedido precisa, e transferir obriga uma pessoa a refazer o pedido
+            # inteiro — no Pix e na retirada isso e pior do que precisa ser.
+            _itens_ficha = _memoria.get("items") or []
+            try:
+                _total_ficha = float(_memoria.get("total") or 0)
+            except (TypeError, ValueError):
+                _total_ficha = 0.0
+
+            if _itens_ficha and _total_ficha > 0:
+                # subtotal/frete/retorno nao sao guardados como tal: o frete vem
+                # de registrar_frete e o retorno da regra do BLOCO 3.
+                try:
+                    _frete_ficha = float(_memoria.get("frete") or 0)
+                except (TypeError, ValueError):
+                    _frete_ficha = 0.0
+                _retorno_ficha = cardapio.calcular_taxa_retorno(
+                    _memoria.get("modality", ""), _memoria.get("payment_method", "")
+                )
+                print(f"[flush] user={user} modelo ANUNCIOU fechamento sem chamar "
+                      f"a tool; enviando o pedido pela ficha")
+                _resultado_auto = _send_handler(
+                    customer_name=_memoria.get("name", ""),
+                    customer_phone=user,
+                    items=_itens_ficha,
+                    subtotal=round(_total_ficha - _frete_ficha - _retorno_ficha, 2),
+                    delivery_fee=_frete_ficha,
+                    return_fee=_retorno_ficha,
+                    total=_total_ficha,
+                )
+            else:
+                # Sem total nao existe pedido: se o calculate_order nunca rodou,
+                # qualquer valor aqui seria invencao. Melhor uma pessoa.
+                print(f"[flush] user={user} modelo ANUNCIOU fechamento sem chamar "
+                      f"a tool, e a ficha nao tem itens/total para enviar "
+                      f"(itens={len(_itens_ficha)} total={_total_ficha})")
+                _resultado_auto = ""
+
+            if _pedido_saiu:
+                # Deu certo: a mensagem que o modelo ja escreveu passa a ser
+                # verdade. Vale inclusive no Pix — o texto do BLOCO 5 pedindo o
+                # comprovante e exatamente o certo para um pedido retido em
+                # aguardando_pix, que o painel mostra com o botao Validar Pix.
+                print(f"[flush] user={user} pedido enviado pela ficha; "
+                      f"resposta do modelo mantida")
+            else:
+                reply = MENSAGEM_PEDIDO_NAO_ENTROU
+                perform_transfer(user, reason="modelo disse que fechou o pedido sem "
+                                              "chamar send_order_to_cardapio, e o "
+                                              "envio pela ficha nao deu: "
+                                              f"{str(_resultado_auto)[:120]}",
+                                 send_message=False)
+                _transfer_done = True
 
         # Pedido recusado pelo cardapio: o que o modelo escreveu e descartado.
         # Ele ja respondeu "Pedido agendado!" por cima de um 401 — nao ha

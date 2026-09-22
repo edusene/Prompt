@@ -421,13 +421,35 @@ chegar ao envio, vai para a API como `cartao`.
 
 Ja existia a trava para o cardapio RECUSAR o pedido (`FALHA_NO_ENVIO`). Faltava
 o caso em que o modelo simplesmente **nao chama a tool** e anuncia o
-fechamento assim mesmo — foi o 2o teste do dono: ele leu "Pedido agendado!" e
-nao ha nenhum registro em `cardapio_orders`.
+fechamento assim mesmo. No teste do dono de 22/09 isso aconteceu DUAS vezes: a
+retirada das 09:46 e o Pix das 09:51 — os dois textos sairam para o cliente e
+nao ha registro nenhum em `cardapio_orders`.
 
-Se o cliente aceitou o resumo, nenhuma ordem saiu, ninguem transferiu e a
-resposta `_parece_fechamento()`, a resposta do modelo e descartada e o
-atendimento vai para um humano. O cliente nunca ouve que pediu quando nao
-pediu.
+Quando o cliente aceitou o espelho, nenhuma ordem saiu, ninguem transferiu e a
+resposta `_parece_fechamento()`, o codigo **envia o pedido pela ficha** — que
+ja tem nome, itens, total, frete, pagamento, troco, data e endereco. A chamada
+e para `_send_handler`, a porta unica de envio, entao todas as regras valem
+(retirada sem pagamento, `cartao_a_definir` -> `cartao`, referencia no
+endereco, troco no `notes`).
+
+Os valores que a ficha nao guarda separados sao derivados:
+
+```
+delivery_fee = memoria["frete"]                                (registrar_frete)
+return_fee   = cardapio.calcular_taxa_retorno(modality, pagamento)
+subtotal     = total - delivery_fee - return_fee
+```
+
+**So envia com `items` e `total > 0`.** Se o `calculate_order` nunca rodou, o
+`total` e zero e qualquer valor seria invencao — nesse caso transfere, que
+continua sendo o plano B. Deu certo o envio, a mensagem que o modelo ja
+escreveu vira verdade e e mantida; inclusive no Pix, em que o texto do BLOCO 5
+pedindo o comprovante e exatamente o certo para um pedido retido em
+`aguardando_pix` (o painel mostra o botao **Validar Pix**).
+
+Duplicata nao e risco: `_send_order_handler` ja barra pela chave
+`phone:total:items` em `_orders_sent`, e o `whatsapp_message_id` e a
+idempotencia do lado do cardapio.
 
 ### Onde vao os segundos
 
