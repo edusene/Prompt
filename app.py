@@ -1185,6 +1185,111 @@ def _valor_explicavel(valor: float, conhecidos: set, consultados: list) -> bool:
     return False
 
 
+# "Total: R$ 72,00", "o total fica R$ 84,00", "total e de R$ 58".
+_RX_TOTAL_DITO = _re_mod.compile(
+    r"total[^\d\n]{0,24}?R?\$?\s*(\d{1,3}(?:\.\d{3})*(?:,\d{2})?|\d+(?:[.,]\d{1,2})?)",
+    _re_mod.IGNORECASE,
+)
+
+# O modelo concordando em tirar a taxa de retorno. Ela nao e negociavel: o
+# motoboy volta com a maquina ou com o troco de qualquer jeito. No teste do
+# dono de 22/09 17:09 bastou o cliente reclamar ("por que cobrou taxa se vou
+# pagar no cartao?") para a Sandrinha responder "removendo a taxa de retorno".
+_RX_TIRA_RETORNO = _re_mod.compile(
+    r"(?:remov\w+|retir\w+|tir\w+|sem|isent\w+|nao (?:vou |irei )?cobr\w+|"
+    r"nao (?:sera|e) cobrad\w+|desconsider\w+)[^.\n]{0,40}taxa de retorno"
+    r"|taxa de retorno[^.\n]{0,40}(?:remov\w+|retirad\w+|isent\w+|"
+    r"nao (?:sera|e) cobrad\w+|nao se aplica|zerad\w+)",
+    _re_mod.IGNORECASE,
+)
+
+
+def _valor_em_float(bruto: str) -> float:
+    """'1.234,56' -> 1234.56; '58' -> 58.0. Devolve 0.0 no que nao for numero."""
+    texto = bruto.replace(".", "").replace(",", ".") if "," in bruto else bruto
+    try:
+        return float(texto)
+    except ValueError:
+        return 0.0
+
+
+def _numeros_do_pedido(memoria: dict) -> dict:
+    """Recalcula o pedido da ficha em CODIGO. {} quando ainda nao da para somar.
+
+    Esta e a unica fonte de dinheiro que o cliente pode ver. O modelo continua
+    escrevendo a conversa, mas nao a aritmetica: na bateria do dono ele errou
+    o subtotal (disse R$ 70,00 onde eram R$ 58,00) e so nao foi para a comanda
+    porque o proprio cliente conferiu a soma.
+    """
+    itens = memoria.get("items") or []
+    if not itens:
+        return {}
+    try:
+        resultado = cardapio.calcular_pedido(
+            itens,
+            memoria.get("bairro", ""),
+            modalidade=memoria.get("modality", ""),
+            dia=memoria.get("data_agendada", ""),
+            horario=memoria.get("horario", ""),
+            pagamento=memoria.get("payment_method", ""),
+            cliente=memoria.get("name", ""),
+            endereco=memoria.get("endereco", ""),
+            troco=memoria.get("troco_para", ""),
+            referencia=memoria.get("referencia", ""),
+            data_iso=memoria.get("data_iso", ""),
+        )
+    except Exception as e:
+        print(f"[dinheiro] WARN nao recalculou: {e}")
+        return {}
+    return resultado if resultado.get("success") else {}
+
+
+def _conferir_dinheiro(user: str, reply: str, memoria: dict) -> str:
+    """Troca o dinheiro inventado pelo resumo que o codigo calculou.
+
+    Os dois pedidos do dono sobre valor — taxa de retorno inegociavel e
+    "matematica por funcao" — sao o mesmo pedido: o numero que chega ao
+    cliente tem de vir daqui, nao da cabeca do modelo. Em vez de tentar
+    consertar a frase, devolve o resumo oficial inteiro, que ja sai formatado
+    de cardapio.montar_resumo com subtotal, frete, taxa e troco.
+    """
+    if not reply:
+        return reply
+
+    ditos = [_valor_em_float(b) for b in _RX_TOTAL_DITO.findall(reply)]
+    ditos = [v for v in ditos if v > 0]
+    negou_retorno = bool(_RX_TIRA_RETORNO.search(facts.normalize(reply)))
+    if not ditos and not negou_retorno:
+        return reply
+
+    numeros = _numeros_do_pedido(memoria)
+    if not numeros:
+        if negou_retorno:
+            print(f"[dinheiro] user={user} modelo mexeu na taxa de retorno mas a "
+                  f"ficha ainda nao fecha conta; mantendo a resposta")
+        return reply
+
+    oficial = round(float(numeros.get("total") or 0), 2)
+    if oficial <= 0:
+        return reply
+
+    errados = [v for v in ditos if abs(v - oficial) > 0.01]
+    if not errados and not negou_retorno:
+        return reply
+
+    resumo = numeros.get("resumo_formatado") or ""
+    if not resumo:
+        return reply
+
+    if negou_retorno and numeros.get("return_fee"):
+        print(f"[dinheiro] user={user} modelo tentou tirar a taxa de retorno "
+              f"(devida: R$ {numeros['return_fee']:.2f}); resumo do codigo no lugar")
+    if errados:
+        print(f"[dinheiro] user={user} total dito {errados} != calculado "
+              f"R$ {oficial:.2f}; resumo do codigo no lugar")
+    return resumo
+
+
 def _auditar_valores(user: str, reply: str, consultados: list) -> None:
     """Registra no log todo valor em R$ da resposta que nao veio da base.
 
@@ -1753,6 +1858,13 @@ def handle_flush(user: str, items: list[dict]) -> None:
         # teste do dono: ele leu "Pedido agendado!" e nada foi registrado.
         _pedido_saiu = False
 
+        # True quando calculate_order rodou neste turno. Quando ela rodou, o
+        # dinheiro da resposta ja veio de codigo e nao ha o que conferir: a
+        # conferencia refaz a conta chamando calculateOrder, e repetir isso em
+        # toda resposta com total custaria ~1s justamente na hora em que o
+        # cliente esta esperando o resumo.
+        _calculou_na_volta = False
+
         def _transfer_handler(reason: str = "", **kwargs) -> str:
             nonlocal _transfer_done
             performed = perform_transfer(user, reason, send_message=False)
@@ -1873,6 +1985,8 @@ def handle_flush(user: str, items: list[dict]) -> None:
                 data_iso=_memoria.get("data_iso", ""),
                 **kwargs,
             )
+            nonlocal _calculou_na_volta
+            _calculou_na_volta = True
             try:
                 dados = json.loads(resultado)
                 for campo in ("subtotal", "delivery_fee", "return_fee", "total"):
@@ -2034,6 +2148,13 @@ def handle_flush(user: str, items: list[dict]) -> None:
               f"llm+tools={_gasto_llm:.1f} piso={RESPOSTA_MIN_SEG:.1f})")
 
         _auditar_valores(user, reply, _valores_consultados)
+
+        # Dinheiro so sai daqui calculado em codigo. Fica DEPOIS da auditoria,
+        # para o log continuar registrando o que o modelo tinha escrito, e so
+        # vale enquanto o pedido nao foi enviado: depois do envio a resposta
+        # fala de um pedido que ja existe, com os valores que foram gravados.
+        if not _pedido_saiu and not _transfer_done and not _calculou_na_volta:
+            reply = _conferir_dinheiro(user, reply, _memoria)
 
         # O cliente confirmou o resumo, o modelo escreveu que fechou, mas a tool
         # nunca foi chamada — o pedido nao existe em lugar nenhum e o cliente

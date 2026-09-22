@@ -8,6 +8,8 @@ import time
 import json
 import re
 
+import facts
+
 
 @dataclass
 class ConversationState:
@@ -351,6 +353,68 @@ _RETIRADA_EXPLICITA = re.compile(
 )
 
 
+# Palavras que aparecem no lugar de um nome sem ser nome de ninguem. A lista
+# existe porque a captura e por palavra-chave, e qualquer palavra-chave um dia
+# encosta em texto corrido: no teste do dono de 22/09 17:07, "entregar daqui a
+# pouco" gravou o cliente como "pouco" e o resumo saiu com "Cliente: pouco".
+_NAO_E_NOME = {
+    # tempo — o vizinho mais comum de "daqui a"
+    "pouco", "pouca", "poucos", "poucas", "pouquinho", "instante", "instantes",
+    "momento", "minuto", "minutos", "hora", "horas", "dia", "dias", "semana",
+    "hoje", "amanha", "ontem", "agora", "cedo", "tarde", "noite", "manha",
+    "meia", "meio", "cento", "porcao", "unidade", "unidades",
+    # quantificadores e ligacoes
+    "um", "uma", "uns", "umas", "mais", "menos", "muito", "muita", "tudo",
+    "nada", "todo", "toda", "outro", "outra", "mesmo", "mesma",
+    "para", "pra", "por", "com", "sem", "que", "qual", "quanto", "quando",
+    "onde", "como", "ali", "aqui", "la", "isso", "isto", "esse", "essa",
+    # respostas e vocabulario do pedido
+    "sim", "nao", "ok", "certo", "claro", "bom", "boa", "obrigado", "obrigada",
+    "entrega", "retirada", "pedido", "salgado", "salgados", "coxinha", "quibe",
+    "pix", "dinheiro", "cartao", "credito", "debito", "troco", "frete", "taxa",
+    "cliente", "gente", "voce", "eu", "ele", "ela", "nos",
+}
+
+# Cada frase abaixo e uma apresentacao EXPLICITA. A versao anterior aceitava
+# "aqui (?:o|a)" sem limite de palavra, entao "d-aqui a pouco" casava: o \b
+# aqui nao e detalhe, e o que separa o cliente se apresentando de uma frase
+# qualquer que por acaso contem "aqui".
+_RX_NOME = [
+    # "meu nome nao e 'pouco', e Balbino" — o cliente corrigindo a Sandrinha.
+    # Vem primeiro porque tambem casaria com os padroes de baixo, e neles o
+    # nome capturado seria o errado, o que o cliente acabou de negar.
+    re.compile(
+        r"\bnome\s+(?:nao|não)\s+(?:e|é|eh)\s+['\"]?[A-Za-zÀ-ÿ]+['\"]?\s*[,.!]*\s*"
+        r"(?:e|é|eh)\s+(?:o\s+|a\s+)?([A-Za-zÀ-ÿ]{3,})",
+        re.IGNORECASE),
+    re.compile(r"\bmeu\s+nome\s+(?:e|é|eh)\s+(?:o\s+|a\s+)?([A-Za-zÀ-ÿ]{3,})", re.IGNORECASE),
+    re.compile(r"\bme\s+chamo\s+(?:de\s+)?([A-Za-zÀ-ÿ]{3,})", re.IGNORECASE),
+    re.compile(r"\b(?:aqui|quem\s+fala)\s+(?:e|é|eh)\s+(?:o|a)\s+([A-Za-zÀ-ÿ]{3,})", re.IGNORECASE),
+    re.compile(r"\b(?:sou|aqui|fala)\s+(?:o|a)\s+([A-Za-zÀ-ÿ]{3,})", re.IGNORECASE),
+    re.compile(r"\bsou\s+(?:e|é|eh)?\s*([A-ZÀ-Ú][a-zà-ú]{2,})"),   # "sou Balbino": exige maiuscula
+    re.compile(r"\b(?:nome|falar)\s+(?:com\s+)?(?:o|a)\s+([A-Za-zÀ-ÿ]{3,})", re.IGNORECASE),
+]
+
+
+def detectar_nome(message: str) -> str:
+    """O nome que o cliente deu, ou '' quando ele nao se apresentou.
+
+    So aceita apresentacao explicita ("meu nome e X", "aqui e o X"). Um nome
+    errado e pior do que nenhum: ele vai para o resumo, para a comanda e para
+    o cadastro do contato, e o cliente precisa corrigir a Sandrinha no meio do
+    pedido — foi o que aconteceu no teste do dono com "Cliente: pouco".
+    """
+    for rx in _RX_NOME:
+        achado = rx.search(message or "")
+        if not achado:
+            continue
+        nome = achado.group(1).strip(" .,!?;:")
+        if facts.normalize(nome) in _NAO_E_NOME:
+            continue
+        return nome[:1].upper() + nome[1:] if nome.islower() else nome
+    return ""
+
+
 def detectar_modalidade(message: str) -> str:
     """'entrega', 'retirada' ou '' quando o cliente ainda nao escolheu.
 
@@ -530,15 +594,10 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
     # ── Nome ────────────────────────────────────────────────────────────────
     # "sou a Ana" nao era reconhecido — so "sou o". O resultado era perguntar o
     # nome de novo para metade dos clientes, logo depois de eles o dizerem.
-    name_patterns = [
-        r"(?:sou (?:o|a)?|meu nome (?:e|é)|me chamo|aqui (?:e|é)|aqui (?:o|a)|quem fala (?:e|é))\s+([A-ZÀ-Ú][a-zà-ú]+)",
-        r"(?:Oi|Ola|Olá|Bom dia|Boa tarde|Boa noite)[^,!,.]*[,!,.]?\s*(?:sou (?:o|a)?|meu nome (?:e|é)|me chamo)\s+([A-ZÀ-Ú][a-zà-ú]+)",
-    ]
-    for pat in name_patterns:
-        m = re.search(pat, message, re.IGNORECASE)
-        if m and not state.name:
-            extracted["name"] = m.group(1).strip()
-            break
+    if not state.name:
+        nome = detectar_nome(message)
+        if nome:
+            extracted["name"] = nome
 
     # ── Modalidade ──────────────────────────────────────────────────────────
     if not state.modality:

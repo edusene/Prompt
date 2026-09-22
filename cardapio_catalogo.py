@@ -231,6 +231,35 @@ def _escolher_pacote(familia: str, quantidade: int) -> dict | None:
     return None
 
 
+def _sem_rotulo(nome: str, qtd: int) -> tuple[str, int]:
+    """Tira o rotulo de formato do nome e converte pacotes em unidades.
+
+    "Porção (25 un) Quibe" com quantity=1 nao e um quibe: e uma porcao, ou
+    seja 25. O modelo conta PACOTES quando escreve o rotulo, e a API do
+    cardapio digital so entende UNIDADES, multiplas de 25. Sem esta conversao
+    o item ou era bloqueado por nome, ou passava com 1 unidade no lugar de 25.
+
+    A quantidade so e multiplicada quando ela e menor que o lote: assim
+    quantity=1 vira 25 e quantity=2 vira 50, mas quantity=25, que ja veio em
+    unidades, fica como esta. Quem vier com um numero incoerente (30 com
+    rotulo de 25) segue adiante e cai na regra dos multiplos, que pede ajuste
+    em vez de adivinhar.
+    """
+    try:
+        import cardapio
+    except Exception:
+        return nome, qtd
+
+    limpo = cardapio.nome_sem_rotulo_de_formato(nome)
+    if not limpo or limpo == nome:
+        return nome, qtd
+
+    unidades = cardapio.unidades_do_rotulo(nome)
+    if unidades and qtd < unidades:
+        qtd = qtd * unidades
+    return limpo, qtd
+
+
 def traduzir(items: list[dict]) -> tuple[list[dict], list[str]]:
     """Converte itens internos para o formato do cardapio digital.
 
@@ -252,6 +281,14 @@ def traduzir(items: list[dict]) -> tuple[list[dict], list[str]]:
             qtd = 0
         if not nome or qtd <= 0:
             continue
+
+        # O rotulo do formato tem de sair ANTES de procurar no de-para. O
+        # modelo manda o nome como ele aparece no resumo — "Porção (25 un)
+        # Quibe fritos" — e o de-para so conhece "Quibe". Na bateria do dono
+        # de 22/09 isso bloqueou dois pedidos inteiros (17:54 e 18:06): o
+        # cliente confirmou, ouviu "nao consegui registrar" e foi para a fila
+        # do humano, sem que faltasse nada no pedido alem do rotulo grudado.
+        nome, qtd = _sem_rotulo(nome, qtd)
 
         bloqueio = _achar(BLOQUEADOS, nome)
         if bloqueio:
