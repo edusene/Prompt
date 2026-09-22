@@ -1262,6 +1262,24 @@ def _conferir_dinheiro(user: str, reply: str, memoria: dict) -> str:
     if not ditos and not negou_retorno:
         return reply
 
+    # So corrige pedido que JA passou por calculate_order alguma vez nesta
+    # conversa. A ficha e montada por extracao e pode estar incompleta — no
+    # aceite ela ficou com 2 dos 3 itens, e sem esta guarda o codigo trocava o
+    # total certo do modelo (R$ 58,00) por um errado calculado sobre meia
+    # ficha (R$ 40,00). Numero errado com cara de oficial e pior do que o
+    # problema que esta funcao veio resolver.
+    #
+    # Nao e perda de alcance: o defeito que o dono relatou e "a IA alucinou
+    # valores AO EDITAR ITENS", ou seja, depois de ja ter havido um calculo.
+    try:
+        _ja_calculado = float(memoria.get("total") or 0)
+    except (TypeError, ValueError):
+        _ja_calculado = 0.0
+    if _ja_calculado <= 0:
+        print(f"[dinheiro] user={user} valores fora de calculate_order, mas a ficha "
+              f"nunca foi calculada; nao da para conferir sem arriscar piorar")
+        return reply
+
     numeros = _numeros_do_pedido(memoria)
     if not numeros:
         if negou_retorno:

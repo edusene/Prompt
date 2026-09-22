@@ -302,6 +302,60 @@ def _sem_acento(texto: str) -> str:
         return (texto or "").strip().lower()
 
 
+# O valor do troco grudado na palavra que o anuncia. Sem esta ancora o troco
+# era o PRIMEIRO numero da mensagem: em "Quero 1 porcao de 25 coxinhas ... nota
+# de 100, traz troco" a ficha guardava troco de R$ 1,00, e a comanda saia
+# mandando o motoboy levar um real de troco para uma nota de cem.
+_NUM = r"(\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?|\d+(?:[.,]\d{1,2})?)"
+_RX_TROCO_ANCORADO = [
+    _re.compile(r"troco\s+(?:para|pra|p/|de)?\s*(?:r\$)?\s*" + _NUM, _re.IGNORECASE),
+    _re.compile(r"(?:nota|cedula|cédula)\s+de\s+(?:r\$)?\s*" + _NUM, _re.IGNORECASE),
+    _re.compile(r"(?:pagar?|pago)\s+com\s+(?:uma\s+|um\s+)?(?:nota\s+de\s+)?"
+               r"(?:r\$)?\s*" + _NUM, _re.IGNORECASE),
+    _re.compile(_NUM + r"\s*reais", _re.IGNORECASE),
+    _re.compile(r"(?:r\$)\s*" + _NUM, _re.IGNORECASE),
+]
+
+
+def _valor_do_troco(texto: str) -> float | None:
+    """O valor que o cliente deu como troco, ou None quando nao da para saber.
+
+    Procura o numero ancorado em "troco"/"nota de"/"reais". So cai no primeiro
+    numero solto quando a mensagem e curta — ai ela e resposta direta a
+    pergunta do troco ("100") e nao ha o que confundir. Em mensagem longa, sem
+    ancora, prefere nao saber: um troco errado vai para a comanda e o motoboy
+    sai com o dinheiro errado no bolso.
+    """
+    cru = texto or ""
+    for rx in _RX_TROCO_ANCORADO:
+        achado = rx.search(cru)
+        if achado:
+            valor = _numero_brasileiro(achado.group(1))
+            if valor:
+                return valor
+
+    if len(cru.split()) > 8:
+        return None
+    # Mensagem curta: "100", "R$ 100". Hora nao e dinheiro ("19h" nunca e troco).
+    sem_hora = _re.sub(r"\b\d{1,2}\s*[h:]\S*", " ", cru, flags=_re.IGNORECASE)
+    return _valor_em_reais(sem_hora)
+
+
+def _numero_brasileiro(bruto: str) -> float | None:
+    """'1.000,50' -> 1000.5; '100' -> 100.0. None no que nao for numero > 0."""
+    if "." in bruto and "," in bruto:
+        bruto = bruto.replace(".", "").replace(",", ".")
+    elif "," in bruto:
+        bruto = bruto.replace(",", ".")
+    elif bruto.count(".") == 1 and len(bruto.split(".")[1]) == 3:
+        bruto = bruto.replace(".", "")
+    try:
+        valor = float(bruto)
+    except ValueError:
+        return None
+    return valor if valor > 0 else None
+
+
 def _valor_em_reais(texto: str) -> float | None:
     """Le o primeiro valor monetario do texto CRU, no formato brasileiro.
 
@@ -371,7 +425,7 @@ def capturar_troco(memoria: dict, pergunta_anterior: str, texto: str) -> str:
                     memoria["troco_para"] = "nao"
                     return "nao"
 
-    valor = _valor_em_reais(texto)
+    valor = _valor_do_troco(texto)
     if valor is None:
         for palavra, numero in _EXTENSO_DE_TROCO.items():
             if palavra in palavras:

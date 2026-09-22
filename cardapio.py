@@ -590,8 +590,15 @@ def montar_notes(troco_para: str, total: float, observacao: str = "",
     )
 
 
-def _rotulo_pagamento(pagamento: str, troco_para: str = "") -> str:
-    """Forma de pagamento como o BLOCO 5 pede: com o troco, se houver."""
+def _rotulo_pagamento(pagamento: str, troco_para: str = "", total: float = 0.0) -> str:
+    """Forma de pagamento como o BLOCO 5 pede: com o troco, se houver.
+
+    Quando o total ja e conhecido, diz TAMBEM quanto volta. O cliente pergunta
+    isso ("quanto sobra de troco?") e, sem o numero aqui, quem respondia era o
+    modelo de cabeca — a conta de troco e uma das que o dono pediu para sair
+    de funcao. O valor que vai para a comanda sai de montar_notes, que faz a
+    mesma subtracao; esta linha e a versao que o cliente le.
+    """
     rotulo = _PAGAMENTO_ROTULO.get(pagamento, pagamento) or "[PAGAMENTO]"
     troco_para = (troco_para or "").strip()
     if (pagamento or "").strip().lower() != "dinheiro" or not troco_para:
@@ -601,9 +608,12 @@ def _rotulo_pagamento(pagamento: str, troco_para: str = "") -> str:
     if troco_para == "nao_informado":
         return rotulo
     try:
-        return f"{rotulo} (troco para {_brl(float(troco_para))})"
+        valor = float(troco_para)
     except (TypeError, ValueError):
         return rotulo
+    if total and valor > total:
+        return f"{rotulo} (troco para {_brl(valor)} - levar {_brl(valor - total)})"
+    return f"{rotulo} (troco para {_brl(valor)})"
 
 
 def montar_resumo(items: list[dict], subtotal: float, delivery_fee: float,
@@ -664,7 +674,7 @@ def montar_resumo(items: list[dict], subtotal: float, delivery_fee: float,
         if return_fee:
             linhas.append(f"🛵 Taxa de retorno: {_brl(return_fee)}")
         linhas.append(f"💵 Total: {_brl(total)}")
-        linhas.append(f"💳 Pagamento: {_rotulo_pagamento(pagamento, troco)}")
+        linhas.append(f"💳 Pagamento: {_rotulo_pagamento(pagamento, troco, total)}")
 
     # A confirmacao cita dia e hora juntos: ultima chance de o cliente corrigir
     # o dia antes de o pedido entrar na producao.

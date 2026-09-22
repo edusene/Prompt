@@ -326,9 +326,17 @@ _PRECO_UNITARIO = {
 
 # ── Modalidade ──────────────────────────────────────────────────────────────
 
+# Pergunta SOBRE entrega ("quanto fica a taxa de entrega?"), que nao escolhe
+# modalidade nenhuma. A palavra de pergunta precisa estar PERTO da palavra
+# entrega/retirada, e na mesma frase: antes bastava um "quanto" em qualquer
+# lugar da mensagem, e "Entrega hoje as 19h na Rua Guapore (...) me passa o
+# total e quanto sobra" perdia a modalidade por causa do "quanto sobra" que
+# vinha 130 caracteres depois, sobre outro assunto.
+_PALAVRA_DE_PERGUNTA = (r"quanto|qual|quais|tem|voces|vcs|fazem|faz|taxa|valor|"
+                        r"preco|custa|cobram|funciona|como")
 _MODALIDADE_PERGUNTA = re.compile(
-    r"\b(quanto|qual|quais|tem|voces|vcs|fazem|faz|taxa|valor|preco|custa|cobram|"
-    r"funciona|como)\b"
+    rf"\b(?:{_PALAVRA_DE_PERGUNTA})\b[^.?!]{{0,30}}?\b(?:entrega\w*|retirad\w*|delivery)\b"
+    rf"|\b(?:entrega\w*|retirad\w*|delivery)\b[^.?!]{{0,20}}?\b(?:{_PALAVRA_DE_PERGUNTA})\b"
 )
 
 _ENTREGA_EXPLICITA = re.compile(
@@ -342,15 +350,27 @@ _ENTREGA_EXPLICITA = re.compile(
     r"|\btrazer\s+(?:em|na|no|aqui)\b"
 )
 
+# "entrega" como substantivo, seguido de dia, hora ou endereco — nunca de
+# preco ("taxa de entrega", "valor da entrega"), que e pergunta, nao escolha.
+_ENTREGA_SUBSTANTIVO = re.compile(
+    r"(?<!taxa de )(?<!valor da )(?<!preco da )(?<!custo da )"
+    r"\bentrega\s+(?:hoje|amanha|depois|pra|para|em|na|no|as|ate|neste|nesse)\b"
+)
+
+# Intencao de retirar, dita com verbo: vale mesmo numa frase com pergunta.
 _RETIRADA_EXPLICITA = re.compile(
-    r"\bretirad\w*\b"
-    r"|\bretirar\b"
-    r"|\b(?:vou|posso|prefiro|quero|queria)\s+buscar\b"
+    r"\bretirar\b"
+    r"|\b(?:vou|posso|prefiro|quero|queria)\s+(?:retirar|buscar|pegar)\b"
     r"|\beu\s+busco\b"
     r"|\beu\s+pego\b"
     r"|\bna\s+fabrica\b"
     r"|\bno\s+balcao\b"
 )
+
+# "retirada" como substantivo. Fica abaixo da guarda de pergunta, igual a
+# entrega: "voces tem retirada?" e pergunta, nao escolha — antes ela marcava
+# o pedido como retirada e a Sandrinha nunca mais perguntava.
+_RETIRADA_SUBSTANTIVO = re.compile(r"\bretirad[ao]\b")
 
 
 # Palavras que aparecem no lugar de um nome sem ser nome de ninguem. A lista
@@ -415,6 +435,42 @@ def detectar_nome(message: str) -> str:
     return ""
 
 
+def detectar_bairro(message: str) -> str:
+    """O bairro OFICIAL citado na mensagem, ou '' quando nenhum aparece.
+
+    A tabela de bairros e a mesma que da o frete, entao casar contra ela
+    resolve dois defeitos de uma vez:
+
+      - o nome nao trunca. O padrao anterior pegava uma palavra so, e
+        "bairro Agenor de Carvalho" virava "Agenor" na ficha e na comanda.
+      - a palavra "bairro" deixa de ser obrigatoria. Em "Rua Guapore, 4120 -
+        Agenor de Carvalho" e em "Sim, e Agenor de Carvalho mesmo" nao havia
+        captura nenhuma: a Sandrinha perguntava o endereco de novo, recebia a
+        mesma resposta e perguntava outra vez. Foi esse laco que travou o
+        pedido no aceite.
+
+    Prefere o nome mais longo: "Agenor de Carvalho" ganha de "Agenor" quando
+    os dois existirem na tabela.
+    """
+    alvo = facts.normalize(message or "")
+    if not alvo:
+        return ""
+    try:
+        oficiais = facts.get()["bairros"]
+    except Exception:
+        return ""
+
+    achado = ""
+    for bairro in oficiais:
+        for nome in [bairro["nome"], *(bairro.get("aliases") or [])]:
+            chave = facts.normalize(nome)
+            if not chave or len(chave) < 4:
+                continue
+            if re.search(rf"\b{re.escape(chave)}\b", alvo) and len(chave) > len(facts.normalize(achado)):
+                achado = bairro["nome"]
+    return achado
+
+
 def detectar_modalidade(message: str) -> str:
     """'entrega', 'retirada' ou '' quando o cliente ainda nao escolheu.
 
@@ -443,6 +499,20 @@ def detectar_modalidade(message: str) -> str:
     if curto in ("entrega", "e entrega", "eh entrega", "entrega mesmo", "entregar"):
         return "entrega"
     if curto in ("retirada", "e retirada", "eh retirada", "retirar", "vou buscar", "busco"):
+        return "retirada"
+
+    # "Entrega hoje as 19h na Rua Guapore" — o substantivo seguido de dia,
+    # hora ou endereco. A retirada ja contava assim ("\bretirad\w*\b"); a
+    # entrega nao, e a assimetria custou uma modalidade perdida no teste do
+    # dono: o pedido tinha endereco, hora e pagamento, e a Sandrinha ainda
+    # perguntava se era entrega ou retirada.
+    #
+    # So chega aqui o que NAO e pergunta: "quanto fica a entrega no Olaria?"
+    # ja voltou vazio na guarda acima, que e o que essa funcao existia para
+    # proteger.
+    if _ENTREGA_SUBSTANTIVO.search(t):
+        return "entrega"
+    if _RETIRADA_SUBSTANTIVO.search(t):
         return "retirada"
 
     return ""
@@ -648,10 +718,9 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
 
     # ── Bairro ──────────────────────────────────────────────────────────────
     if not state.bairro:
-        # Padrão: "bairro Olaria" ou "no bairro Olaria"
-        bairro_match = re.search(r'(?:bairro|bairro)\s+([A-ZÀ-Ú][a-zà-ú]+)', message, re.IGNORECASE)
-        if bairro_match:
-            extracted["bairro"] = bairro_match.group(1).strip()
+        bairro = detectar_bairro(message)
+        if bairro:
+            extracted["bairro"] = bairro
 
     # ── Pagamento ───────────────────────────────────────────────────────────
     if not state.payment_method:
@@ -667,10 +736,15 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
         # extraia item nenhum — o pedido sumia e a Sandrinha perguntava de novo
         # o que o cliente ja tinha dito. Aqui o nome termina tambem em ponto e
         # nas preposicoes que costumam vir depois do produto.
+        # O preco dito pelo cliente tambem encerra o nome do produto. Sem
+        # "r$" na lista, "2 coxinhas grandes de balcao de R$ 9,00" nao casava
+        # com nada — o nome seguia engolindo texto ate esbarrar no cifrao, que
+        # a classe de caracteres nao aceita, e o item inteiro sumia da ficha.
+        # No aceite isso deixou a ficha com 2 dos 3 itens do pedido.
         item_pattern = re.findall(
             r'(\d+)\s*(?:unidades?|un\.?|pcs\.?)?\s*(de\s+)?([a-záàãâéêíóôõúç\s]+?)'
             r'(?:\s*(?:[,;.!?]|\be\b|\bpra\b|\bpara\b|\bcom\b|\bno\b|\bna\b|\bem\b'
-            r'|\bhoje\b|\bamanh[aã]\b|\bàs\b|\bas\b|$))',
+            r'|\bhoje\b|\bamanh[aã]\b|\bàs\b|\bas\b|\bde\s+r\$|r\$|$))',
             msg_lower
         )
         items_found = []
