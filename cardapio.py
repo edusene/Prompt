@@ -344,6 +344,36 @@ def nome_sem_rotulo_de_formato(nome: str) -> str:
     return texto
 
 
+_PALAVRAS_FRACAS = {"de", "da", "do", "e", "com", "a", "o", "no", "na", "un", "uni"}
+
+
+def nome_confiavel(pedido: str, oficial: str) -> bool:
+    """O nome oficial e mesmo o que o cliente pediu, ou e palpite da busca?
+
+    facts.resolve_unit_price tem um ultimo recurso que aceita "qualquer linha
+    com preco definido". Isso e bom para achar preco, e perigoso para dar NOME
+    ao item: sem esta guarda, "Pizza de Calabresa" virava "Empada de Camarao" e
+    "Refrigerante Coca 2L" virava "Refrigerante Lata" - o cliente pedia uma
+    coisa e a comanda saia com outra.
+
+    O criterio e conter, por palavra: "Coxinha" -> "Coxinha frango" passa
+    (quem pediu falou menos, nao falou outra coisa), mas "Bolo de Chocolate" ->
+    "Bolo de Milho" nao, porque 'chocolate' e 'milho' se contradizem.
+    """
+    import facts
+    a = set(facts.normalize(pedido).split())
+    b = set(facts.normalize(oficial).split())
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    menor, maior = (a, b) if len(a) <= len(b) else (b, a)
+    if not menor <= maior:
+        return False
+    # Precisa sobrar alguma palavra com significado: casar so por "de" nao vale.
+    return bool(menor - _PALAVRAS_FRACAS)
+
+
 def _normalizar_itens(items: list[dict]) -> tuple[list[dict], list[str], list[str]]:
     """Define o preco de cada item pela TABELA OFICIAL, nao pelo que o modelo mandou.
 
@@ -397,6 +427,13 @@ def _normalizar_itens(items: list[dict]) -> tuple[list[dict], list[str], list[st
                 tem_pacote = True
 
         oficial = facts.resolve_unit_price(nome, quantidade)
+        if oficial is not None and not nome_confiavel(nome, oficial["item_oficial"]):
+            # Achou preco, mas de outro produto. Preferimos recusar a cobrar
+            # errado: o retorno manda o agente consultar_preco e perguntar.
+            print(f"[cardapio] casamento DUVIDOSO descartado: '{nome}' -> "
+                  f"'{oficial['item_oficial']}'")
+            oficial = None
+
         if oficial is None:
             nao_encontrados.append(nome)
             print(f"[cardapio] item FORA do cardapio: '{nome}'")
