@@ -1341,20 +1341,26 @@ def _pausa_digitacao(indice: int, chunk: str) -> float:
     return min(PAUSA_MAX, max(PAUSA_MIN, len(chunk) / 200))
 
 
-def _esperar_piso(inicio: float | None) -> None:
-    """Segura a primeira mensagem ate fechar RESPOSTA_MIN_SEG desde o cliente."""
-    if inicio is None:
+def _esperar_piso(chegada: float | None) -> None:
+    """Segura a primeira mensagem ate fechar RESPOSTA_MIN_SEG desde o cliente.
+
+    `chegada` e o instante em que a mensagem entrou no webhook — o relogio do
+    cliente. Antes isso era o comeco do flush mais BUFFER_SECONDS, o que
+    ignorava os segundos gastos em gravar a mensagem e fazia o piso somar
+    espera a quem ja tinha esperado demais.
+    """
+    if chegada is None:
         return
-    decorrido = BUFFER_SECONDS + (time.monotonic() - inicio)
+    decorrido = time.monotonic() - chegada
     if decorrido < RESPOSTA_MIN_SEG:
         time.sleep(RESPOSTA_MIN_SEG - decorrido)
 
 
-def enviar_em_blocos(user: str, texto: str, inicio: float | None = None) -> None:
+def enviar_em_blocos(user: str, texto: str, chegada: float | None = None) -> None:
     """Envia a resposta ja dividida, com o ritmo de digitacao, e espelha no painel.
 
-    `inicio` e o time.monotonic() do comeco do flush; com ele a primeira
-    mensagem respeita o piso de RESPOSTA_MIN_SEG.
+    `chegada` e o time.monotonic() de quando a mensagem do cliente chegou; com
+    ele a primeira mensagem respeita o piso de RESPOSTA_MIN_SEG.
     """
     chunks = split_reply(texto) or ([texto] if texto else [])
     for indice, chunk in enumerate(chunks):
@@ -1362,7 +1368,7 @@ def enviar_em_blocos(user: str, texto: str, inicio: float | None = None) -> None
         if pausa > 0:
             time.sleep(pausa)
         if indice == 0:
-            _esperar_piso(inicio)
+            _esperar_piso(chegada)
         res = send_text(user, chunk)
         if not res.get("ok"):
             print(f"[flush] ERRO ao enviar p/ {user}: {res.get('error')}")
@@ -1371,7 +1377,7 @@ def enviar_em_blocos(user: str, texto: str, inicio: float | None = None) -> None
 
 
 def _responder_direto(user: str, items: list[dict], texto: str,
-                     inicio: float | None = None) -> None:
+                     chegada: float | None = None) -> None:
     """Envia uma resposta decidida em codigo, sem passar pelo LLM.
 
     Usado para as regras de negocio fechadas (fora do expediente, horario
@@ -1381,11 +1387,16 @@ def _responder_direto(user: str, items: list[dict], texto: str,
     """
     memory.append_multimodal(user, "user", _build_user_parts(items))
     memory.append(user, "assistant", texto)
-    enviar_em_blocos(user, texto, inicio)
+    enviar_em_blocos(user, texto, chegada)
 
 
 def handle_flush(user: str, items: list[dict]) -> None:
     _inicio = time.monotonic()
+    # Quando o cliente mandou a mensagem. E o unico relogio que interessa para
+    # o piso e para a linha [tempo]; _inicio so serve para medir o flush.
+    _chegada = min((it.get("recebido_em") or 0.0) for it in items) if items else 0.0
+    if not _chegada:
+        _chegada = _inicio - BUFFER_SECONDS
     try:
         global_mode = int(database.get_setting("agent_mode", "1"))
         if not global_mode:
@@ -1411,12 +1422,13 @@ def handle_flush(user: str, items: list[dict]) -> None:
                 # Typing indicator
                 last_wa_msg_id = items[-1].get("wa_message_id", "") if items else ""
                 if last_wa_msg_id and last_wa_msg_id.startswith("wamid."):
-                    send_typing(last_wa_msg_id)
+                    threading.Thread(target=_avisar_digitando_async,
+                                     args=(last_wa_msg_id,), daemon=True).start()
                 # Processa via sub-agentes
                 reply = manager.handle_message(phone=user, message=message_text)
                 if reply:
                     memory.append(user, "assistant", reply)
-                    enviar_em_blocos(user, reply, _inicio)
+                    enviar_em_blocos(user, reply, _chegada)
                 return
 
         # ── Modo classico (prompt unico) ─────────────────────────────────────
@@ -1427,10 +1439,13 @@ def handle_flush(user: str, items: list[dict]) -> None:
             perform_transfer(user, reason=f"cliente mencionou '{matched_kw}'")
             return
 
-        # Typing indicator (Meta: combinado com mark_read via typing_indicator)
+        # Typing indicator em background: e enfeite, e a ida ate a Datafy
+        # custava 0,8s do tempo do cliente. Em thread ele aparece no celular
+        # mais cedo do que antes, e nao no lugar do preparo da resposta.
         last_wa_msg_id = items[-1].get("wa_message_id", "") if items else ""
         if last_wa_msg_id and last_wa_msg_id.startswith("wamid."):
-            send_typing(last_wa_msg_id)
+            threading.Thread(target=_avisar_digitando_async,
+                             args=(last_wa_msg_id,), daemon=True).start()
 
         # ── Memoria estruturada do atendimento ───────────────────────────────
         # A extracao roda duas vezes: uma sobre o que ja esta na memoria (so
@@ -1504,7 +1519,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
             if _expediente.get("sugestao_data") and not _memoria.get("data_iso"):
                 _memoria["data_proposta"] = _expediente["sugestao_data"].isoformat()
             conversation_memory.save(user, _memoria)
-            _responder_direto(user, items, _resposta, _inicio)
+            _responder_direto(user, items, _resposta, _chegada)
             return
 
         if _memoria.get("data_iso") and _memoria.get("horario"):
@@ -1524,7 +1539,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
                         _memoria["data_proposta"] = _sugestao.isoformat()
                 _memoria["saudacao_feita"] = True
                 conversation_memory.save(user, _memoria)
-                _responder_direto(user, items, _motivo, _inicio)
+                _responder_direto(user, items, _motivo, _chegada)
                 return
 
         user_parts = _build_user_parts(items)
@@ -2003,14 +2018,19 @@ def handle_flush(user: str, items: list[dict]) -> None:
         # debounce ja e conhecido (BUFFER_SECONDS), o preparo e tudo que vem
         # antes do modelo (ficha, RAG, calendario) e o llm inclui as tools.
         _gasto_ate_aqui = time.monotonic() - _inicio
+        # webhook = o que rodou antes do debounce comecar (gravar a mensagem).
+        # O log de 22/09 mostrou 3,8s escondidos aqui, maiores que o proprio
+        # debounce, sem que a linha [tempo] os enxergasse.
+        _gasto_webhook = max(0.0, _inicio - _chegada - BUFFER_SECONDS)
         # O total e o que o CLIENTE espera, nao o que o servidor gastou: quando
         # a resposta fica pronta antes do piso, enviar_em_blocos segura ate
         # RESPOSTA_MIN_SEG. Sem esse max o log dizia "total=3.8s" num caso em
         # que o cliente esperou 5s — numero impossivel e que tiraria a
         # confianca da linha justamente quando ela for usada para cortar tempo.
-        _pronto_em = BUFFER_SECONDS + _gasto_ate_aqui
+        _pronto_em = _gasto_webhook + BUFFER_SECONDS + _gasto_ate_aqui
         print(f"[tempo] user={user} total={max(_pronto_em, RESPOSTA_MIN_SEG):.1f}s "
-              f"(debounce={BUFFER_SECONDS:.1f} preparo={_gasto_ate_aqui - _gasto_llm:.1f} "
+              f"(webhook={_gasto_webhook:.1f} debounce={BUFFER_SECONDS:.1f} "
+              f"preparo={_gasto_ate_aqui - _gasto_llm:.1f} "
               f"llm+tools={_gasto_llm:.1f} piso={RESPOSTA_MIN_SEG:.1f})")
 
         _auditar_valores(user, reply, _valores_consultados)
@@ -2094,7 +2114,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
             # Envia a resposta do LLM (pode conter info do knowledge)
             if reply:
                 memory.append(user, "assistant", reply)
-                enviar_em_blocos(user, reply, _inicio)
+                enviar_em_blocos(user, reply, _chegada)
             # Agora envia a mensagem de transferência
             transfer_msg = database.get_setting("transfer_message", "") or _DEFAULT_TRANSFER_MESSAGE
             time.sleep(PAUSA_MIN)
@@ -2112,7 +2132,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
         if not reply:
             return
 
-        enviar_em_blocos(user, reply, _inicio)
+        enviar_em_blocos(user, reply, _chegada)
 
         # Meta: indicador some automaticamente apos 25s ou envio
 
@@ -2154,6 +2174,22 @@ def _get_media_lock(msg_id: int) -> threading.Lock:
             lock = threading.Lock()
             _media_download_locks[msg_id] = lock
         return lock
+
+
+def _marcar_lido_async(wa_message_id: str) -> None:
+    """Tique azul no celular do cliente. Nada depende do resultado."""
+    try:
+        mark_read(wa_message_id)
+    except Exception as e:
+        print(f"[meta] WARN: falha ao marcar como lido: {e}")
+
+
+def _avisar_digitando_async(wa_message_id: str) -> None:
+    """'digitando...' no WhatsApp. Enfeite: nao pode atrasar a resposta."""
+    try:
+        send_typing(wa_message_id)
+    except Exception as e:
+        print(f"[meta] WARN: falha ao enviar typing: {e}")
 
 
 def _download_media_async(message_db_id: int, wa_media_id: str) -> None:
@@ -2423,10 +2459,16 @@ def webhook():
                 print(f"[webhook] SEM BODY: msg_type={msg_type} from={number}")
                 continue
 
+            _chegou_em = time.monotonic()
             print(f"[webhook] from={number} ({push_name}) type={msg_type} len={len(body)} msg_id={message_id[:30]}")
 
-            # Marca como lido
-            mark_read(str(message_id))
+            # Marca como lido em background. E uma chamada de rede a Datafy
+            # (0,9s medido em producao) cujo resultado ninguem espera: o tique
+            # azul no celular do cliente nao muda uma virgula da resposta.
+            # Segurava o debounce sem motivo.
+            threading.Thread(
+                target=_marcar_lido_async, args=(str(message_id),), daemon=True,
+            ).start()
 
             # Salva contato e conversa
             contact_kwargs = {}
@@ -2446,6 +2488,30 @@ def webhook():
                 wa_message_id=str(message_id) if message_id else None,
                 wa_media_id=wa_media_id,
             )
+            # A partir daqui nada mais precisa ser feito ANTES de comecar a
+            # contar o debounce. O que vem abaixo — CRM, follow-ups, SSE do
+            # painel — sao 1,4s de banco que o cliente estava esperando de pe,
+            # embora nenhum deles mude a resposta. Disparando o buffer aqui,
+            # eles passam a correr dentro dos 3s de silencio, de graca.
+            #
+            # save_message fica acima porque e ele quem faz a deduplicacao (a
+            # Meta reentrega o mesmo wamid) e quem devolve o msg_id da midia.
+            # Comecar o debounce antes dele processaria a mensagem duas vezes.
+            if not e_pedido_de_reset(body):
+                # Download de midia em background — antes do CRM, para ter os
+                # 3s inteiros do debounce e chegar pronta em _build_user_parts.
+                if saved and wa_media_id and msg_type != "text":
+                    threading.Thread(
+                        target=_download_media_async,
+                        args=(saved["id"], wa_media_id),
+                        daemon=True,
+                    ).start()
+                buffer.add(number, body,
+                           msg_id=saved["id"] if saved else None,
+                           wa_message_id=str(message_id) if message_id else "",
+                           wa_media_id=wa_media_id,
+                           recebido_em=_chegou_em)
+
             if saved:
                 database.update_conversation(conv["id"], last_message_at=time.strftime("%Y-%m-%dT%H:%M:%S"))
                 database.increment_unread(conv["id"])
@@ -2464,32 +2530,19 @@ def webhook():
                     "message_id": str(message_id),
                 })
                 print(f"[webhook] MSG SALVA conv={conv['id']} from={number} len={len(body)}")
-
-                # Download de midia em background
-                if wa_media_id and msg_type != "text":
-                    threading.Thread(
-                        target=_download_media_async,
-                        args=(saved["id"], wa_media_id),
-                        daemon=True,
-                    ).start()
             else:
                 print(f"[webhook] MSG DUPLICADA msg_id={message_id}")
 
-            # #reset vem ANTES do buffer e antes de qualquer checagem de modo:
-            # ele precisa funcionar justamente quando a conversa esta em modo
-            # humano, que e onde handle_flush desiste logo no inicio. Tambem
-            # nao entra no debounce - a palavra nao e conversa, e comando.
+            # #reset nao entra no debounce — a palavra nao e conversa, e
+            # comando — e roda DEPOIS do CRM justamente por nao ter pressa:
+            # ele precisa funcionar quando a conversa esta em modo humano, que
+            # e onde handle_flush desiste logo no inicio.
             if e_pedido_de_reset(body):
                 try:
                     perform_reset(number, origem="cliente")
                 except Exception as e:
                     print(f"[reset] ERRO ao reiniciar {number}: {e}")
                 continue
-
-            buffer.add(number, body,
-                       msg_id=saved["id"] if saved else None,
-                       wa_message_id=str(message_id) if message_id else "",
-                       wa_media_id=wa_media_id)
 
     return jsonify({"ok": True})
 

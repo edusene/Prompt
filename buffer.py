@@ -4,6 +4,7 @@ Cada mensagem nova reseta o timer; flush so ocorre apos BUFFER_SECONDS de silenc
 """
 
 import threading
+import time
 from typing import Callable
 
 
@@ -16,14 +17,21 @@ class MessageBuffer:
         self._state: dict[str, dict] = {}
 
     def add(self, user: str, text: str, msg_id: int | None = None,
-            wa_message_id: str = "", wa_media_id: str = "") -> None:
+            wa_message_id: str = "", wa_media_id: str = "",
+            recebido_em: float = 0.0) -> None:
         with self._lock:
             if user not in self._state:
                 self._state[user] = {"items": [], "timer": None}
 
+            # recebido_em e o relogio do CLIENTE, nao o do servidor: quem mede
+            # a espera dele e o instante em que a mensagem entrou no webhook,
+            # nao o instante em que o debounce terminou. Sem isso a linha
+            # [tempo] media so a segunda metade e escondia os 3,8s de webhook
+            # que eram justamente o maior pedaco.
             self._state[user]["items"].append({
                 "text": text, "msg_id": msg_id,
                 "wa_message_id": wa_message_id, "wa_media_id": wa_media_id,
+                "recebido_em": recebido_em or time.monotonic(),
             })
 
             # Cancela timer anterior e cria novo (debounce)
