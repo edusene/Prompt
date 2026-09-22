@@ -2003,9 +2003,15 @@ def handle_flush(user: str, items: list[dict]) -> None:
         # debounce ja e conhecido (BUFFER_SECONDS), o preparo e tudo que vem
         # antes do modelo (ficha, RAG, calendario) e o llm inclui as tools.
         _gasto_ate_aqui = time.monotonic() - _inicio
-        print(f"[tempo] user={user} total={BUFFER_SECONDS + _gasto_ate_aqui:.1f}s "
+        # O total e o que o CLIENTE espera, nao o que o servidor gastou: quando
+        # a resposta fica pronta antes do piso, enviar_em_blocos segura ate
+        # RESPOSTA_MIN_SEG. Sem esse max o log dizia "total=3.8s" num caso em
+        # que o cliente esperou 5s — numero impossivel e que tiraria a
+        # confianca da linha justamente quando ela for usada para cortar tempo.
+        _pronto_em = BUFFER_SECONDS + _gasto_ate_aqui
+        print(f"[tempo] user={user} total={max(_pronto_em, RESPOSTA_MIN_SEG):.1f}s "
               f"(debounce={BUFFER_SECONDS:.1f} preparo={_gasto_ate_aqui - _gasto_llm:.1f} "
-              f"llm+tools={_gasto_llm:.1f})")
+              f"llm+tools={_gasto_llm:.1f} piso={RESPOSTA_MIN_SEG:.1f})")
 
         _auditar_valores(user, reply, _valores_consultados)
 
