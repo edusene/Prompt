@@ -282,6 +282,14 @@ _EXTENSO_DE_TROCO = {
 _NUMERO_RE = _re.compile(r"\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+(?:[.,]\d{1,2})?|\d+")
 
 
+def _data_numerica(data_iso: str) -> str:
+    """'2026-09-22' -> '22/09/2026'. Vazio se nao der para converter."""
+    try:
+        return _dt.date.fromisoformat(str(data_iso)).strftime("%d/%m/%Y")
+    except (TypeError, ValueError):
+        return ""
+
+
 def _brl(valor: float) -> str:
     return ("R$ %.2f" % float(valor or 0)).replace(".", ",")
 
@@ -455,6 +463,43 @@ def pendencia_de_item(memoria: dict) -> str:
     )
 
 
+def pendencia_de_lote(memoria: dict) -> str:
+    """Sabor de lote com quantidade que nao fecha em multiplo de 25.
+
+    A trava ja existia, mas so no calculate_order — la no fim. O cliente pedia
+    30 coxinhas, a Sandrinha seguia coletando endereco, horario e pagamento, e
+    so entao descobria que 30 nao fecha lote (teste do dono, 22/09). Aqui a
+    conta e a mesma (cardapio_catalogo.traduzir), so que lida a cada mensagem,
+    antes de o funil andar.
+    """
+    items = memoria.get("items") or []
+    if not items:
+        return ""
+    try:
+        import cardapio
+        import cardapio_catalogo
+        norm, _avisos, nao_encontrados = cardapio._normalizar_itens(
+            [dict(i) for i in items]
+        )
+        if nao_encontrados:
+            return ""      # item fora do cardapio tem tratamento proprio
+        _saida, bloqueados = cardapio_catalogo.traduzir([dict(i) for i in norm])
+    except Exception as e:
+        print(f"[memoria] WARN pendencia_de_lote: {e}")
+        return ""
+
+    quebrados = [b for b in bloqueados if "multiplos de" in b]
+    if not quebrados:
+        return ""
+    return (
+        "QUANTIDADE QUEBRADA - " + "; ".join(quebrados) + ". Pergunte AGORA, "
+        "antes de seguir o funil, usando o BLOCO 2: 'Nossas porcoes sao "
+        "fechadas de 25 em 25 por sabor! Fica melhor para voce 1 porcao de 25 "
+        "ou 2 porcoes com 50 unidades?'. NAO apresente resumo nem total "
+        "enquanto a quantidade nao fechar em multiplo de 25."
+    )
+
+
 def pendencia_de_detalhe(memoria: dict) -> str:
     """Campo preenchido que ainda precisa de um detalhe, nao de nova coleta."""
     if memoria.get("payment_method") == "cartao_a_definir":
@@ -513,6 +558,15 @@ def render_ficha(memoria: dict) -> str:
         valor = memoria.get(campo)
         if campo == "items":
             valor = _formatar_itens(valor)
+        if campo == "data_agendada":
+            # A data numerica vem primeiro porque e ela que vai no espelho
+            # (BLOCO 5: "Data: [DD/MM/AAAA]"). O modelo escreve o proprio
+            # resumo em vez de copiar o da tool, entao ele precisa ver o
+            # formato certo AQUI - no teste de 22/09 saiu "hoje, terca-feira
+            # (22/09)" porque era so isso que a ficha mostrava.
+            numerica = _data_numerica(memoria.get("data_iso", ""))
+            if numerica:
+                valor = f"{numerica}" + (f" ({valor})" if valor else "")
         if valor:
             linhas.append(f"- {_ROTULOS[campo]}: {valor}")
 
@@ -530,6 +584,7 @@ def render_ficha(memoria: dict) -> str:
     pendentes = faltando(memoria)
     detalhe = pendencia_de_detalhe(memoria)
     duvida_item = pendencia_de_item(memoria)
+    lote_quebrado = pendencia_de_lote(memoria)
     bloco = ["=== FICHA DESTE ATENDIMENTO (memoria do cliente) ==="]
     if linhas:
         bloco.append("JA CONFIRMADO PELO CLIENTE - nao pergunte de novo, nao altere:")
@@ -555,6 +610,9 @@ def render_ficha(memoria: dict) -> str:
             "Os itens acima sao o que o cliente pediu. O preco deles vem de "
             "consultar_preco/calculate_order - nunca do seu calculo."
         )
+
+    if lote_quebrado:
+        bloco.append(lote_quebrado)
 
     if duvida_item:
         bloco.append(duvida_item)

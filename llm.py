@@ -16,7 +16,12 @@ _client = OpenAI(api_key=OPENAI_API_KEY)
 # no catalogo e no prompt operacional, nunca variar de redacao a ponto de
 # inventar produto, preco ou regra. Lida a cada chamada (e nao uma vez no
 # import) para o painel poder mexer sem redeploy.
-_TEMPERATURA_PADRAO = "0.1"
+# 0.0 por decisao do dono depois do teste de 22/09: a 0.1 a Sandrinha ainda
+# improvisava (pediu troco numa retirada, aceitou 30 salgados sem travar no
+# lote de 25, escreveu a data por extenso no espelho). Os tres viraram trava de
+# codigo tambem — temperatura nao substitui trava —, mas zerar tira a variacao
+# que sobra na redacao.
+_TEMPERATURA_PADRAO = "0.0"
 
 # Familias que so aceitam a temperatura default (gpt-5, o1, o3...). Mandar
 # temperature para elas devolve 400 e derruba a resposta inteira.

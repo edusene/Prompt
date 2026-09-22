@@ -504,12 +504,20 @@ MENSAGEM_PEDIDO_NAO_ENTROU = (
 
 def _calculate_order_handler(items: list[dict], bairro: str = "", modalidade: str = "",
                              dia: str = "", horario: str = "", pagamento: str = "",
-                             cliente: str = "", endereco: str = "", **kwargs) -> str:
-    """Handler para a tool calculate_order."""
+                             cliente: str = "", endereco: str = "", troco: str = "",
+                             referencia: str = "", data_iso: str = "", **kwargs) -> str:
+    """Handler para a tool calculate_order.
+
+    Os campos precisam estar TODOS na assinatura: o que cai em **kwargs e
+    descartado em silencio. Foi o que aconteceu com troco, referencia e
+    data_iso — o resumo_formatado saia sem eles, o modelo escrevia o espelho a
+    mao e a data voltava por extenso.
+    """
     print(f"[cardápio] TOOL calculate_order items={items} bairro={bairro}")
     result = cardapio.calcular_pedido(
         items, bairro, modalidade=modalidade, dia=dia, horario=horario,
         pagamento=pagamento, cliente=cliente, endereco=endereco,
+        troco=troco, referencia=referencia, data_iso=data_iso,
     )
     if result.get("success"):
         return json.dumps(result, ensure_ascii=False)
@@ -1666,8 +1674,11 @@ def handle_flush(user: str, items: list[dict]) -> None:
             "Nao existe 'ou Hoje': se o cliente nao disse o dia, voce PERGUNTA o dia. "
             "Isso vale tambem na ENTREGA, cuja lista de coleta do BLOCO 3 esquece a Data "
             "- colete Nome, Bairro, Rua com Numero, Ponto de Referencia, DATA, Horario e "
-            "Forma de Pagamento. Ao escrever a data, use sempre o dia por extenso com a "
-            "data (\"hoje, sexta-feira (19/09)\"), e cite dia E horario na confirmacao."
+            "Forma de Pagamento. NA CONVERSA escreva o dia por extenso com a data "
+            "(\"hoje, sexta-feira (19/09)\"), porque e mais claro para o cliente; NO "
+            "ESPELHO do pedido a data e numerica (DD/MM/AAAA), como manda o BLOCO 5 - "
+            "e ela ja vem pronta no resumo_formatado, nao reescreva. Cite dia E "
+            "horario na confirmacao."
             "\n8.2 MODALIDADE: nunca assuma entrega nem retirada. Enquanto o cliente nao "
             "escolher, nao fale em endereco, bairro, frete ou taxa de entrega. Cliente "
             "PERGUNTAR sobre entrega nao e o cliente ESCOLHER entrega."
@@ -1830,6 +1841,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
                 endereco=_memoria.get("endereco", ""),
                 troco=_memoria.get("troco_para", ""),
                 referencia=_memoria.get("referencia", ""),
+                data_iso=_memoria.get("data_iso", ""),
                 **kwargs,
             )
             try:

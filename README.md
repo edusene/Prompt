@@ -48,7 +48,7 @@ Edite `.env` e preencha:
 | `WEBHOOK_VERIFY_TOKEN` | Token secreto para verificacao do webhook |
 | `OPENAI_API_KEY` | Chave da OpenAI |
 | `OPENAI_MODEL` | Modelo OpenAI (padrao: `gpt-4o-mini`) |
-| `OPENAI_TEMPERATURE` | Temperatura do modelo (padrao: `0.1`) |
+| `OPENAI_TEMPERATURE` | Temperatura do modelo (padrao: `0.0`) |
 | `BUFFER_SECONDS` | Segundos de debounce (padrao: `3`) |
 | `MAX_HISTORY` | Maximo de mensagens no historico (padrao: `40`) |
 | `SYSTEM_PROMPT` | Instrucao de sistema para o LLM |
@@ -214,7 +214,7 @@ Meta envia webhooks para notificacoes:
 | `WEBHOOK_VERIFY_TOKEN` | Token secreto |
 | `OPENAI_API_KEY` | Chave OpenAI |
 | `OPENAI_MODEL` | `gpt-4o-mini` |
-| `OPENAI_TEMPERATURE` | `0.1` |
+| `OPENAI_TEMPERATURE` | `0.0` |
 | `CARDAPIO_API_URL` | `https://balbs-cardapio.base44.app` (apelido ASCII de `CARDÁPIO_API_URL`) |
 | `BALBS_AGENTE_API_KEY` | Chave do cardapio digital |
 | `SYSTEM_PROMPT` | Instrucao base do agente |
@@ -274,7 +274,7 @@ O cliente ve a resposta entre **5 e 10 segundos**. O tempo se divide em:
 respeita o piso e espelha no painel. Antes cada trecho esperava `1 + len/200`
 segundos — inclusive o primeiro — e com o debounce de 8s a resposta levava ~21s.
 
-`OPENAI_TEMPERATURE` (padrao `0.1`) prende o modelo ao catalogo. `llm._create()`
+`OPENAI_TEMPERATURE` (padrao `0.0`) prende o modelo ao catalogo. `llm._create()`
 aplica a temperatura e, se o modelo for de uma familia que so aceita o valor
 default (gpt-5, o1, o3), repete a chamada sem ela em vez de derrubar a resposta.
 
@@ -367,6 +367,42 @@ python test_agente.py --extracao   # sem LLM, sem rede, sem banco
 ```
 
 Cada defeito que apareceu num teste do dono virou linha nessa bateria.
+
+### Quantidade que nao fecha lote
+
+`conversation_memory.pendencia_de_lote` le a MESMA conta de
+`cardapio_catalogo.traduzir`, so que a cada mensagem em vez de la no
+calculate_order. O cliente pedia 30 coxinhas, a Sandrinha seguia coletando
+endereco, horario e pagamento, e so entao descobria que 30 nao fecha porcao de
+25 (teste do dono, 22/09). Agora a pergunta do BLOCO 2 vem antes de o funil
+andar.
+
+Quantidade ABAIXO de 25 ja era coberta por `pendencia_de_item` (o mesmo nome
+existe como sabor de lote e como salgado grande avulso): as duas travas sao
+complementares, nao sobrepostas.
+
+### Data: por extenso na conversa, numerica no espelho
+
+O BLOCO 5 pede `Data: [DD/MM/AAAA]`, mas o modelo escreve o proprio espelho em
+vez de copiar o `resumo_formatado` — entao nao basta a tool acertar, a **ficha**
+tem de mostrar o formato certo. `render_ficha` exibe `22/09/2026 (hoje,
+terca-feira)`: numerica primeiro, amigavel entre parenteses. Na conversa o
+texto por extenso continua valendo, que e mais claro para o cliente.
+
+> Todo campo que `calculate_order` usa precisa estar na assinatura de
+> `app._calculate_order_handler`. O que cai em `**kwargs` e descartado em
+> silencio — foi o que aconteceu com `troco`, `referencia` e `data_iso`: o
+> `resumo_formatado` saia sem eles e o modelo improvisava o espelho inteiro.
+
+### Preparo no nome do item
+
+O BLOCO 2 manda o modelo dizer "sabor e preparo", entao ele envia
+`"Porcao (25 un) - Coxinha frango - Frito"`. A planilha guarda o preparo na
+CATEGORIA (Fritos/Assados), nao no nome, e esse item nao casava com nada: o
+`calculate_order` falhava e o modelo passava a escrever tudo a mao.
+`nome_sem_rotulo_de_formato` recorta tambem `frito/frita/assado/assada` —
+produto que tem o preparo no proprio nome ("Saltenha Assada") sai intacto pela
+guarda de produto real.
 
 ### Retirada nao tem pagamento nem troco
 

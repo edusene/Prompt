@@ -340,6 +340,14 @@ def nome_sem_rotulo_de_formato(nome: str) -> str:
     texto = _re.sub(r"\b\d+\s*un\.?\b", " ", texto, flags=_re.IGNORECASE)
     texto = _re.sub(r"\bmeio\s+cento\b|\bcento\b|\bpor[cç][aã]o\b", " ", texto,
                     flags=_re.IGNORECASE)
+    # Preparo. O BLOCO 2 manda o modelo dizer "sabor e preparo", entao ele
+    # escreve "Coxinha frango Frito". A planilha guarda o preparo na CATEGORIA
+    # (Fritos/Assados), nao no nome, e esse nome nao casava com nada: o
+    # calculate_order falhava e o modelo passava a escrever o espelho inteiro a
+    # mao — data por extenso e tudo. Produto que tem o preparo no proprio nome
+    # ("Saltenha Assada") sai intacto pela guarda la de cima.
+    texto = _re.sub(r"\b(fritos?|fritas?|assados?|assadas?)\b", " ", texto,
+                    flags=_re.IGNORECASE)
     texto = " ".join(texto.replace("-", " ").split()).strip(" -,")
     return texto
 
@@ -523,6 +531,15 @@ _PAGAMENTO_ROTULO = {
 }
 
 
+def _data_numerica(data_iso: str) -> str:
+    """'2026-09-22' -> '22/09/2026'. Vazio se nao der para converter."""
+    try:
+        from datetime import date
+        return date.fromisoformat(str(data_iso)).strftime("%d/%m/%Y")
+    except (TypeError, ValueError):
+        return ""
+
+
 def montar_notes(troco_para: str, total: float, observacao: str = "") -> str:
     """Observacao do pedido, com o troco que a API nao tem campo para receber.
 
@@ -574,7 +591,7 @@ def montar_resumo(items: list[dict], subtotal: float, delivery_fee: float,
                   return_fee: float, total: float, bairro: str = "",
                   modalidade: str = "", dia: str = "", horario: str = "",
                   cliente: str = "", pagamento: str = "", endereco: str = "",
-                  troco: str = "", referencia: str = "") -> str:
+                  troco: str = "", referencia: str = "", data_iso: str = "") -> str:
     """Resumo pronto para o agente copiar, com os numeros ja calculados aqui.
 
     Segue exatamente o modelo do BLOCO 5 do prompt operacional. Isso e
@@ -589,7 +606,11 @@ def montar_resumo(items: list[dict], subtotal: float, delivery_fee: float,
     retirada = (modalidade or "").strip().lower() == "retirada"
 
     linhas = [f"👤 Cliente: {cliente or '[Nome]'}"]
-    linhas.append(f"📅 Data: {dia or '[DIA - PERGUNTE AO CLIENTE]'}")
+    # O BLOCO 5 pede a data NUMERICA no espelho ("Data: [DD/MM/AAAA]"). Na
+    # conversa o texto amigavel continua valendo ("Posso deixar para
+    # segunda-feira (21/09)?"), mas no espelho o dono quer o formato fechado —
+    # no teste de 22/09 saiu "hoje, terca-feira (22/09)".
+    linhas.append(f"📅 Data: {_data_numerica(data_iso) or dia or '[DIA - PERGUNTE AO CLIENTE]'}")
     linhas.append(f"⏰ Horário: {horario or '[HORARIO]'}")
 
     if retirada:
@@ -664,7 +685,7 @@ def _resolver_frete(bairro: str) -> tuple[float, str, bool]:
 def calcular_pedido(items: list[dict], bairro: str = "", modalidade: str = "",
                     dia: str = "", horario: str = "", pagamento: str = "",
                     cliente: str = "", endereco: str = "", troco: str = "",
-                    referencia: str = "") -> dict:
+                    referencia: str = "", data_iso: str = "") -> dict:
     """Valida o pedido e calcula subtotal, frete e total.
 
     O frete vem da tabela oficial (facts.lookup_frete), nao mais de regex sobre
@@ -743,7 +764,7 @@ def calcular_pedido(items: list[dict], bairro: str = "", modalidade: str = "",
                 items, subtotal, delivery_fee, return_fee, total, bairro_oficial,
                 modalidade=modalidade, dia=dia, horario=horario,
                 cliente=cliente, pagamento=pagamento, endereco=endereco,
-                troco=troco, referencia=referencia,
+                troco=troco, referencia=referencia, data_iso=data_iso,
             ),
         }
         if avisos_itens:
@@ -827,7 +848,7 @@ def calcular_pedido(items: list[dict], bairro: str = "", modalidade: str = "",
                     items, subtotal, delivery_fee, return_fee, total, bairro_oficial,
                     modalidade=modalidade, dia=dia, horario=horario,
                     cliente=cliente, pagamento=pagamento, endereco=endereco,
-                troco=troco, referencia=referencia,
+                troco=troco, referencia=referencia, data_iso=data_iso,
                 ),
             }
             if avisos_itens:
