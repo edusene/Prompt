@@ -11,6 +11,7 @@ Uso:
     python test_agente.py "sua pergunta"   # pergunta avulsa
     python test_agente.py --fluxo          # conversa completa de pedido
     python test_agente.py --chat           # cliente manda tudo na primeira mensagem
+    python test_agente.py --extracao       # so a extracao: sem LLM, sem rede, sem banco
 """
 
 import sys
@@ -114,7 +115,88 @@ FLUXO_TUDO_DE_UMA_VEZ = [
 ]
 
 
+# Tabelas da bateria --extracao. Cada defeito que apareceu num teste do dono
+# vira uma linha aqui, para nao voltar.
+_CASOS_PAGAMENTO = [
+    # A frase que a propria Sandrinha oferece. Virava "dinheiro" e mandava o
+    # entregador levar troco para quem ia pagar no cartao (teste de 22/09).
+    ("Vou pagar no Cartão na entrega", "cartao_a_definir"),
+    ("Cartao na entrega", "cartao_a_definir"),
+    ("Dinheiro na entrega", "dinheiro"),
+    ("vou pagar na entrega", "dinheiro"),
+    ("quero pagar no credito na entrega", "cartao_credito"),
+    ("no débito na entrega", "cartao_debito"),
+    ("vou mandar o pix", "pix"),
+    ("Pix antecipado", "pix"),
+    ("maquininha", "cartao_a_definir"),
+    ("CARTAO", "cartao_a_definir"),
+    ("cartao de credito", "cartao_credito"),
+    ("aceita cartao? vou pagar em dinheiro", "dinheiro"),
+    ("nao e dinheiro, e no cartao", "cartao_a_definir"),
+    ("quero 50 coxinhas", ""),
+]
+
+_CASOS_HORARIO = [
+    # "20 horas" nao era entendido: o dono digitou 4x e a Sandrinha
+    # reperguntou 3x seguidas (teste de 22/09).
+    ("20 HORAS", "20h"), ("as 20 horas", "20h"), ("pode ser as 19 horas", "19h"),
+    ("20h", "20h"), ("18h", "18h"), ("18:30", "18h30"), ("hoje as 18h", "18h"),
+    ("8h15", "08h15"),
+    # Numero de rua nao pode virar horario.
+    ("Av. Calama, 3234", ""), ("Rua Salgado Filho, 2125", ""), ("2125", ""),
+    ("50 coxinhas", ""), ("quero 100 salgados", ""),
+    # Nem pergunta de prazo de entrega.
+    ("demora 1 hora?", ""), ("chega em 2 horas", ""), ("dentro de 2 horas", ""),
+    ("meia hora", ""),
+]
+
+_CASOS_REFERENCIA = [
+    # A locucao faz parte do texto: "em frente ao mercado" virava "ao mercado",
+    # e sem virgula no fim da frase nao extraia nada.
+    ("em frente ao mercado", "em frente ao mercado"),
+    ("perto do posto Ipiranga", "perto do posto Ipiranga"),
+    ("ao lado da farmacia", "ao lado da farmacia"),
+    ("fica atras do colegio Dom Bosco", "atras do colegio Dom Bosco"),
+    ("referencia: portao azul", "portao azul"),
+    ("ponto de referencia em frente a escola", "em frente a escola"),
+    ("Av Calama 100, proximo a Havan", "proximo a Havan"),
+    ("quero 50 coxinhas", ""),
+]
+
+
+def bateria_extracao() -> int:
+    """Confere a extracao deterministica. Nao chama LLM, rede nem banco."""
+    from agents.conversation import (detectar_pagamento, detectar_horario,
+                                     detectar_referencia)
+    falhas = []
+
+    def rodar(titulo, casos, fn):
+        print(f"\n=== {titulo} ===")
+        for entrada, esperado in casos:
+            obtido = fn(entrada)
+            ok = obtido == esperado
+            if not ok:
+                falhas.append(f"{titulo}: {entrada!r} -> {obtido!r}, esperado {esperado!r}")
+            print(f"  {'OK  ' if ok else 'FALHA'} {entrada!r:<42} -> {obtido!r}")
+
+    rodar("forma de pagamento", _CASOS_PAGAMENTO, detectar_pagamento)
+    rodar("horario", _CASOS_HORARIO, detectar_horario)
+    rodar("ponto de referencia", _CASOS_REFERENCIA, detectar_referencia)
+
+    print("\n" + "=" * 70)
+    if falhas:
+        for f in falhas:
+            print(f"  FALHA {f}")
+        print(f"\n{len(falhas)} falha(s)")
+        return 1
+    print("extracao: tudo certo")
+    return 0
+
+
 def main() -> int:
+    if "--extracao" in sys.argv:
+        return bateria_extracao()
+
     if not facts.is_loaded():
         print("ERRO: base de fatos vazia — rode 'python reindex_knowledge.py --embed' antes.")
         return 1

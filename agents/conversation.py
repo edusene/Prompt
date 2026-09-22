@@ -402,6 +402,123 @@ def detectar_data(message: str, now=None):
     return _horario.resolver_data(message, now)
 
 
+_PGTO_PIX = re.compile(r"\bpix\b")
+_PGTO_CREDITO = re.compile(r"\bcredito\b")
+_PGTO_DEBITO = re.compile(r"\bdebito\b")
+_PGTO_CARTAO = re.compile(r"\b(cartao|cartoes|maquininha|maquina de cartao|maestro|visa|elo|mastercard)\b")
+_PGTO_DINHEIRO = re.compile(r"\b(dinheiro|especie)\b")
+# "na entrega" sozinho: e o que sobra do menu da Sandrinha ("Dinheiro na
+# entrega"), mas so vale quando NENHUMA forma foi citada.
+_PGTO_NA_ENTREGA = re.compile(r"\b(na entrega|no ato da entrega)\b")
+
+
+def detectar_pagamento(message: str) -> str:
+    """Forma de pagamento citada na mensagem, ou "" se nenhuma.
+
+    A cadeia if/elif antiga decidia pela PRIMEIRA regra que batia, e o ramo do
+    dinheiro testava "na entrega" antes de alguem olhar a palavra "cartao".
+    Resultado: "Vou pagar no Cartao na entrega" — que e literalmente a frase
+    que a propria Sandrinha oferece — era gravado como dinheiro, e a comanda ia
+    para a fabrica mandando o entregador levar troco.
+
+    Aqui a decisao e por ULTIMA MENCAO: quem corrige no meio da frase ("nao e
+    dinheiro, e no cartao") tem a correcao respeitada. "na entrega" deixa de
+    ser sinal de dinheiro e vira so o ultimo recurso.
+    """
+    import horario as _horario
+    t = _horario._norm(message)        # tira acento: cartão/débito caem aqui
+
+    cred, deb = _PGTO_CREDITO.search(t), _PGTO_DEBITO.search(t)
+    cartao = _PGTO_CARTAO.search(t)
+    pix, dinheiro = _PGTO_PIX.search(t), _PGTO_DINHEIRO.search(t)
+
+    candidatos = []
+    marcas_cartao = [m for m in (cred, deb, cartao) if m]
+    if marcas_cartao:
+        if cred and not deb:
+            valor = "cartao_credito"
+        elif deb and not cred:
+            valor = "cartao_debito"
+        else:
+            # "cartao" solto, ou os dois citados: falta o detalhe, e
+            # pendencia_de_detalhe pergunta "debito ou credito?".
+            valor = "cartao_a_definir"
+        candidatos.append((min(m.start() for m in marcas_cartao), valor))
+    if pix:
+        candidatos.append((pix.start(), "pix"))
+    if dinheiro:
+        candidatos.append((dinheiro.start(), "dinheiro"))
+
+    if candidatos:
+        return max(candidatos)[1]
+    if _PGTO_NA_ENTREGA.search(t):
+        return "dinheiro"
+    return ""
+
+
+# Frases de DURACAO, que nao sao horario de agendamento. Sem esta guarda,
+# "demora 1 hora?" viraria pedido marcado para 1h da manhã e a Sandrinha
+# responderia "A gente so comeca as 07h40!".
+_DURACAO = re.compile(
+    r"\b(?:em|daqui a|dentro de|demora|demoram|leva|levam|dura|duram|durante|"
+    r"por|apos|depois de|antecedencia de|meia)\s+(?:umas?\s+)?\d{0,2}\s*horas?\b"
+)
+
+
+def detectar_horario(message: str) -> str:
+    """Horario do pedido no formato da ficha ("18h", "18h30"), ou "".
+
+    Usa horario.parse_horario em vez de uma regex propria: a daqui exigia 'h'
+    ou ':' colado no numero, entao "20 horas" nao era entendido — o cliente
+    respondia quatro vezes e a Sandrinha reperguntava o horario tres vezes
+    seguidas. parse_horario ja entende "20 horas" e continua devolvendo None
+    para numero de rua ("Av. Calama, 3234"), que era a razao da regex
+    restritiva.
+    """
+    import horario as _horario
+    t = _horario._norm(message)
+    if _DURACAO.search(t):
+        return ""
+    hm = _horario.parse_horario(t)
+    return _horario.formatar_horario(*hm) if hm else ""
+
+
+# Referencia anunciada por ROTULO: o rotulo some, fica so o valor.
+_REF_ROTULO = re.compile(
+    r"(?:ponto\s+de\s+refer[eê]ncia|refer[eê]ncia|proximidade)\s*(?:[:\-]\s*|\s+)(?P<v>.{2,80})",
+    re.IGNORECASE,
+)
+# Referencia dita por LOCUCAO: a locucao faz parte do texto e FICA.
+# "em frente ao mercado" tem de chegar inteiro ao entregador; a versao antiga
+# capturava so o que vinha depois do gatilho e entregava "ao mercado".
+_REF_LOCAL = re.compile(
+    r"(?:(?:em|de)\s+frente|perto|pr[oó]xim[oa]|ao\s+lado|do\s+lado|atr[aá]s|"
+    r"em\s+cima|embaixo)\s+(?:d[eoa]s?|ao?s?|à|a)?\s*.{2,80}",
+    re.IGNORECASE,
+)
+# Onde a referencia acaba. Era obrigatorio, entao referencia no FIM da frase
+# (sem virgula depois) nao era extraida de jeito nenhum.
+_REF_CORTE = re.compile(
+    r"\s*(?:[,;.]|\bhoje\b|\bamanh[aã]\b|\b[aà]s?\s+\d|\bpara\s+|\bpra\s+).*",
+    re.IGNORECASE | re.DOTALL,
+)
+_REF_COPULA = re.compile(r"^(?:e|eh|é|que)\s+", re.IGNORECASE)
+
+
+def detectar_referencia(message: str) -> str:
+    """Ponto de referencia do endereco, ou ""."""
+    m = _REF_ROTULO.search(message or "")
+    bruto = m.group("v") if m else None
+    if bruto is None:
+        m = _REF_LOCAL.search(message or "")
+        bruto = m.group(0) if m else None
+    if not bruto:
+        return ""
+    texto = _REF_CORTE.sub("", bruto).strip()
+    texto = _REF_COPULA.sub("", texto).strip()
+    return texto if len(texto) >= 2 else ""
+
+
 def _extract_data_from_message(message: str, state: "ConversationState") -> dict:
     """Extrai dados estruturados da mensagem do cliente (nome, itens, modalidade, endereco, horario, pagamento).
 
@@ -431,16 +548,9 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
 
     # ── Horario ─────────────────────────────────────────────────────────────
     if not state.horario:
-        # Padrões: "18h", "18:00", "as 18h", "às 18h", "hoje as 18h".
-        # O "as"/"às" era obrigatorio, entao o cliente que respondia so "16h" a
-        # pergunta de horario nao era entendido e a pergunta se repetia. O "h"
-        # ou ":" logo apos os digitos continua obrigatorio, para numero de rua
-        # ("Av. Calama, 3234") nao virar horario.
-        time_match = re.search(r'\b(?:as|às|a|à)?\s*(\d{1,2})\s*[h:](\d{2})?\b', msg_lower)
-        if time_match:
-            hour = time_match.group(1)
-            minute = time_match.group(2) or "00"
-            extracted["horario"] = f"{hour}h{minute}" if minute != "00" else f"{hour}h"
+        hora = detectar_horario(message)
+        if hora:
+            extracted["horario"] = hora
 
     # ── Data ────────────────────────────────────────────────────────────────
     # A data so entra no pedido se o cliente disser o dia. Nunca ha default
@@ -486,21 +596,9 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
 
     # ── Pagamento ───────────────────────────────────────────────────────────
     if not state.payment_method:
-        if re.search(r'\b(pix|chave pix)\b', msg_lower):
-            extracted["payment_method"] = "pix"
-        elif re.search(r'\b(crédito|credito)\b', msg_lower):
-            extracted["payment_method"] = "cartao_credito"
-        elif re.search(r'\b(débito|debito)\b', msg_lower):
-            extracted["payment_method"] = "cartao_debito"
-        elif re.search(r'\b(dinheiro|na entrega|pagar na entrega)\b', msg_lower):
-            extracted["payment_method"] = "dinheiro"
-        elif re.search(r'\b(cartão|cartao|maquininha|maestro|visa|elo)\b', msg_lower):
-            # Cartao sem dizer se e debito ou credito. Antes isso nao era
-            # extraido de jeito nenhum e a ficha continuava pedindo "forma de
-            # pagamento" mesmo depois de o cliente responder "cartao" duas
-            # vezes. Agora fica registrado como pendente de detalhe: a pergunta
-            # passa a ser debito ou credito, e nao a mesma de novo.
-            extracted["payment_method"] = "cartao_a_definir"
+        forma = detectar_pagamento(message)
+        if forma:
+            extracted["payment_method"] = forma
 
     # ── Itens ───────────────────────────────────────────────────────────────
     if not state.items:
@@ -581,9 +679,9 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
 
     # ── Referencia ──────────────────────────────────────────────────────────
     if not state.referencia:
-        ref_match = re.search(r'(?:referência|referencia|ponto de referência|ponto de referencia|proximidade|perto de|em frente|ao lado)\s+(.+?)(?:\s*(?:,|\.|hoje|amanhã|amanha|as |às |para |pra ))', message, re.IGNORECASE)
-        if ref_match:
-            extracted["referencia"] = ref_match.group(1).strip()
+        ref = detectar_referencia(message)
+        if ref:
+            extracted["referencia"] = ref
 
     return extracted
 

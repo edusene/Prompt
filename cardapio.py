@@ -574,7 +574,7 @@ def montar_resumo(items: list[dict], subtotal: float, delivery_fee: float,
                   return_fee: float, total: float, bairro: str = "",
                   modalidade: str = "", dia: str = "", horario: str = "",
                   cliente: str = "", pagamento: str = "", endereco: str = "",
-                  troco: str = "") -> str:
+                  troco: str = "", referencia: str = "") -> str:
     """Resumo pronto para o agente copiar, com os numeros ja calculados aqui.
 
     Segue exatamente o modelo do BLOCO 5 do prompt operacional. Isso e
@@ -596,7 +596,11 @@ def montar_resumo(items: list[dict], subtotal: float, delivery_fee: float,
         linhas.append(f"📍 Retirada: No balcão da fábrica ({ENDERECO_FABRICA})")
     else:
         linhas.append(f"📍 Bairro: {bairro or '[BAIRRO]'}")
-        linhas.append(f"📍 Endereço: {endereco or '[ENDERECO]'}")
+        # O BLOCO 5 pede "Rua, Numero e Ponto de Referencia" na mesma linha.
+        _end = endereco or "[ENDERECO]"
+        if referencia and referencia.lower() not in _end.lower():
+            _end = f"{_end}, {referencia}"
+        linhas.append(f"📍 Endereço: {_end}")
 
     linhas.append("Itens:")
     for item in items or []:
@@ -659,7 +663,8 @@ def _resolver_frete(bairro: str) -> tuple[float, str, bool]:
 
 def calcular_pedido(items: list[dict], bairro: str = "", modalidade: str = "",
                     dia: str = "", horario: str = "", pagamento: str = "",
-                    cliente: str = "", endereco: str = "", troco: str = "") -> dict:
+                    cliente: str = "", endereco: str = "", troco: str = "",
+                    referencia: str = "") -> dict:
     """Valida o pedido e calcula subtotal, frete e total.
 
     O frete vem da tabela oficial (facts.lookup_frete), nao mais de regex sobre
@@ -738,7 +743,7 @@ def calcular_pedido(items: list[dict], bairro: str = "", modalidade: str = "",
                 items, subtotal, delivery_fee, return_fee, total, bairro_oficial,
                 modalidade=modalidade, dia=dia, horario=horario,
                 cliente=cliente, pagamento=pagamento, endereco=endereco,
-                troco=troco,
+                troco=troco, referencia=referencia,
             ),
         }
         if avisos_itens:
@@ -822,7 +827,7 @@ def calcular_pedido(items: list[dict], bairro: str = "", modalidade: str = "",
                     items, subtotal, delivery_fee, return_fee, total, bairro_oficial,
                     modalidade=modalidade, dia=dia, horario=horario,
                     cliente=cliente, pagamento=pagamento, endereco=endereco,
-                troco=troco,
+                troco=troco, referencia=referencia,
                 ),
             }
             if avisos_itens:

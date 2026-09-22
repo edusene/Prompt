@@ -1272,6 +1272,21 @@ _RESSALVAS_NO_ACEITE = (
 )
 
 
+# Frases de encerramento do BLOCO 5. Se alguma aparece, o modelo esta dizendo
+# ao cliente que o pedido esta fechado.
+_MARCAS_DE_FECHAMENTO = (
+    "pedido agendado", "pedido finalizado", "pedido confirmado",
+    "ja esta sendo preparado", "esta sendo preparado",
+    "obrigado por escolher a balbs", "obrigada por escolher a balbs",
+)
+
+
+def _parece_fechamento(texto: str) -> bool:
+    """A resposta anuncia ao cliente que o pedido foi fechado?"""
+    limpo = " ".join(facts.normalize(texto or "").split())
+    return any(facts.normalize(m) in limpo for m in _MARCAS_DE_FECHAMENTO)
+
+
 def _confirmou_o_resumo(ultima_do_agente: str, texto_do_cliente: str) -> bool:
     """O cliente esta aceitando o espelho que acabou de receber?
 
@@ -1692,6 +1707,11 @@ def handle_flush(user: str, items: list[dict]) -> None:
         _transfer_done = False
         # Preenchido quando o cardapio recusa o pedido (ver FALHA_NO_ENVIO).
         _pedido_nao_entrou = ""
+        # True quando send_order_to_cardapio chegou a ser chamada com sucesso
+        # neste turno. Serve para pegar o caso em que o modelo ANUNCIA o
+        # fechamento sem ter chamado a tool - foi o que aconteceu no segundo
+        # teste do dono: ele leu "Pedido agendado!" e nada foi registrado.
+        _pedido_saiu = False
 
         def _transfer_handler(reason: str = "", **kwargs) -> str:
             nonlocal _transfer_done
@@ -1809,6 +1829,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
                 cliente=_memoria.get("name", ""),
                 endereco=_memoria.get("endereco", ""),
                 troco=_memoria.get("troco_para", ""),
+                referencia=_memoria.get("referencia", ""),
                 **kwargs,
             )
             try:
@@ -1834,11 +1855,36 @@ def handle_flush(user: str, items: list[dict]) -> None:
             # do LLM e justamente perder a garantia.
             if last_wa_msg_id:
                 kwargs["whatsapp_message_id"] = last_wa_msg_id
-            kwargs["payment_method"] = kwargs.get("payment_method") or _memoria.get("payment_method", "")
-            kwargs["delivery_address"] = kwargs.get("delivery_address") or (
-                f"{_memoria.get('endereco', '')}, {_memoria.get('bairro', '')}".strip(", ")
-                if _memoria.get("modality") == "entrega" else "Retirada"
+            _retirada = _memoria.get("modality") == "retirada"
+            # Na retirada o pagamento e no balcao e o prompt PROIBE perguntar
+            # (BLOCO 3, TRAVA DE RETIRADA). O modelo as vezes chuta "dinheiro"
+            # ao fechar; deixar esse chute passar fazia o portao de troco abaixo
+            # disparar numa retirada e a Sandrinha perguntar troco quando nao
+            # devia — foi o que quebrou o segundo teste do dono.
+            if _retirada:
+                kwargs["payment_method"] = ""
+            else:
+                kwargs["payment_method"] = kwargs.get("payment_method") or _memoria.get("payment_method", "")
+                # A API do cardapio so conhece pix/cartao_debito/cartao_credito/
+                # dinheiro. 'cartao_a_definir' e estado interno nosso: se chegar
+                # ate aqui, vai como 'cartao'.
+                if kwargs["payment_method"] == "cartao_a_definir":
+                    kwargs["payment_method"] = "cartao"
+
+            # Ponto de referencia entra no endereco: o prompt manda coleta-lo
+            # (BLOCO 3) e o modelo do BLOCO 5 escreve "Rua, Numero e Ponto de
+            # Referencia", mas ele ficava so na ficha e o entregador nunca via.
+            _endereco_ficha = ", ".join(
+                x for x in (_memoria.get("endereco", ""), _memoria.get("bairro", ""),
+                            _memoria.get("referencia", "")) if x
             )
+            kwargs["delivery_address"] = (
+                "Retirada" if _retirada
+                else (kwargs.get("delivery_address") or _endereco_ficha)
+            )
+            _ref = (_memoria.get("referencia") or "").strip()
+            if not _retirada and _ref and _ref.lower() not in kwargs["delivery_address"].lower():
+                kwargs["delivery_address"] = f"{kwargs['delivery_address']}, {_ref}"
             # Data do agendamento vem da ficha (ja resolvida em dia absoluto),
             # nao do texto livre do modelo.
             if _memoria.get("data_iso"):
@@ -1849,7 +1895,9 @@ def handle_flush(user: str, items: list[dict]) -> None:
 
             # Troco: a API nao tem campo change_for, entao ele vai na observacao
             # do pedido - unico lugar que chega a comanda do entregador.
-            if (kwargs.get("payment_method") or "").strip().lower() == "dinheiro"                     and not _memoria.get("troco_para"):
+            if (not _retirada
+                    and (kwargs.get("payment_method") or "").strip().lower() == "dinheiro"
+                    and not _memoria.get("troco_para")):
                 if "troco" in (last_assistant_text or "").lower():
                     # Ja perguntamos e a resposta nao foi entendida. Registrar e
                     # seguir e melhor do que travar o pedido num laco.
@@ -1883,9 +1931,12 @@ def handle_flush(user: str, items: list[dict]) -> None:
                 _pedido_nao_entrou = str(resultado)
                 print(f"[cardápio] pedido NAO entrou para {user}: {resultado[:120]}")
                 return resultado
+            nonlocal _pedido_saiu
+            _pedido_saiu = True
             conversation_memory.registrar_pedido_enviado(user, _memoria)
             return resultado
 
+        _t_llm = time.monotonic()
         try:
             reply = llm.generate_reply(
                 history=memory.get(user),
@@ -1910,8 +1961,33 @@ def handle_flush(user: str, items: list[dict]) -> None:
         except Exception as e:
             print(f"[flush] ERRO llm p/ {user}: {e}")
             return
+        _gasto_llm = time.monotonic() - _t_llm
+
+        # O dono pediu resposta entre 5 e 10 segundos. Medido no teste dele,
+        # em producao, deu 16s a 31s — e o log nao dizia onde o tempo ia. Esta
+        # linha e o que permite cortar o que pesa em vez de adivinhar: o
+        # debounce ja e conhecido (BUFFER_SECONDS), o preparo e tudo que vem
+        # antes do modelo (ficha, RAG, calendario) e o llm inclui as tools.
+        _gasto_ate_aqui = time.monotonic() - _inicio
+        print(f"[tempo] user={user} total={BUFFER_SECONDS + _gasto_ate_aqui:.1f}s "
+              f"(debounce={BUFFER_SECONDS:.1f} preparo={_gasto_ate_aqui - _gasto_llm:.1f} "
+              f"llm+tools={_gasto_llm:.1f})")
 
         _auditar_valores(user, reply, _valores_consultados)
+
+        # O cliente confirmou o resumo, o modelo escreveu que fechou, mas a tool
+        # nunca foi chamada — o pedido nao existe em lugar nenhum e o cliente
+        # foi embora achando que pediu. Aconteceu no 2o teste do dono (22/09
+        # 09:46): "Pedido agendado!" sem nenhum registro em cardapio_orders.
+        if (_aceitou_o_resumo and not _pedido_saiu and not _pedido_nao_entrou
+                and not _transfer_done and _parece_fechamento(reply)):
+            print(f"[flush] user={user} modelo ANUNCIOU fechamento sem chamar a "
+                  f"tool; descartando a resposta e transferindo")
+            reply = MENSAGEM_PEDIDO_NAO_ENTROU
+            perform_transfer(user, reason="modelo disse que fechou o pedido sem "
+                                          "chamar send_order_to_cardapio",
+                             send_message=False)
+            _transfer_done = True
 
         # Pedido recusado pelo cardapio: o que o modelo escreveu e descartado.
         # Ele ja respondeu "Pedido agendado!" por cima de um 401 — nao ha

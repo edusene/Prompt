@@ -349,6 +349,63 @@ muda um byte do que o cardapio recebe.
 > campo de pedido. No dia em que ele descrever um pedido valido, cada clique em
 > "Testar chave" vira comanda na fabrica.
 
+### Extracao deterministica (o que vira a comanda)
+
+`agents/conversation.py::_extract_data_from_message` roda ANTES do LLM e o que
+ela extrai vira a ficha — e `app._send_handler` forca `payment_method`,
+`items`, `delivery_address` e `scheduled_date` a partir dela. **Erro de regex
+ali e erro na comanda da fabrica.** Tres funcoes puras, com bateria propria:
+
+| funcao | por que existe |
+|---|---|
+| `detectar_pagamento` | a cadeia if/elif antiga decidia pela PRIMEIRA regra que batia, e o ramo do dinheiro testava "na entrega" antes de alguem olhar "cartao". "Vou pagar no Cartao na entrega" — a frase que a propria Sandrinha oferece — virava `dinheiro`, e a comanda mandava o entregador levar troco. Hoje decide por ULTIMA MENCAO, e "na entrega" so vale quando nenhuma forma foi citada. |
+| `detectar_horario` | a regex exigia `h` ou `:` colado no numero, entao "20 horas" nao era entendido: o dono digitou quatro vezes e a Sandrinha reperguntou tres. Usa `horario.parse_horario`, que ja resolvia isso, com guarda contra frases de DURACAO ("demora 1 hora?" nao e agendamento para 1h da manha). |
+| `detectar_referencia` | o terminador era obrigatorio, entao referencia no fim da frase nao era extraida; e a locucao era descartada, entao "em frente ao mercado" virava "ao mercado". Rotulo ("referencia: X") some, locucao ("em frente a X") fica. |
+
+```bash
+python test_agente.py --extracao   # sem LLM, sem rede, sem banco
+```
+
+Cada defeito que apareceu num teste do dono virou linha nessa bateria.
+
+### Retirada nao tem pagamento nem troco
+
+O BLOCO 3 do prompt e explicito: na retirada o pagamento e no balcao e
+**perguntar e proibido**. O modelo as vezes chuta `payment_method: dinheiro` ao
+fechar; como o portao de troco olhava so o pagamento, ele disparava numa
+retirada e a Sandrinha perguntava troco — no 2o teste do dono isso quebrou o
+fluxo e o pedido nunca foi enviado. Hoje `_send_handler` zera o pagamento
+quando a modalidade e retirada, e tanto o portao quanto
+`pendencia_de_detalhe` checam a modalidade.
+
+`cartao_a_definir` e estado interno nosso (falta saber debito ou credito); se
+chegar ao envio, vai para a API como `cartao`.
+
+### "Pedido agendado!" sem ter enviado
+
+Ja existia a trava para o cardapio RECUSAR o pedido (`FALHA_NO_ENVIO`). Faltava
+o caso em que o modelo simplesmente **nao chama a tool** e anuncia o
+fechamento assim mesmo — foi o 2o teste do dono: ele leu "Pedido agendado!" e
+nao ha nenhum registro em `cardapio_orders`.
+
+Se o cliente aceitou o resumo, nenhuma ordem saiu, ninguem transferiu e a
+resposta `_parece_fechamento()`, a resposta do modelo e descartada e o
+atendimento vai para um humano. O cliente nunca ouve que pediu quando nao
+pediu.
+
+### Onde vao os segundos
+
+O log escreve uma linha por mensagem:
+
+```
+[tempo] user=… total=8.7s (debounce=3.0 preparo=1.2 llm+tools=4.5)
+```
+
+Existe porque o teste do dono em producao deu 16s a 31s (mediana 18s) contra
+5s a 9s medidos localmente, e o log nao dizia onde o tempo ia. `debounce` sai
+de `BUFFER_SECONDS` — se o numero no Render nao bater com o do codigo, e a
+variavel de ambiente de la que esta valendo.
+
 ### Fechamento do pedido
 
 Depois do "sim" o modelo chamava `calculate_order` de novo e reapresentava o

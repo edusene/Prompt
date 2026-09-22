@@ -465,7 +465,9 @@ def pendencia_de_detalhe(memoria: dict) -> str:
 
     # O troco entra aqui, e nao em faltando(), porque depende do total: exigi-lo
     # antes travaria o calculate_order, que e justamente quem calcula o total.
-    if memoria.get("payment_method") == "dinheiro":
+    # Na retirada o pagamento e no balcao e o prompt PROIBE perguntar, entao
+    # nao existe troco a cobrar.
+    if memoria.get("payment_method") == "dinheiro" and memoria.get("modality") != "retirada":
         total = float(memoria.get("total") or 0)
         troco = memoria.get("troco_para", "")
         if total > 0 and not troco:
