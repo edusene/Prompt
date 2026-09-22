@@ -540,17 +540,34 @@ def _data_numerica(data_iso: str) -> str:
         return ""
 
 
-def montar_notes(troco_para: str, total: float, observacao: str = "") -> str:
-    """Observacao do pedido, com o troco que a API nao tem campo para receber.
+def montar_notes(troco_para: str, total: float, observacao: str = "",
+                 data_iso: str = "", horario: str = "") -> str:
+    """Observacao do pedido: e o unico campo livre que chega a comanda.
 
-    A lista oficial de campos do createOrderFromAgent nao inclui `change_for`.
-    Como o prompt manda a Sandrinha coletar o troco, ele vai aqui: e o unico
-    lugar que chega a comanda. Observacao POR ITEM nao serve — cardapio_catalogo
-    .traduzir() reconstroi cada item do zero e descarta 'price' e 'notes'.
+    Vao aqui as duas coisas que a API nao tem campo para receber:
 
-    O texto do modelo e preservado; o troco vem antes por ser o que o entregador
-    precisa ler mesmo se a comanda truncar.
+    HORARIO. O contrato do cardapio tem `scheduled_date` (so o dia) e nao tem
+    hora. O prompt do dono manda coletar "Data (DD/MM/AAAA) e Horario", e a
+    fabrica precisa da hora para saber quando produzir — "50 coxinhas para
+    hoje" nao diz se e para as 10h ou para as 19h. Sem isto a hora morria na
+    conversa.
+
+    TROCO. A lista oficial de campos nao inclui `change_for`.
+
+    Observacao POR ITEM nao serve: cardapio_catalogo.traduzir() reconstroi cada
+    item do zero e descarta 'price' e 'notes'. O agendamento vem primeiro
+    porque e o que decide a producao; depois o troco, que e do entregador.
     """
+    agendamento = ""
+    dia = _data_numerica(data_iso)
+    hora = (horario or "").strip()
+    if dia and hora:
+        agendamento = f"AGENDADO para {dia} as {hora}"
+    elif dia:
+        agendamento = f"AGENDADO para {dia}"
+    elif hora:
+        agendamento = f"Horario combinado: {hora}"
+
     troco_para = (troco_para or "").strip()
     if troco_para == "nao":
         parte = "Cliente tem o valor trocado - nao precisa de troco"
@@ -568,7 +585,9 @@ def montar_notes(troco_para: str, total: float, observacao: str = "") -> str:
     else:
         parte = ""
 
-    return " | ".join(p for p in (parte, (observacao or "").strip()) if p)
+    return " | ".join(
+        p for p in (agendamento, parte, (observacao or "").strip()) if p
+    )
 
 
 def _rotulo_pagamento(pagamento: str, troco_para: str = "") -> str:

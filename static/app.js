@@ -3760,6 +3760,21 @@ const CARDAPIO_STATUS_FALHA = ['erro', 'perdido'];
 // A regra era "erro -> vermelho, enviado -> verde, QUALQUER OUTRA COISA ->
 // pendente". Um status de falha novo caia no else e um pedido perdido
 // aparecia em laranja, como se ainda fosse entrar em producao.
+// Rotulo do status. A coluna e do NOSSO envio: nada le o estado de volta do
+// cardapio, entao o andamento na fabrica (aceito, impresso, entregue) so
+// aparece no painel do cardapio digital.
+const CARDAPIO_STATUS_ROTULO = {
+    enviado: 'Enviado ao cardapio',
+    aguardando_pix: 'Aguardando comprovante',
+    erro: 'Falhou',
+    perdido: 'Perdido',
+    pendente: 'Enviado ao cardapio',   // registros antigos
+};
+
+function cardapioStatusRotulo(status) {
+    return CARDAPIO_STATUS_ROTULO[status] || status;
+}
+
 function cardapioStatusClasse(status) {
     if (CARDAPIO_STATUS_FALHA.includes(status)) return 'cardapio-status-erro';
     if (status === 'enviado') return 'cardapio-status-ok';
@@ -3787,7 +3802,7 @@ async function loadCardapioOrders() {
             <td>${esc(o.customer_phone)}</td>
             <td title="${esc(itemsSummary)}">${esc(itemsSummary.length > 30 ? itemsSummary.substring(0, 30) + '...' : itemsSummary)}</td>
             <td>R$ ${parseFloat(o.total || 0).toFixed(2)}</td>
-            <td><span class="cardapio-status-badge ${statusClass}">${esc(o.status)}</span></td>
+            <td><span class="cardapio-status-badge ${statusClass}">${esc(cardapioStatusRotulo(o.status))}</span></td>
             <td><span class="cardapio-mode-badge ${modeClass}">${o.is_test ? 'Teste' : 'Prod'}</span></td>
             <td>${dt}</td>
             <td>
@@ -3834,7 +3849,7 @@ async function viewCardapioOrder(id) {
     const body = `
         <div class="cardapio-detail">
             <div class="cardapio-detail-header">
-                <span class="cardapio-status-badge ${statusClass}" style="font-size:14px">${esc(order.status)}</span>
+                <span class="cardapio-status-badge ${statusClass}" style="font-size:14px">${esc(cardapioStatusRotulo(order.status))}</span>
                 <span class="cardapio-mode-badge ${order.is_test ? 'cardapio-mode-test' : 'cardapio-mode-prod'}">${order.is_test ? 'MODO TESTE' : 'PRODUCAO'}</span>
             </div>
             <div class="cardapio-detail-grid">

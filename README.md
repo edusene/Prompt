@@ -417,6 +417,47 @@ quando a modalidade e retirada, e tanto o portao quanto
 `cartao_a_definir` e estado interno nosso (falta saber debito ou credito); se
 chegar ao envio, vai para a API como `cartao`.
 
+### O que a fabrica recebe de um agendamento
+
+O contrato do cardapio tem `scheduled_date` (so o DIA) e **nao tem campo de
+hora**. O prompt do dono manda coletar "Data (DD/MM/AAAA) e Horario", e a
+fabrica precisa da hora para saber quando produzir: "50 coxinhas para hoje" nao
+diz se e para as 10h ou para as 19h. A hora morria na conversa.
+
+Hoje ela vai no `notes`, junto do troco — o unico campo livre que chega a
+comanda:
+
+```
+scheduled_date : "22/09/2026"
+is_scheduled   : true
+notes          : "AGENDADO para 22/09/2026 as 19h | Troco para R$ 100,00 (...)"
+```
+
+`scheduled_date` em **DD/MM/AAAA**, nao ISO: e o formato que a especificacao do
+desenvolvedor pede (`scheduled_date (DD/MM/AAAA)`) e o mesmo do BLOCO 5.
+Estavamos mandando `2026-09-22`.
+
+### O status da aba Cardapio e do NOSSO envio
+
+So existem dois endpoints no cardapio: `createOrderFromAgent` e
+`calculateOrder`. **Nada le o estado de volta.** Guardar o `"pendente"` que o
+cardapio devolve no instante da criacao congelava essa palavra para sempre: o
+pedido podia estar aceito, impresso e entregue, e o painel continuaria dizendo
+"pendente".
+
+Entao a coluna diz o que de fato sabemos:
+
+| status | significa |
+|---|---|
+| `enviado` | saiu daqui e o cardapio aceitou |
+| `aguardando_pix` | retido AQUI ate alguem conferir o comprovante (botao **Validar Pix**) |
+| `erro` | o cardapio recusou |
+| `perdido` | desistimos do pedido |
+
+O andamento na fabrica (aceito, impresso, entregue) so aparece no painel do
+cardapio digital. Para espelhar aqui seria preciso um endpoint de leitura que o
+contrato atual nao tem.
+
 ### "Pedido agendado!" sem ter enviado
 
 Ja existia a trava para o cardapio RECUSAR o pedido (`FALHA_NO_ENVIO`). Faltava

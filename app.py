@@ -646,7 +646,16 @@ def _send_order_handler(
         is_test=is_test,
         order_id_externo=result.get("order_id", ""),
         display_id=result.get("display_id", ""),
-        status=result.get("status", "enviado") if result.get("success") else "erro",
+        # O status daqui e o do NOSSO lado, nao o da fabrica. Nada le o estado
+        # de volta do cardapio — so existem dois endpoints, createOrderFromAgent
+        # e calculateOrder —, entao guardar o "pendente" que o cardapio devolveu
+        # no instante da criacao congelava essa palavra para sempre: o pedido
+        # podia estar aceito, impresso e entregue e o painel continuaria dizendo
+        # "pendente". "enviado" e o que de fato sabemos. A unica excecao e
+        # aguardando_pix, que e estado NOSSO: o pedido fica retido aqui ate
+        # alguem conferir o comprovante.
+        status=("aguardando_pix" if result.get("status") == "aguardando_pix"
+                else "enviado") if result.get("success") else "erro",
         api_response=result,
         error_message=result.get("error", "") if not result.get("success") else "",
     )
@@ -1900,7 +1909,12 @@ def handle_flush(user: str, items: list[dict]) -> None:
             # Data do agendamento vem da ficha (ja resolvida em dia absoluto),
             # nao do texto livre do modelo.
             if _memoria.get("data_iso"):
-                kwargs["scheduled_date"] = _memoria["data_iso"]
+                # DD/MM/AAAA: e o formato que a especificacao do desenvolvedor
+                # do cardapio pede ("scheduled_date (DD/MM/AAAA)") e o mesmo
+                # que o BLOCO 5 do prompt usa. Estavamos mandando ISO.
+                kwargs["scheduled_date"] = (
+                    cardapio._data_numerica(_memoria["data_iso"]) or _memoria["data_iso"]
+                )
                 kwargs["is_scheduled"] = True
             # Sabores do pacote saem dos itens da ficha.
             kwargs["items"] = kwargs.get("items") or _memoria.get("items") or []
@@ -1933,6 +1947,8 @@ def handle_flush(user: str, items: list[dict]) -> None:
                 _memoria.get("troco_para", ""),
                 float(_memoria.get("total") or kwargs.get("total") or 0),
                 kwargs.get("notes", ""),
+                data_iso=_memoria.get("data_iso", ""),
+                horario=_memoria.get("horario", ""),
             )
 
             resultado = _send_order_handler(**kwargs)
@@ -4443,7 +4459,10 @@ def api_cardapio_order_validar_pix(order_id):
 
     database.atualizar_cardapio_order(
         order_id,
-        status=resultado.get("status", "pendente"),
+        # Mesma razao do status na criacao: "enviado" e o que sabemos: o
+        # pedido saiu daqui e o cardapio aceitou. O que acontece depois so o
+        # painel do cardapio mostra.
+        status="enviado",
         order_id_externo=resultado.get("order_id", ""),
         display_id=resultado.get("display_id", ""),
         api_response=resultado,
