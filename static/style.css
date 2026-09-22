@@ -4219,6 +4219,15 @@ select option {
 }
 
 /* Status badges */
+/* "Agendado para": destaque leve, porque e a coluna que o dono usa para
+   planejar producao. Sem cor forte para nao competir com o status. */
+.cardapio-agendado {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--warning);
+    white-space: nowrap;
+}
+
 .cardapio-status-badge {
     display: inline-flex;
     align-items: center;

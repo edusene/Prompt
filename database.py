@@ -101,6 +101,23 @@ def init_db() -> None:
         except Exception:
             pass
 
+    # Migração: quando o pedido e para, nao quando foi feito. A coluna "Data"
+    # do painel e created_at, entao um pedido para amanha as 19h ficava
+    # visualmente igual a um para agora, e o dono so descobria o agendamento
+    # abrindo o detalhe e lendo as observacoes.
+    #
+    # scheduled_time e coluna NOSSA: o contrato do cardapio nao tem campo de
+    # hora (por isso ela vai no notes), mas nada impede a nossa tabela de
+    # guardar o que a ficha ja sabe.
+    cocols = db.table_columns("cardapio_orders")
+    for col in ("scheduled_date", "scheduled_time"):
+        if col not in cocols:
+            try:
+                db.execute(f"ALTER TABLE cardapio_orders ADD COLUMN {col} TEXT DEFAULT ''")
+                print(f"[db] coluna {col} adicionada em cardapio_orders")
+            except Exception:
+                pass
+
     # Migração: reset_at marca onde o atendimento recomecou (#reset). O
     # historico enviado ao LLM e cortado nesse ponto; sem a coluna, o corte
     # viveria so em memoria e o Render reiniciando trazia a conversa velha de
@@ -1746,6 +1763,8 @@ def criar_cardapio_order(
     status: str = "pendente",
     api_response: dict = None,
     error_message: str = "",
+    scheduled_date: str = "",
+    scheduled_time: str = "",
 ) -> dict:
     """Insere um log de pedido enviado ao cardápio digital."""
     now = datetime.utcnow().isoformat()
@@ -1756,13 +1775,15 @@ def criar_cardapio_order(
         "(conversation_id, contact_id, order_id_externo, display_id, status, "
         "customer_name, customer_phone, delivery_address, payment_method, "
         "items, subtotal, delivery_fee, return_fee, total, notes, "
-        "whatsapp_message_id, is_test, api_response, error_message, created_at) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "whatsapp_message_id, is_test, api_response, error_message, created_at, "
+        "scheduled_date, scheduled_time) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (
             conversation_id, contact_id, order_id_externo, display_id, status,
             customer_name, customer_phone, delivery_address, payment_method,
             items_json, subtotal, delivery_fee, return_fee, total, notes,
             whatsapp_message_id, is_test, api_resp_json, error_message, now,
+            scheduled_date, scheduled_time,
         ),
     )
     if log_id:
@@ -1774,7 +1795,7 @@ def atualizar_cardapio_order(order_db_id: int, **fields) -> None:
     """Atualiza um log de pedido (status, api_response, error_message, etc)."""
     allowed = (
         "order_id_externo", "display_id", "status", "api_response",
-        "error_message",
+        "error_message", "scheduled_date", "scheduled_time",
     )
     sets, vals = [], []
     for k, v in fields.items():

@@ -538,6 +538,9 @@ def _send_order_handler(
     whatsapp_message_id: str = "",
     scheduled_date: str = "",
     is_scheduled: bool = False,
+    # So para o NOSSO registro: o contrato do cardapio nao tem campo de hora,
+    # mas a aba Cardapio precisa dela para o dono planejar a producao.
+    scheduled_time: str = "",
     **kwargs,
 ) -> str:
     """Handler para a tool send_order_to_cardapio."""
@@ -658,6 +661,8 @@ def _send_order_handler(
                 else "enviado") if result.get("success") else "erro",
         api_response=result,
         error_message=result.get("error", "") if not result.get("success") else "",
+        scheduled_date=scheduled_date if is_scheduled else "",
+        scheduled_time=scheduled_time if is_scheduled else "",
     )
 
     # Emite evento SSE para atualizar o painel em tempo real
@@ -1916,6 +1921,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
                     cardapio._data_numerica(_memoria["data_iso"]) or _memoria["data_iso"]
                 )
                 kwargs["is_scheduled"] = True
+                kwargs["scheduled_time"] = _memoria.get("horario", "")
             # Sabores do pacote saem dos itens da ficha.
             kwargs["items"] = kwargs.get("items") or _memoria.get("items") or []
 

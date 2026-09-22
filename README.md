@@ -437,6 +437,29 @@ notes          : "AGENDADO para 22/09/2026 as 19h | Troco para R$ 100,00 (...)"
 desenvolvedor pede (`scheduled_date (DD/MM/AAAA)`) e o mesmo do BLOCO 5.
 Estavamos mandando `2026-09-22`.
 
+### Onde o pedido aparece, e o que o dono ve
+
+| pagamento | cardapio digital (tela da fabrica) | aba Cardapio |
+|---|---|---|
+| dinheiro / cartao / retirada | vai na hora | aparece |
+| **Pix** | **nao vai** — fica retido | aparece como "Aguardando comprovante" |
+
+O Pix nao ir direto e regra do dono, nao defeito: o V7 diz "Liberacao de
+producao condicionada ao Pix antecipado". O caminho e pedido retido -> cliente
+manda o comprovante -> alguem clica **Validar Pix** -> ai vai para a fabrica.
+`database.criar_cardapio_order` e chamado em TODOS os caminhos, entao na nossa
+aba o pedido aparece sempre — inclusive o retido e o que falhou.
+
+A coluna **Data** e `created_at`, quando o pedido foi FEITO. A coluna
+**Agendado para** e quando ele E, de `scheduled_date` + `scheduled_time`, e
+mostra `—` no pedido imediato. Sem ela um pedido para amanha as 19h ficava
+visualmente identico a um para agora, e o agendamento so aparecia abrindo o
+detalhe e lendo as observacoes.
+
+`scheduled_time` e coluna NOSSA: o contrato do cardapio nao tem campo de hora
+(por isso ela tambem vai no `notes`), mas nada impede a nossa tabela de guardar
+o que a ficha ja sabe.
+
 ### O status da aba Cardapio e do NOSSO envio
 
 So existem dois endpoints no cardapio: `createOrderFromAgent` e

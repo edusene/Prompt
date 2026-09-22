@@ -3775,6 +3775,17 @@ function cardapioStatusRotulo(status) {
     return CARDAPIO_STATUS_ROTULO[status] || status;
 }
 
+// "Agendado para": quando o pedido E, nao quando foi feito (a coluna Data e
+// created_at). Um pedido para amanha as 19h ficava identico a um para agora.
+function cardapioAgendamento(o) {
+    const dia = (o.scheduled_date || '').trim();
+    const hora = (o.scheduled_time || '').trim();
+    if (dia && hora) return `${dia} às ${hora}`;
+    if (dia) return dia;
+    if (hora) return hora;
+    return '';
+}
+
 function cardapioStatusClasse(status) {
     if (CARDAPIO_STATUS_FALHA.includes(status)) return 'cardapio-status-erro';
     if (status === 'enviado') return 'cardapio-status-ok';
@@ -3802,6 +3813,7 @@ async function loadCardapioOrders() {
             <td>${esc(o.customer_phone)}</td>
             <td title="${esc(itemsSummary)}">${esc(itemsSummary.length > 30 ? itemsSummary.substring(0, 30) + '...' : itemsSummary)}</td>
             <td>R$ ${parseFloat(o.total || 0).toFixed(2)}</td>
+            <td>${cardapioAgendamento(o) ? `<span class="cardapio-agendado">${esc(cardapioAgendamento(o))}</span>` : '<span class="muted">—</span>'}</td>
             <td><span class="cardapio-status-badge ${statusClass}">${esc(cardapioStatusRotulo(o.status))}</span></td>
             <td><span class="cardapio-mode-badge ${modeClass}">${o.is_test ? 'Teste' : 'Prod'}</span></td>
             <td>${dt}</td>
@@ -3866,8 +3878,12 @@ async function viewCardapioOrder(id) {
                     <span>${esc(order.payment_method || '-')}</span>
                 </div>
                 <div class="cardapio-detail-field">
-                    <label>Data</label>
+                    <label>Feito em</label>
                     <span>${dt}</span>
+                </div>
+                <div class="cardapio-detail-field">
+                    <label>Agendado para</label>
+                    <span>${cardapioAgendamento(order) ? esc(cardapioAgendamento(order)) : 'entrega imediata'}</span>
                 </div>
             </div>
             ${order.delivery_address ? `
