@@ -662,6 +662,22 @@ def detectar_referencia(message: str) -> str:
     return texto if len(texto) >= 2 else ""
 
 
+# Rua respondida sem rotulo: "SALGADO FILHO,2233", "Duque de Caxias 500".
+# Duas palavras ou mais e o numero no fim, e a mensagem inteira, para nao
+# confundir com um trecho de pedido.
+_RUA_SEM_ROTULO = re.compile(
+    r"^[A-Za-zÀ-ÿ]{3,}(?:[\s.]+[A-Za-zÀ-ÿ]{2,})+\s*,?\s*n?[ºo°]?\s*\d{1,6}$",
+    re.IGNORECASE)
+# O que nunca e endereco, por mais que caiba no molde acima.
+_NAO_E_RUA = re.compile(
+    r"\b(?:hoje|amanh[aã]|depois|hora|horas|hrs|manh[aã]|tarde|noite|"
+    r"segunda|ter[cç]a|quarta|quinta|sexta|s[aá]bado|domingo|"
+    r"pix|cart[aã]o|credito|cr[eé]dito|debito|d[eé]bito|dinheiro|troco|"
+    r"reais|total|unidades?|coxinhas?|churros|"
+    r"pode|posso|quero|vou|ser|seria|fica|manda|mande|mais|menos|"
+    r"sim|n[aã]o|obrigad[oa])\b")
+
+
 def _extract_data_from_message(message: str, state: "ConversationState") -> dict:
     """Extrai dados estruturados da mensagem do cliente (nome, itens, modalidade, endereco, horario, pagamento).
 
@@ -724,6 +740,18 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
             # Remove "bairro" e o que vem depois se estiver junto
             addr = re.split(r'\s+bairro', addr, flags=re.IGNORECASE)[0].strip()
             extracted["endereco"] = addr
+        elif state.bairro and "entrega" in (state.modality,
+                                            extracted.get("modality")):
+            # Quem responde "qual e a rua e o numero?" responde so a rua:
+            # "SALGADO FILHO,2233". Sem "Rua" na frente nada era guardado, e a
+            # Sandrinha pedia o endereco de novo — o dono teve de repetir o
+            # endereco inteiro em caixa alta para seguir. So vale quando a
+            # entrega e o bairro ja estao na ficha, isto e, quando o endereco
+            # e de fato a proxima pergunta: duas palavras ou mais e um numero
+            # no fim, sem nenhuma palavra de dia, hora ou pagamento no meio.
+            solto = _RUA_SEM_ROTULO.match(message.strip())
+            if solto and not _NAO_E_RUA.search(message.lower()):
+                extracted["endereco"] = " ".join(message.strip().split())
 
     # ── Bairro ──────────────────────────────────────────────────────────────
     if not state.bairro:
@@ -750,10 +778,17 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
         # com nada — o nome seguia engolindo texto ate esbarrar no cifrao, que
         # a classe de caracteres nao aceita, e o item inteiro sumia da ficha.
         # No aceite isso deixou a ficha com 2 dos 3 itens do pedido.
+        # Qualquer outro sinal tambem encerra o nome. Valiam so os
+        # terminadores listados acima, entao '50 coxinha e 50 churros"'
+        # guardava a coxinha e perdia o churros: a aspa nao terminava o
+        # nome nem cabia na classe de caracteres. O dono fechou assim um
+        # pedido de R$ 94,00 cobrando R$ 54,00. E lookahead, para nao
+        # comer o '50' do item seguinte quando o sinal e um digito.
         item_pattern = re.findall(
             r'(\d+)\s*(?:unidades?|un\.?|pcs\.?)?\s*(de\s+)?([a-záàãâéêíóôõúç\s]+?)'
             r'(?:\s*(?:[,;.!?]|\be\b|\bpra\b|\bpara\b|\bcom\b|\bno\b|\bna\b|\bem\b'
-            r'|\bhoje\b|\bamanh[aã]\b|\bàs\b|\bas\b|\bde\s+r\$|r\$|$))',
+            r'|\bhoje\b|\bamanh[aã]\b|\bàs\b|\bas\b|\bde\s+r\$|r\$'
+            r"|(?![a-z\u00e0-\u00ff])|$))",
             msg_lower
         )
         items_found = []
