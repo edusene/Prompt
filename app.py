@@ -1392,8 +1392,9 @@ _SO_HORARIO = _re_mod.compile(
 )
 
 
-def _e_concordancia(texto: str) -> bool:
-    limpo = _re_mod.sub(r"[^\w\s]", " ", (texto or "").lower(), flags=_re_mod.UNICODE)
+def _concorda(frase: str) -> bool:
+    """A frase, sozinha, e um 'sim'?"""
+    limpo = _re_mod.sub(r"[^\w\s]", " ", (frase or "").lower(), flags=_re_mod.UNICODE)
     limpo = " ".join(limpo.split())
     if not limpo:
         return False
@@ -1402,6 +1403,25 @@ def _e_concordancia(texto: str) -> bool:
     # "pode sim, as 11h": tira o horario e reavalia o que sobrou.
     sem_horario = " ".join(_SO_HORARIO.sub(" ", limpo).split())
     return bool(sem_horario) and sem_horario in _CONCORDANCIAS
+
+
+def _e_concordancia(texto: str) -> bool:
+    """O cliente aceitou o dia que a Sandrinha ofereceu?
+
+    Basta a mensagem COMECAR com o sim; ela nao precisa ser so isso. Quem
+    aceita costuma emendar o pedido na mesma frase, e exigir a mensagem
+    inteira fazia a data se perder: no teste do dono de 23/09 13:32 ele
+    respondeu "Pode sim, pode adiantar pras 14h. Passa os valores de tudo com
+    a entrega e o cartao pra eu confirmar" e a Sandrinha perguntou o dia de
+    novo, dois turnos depois.
+
+    So a PRIMEIRA oracao conta, o que mantem a guarda contra o contrario:
+    "nao, pode ser amanha" comeca com "nao" e continua nao sendo aceite.
+    """
+    if _concorda(texto):
+        return True
+    primeira = _re_mod.split(r"[,.;!]", (texto or "").strip(), maxsplit=1)[0]
+    return _concorda(primeira)
 
 
 # Marcas de que a mensagem anterior do agente FOI o espelho do pedido. Ambas

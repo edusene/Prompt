@@ -490,8 +490,17 @@ def detectar_modalidade(message: str) -> str:
     if _ENTREGA_EXPLICITA.search(t):
         return "entrega"
 
-    # Pergunta sobre entrega nao e escolha de entrega.
-    if "?" in message or _MODALIDADE_PERGUNTA.search(t):
+    # Pergunta SOBRE entrega nao e escolha de entrega. Repare que nao basta a
+    # mensagem TER uma interrogacao: quem manda o pedido pronto quase sempre
+    # termina perguntando o preco. No teste do dono de 23/09 13:31 a frase era
+    # "Entrega na Rua Duque de Caxias, 500, bairro Agenor de Carvalho. Vou
+    # pagar no cartao. Quanto fica tudo?" — o "?" do fim apagava a modalidade,
+    # e a Sandrinha perguntava entrega ou retirada logo depois de ele ter dito
+    # o endereco inteiro.
+    #
+    # Quem decide e _MODALIDADE_PERGUNTA, que exige a palavra de pergunta
+    # PERTO de entrega/retirada e na mesma frase.
+    if _MODALIDADE_PERGUNTA.search(t):
         return ""
 
     # Resposta curta e seca a "entrega ou retirada?".
