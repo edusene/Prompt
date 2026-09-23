@@ -1244,7 +1244,8 @@ def _numeros_do_pedido(memoria: dict) -> dict:
     return resultado if resultado.get("success") else {}
 
 
-def _conferir_dinheiro(user: str, reply: str, memoria: dict) -> str:
+def _conferir_dinheiro(user: str, reply: str, memoria: dict,
+                       calculo: dict | None = None, pular: bool = False) -> str:
     """Troca o dinheiro inventado pelo resumo que o codigo calculou.
 
     Os dois pedidos do dono sobre valor — taxa de retorno inegociavel e
@@ -1252,8 +1253,17 @@ def _conferir_dinheiro(user: str, reply: str, memoria: dict) -> str:
     cliente tem de vir daqui, nao da cabeca do modelo. Em vez de tentar
     consertar a frase, devolve o resumo oficial inteiro, que ja sai formatado
     de cardapio.montar_resumo com subtotal, frete, taxa e troco.
+
+    `calculo` e a resposta da calculate_order deste turno, quando houve uma.
+    Ela tem prioridade sobre a ficha: e o numero que o modelo TINHA EM MAOS
+    quando escreveu a resposta, entao divergir dela nao e ficha desatualizada,
+    e o modelo ignorando a propria ferramenta. Conferir contra ela tambem nao
+    custa rede nenhuma.
+
+    `pular` vale quando a tool rodou e FALHOU (pediu confirmacao, item fora do
+    cardapio): ai a resposta do modelo e uma pergunta, nao um total.
     """
-    if not reply:
+    if not reply or pular:
         return reply
 
     ditos = [_valor_em_float(b) for b in _RX_TOTAL_DITO.findall(reply)]
@@ -1271,16 +1281,17 @@ def _conferir_dinheiro(user: str, reply: str, memoria: dict) -> str:
     #
     # Nao e perda de alcance: o defeito que o dono relatou e "a IA alucinou
     # valores AO EDITAR ITENS", ou seja, depois de ja ter havido um calculo.
-    try:
-        _ja_calculado = float(memoria.get("total") or 0)
-    except (TypeError, ValueError):
-        _ja_calculado = 0.0
-    if _ja_calculado <= 0:
-        print(f"[dinheiro] user={user} valores fora de calculate_order, mas a ficha "
-              f"nunca foi calculada; nao da para conferir sem arriscar piorar")
-        return reply
+    if not calculo:
+        try:
+            _ja_calculado = float(memoria.get("total") or 0)
+        except (TypeError, ValueError):
+            _ja_calculado = 0.0
+        if _ja_calculado <= 0:
+            print(f"[dinheiro] user={user} valores fora de calculate_order, mas a ficha "
+                  f"nunca foi calculada; nao da para conferir sem arriscar piorar")
+            return reply
 
-    numeros = _numeros_do_pedido(memoria)
+    numeros = calculo or _numeros_do_pedido(memoria)
     if not numeros:
         if negou_retorno:
             print(f"[dinheiro] user={user} modelo mexeu na taxa de retorno mas a "
@@ -1882,6 +1893,12 @@ def handle_flush(user: str, items: list[dict]) -> None:
         # toda resposta com total custaria ~1s justamente na hora em que o
         # cliente esta esperando o resumo.
         _calculou_na_volta = False
+        # O resultado da ultima calculate_order bem-sucedida deste turno.
+        # Chamar a tool nao garante nada: no teste do dono de 22/09 21:27 ela
+        # devolveu R$ 94,00 e o modelo escreveu R$ 54,00 na mesma volta, tendo
+        # sumido com um item do pedido. Guardando a resposta da tool da para
+        # conferir contra ela sem custo de rede nenhum.
+        _calculo_da_volta = None
 
         def _transfer_handler(reason: str = "", **kwargs) -> str:
             nonlocal _transfer_done
@@ -2003,10 +2020,12 @@ def handle_flush(user: str, items: list[dict]) -> None:
                 data_iso=_memoria.get("data_iso", ""),
                 **kwargs,
             )
-            nonlocal _calculou_na_volta
+            nonlocal _calculou_na_volta, _calculo_da_volta
             _calculou_na_volta = True
             try:
                 dados = json.loads(resultado)
+                if dados.get("success") and dados.get("total"):
+                    _calculo_da_volta = dados
                 for campo in ("subtotal", "delivery_fee", "return_fee", "total"):
                     if dados.get(campo) is not None:
                         _valores_consultados.append(float(dados[campo]))
@@ -2171,8 +2190,9 @@ def handle_flush(user: str, items: list[dict]) -> None:
         # para o log continuar registrando o que o modelo tinha escrito, e so
         # vale enquanto o pedido nao foi enviado: depois do envio a resposta
         # fala de um pedido que ja existe, com os valores que foram gravados.
-        if not _pedido_saiu and not _transfer_done and not _calculou_na_volta:
-            reply = _conferir_dinheiro(user, reply, _memoria)
+        if not _pedido_saiu and not _transfer_done:
+            reply = _conferir_dinheiro(user, reply, _memoria, _calculo_da_volta,
+                                       pular=_calculou_na_volta and not _calculo_da_volta)
 
         # O cliente confirmou o resumo, o modelo escreveu que fechou, mas a tool
         # nunca foi chamada — o pedido nao existe em lugar nenhum e o cliente

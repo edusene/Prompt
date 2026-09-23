@@ -489,6 +489,54 @@ def _normalizar_itens(items: list[dict]) -> tuple[list[dict], list[str], list[st
     return normalizados, avisos, nao_encontrados
 
 
+# A partir daqui uma quantidade deixa de ser "comer na hora" e passa a ser
+# encomenda: e o passo do lote de festa.
+_LOTE_DE_FESTA = 25
+
+# Categoria da planilha que vende por unidade, no balcao.
+_CATEGORIA_BALCAO = "Salgados Grandes"
+
+
+def _balcao_em_quantidade_de_festa(items: list[dict]) -> list[str]:
+    """Itens de balcao pedidos em quantidade que so faz sentido como festa.
+
+    No teste do dono de 22/09 21:22 o cliente escreveu "QUERO 50 COX E 50
+    CHURROS" logo depois de a Sandrinha perguntar "1 porcao de 25 ou 2 porcoes
+    com 50 unidades?". O resumo saiu com 50 unidades de Coxinha de Frango com
+    Catupiry a R$ 9,00 — R$ 450,00 no lugar de R$ 40,00. O cliente reclamou
+    tres vezes, a Sandrinha defendeu a conta as tres, e ele encerrou com "MUITO
+    OBRIGADO MAS VOU PARA SEU CONCORRENTE".
+
+    A aritmetica estava certa; o PRODUTO e que era outro. Nenhuma conferencia
+    de soma pega isso — por isso a trava e aqui, na quantidade: onze vezes o
+    preco e caro demais para sair sem uma pergunta.
+    """
+    try:
+        import facts
+        produtos = facts.get()["produtos"]
+    except Exception:
+        return []
+
+    categorias = {facts.normalize(p["item"]): p.get("categoria", "") for p in produtos}
+    suspeitos = []
+    for item in items or []:
+        nome = str(item.get("name", "")).strip()
+        try:
+            qtd = int(float(item.get("quantity", 0) or 0))
+        except (ValueError, TypeError):
+            continue
+        if qtd < _LOTE_DE_FESTA:
+            continue
+        if categorias.get(facts.normalize(nome), "") != _CATEGORIA_BALCAO:
+            continue
+        preco = float(item.get("price", 0) or 0)
+        suspeitos.append(
+            f"{qtd} un de '{nome}' sairia a {_brl(preco)}/un "
+            f"({_brl(qtd * preco)})"
+        )
+    return suspeitos
+
+
 _MODALIDADE_ROTULO = {
     "entrega": "Entrega",
     "retirada": "Retirada na fabrica",
@@ -749,6 +797,23 @@ def calcular_pedido(items: list[dict], bairro: str = "", modalidade: str = "",
                 "calculate_order de novo. NAO informe total ao cliente antes disso."
             ),
             "itens_nao_encontrados": nao_encontrados,
+        }
+
+    # Salgado de BALCAO em quantidade de lote de FESTA quase sempre e o produto
+    # errado, e a diferenca de preco e de onze para um.
+    confirmar = _balcao_em_quantidade_de_festa(items)
+    if confirmar:
+        return {
+            "success": False,
+            "error": (
+                "PERGUNTE ANTES DE CALCULAR: " + "; ".join(confirmar) +
+                ". Salgado grande de balcao e vendido por unidade, para comer "
+                "na hora; quantidade nessa faixa normalmente e porcao de festa, "
+                "que sai em lotes de 25 por sabor. Confirme com o cliente qual "
+                "dos dois ele quer e chame calculate_order de novo. NAO informe "
+                "total ao cliente antes disso."
+            ),
+            "itens_para_confirmar": confirmar,
         }
 
     # Traducao para o cardapio digital. Os dois catalogos divergem em varios
