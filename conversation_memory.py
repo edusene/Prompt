@@ -513,7 +513,9 @@ def pendencia_de_item(memoria: dict) -> str:
         "ITEM AMBIGUO - o mesmo nome existe como sabor de pacote e como salgado "
         "grande avulso, com precos bem diferentes: " + "; ".join(ambiguos)
         + ". Pergunte ao cliente qual das duas opcoes ele quer, citando as duas "
-        "com o preco, ANTES de seguir para entrega/retirada."
+        "com o preco, ANTES de seguir para entrega/retirada. E PROIBIDO "
+        "transferir para humano por causa disto: a duvida se resolve "
+        "perguntando, e o cliente ainda esta montando o pedido."
     )
 
 
@@ -575,6 +577,62 @@ def pendencia_de_lote(memoria: dict) -> str:
         "NAO apresente resumo nem total enquanto a quantidade nao fechar em "
         "multiplo de 25."
     )
+
+
+def aplicar_ajuste_de_lote(memoria: dict) -> list[str]:
+    """Grava na ficha o ajuste de quantidade que o cliente acabou de aceitar.
+
+    Sem isto o aceite morria na conversa. A Sandrinha oferecia "Ajusto para 25
+    quibes?", o cliente dizia "pode ser", e a ficha continuava com 5: a trava
+    de lote apontava a mesma quebra na mensagem seguinte, o funil nao andava e
+    o modelo acabava transferindo para um humano um pedido que o cliente ja
+    tinha ajustado (teste do dono, 23/09 15:41). A quantidade e do codigo, nao
+    do texto do modelo.
+
+    Devolve a lista de mudancas, para o log.
+    """
+    items = memoria.get("items") or []
+    if not items:
+        return []
+    try:
+        import cardapio
+        import cardapio_catalogo
+        # O nome tem de passar pela tabela antes: a ficha guarda "Coxinha" e a
+        # planilha diz "Coxinha frango" - sem normalizar, nenhum item casa.
+        norm, _avisos, nao_encontrados = cardapio._normalizar_itens(
+            [dict(i) for i in items]
+        )
+        if nao_encontrados or len(norm) != len(items):
+            return []          # sem correspondencia 1 para 1 nao da para aplicar
+        quebras = cardapio_catalogo.quebras_de_lote([dict(i) for i in norm])
+    except Exception as e:
+        print(f"[memoria] WARN aplicar_ajuste_de_lote: {e}")
+        return []
+    if not quebras:
+        return []
+
+    por_indice = {q["indice"]: q for q in quebras}
+    novos, mudancas = [], []
+    for i, bruto in enumerate(items):
+        it = dict(bruto)
+        q = por_indice.get(i)
+        if q and int(it.get("quantity") or 0) != q["sugerida"]:
+            mudancas.append(f"{it.get('name')} {it.get('quantity')} -> {q['sugerida']} un")
+            it["quantity"] = q["sugerida"]
+            # O preco tem de ser relido: abaixo de 25 o mesmo nome resolvia
+            # para o salgado grande avulso (R$ 9,00), e na quantidade de
+            # pacote ele vale R$ 0,80.
+            try:
+                import facts
+                oficial = facts.resolve_unit_price(it.get("name", ""), q["sugerida"])
+                it["price"] = oficial["preco_unitario"] if oficial else 0.0
+            except Exception:
+                it["price"] = 0.0
+        novos.append(it)
+
+    if mudancas:
+        memoria["items"] = novos
+    return mudancas
 
 
 def pendencia_de_detalhe(memoria: dict) -> str:

@@ -1479,6 +1479,19 @@ _MARCAS_DE_FECHAMENTO = (
 )
 
 
+# Como a oferta de ajuste de quantidade aparece na resposta da Sandrinha.
+_MARCAS_DE_AJUSTE_DE_LOTE = (
+    "ajusto para", "ajustar para", "de 25 em 25", "porcoes fechadas",
+    "porcao fechada", "multiplo de 25", "fechamos de 25",
+)
+
+
+def _ofereceu_ajuste_de_lote(texto: str) -> bool:
+    """A ultima resposta ofereceu arredondar a quantidade para o lote?"""
+    limpo = " ".join(facts.normalize(texto or "").split())
+    return any(facts.normalize(m) in limpo for m in _MARCAS_DE_AJUSTE_DE_LOTE)
+
+
 def _parece_fechamento(texto: str) -> bool:
     """A resposta anuncia ao cliente que o pedido foi fechado?"""
     limpo = " ".join(facts.normalize(texto or "").split())
@@ -1743,6 +1756,20 @@ def handle_flush(user: str, items: list[dict]) -> None:
         if _troco_capturado:
             conversation_memory.save(user, _memoria)
             print(f"[memoria] {user}: troco_para={_troco_capturado}")
+
+        # Cliente aceitando o ajuste de quantidade que a propria Sandrinha
+        # ofereceu ("Ajusto para 25 quibes?" -> "pode ser"). O aceite precisa
+        # entrar na FICHA: enquanto ele ficava so no texto, a trava de lote
+        # continuava vendo 5 quibes, o funil nao andava e o modelo acabava
+        # transferindo para humano um pedido ja ajustado (teste do dono,
+        # 23/09 15:41).
+        if (_ofereceu_ajuste_de_lote(last_assistant_text)
+                and _e_concordancia(text_only)):
+            _ajustes = conversation_memory.aplicar_ajuste_de_lote(_memoria)
+            if _ajustes:
+                conversation_memory.save(user, _memoria)
+                print(f"[memoria] {user}: ajuste de lote aceito -> "
+                      f"{'; '.join(_ajustes)}")
 
         if _campo_direto:
             conversation_memory.save(user, _memoria)

@@ -272,7 +272,7 @@ def quebras_de_lote(items: list[dict]) -> list[dict]:
     Devolve [{"sabor", "qtd", "passo", "sugerida"}].
     """
     quebras: list[dict] = []
-    for item in items or []:
+    for indice, item in enumerate(items or []):
         nome = str(item.get("name", "")).strip()
         try:
             qtd = int(float(item.get("quantity", 0) or 0))
@@ -298,6 +298,7 @@ def quebras_de_lote(items: list[dict]) -> list[dict]:
         # 20 -> 25. E a mesma regra de arredondamento do prompt do cardapio.
         sugerida = max(passo, round(qtd / passo) * passo)
         quebras.append({
+            "indice": indice,
             "sabor": _sabor_oficial(familia, nome) or nome,
             "qtd": qtd,
             "passo": passo,
