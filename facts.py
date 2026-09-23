@@ -456,18 +456,26 @@ def render_tabela_precos() -> str:
 
     por_categoria: dict[str, list[str]] = {}
     for p in com_preco:
+        # O esgotado fica na lista, marcado: some-lo fazia o modelo achar que o
+        # produto nao existe e oferecer outro preco no lugar.
+        marca = "" if p["disponivel"] else " (ESGOTADO)"
         por_categoria.setdefault(p["categoria"], []).append(
-            f"{p['item']} = {_brl(p['preco'])}"
+            f"{p['item']} = {_brl(p['preco'])}{marca}"
         )
 
-    blocos = ["PRECOS OFICIAIS (nunca informe preco fora desta tabela):"]
+    blocos = [
+        "PRECOS OFICIAIS DA PLANILHA - unica fonte de preco. E PROIBIDO "
+        "informar qualquer valor que nao esteja aqui, e PROIBIDO oferecer item "
+        "marcado ESGOTADO:"
+    ]
     for categoria, itens in por_categoria.items():
         blocos.append(f"- {categoria}: " + "; ".join(itens))
 
     sabores: dict[str, list[str]] = {}
     for p in dados["produtos"]:
         if p["preco"] is None and p["item"]:
-            sabores.setdefault(p["categoria"], []).append(p["item"])
+            rotulo = p["item"] if p["disponivel"] else f"{p['item']} (ESGOTADO)"
+            sabores.setdefault(p["categoria"], []).append(rotulo)
     for categoria, itens in sabores.items():
         blocos.append(f"- Sabores de {categoria} (inclusos no pacote): " + "; ".join(itens))
 

@@ -140,6 +140,11 @@ class ConversationState:
             faltando.append("data (o DIA do pedido)")
         if not self.horario:
             faltando.append("horario")
+        # Na retirada o pagamento e no balcao e o prompt proibe perguntar; so a
+        # entrega precisa da forma antes do resumo. Entra aqui para caber na
+        # mesma mensagem de coleta, em vez de virar mais uma rodada sozinha.
+        if self.modality == "entrega" and not self.payment_method:
+            faltando.append("forma de pagamento")
         return faltando
 
     def bloco_runtime(self) -> str:
@@ -583,9 +588,12 @@ def detectar_pagamento(message: str) -> str:
         elif deb and not cred:
             valor = "cartao_debito"
         else:
-            # "cartao" solto, ou os dois citados: falta o detalhe, e
-            # pendencia_de_detalhe pergunta "debito ou credito?".
-            valor = "cartao_a_definir"
+            # "cartao" solto ja basta. Debito e credito cobram a MESMA taxa de
+            # retorno de R$ 2,00 da maquininha e chegam iguais na comanda, entao
+            # perguntar qual era so uma pergunta a mais no funil - o dono cortou
+            # em 23/09. "cartao_a_definir" some daqui, mas segue aceito nas
+            # fichas antigas que ainda o tenham gravado.
+            valor = "cartao"
         candidatos.append((min(m.start() for m in marcas_cartao), valor))
     if pix:
         candidatos.append((pix.start(), "pix"))
@@ -1070,11 +1078,26 @@ class ConversationManager:
             linhas.append("1. A saudacao ja foi feita. NAO cumprimente de novo.")
 
         faltando = state.dados_faltando()
-        if faltando:
+        if faltando and not state.modality:
+            # Antes da modalidade a coleta segue de uma em uma: perguntar
+            # endereco e frete sem o cliente ter dito que quer entrega e
+            # justamente o que o funil evita.
             linhas.append(
                 f"2. Ainda faltam: {', '.join(faltando)}. Pergunte APENAS "
                 f'"{faltando[0]}" nesta mensagem, uma pergunta so. Nao pergunte o '
                 f"resto agora e nao apresente resumo nem total."
+            )
+        elif faltando:
+            # Definida a modalidade, o resto vai numa mensagem so. O dono
+            # contou dez perguntas pingadas para fechar um pedido (23/09) e
+            # pediu bairro, rua com numero, dia, horario e pagamento juntos.
+            itens = "; ".join(faltando)
+            linhas.append(
+                f"2. Ainda faltam: {itens}. Peca TODOS eles NESTA MESMA "
+                f"mensagem, em lista vertical curta (um item por linha), e so "
+                f"eles. E PROIBIDO perguntar um de cada vez, PROIBIDO repetir o "
+                f"que ja esta na ficha e PROIBIDO pedir ponto de referencia. "
+                f"Nao apresente resumo nem total enquanto faltar algum."
             )
         else:
             linhas.append(

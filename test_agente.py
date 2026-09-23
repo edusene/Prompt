@@ -120,19 +120,19 @@ FLUXO_TUDO_DE_UMA_VEZ = [
 _CASOS_PAGAMENTO = [
     # A frase que a propria Sandrinha oferece. Virava "dinheiro" e mandava o
     # entregador levar troco para quem ia pagar no cartao (teste de 22/09).
-    ("Vou pagar no Cartão na entrega", "cartao_a_definir"),
-    ("Cartao na entrega", "cartao_a_definir"),
+    ("Vou pagar no Cartão na entrega", "cartao"),
+    ("Cartao na entrega", "cartao"),
     ("Dinheiro na entrega", "dinheiro"),
     ("vou pagar na entrega", "dinheiro"),
     ("quero pagar no credito na entrega", "cartao_credito"),
     ("no débito na entrega", "cartao_debito"),
     ("vou mandar o pix", "pix"),
     ("Pix antecipado", "pix"),
-    ("maquininha", "cartao_a_definir"),
-    ("CARTAO", "cartao_a_definir"),
+    ("maquininha", "cartao"),
+    ("CARTAO", "cartao"),
     ("cartao de credito", "cartao_credito"),
     ("aceita cartao? vou pagar em dinheiro", "dinheiro"),
-    ("nao e dinheiro, e no cartao", "cartao_a_definir"),
+    ("nao e dinheiro, e no cartao", "cartao"),
     ("quero 50 coxinhas", ""),
 ]
 

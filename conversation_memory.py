@@ -545,22 +545,42 @@ def pendencia_de_lote(memoria: dict) -> str:
     quebrados = [b for b in bloqueados if "multiplos de" in b]
     if not quebrados:
         return ""
+
+    # A pergunta precisa dizer DE QUAL SABOR se trata. O cliente pediu 30
+    # coxinhas e 20 quibes e ouviu "quer 25 ou 50?", sem saber a qual dos dois
+    # a Sandrinha se referia (teste do dono, 23/09).
+    try:
+        quebras = cardapio_catalogo.quebras_de_lote([dict(i) for i in norm])
+    except Exception as e:
+        print(f"[memoria] WARN quebras_de_lote: {e}")
+        quebras = []
+
+    if quebras:
+        detalhe = "; ".join(
+            f"{q['sabor']}: {q['qtd']} un -> ofereca {q['sugerida']} un"
+            for q in quebras
+        )
+        exemplo = " e ".join(f"{q['sugerida']} {q['sabor']}" for q in quebras)
+        return (
+            f"QUANTIDADE QUEBRADA - {detalhe}. Pergunte AGORA, antes de seguir o "
+            f"funil, CITANDO CADA SABOR pelo nome: 'Fazemos de 25 em 25 por "
+            f"sabor! Ajusto para {exemplo}?'. E PROIBIDO perguntar 'quer 25 ou "
+            f"50?' sem dizer de qual sabor voce esta falando. NAO apresente "
+            f"resumo nem total enquanto a quantidade nao fechar em multiplo de 25."
+        )
+
     return (
         "QUANTIDADE QUEBRADA - " + "; ".join(quebrados) + ". Pergunte AGORA, "
-        "antes de seguir o funil, usando o BLOCO 2: 'Nossas porcoes sao "
-        "fechadas de 25 em 25 por sabor! Fica melhor para voce 1 porcao de 25 "
-        "ou 2 porcoes com 50 unidades?'. NAO apresente resumo nem total "
-        "enquanto a quantidade nao fechar em multiplo de 25."
+        "antes de seguir o funil, CITANDO O SABOR de que voce esta falando. "
+        "NAO apresente resumo nem total enquanto a quantidade nao fechar em "
+        "multiplo de 25."
     )
 
 
 def pendencia_de_detalhe(memoria: dict) -> str:
     """Campo preenchido que ainda precisa de um detalhe, nao de nova coleta."""
-    if memoria.get("payment_method") == "cartao_a_definir":
-        return (
-            "O cliente ja disse que paga com CARTAO. Falta so saber se e DEBITO "
-            "ou CREDITO - pergunte exatamente isso, nunca 'qual a forma de pagamento'."
-        )
+    # Nao ha mais pendencia de debito/credito: "cartao" e forma de pagamento
+    # completa desde 23/09 (os dois pagam a mesma taxa de retorno).
 
     # O troco entra aqui, e nao em faltando(), porque depende do total: exigi-lo
     # antes travaria o calculate_order, que e justamente quem calcula o total.
@@ -650,6 +670,19 @@ def render_ficha(memoria: dict) -> str:
     # pedido que acabou de ir para a producao, ou pedido novo. Sem este aviso o
     # modelo aplicava a regra de alteracao do BLOCO 0 e transferia para humano.
     minutos = pedido_recente(memoria)
+    if minutos is None and not memoria.get("pedido_enviado"):
+        # Sem esta linha o modelo aplicava a regra de "pedido em linha de
+        # producao" do BLOCO 0 a um pedido que ainda estava sendo montado: o
+        # cliente respondeu "PODE SER" a uma pergunta de quantidade e foi
+        # mandado para a fila do humano, sem nunca ter visto um resumo (teste
+        # do dono, 23/09 15:32).
+        bloco.append(
+            "NENHUM PEDIDO FOI ENVIADO AINDA nesta conversa. A regra de "
+            "'pedido ja entrou em linha de producao' do BLOCO 0 NAO se aplica: "
+            "e PROIBIDO dizer que o pedido esta em producao e PROIBIDO "
+            "transferir por causa dela. Mudar item, quantidade, endereco, dia "
+            "ou pagamento agora e atendimento normal - apenas atualize e siga."
+        )
     if minutos is not None:
         bloco.append(
             f"ATENCAO - o cliente fechou um pedido ha {minutos} minuto(s). Se ele "
@@ -701,6 +734,24 @@ def render_ficha(memoria: dict) -> str:
             "PROXIMA PERGUNTA OBRIGATORIA: esclarecer o ITEM AMBIGUO acima. "
             "Nao pergunte modalidade, endereco, dia, horario nem pagamento "
             "nesta mensagem, e nao apresente resumo."
+        )
+    elif pendentes and memoria.get("modality") == "entrega":
+        # Escolhida a entrega, o resto vai numa mensagem so. O dono contou dez
+        # perguntas pingadas para fechar um pedido (23/09) e pediu bairro, rua
+        # com numero, dia, horario e pagamento juntos. Antes da modalidade a
+        # coleta continua de uma em uma: perguntar endereco sem o cliente ter
+        # escolhido entrega e exatamente o que o funil evita.
+        bloco.append("AINDA FALTA COLETAR:")
+        bloco += [f"- {_ROTULOS[c]}" for c in pendentes]
+        bloco.append(
+            "PECA TODOS ESSES DADOS NESTA MESMA MENSAGEM, em lista vertical "
+            "curta (um por linha), e SO eles. E PROIBIDO perguntar um de cada "
+            "vez, PROIBIDO repetir pergunta de dado que ja esta na ficha acima "
+            "e PROIBIDO pedir ponto de referencia."
+        )
+        bloco.append(
+            "PROIBIDO nesta mensagem: apresentar resumo do pedido, informar total "
+            "ou chamar send_order_to_cardapio - a ficha ainda tem pendencias."
         )
     elif pendentes:
         bloco.append("AINDA FALTA COLETAR, nesta ordem:")

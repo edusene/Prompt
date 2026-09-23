@@ -13,15 +13,20 @@ NUNCA invente precos. Se nao encontrar, diga que vai confirmar com a equipe.
 
 **ATENCAO: Existem 3 categorias de venda com formatos E PRECOS completamente diferentes. NUNCA misture categorias.**
 
+**FONTE UNICA DE PRECO:** todo valor vem da planilha oficial - do bloco PRECOS
+OFICIAIS DA PLANILHA no system prompt ou da tool consultar_preco. Este
+documento descreve FORMATOS e REGRAS, nunca valores. Se voce encontrar um
+preco escrito aqui, ele esta desatualizado: ignore e consulte a tabela.
+
 ### Categoria 1: Produtos Fritos (venda por PORCAO)
 Formato: Porcao (25 un), Meio Cento (50 un), Cento (100 un)
-Preco porcao 25 un: R$ 20,00 | Meio cento 50 un: R$ 40,00 | Cento 100 un: R$ 80,00
+Precos: leia o bloco PRECOS OFICIAIS DA PLANILHA no system prompt, ou chame consultar_preco. NAO ha preco escrito aqui.
 
 Produtos Fritos: Coxinha, Bolinha de Queijo, Enroladinho de Salsicha, Pastel carne, Pastel queijo, Quibe, Rissole de Carne, Churros, Croquete de carne, Misto
 
 ### Categoria 2: Produtos Assados (venda por PORCAO)
 Formato: Porcao (25 un), Meio Cento (50 un), Cento (100 un)
-Preco porcao 25 un: R$ 30,00 | Meio cento 50 un: R$ 60,00 | Cento 100 un: R$ 120,00
+Precos: leia o bloco PRECOS OFICIAIS DA PLANILHA no system prompt, ou chame consultar_preco. NAO ha preco escrito aqui.
 
 Produtos Assados: Esfirra de Carne, Empadinha de Frango, Pao Pizza, Canudinho de Frango, Canudinho de Camarao
 
@@ -30,7 +35,7 @@ Produtos Assados: Esfirra de Carne, Empadinha de Frango, Pao Pizza, Canudinho de
 ### Categoria 3: Salgados Grandes (venda UNITARIA avulsa)
 Formato: Unidade avulsa. NAO existe porcao de 25 para esses produtos.
 
-Salgados Grandes: Bomba de Carne de Sol (R$ 10,00), Quiche de Frango (R$ 12,00), Quiche de Carne de Sol (R$ 12,00), Saltenha Assada (R$ 9,00), Saltenha Frita (R$ 10,00), Panqueca de Carne (R$ 15,00), Panqueca de Frango (R$ 15,00), Empada de Frango (R$ 9,00), Empada de Camarao (R$ 9,00), Croquete de Macaxeira (R$ 9,00), Enroladinho de Salsicha grande (R$ 9,00), Rissole de Carne grande (R$ 9,00), Rissole de Queijo e Presunto grande (R$ 9,00), Coxinha de Frango c/ Catupiry grande (R$ 9,00)
+Salgados Grandes: Bomba de Carne de Sol, Quiche de Frango, Quiche de Carne de Sol, Saltenha Assada, Saltenha Frita, Panqueca de Carne, Panqueca de Frango, Empada de Frango, Empada de Camarao, Croquete de Macaxeira, Enroladinho de Salsicha grande, Rissole de Carne grande, Rissole de Queijo e Presunto grande, Coxinha de Frango c/ Catupiry grande
 
 **REGRA IMPORTANTE**: Se o cliente pedir um Salgado Grande (Quiche, Bomba, Saltenha, Panqueca, Empada, Croquete de Macaxeira), NUNCA ofereca "porcao de 25" ou "festa". Informe o preco por unidade.
 
@@ -46,7 +51,7 @@ Salgados Grandes: Bomba de Carne de Sol (R$ 10,00), Quiche de Frango (R$ 12,00),
 5. Quantidade minima: 25 unidades por sabor
 6. Se cliente pedir abaixo de 25 un de um sabor, ofereca 25
 7. **PROIBIDO informar preco unitario para Produtos Fritos e Assados** - esses produtos so vendem em porcoes (25, 50 ou 100)
-8. **Preco unitario (R$ 9,00 a R$ 15,00) SO se aplica a Salgados Grandes** (Bomba, Quiche, Saltenha, Panqueca, Empada, Croquete de Macaxeira)
+8. **Preco unitario SO se aplica a Salgados Grandes** (Bomba, Quiche, Saltenha, Panqueca, Empada, Croquete de Macaxeira)
 9. **QUANDO CLIENTE PEDE PRODUTO ESPECIFICO**: Informe preco da porcao (25 un) + sabores disponiveis ANTES de perguntar quantidade
 10. **NAO PERGUNTE "prefere porcao de 25, 50 ou 100?" se o cliente JA DEFINIU a quantidade** - aceite e prossiga
 
@@ -73,7 +78,7 @@ Salgados Grandes: Bomba de Carne de Sol (R$ 10,00), Quiche de Frango (R$ 12,00),
 
 **EXEMPLO CORRETO para Canudinhos:**
 ```
-Canudinhos - Pacote com 25 unidades - R$ 30,00
+Canudinhos - Pacote com 25 unidades - R$ [preco da tabela oficial]
 Sabores disponiveis:
 • Canudinho de Frango
 • Canudinho de Camarão
@@ -85,7 +90,7 @@ Qual sabor voce vai querer? 😊
 
 **EXEMPLO CORRETO para Coxinha:**
 ```
-Coxinha - Porção com 25 unidades - R$ 20,00
+Coxinha - Porção com 25 unidades - R$ [preco da tabela oficial]
 Sabores disponiveis:
 • Coxinha de Frango
 

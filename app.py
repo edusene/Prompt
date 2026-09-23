@@ -118,7 +118,24 @@ _TOOLS_PROMPT = FULL_SYSTEM_PROMPT[len(_PROMPT_FROM_DOCX or _BASE_PROMPT):]
 
 
 def _get_current_system_prompt() -> str:
-    return (parse_knowledge.get_prompt_cached() or _BASE_PROMPT) + _TOOLS_PROMPT
+    base = (parse_knowledge.get_prompt_cached() or _BASE_PROMPT) + _TOOLS_PROMPT
+    return base + _bloco_precos_oficiais()
+
+
+def _bloco_precos_oficiais() -> str:
+    """Tabela de precos lida da planilha, colada no fim do system prompt.
+
+    Ate 23/09 os precos viviam em dois lugares: a planilha (que a tool le) e o
+    texto do cardapio.md (que o RAG devolve). Quando um mudava e o outro nao, o
+    modelo tinha duas verdades e escolhia uma. O dono pediu uma fonte so, e a
+    planilha e quem manda - e tambem quem sabe o que esta esgotado.
+    """
+    try:
+        tabela = facts.render_tabela_precos()
+    except Exception as e:
+        print(f"[precos] WARN tabela oficial indisponivel: {e}")
+        return ""
+    return f"\n\n=== {tabela}" if tabela else ""
 
 # ── Knowledge Tool (busca seletiva via function calling) ──────────────────────
 import knowledge_rag
@@ -423,7 +440,12 @@ SEND_ORDER_TOOL = {
                 },
                 "payment_method": {
                     "type": "string",
-                    "description": "Forma de pagamento: 'pix', 'cartao_debito', 'cartao_credito', 'dinheiro'",
+                    "description": (
+                        "Forma de pagamento: 'pix', 'cartao', 'dinheiro'. "
+                        "'cartao' basta - NAO pergunte ao cliente se e debito "
+                        "ou credito. 'cartao_debito' e 'cartao_credito' so se o "
+                        "proprio cliente tiver dito qual."
+                    ),
                 },
                 "items": {
                     "type": "array",
@@ -2077,9 +2099,9 @@ def handle_flush(user: str, items: list[dict]) -> None:
                 kwargs["payment_method"] = ""
             else:
                 kwargs["payment_method"] = kwargs.get("payment_method") or _memoria.get("payment_method", "")
-                # A API do cardapio so conhece pix/cartao_debito/cartao_credito/
-                # dinheiro. 'cartao_a_definir' e estado interno nosso: se chegar
-                # ate aqui, vai como 'cartao'.
+                # 'cartao_a_definir' era o estado interno de "falta saber se e
+                # debito ou credito". A pergunta acabou em 23/09; fichas antigas
+                # ainda podem trazer o valor, e ele vira 'cartao'.
                 if kwargs["payment_method"] == "cartao_a_definir":
                     kwargs["payment_method"] = "cartao"
 

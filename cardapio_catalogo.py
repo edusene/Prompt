@@ -260,6 +260,52 @@ def _sem_rotulo(nome: str, qtd: int) -> tuple[str, int]:
     return limpo, qtd
 
 
+def quebras_de_lote(items: list[dict]) -> list[dict]:
+    """Sabores de pacote com quantidade que nao fecha no passo, com a sugestao.
+
+    Existe porque a trava so sabia dizer QUE a quantidade estava quebrada. O
+    modelo entao perguntava "quer 25 ou 50?" sem dizer de qual sabor falava — o
+    cliente tinha pedido 30 coxinhas E 20 quibes e nao sabia a qual dos dois a
+    pergunta se referia (teste do dono, 23/09). Aqui sai o nome do sabor e a
+    quantidade ja arredondada, para a pergunta ser especifica.
+
+    Devolve [{"sabor", "qtd", "passo", "sugerida"}].
+    """
+    quebras: list[dict] = []
+    for item in items or []:
+        nome = str(item.get("name", "")).strip()
+        try:
+            qtd = int(float(item.get("quantity", 0) or 0))
+        except (ValueError, TypeError):
+            qtd = 0
+        if not nome or qtd <= 0:
+            continue
+        nome, qtd = _sem_rotulo(nome, qtd)
+
+        linha = _linha_da_planilha(nome)
+        if linha is None or linha["preco"] is not None:
+            continue                      # nao e sabor de pacote: nao tem passo
+        familia = linha["categoria"]
+        if "canudinho" in _norm(nome):
+            familia = "Canudinhos"
+        if familia not in LOTES:
+            continue
+        passo = LOTES[familia]["passo"]
+        if qtd % passo == 0:
+            continue
+
+        # Multiplo mais proximo, nunca abaixo de um pacote: 30 -> 25, 40 -> 50,
+        # 20 -> 25. E a mesma regra de arredondamento do prompt do cardapio.
+        sugerida = max(passo, round(qtd / passo) * passo)
+        quebras.append({
+            "sabor": _sabor_oficial(familia, nome) or nome,
+            "qtd": qtd,
+            "passo": passo,
+            "sugerida": sugerida,
+        })
+    return quebras
+
+
 def traduzir(items: list[dict]) -> tuple[list[dict], list[str]]:
     """Converte itens internos para o formato do cardapio digital.
 

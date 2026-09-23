@@ -575,7 +575,8 @@ _PAGAMENTO_ROTULO = {
     "cartao_debito": "Cartão de débito na entrega",
     "cartao_credito": "Cartão de crédito na entrega",
     "cartao": "Cartão na entrega",
-    "cartao_a_definir": "Cartão (confirmar se é débito ou crédito)",
+    # Ficha antiga: hoje "cartao" solto ja e completo, sem perguntar o tipo.
+    "cartao_a_definir": "Cartão na entrega",
 }
 
 
