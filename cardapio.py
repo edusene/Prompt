@@ -382,6 +382,20 @@ def nome_confiavel(pedido: str, oficial: str) -> bool:
     return bool(menor - _PALAVRAS_FRACAS)
 
 
+def nome_e_so_formato(nome: str) -> bool:
+    """O item chegou com o NOME DO FORMATO no lugar do sabor?
+
+    O modelo mandou "Meio cento (50 un)" e "Cento (100 un)" como itens do
+    pedido, porque era assim que a conversa vinha falando ("2 porcoes de 25",
+    "4 porcoes de 25"). Sao as linhas de PRECO da planilha, nao sabores: o
+    de-para nao acha equivalente, o pedido e recusado e o cliente ouve que nao
+    deu para registrar (teste do dono, 23/09 22:50 - pedido perdido).
+
+    Quem sabe o sabor e a ficha, e e ela que vale nesse caso.
+    """
+    return not nome_sem_rotulo_de_formato(str(nome or "")).strip()
+
+
 def _normalizar_itens(items: list[dict]) -> tuple[list[dict], list[str], list[str]]:
     """Define o preco de cada item pela TABELA OFICIAL, nao pelo que o modelo mandou.
 
@@ -467,7 +481,14 @@ def _normalizar_itens(items: list[dict]) -> tuple[list[dict], list[str], list[st
                     f"pela tabela oficial ({oficial['base']})"
                 )
 
-            if oficial.get("ambiguo"):
+            # De 25 para cima a leitura de pacote e a unica que faz sentido:
+            # ninguem pede 50 enroladinhos grandes de balcao a R$ 8,00 cada. O
+            # aviso saia em qualquer quantidade e mandava o modelo perguntar
+            # "festa ou grande de balcao?" para 50 e para 100 - o dono viu a
+            # mesma pergunta tres vezes seguidas (23/09 22:45). A regra e a
+            # mesma de conversation_memory._itens_ambiguos, que ja so
+            # perguntava abaixo de 25.
+            if oficial.get("ambiguo") and quantidade < LOTE_MINIMO:
                 avisos.append(
                     f"'{nome}' cobrado como {oficial['item_oficial']} "
                     f"({_brl(oficial['preco_unitario'])}/un) por causa da quantidade "
@@ -517,7 +538,17 @@ def _balcao_em_quantidade_de_festa(items: list[dict]) -> list[str]:
     except Exception:
         return []
 
-    categorias = {facts.normalize(p["item"]): p.get("categoria", "") for p in produtos}
+    # Nome -> TODAS as categorias em que ele aparece. Era um dicionario simples,
+    # e como "Enroladinho de Salsicha" e "Rissole de Carne" existem nos Fritos E
+    # nos Salgados Grandes, a ultima linha da planilha vencia e os dois passavam
+    # por balcao SEMPRE. Resultado: 50 salsichas e 100 rissoles batiam nesta
+    # trava, calculate_order era recusado e a Sandrinha perguntava "festa ou
+    # balcao?" de novo e de novo (teste do dono, 23/09 22:45).
+    categorias: dict[str, set] = {}
+    for p in produtos:
+        categorias.setdefault(facts.normalize(p["item"]), set()).add(
+            p.get("categoria", "")
+        )
     suspeitos = []
     for item in items or []:
         nome = str(item.get("name", "")).strip()
@@ -527,7 +558,10 @@ def _balcao_em_quantidade_de_festa(items: list[dict]) -> list[str]:
             continue
         if qtd < _LOTE_DE_FESTA:
             continue
-        if categorias.get(facts.normalize(nome), "") != _CATEGORIA_BALCAO:
+        # So vale para nome que e EXCLUSIVO do balcao ("Coxinha de Frango com
+        # Catupiry"). Nome que tambem e sabor de pacote ja foi decidido pela
+        # quantidade: de 25 para cima e festa, e perguntar so gera atrito.
+        if categorias.get(facts.normalize(nome), set()) != {_CATEGORIA_BALCAO}:
             continue
         preco = float(item.get("price", 0) or 0)
         suspeitos.append(
@@ -546,6 +580,11 @@ _MODALIDADE_ROTULO = {
 # Cartao de Credito tem taxa fixa de R$ 2,00. No Pix antecipado e na retirada,
 # e isenta". Fica em codigo porque estava so no texto: a tool devolvia
 # return_fee=0 sempre, e o total saia R$ 2,00 menor do que o devido.
+# A partir desta quantidade o pedido e necessariamente de pacote (festa): e o
+# tamanho minimo de uma porcao. Abaixo disso o mesmo nome ainda pode ser o
+# salgado grande avulso, e so ai vale perguntar.
+LOTE_MINIMO = 25
+
 TAXA_RETORNO = 2.00
 
 _PAGAMENTOS_COM_RETORNO = {

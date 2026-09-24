@@ -1699,9 +1699,17 @@ def handle_flush(user: str, items: list[dict]) -> None:
                 _memoria["data_iso"] = ""
                 _memoria["data_agendada"] = ""
             _nome = f", {_memoria['name']}" if _memoria.get("name") else ""
+            # Esta resposta sai SEM passar pelo modelo, e por isso o pedido que
+            # o cliente acabou de escrever ficava sem resposta: ele mandou
+            # "QUERO 50 SALSICHA E 100 RISSOLES" e ouviu so que a producao
+            # tinha encerrado, como se ninguem tivesse lido os itens (teste
+            # do dono, 23/09 22:43). Os itens ja estao na ficha desde a
+            # extracao; o que faltava era dizer isso ao cliente.
+            _itens_lidos = conversation_memory._formatar_itens(_memoria.get("items"))
+            _eco = f"Anotei seu pedido: {_itens_lidos}.\n\n" if _itens_lidos else ""
             _resposta = (
                 f"{horario.saudacao(_agora)}{_nome}! Aqui é a Sandrinha da BALBS.\n\n"
-                f"{_expediente['mensagem']}"
+                f"{_eco}{_expediente['mensagem']}"
             )
             _memoria["saudacao_feita"] = True
             # Guarda o dia oferecido na mensagem para o "pode sim" seguinte.
@@ -2158,7 +2166,22 @@ def handle_flush(user: str, items: list[dict]) -> None:
                 kwargs["is_scheduled"] = True
                 kwargs["scheduled_time"] = _memoria.get("horario", "")
             # Sabores do pacote saem dos itens da ficha.
-            kwargs["items"] = kwargs.get("items") or _memoria.get("items") or []
+            _itens_modelo = kwargs.get("items") or []
+            _itens_ficha = _memoria.get("items") or []
+            # O modelo mandou o FORMATO no lugar do sabor ("Meio cento (50 un)",
+            # "Cento (100 un)"): sao linhas de preco da planilha, o de-para nao
+            # tem equivalente e o pedido era recusado - o cliente ouvia que nao
+            # deu para registrar e ia para a fila do humano com o pedido pronto
+            # (teste do dono, 23/09 22:50). A ficha guarda o sabor que ele
+            # confirmou, e e ela que vale aqui.
+            if _itens_ficha and any(
+                cardapio.nome_e_so_formato(i.get("name", "")) for i in _itens_modelo
+            ):
+                print(f"[cardápio] itens vieram como formato, nao como sabor: "
+                      f"{[i.get('name') for i in _itens_modelo]} -> usando a ficha "
+                      f"{[i.get('name') for i in _itens_ficha]}")
+                _itens_modelo = _itens_ficha
+            kwargs["items"] = _itens_modelo or _itens_ficha
 
             # Troco: a API nao tem campo change_for, entao ele vai na observacao
             # do pedido - unico lugar que chega a comanda do entregador.
