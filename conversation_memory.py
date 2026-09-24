@@ -635,6 +635,62 @@ def aplicar_ajuste_de_lote(memoria: dict) -> list[str]:
     return mudancas
 
 
+# Tamanho minimo de um lote de festa. Abaixo disso o cardapio digital nao
+# aceita, entao quem escolhe o pacote esta escolhendo, no minimo, uma porcao.
+_PORCAO = 25
+
+
+def aplicar_escolha_de_pacote(memoria: dict) -> list[str]:
+    """Grava a escolha entre sabor de pacote e salgado grande de balcao.
+
+    A duvida era levantada (pendencia_de_item), o cliente respondia "pode ser a
+    do pacote mesmo" — e a resposta nao ia para lugar nenhum. A ficha seguia
+    com 10 unidades a R$ 9,00, a trava de lote apontava a mesma quebra na
+    mensagem seguinte e o modelo acabava transferindo para um humano um pedido
+    ja resolvido. A trava nao tinha saida, igual ao caso do ajuste de
+    quantidade (ver aplicar_ajuste_de_lote).
+
+    Escolher o pacote sobe a quantidade para uma porcao fechada e devolve o
+    preco para a tabela decidir: abaixo de 25 o mesmo nome resolve como salgado
+    grande (R$ 9,00/un); na quantidade de pacote vale R$ 0,80.
+
+    Devolve a lista de mudancas, para o log.
+    """
+    itens = memoria.get("items") or []
+    if not itens:
+        return []
+    try:
+        import facts
+    except Exception:
+        return []
+
+    minimo = _minimo_de_festa()
+    novos, mudancas = [], []
+    for bruto in itens:
+        it = dict(bruto)
+        try:
+            qtd = int(float(it.get("quantity", 0) or 0))
+        except (ValueError, TypeError):
+            novos.append(it)
+            continue
+        if qtd >= minimo:
+            novos.append(it)          # ja e quantidade de festa: nada a decidir
+            continue
+        try:
+            oficial = facts.resolve_unit_price(it.get("name", ""), qtd)
+        except Exception:
+            oficial = None
+        if oficial and oficial.get("ambiguo"):
+            mudancas.append(f"{it.get('name')} {qtd} -> {_PORCAO} un (pacote)")
+            it["quantity"] = _PORCAO
+            it["price"] = 0.0
+        novos.append(it)
+
+    if mudancas:
+        memoria["items"] = novos
+    return mudancas
+
+
 def pendencia_de_detalhe(memoria: dict) -> str:
     """Campo preenchido que ainda precisa de um detalhe, nao de nova coleta."""
     # Nao ha mais pendencia de debito/credito: "cartao" e forma de pagamento
@@ -680,6 +736,39 @@ def _formatar_itens(items) -> str:
         else:
             partes.append(str(item))
     return "; ".join(p for p in partes if p)
+
+
+def _minimo_de_festa() -> int:
+    """A partir de quantas unidades o pedido e sempre festa (facts manda)."""
+    try:
+        import facts
+        return facts.QTD_MINIMA_FESTA
+    except Exception:
+        return 21
+
+
+def tamanho_ja_definido(memoria: dict) -> bool:
+    """Nao ha duvida de tamanho a resolver: todo item e quantidade de festa.
+
+    Um item abaixo do minimo derruba a resposta inteira de proposito. Ali a
+    pergunta "festa ou grande de balcao?" e legitima - e a trava que evitou os
+    R$ 450,00 em coxinha de balcao (22/09).
+
+    Quem chama: a diretiva da ficha, que PEDE ao modelo para nao perguntar, e
+    app._conferir_tamanho, que TIRA a pergunta quando ele pergunta assim mesmo.
+    A regra e uma so, escrita num lugar so.
+    """
+    itens = memoria.get("items") or []
+    minimo = _minimo_de_festa()
+    qtds = []
+    for it in itens:
+        if not isinstance(it, dict):
+            continue
+        try:
+            qtds.append(int(float(it.get("quantity", 0) or 0)))
+        except (ValueError, TypeError):
+            return False       # quantidade ilegivel: nao afirme que esta definido
+    return bool(qtds) and all(q >= minimo for q in qtds)
 
 
 def render_ficha(memoria: dict) -> str:
@@ -760,20 +849,8 @@ def render_ficha(memoria: dict) -> str:
         # devolve o sabor de pacote E o salgado grande com o mesmo nome, e ele
         # resolvia a duvida perguntando. Aqui a regra vira instrucao positiva:
         # nessa quantidade nao ha duvida nenhuma a resolver.
-        try:
-            import facts as _f
-            _minimo = _f.QTD_MINIMA_FESTA
-        except Exception:
-            _minimo = 21
-        _qtds = []
-        for _it in memoria["items"]:
-            if not isinstance(_it, dict):
-                continue
-            try:
-                _qtds.append(int(float(_it.get("quantity", 0) or 0)))
-            except (ValueError, TypeError):
-                pass
-        if _qtds and all(q >= _minimo for q in _qtds):
+        if tamanho_ja_definido(memoria):
+            _minimo = _minimo_de_festa()
             bloco.append(
                 f"TAMANHO JA DEFINIDO PELA QUANTIDADE: todo item deste pedido "
                 f"tem {_minimo} unidades ou mais, entao e FESTA (lote de 25 por "

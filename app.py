@@ -1341,6 +1341,91 @@ def _conferir_dinheiro(user: str, reply: str, memoria: dict,
     return resumo
 
 
+# Como a pergunta de tamanho aparece na resposta. Vale sobre texto ja
+# normalizado (sem acento), porque o modelo escreve "balcão" e "porção".
+_RX_PERGUNTA_TAMANHO = _re_mod.compile(
+    r"(balcao|avuls|grande ou|porcao ou|festa ou|ou a porcao|ou grande|"
+    r"unidade avuls|salgado grande)",
+    _re_mod.IGNORECASE,
+)
+
+# Onde uma frase termina. O modelo emenda a pergunta de tamanho no fim de uma
+# pergunta legitima, entao cortar a mensagem inteira perderia a parte boa.
+# A quebra de linha corta sempre, com ou sem espaco depois: sem isso o
+# espelho do pedido inteiro virava uma "frase" so.
+_RX_FIM_DE_FRASE = _re_mod.compile(r"\n+|(?<=[?!.])\s+")
+
+# O espelho do pedido, que o filtro nao pode tocar.
+_RX_LINHA_DE_RESUMO = _re_mod.compile(
+    r"(💵\s*total|💰\s*subtotal|👤\s*cliente|🚚\s*frete)",
+    _re_mod.IGNORECASE)
+
+
+def _conferir_tamanho(user: str, reply: str, memoria: dict) -> str:
+    """Tira a pergunta de tamanho quando a quantidade ja resolveu o tamanho.
+
+    Irmao de _conferir_dinheiro, e pela mesma razao. A regra da fabrica e que
+    de 21 unidades para cima o pedido e SEMPRE festa; o codigo parou de mandar
+    perguntar, o prompt proibe a pergunta e a ficha repete a proibicao a cada
+    volta — e o modelo perguntava assim mesmo em cerca de 1 de cada 3 rodadas,
+    recitando a frase do BLOCO 2 com 50 unidades na ficha.
+
+    Instrucao nao e garantia. O que garante e isto: a frase nao chega ao
+    cliente. Com qualquer modelo, de qualquer provedor.
+
+    So age quando NAO ha duvida a resolver (conversation_memory diz quando).
+    Com um item abaixo do minimo no pedido a pergunta e legitima, e e ela que
+    evitou os R$ 450,00 em coxinha de balcao.
+    """
+    if not reply or not conversation_memory.tamanho_ja_definido(memoria):
+        return reply
+
+    # Nunca mexer no espelho do pedido. Ele tem linha de item, subtotal,
+    # total e a pergunta de confirmacao no fim, tudo na mesma mensagem; um
+    # item de balcao no meio ("30 un - Quiche de Frango") faria o filtro
+    # comer o resumo inteiro. Foi assim que _conferir_dinheiro trocou um
+    # total certo por um errado em 23/09 — o mesmo erro nao se repete aqui.
+    if _RX_LINHA_DE_RESUMO.search(reply):
+        return reply
+
+    def _e_pergunta_de_tamanho(frase: str) -> bool:
+        # Tem de ser PERGUNTA. Sem isto, um resumo com salgado grande no meio
+        # ("30 un - Quiche de Frango (Salgado Grande)") seria cortado junto:
+        # a frase cita balcao, mas esta informando, nao perguntando.
+        return ("?" in frase
+                and bool(_RX_PERGUNTA_TAMANHO.search(facts.normalize(frase))))
+
+    frases = _RX_FIM_DE_FRASE.split(reply)
+    limpas = [f for f in frases if not _e_pergunta_de_tamanho(f)]
+    if len(limpas) == len(frases):
+        return reply
+
+    cortadas = [f.strip() for f in frases if f not in limpas]
+    print(f"[tamanho] user={user} quantidade ja define o tamanho; "
+          f"pergunta removida: {' | '.join(cortadas)[:160]}")
+
+    novo = " ".join(f.strip() for f in limpas if f.strip()).strip()
+    if novo:
+        return novo
+
+    # A pergunta era a mensagem inteira. Nao da para devolver vazio: o codigo
+    # escreve a proxima pergunta do funil, como ja faz em outras recusas.
+    return _proxima_pergunta_do_funil(memoria)
+
+
+def _proxima_pergunta_do_funil(memoria: dict) -> str:
+    """Texto de codigo para seguir o atendimento, sem passar pelo modelo."""
+    pendentes = conversation_memory.faltando(memoria)
+    if not pendentes:
+        return ("Confirmando o seu pedido! Posso seguir para o resumo com os "
+                "valores? 💛")
+    rotulos = [conversation_memory._ROTULOS.get(c, c) for c in pendentes]
+    if len(rotulos) == 1:
+        return f"Para seguir, me confirma: {rotulos[0].lower()}? 😊"
+    lista = "\n".join(f"• {r}" for r in rotulos)
+    return f"Para seguir, me confirma:\n{lista}"
+
+
 def _auditar_valores(user: str, reply: str, consultados: list) -> None:
     """Registra no log todo valor em R$ da resposta que nao veio da base.
 
@@ -1484,6 +1569,24 @@ _MARCAS_DE_AJUSTE_DE_LOTE = (
     "ajusto para", "ajustar para", "de 25 em 25", "porcoes fechadas",
     "porcao fechada", "multiplo de 25", "fechamos de 25",
 )
+
+
+# Como o cliente escolhe o lado da duvida "pacote ou salgado grande".
+_MARCAS_ESCOLHEU_PACOTE = (
+    "pacote", "porcao", "porcoes", "festa", "de 25", "25 de cada", "meio cento",
+    "cento",
+)
+_MARCAS_ESCOLHEU_BALCAO = ("balcao", "avuls", "grande", "unidade", "catupiry")
+
+
+def _escolheu_pacote(texto: str) -> bool:
+    """O cliente optou pelo sabor de pacote, e nao pelo salgado grande?"""
+    limpo = " ".join(facts.normalize(texto or "").split())
+    if not limpo:
+        return False
+    if any(m in limpo for m in _MARCAS_ESCOLHEU_BALCAO):
+        return False          # citou o outro lado: nao decida por ele
+    return any(m in limpo for m in _MARCAS_ESCOLHEU_PACOTE)
 
 
 def _ofereceu_ajuste_de_lote(texto: str) -> bool:
@@ -1771,6 +1874,18 @@ def handle_flush(user: str, items: list[dict]) -> None:
         # continuava vendo 5 quibes, o funil nao andava e o modelo acabava
         # transferindo para humano um pedido ja ajustado (teste do dono,
         # 23/09 15:41).
+        # Cliente escolhendo o lado da duvida de tamanho ("pode ser a do pacote
+        # mesmo"). Tem de entrar na FICHA: enquanto a escolha ficava so no
+        # texto, a duvida voltava a cada mensagem e o pedido ia para a fila do
+        # humano ja resolvido (23/09 15:41).
+        if (conversation_memory.pendencia_de_item(_memoria)
+                and _escolheu_pacote(text_only)):
+            _escolha = conversation_memory.aplicar_escolha_de_pacote(_memoria)
+            if _escolha:
+                conversation_memory.save(user, _memoria)
+                print(f"[memoria] {user}: cliente escolheu o pacote -> "
+                      f"{'; '.join(_escolha)}")
+
         if (_ofereceu_ajuste_de_lote(last_assistant_text)
                 and _e_concordancia(text_only)):
             _ajustes = conversation_memory.aplicar_ajuste_de_lote(_memoria)
@@ -2285,6 +2400,10 @@ def handle_flush(user: str, items: list[dict]) -> None:
         if not _pedido_saiu and not _transfer_done:
             reply = _conferir_dinheiro(user, reply, _memoria, _calculo_da_volta,
                                        pular=_calculou_na_volta and not _calculo_da_volta)
+            # Mesma ideia, para a pergunta de tamanho: com 21 unidades ou mais
+            # nao ha duvida a resolver, e a frase nao pode chegar ao cliente
+            # por mais que o modelo insista em escreve-la.
+            reply = _conferir_tamanho(user, reply, _memoria)
 
         # O cliente confirmou o resumo, o modelo escreveu que fechou, mas a tool
         # nunca foi chamada — o pedido nao existe em lugar nenhum e o cliente
