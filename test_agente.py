@@ -58,9 +58,10 @@ def _instalar_stubs():
     # calculateOrder continua real: ele so calcula, e e justamente o caminho
     # que se quer testar.
     app.cardapio.criar_pedido = lambda **k: (
-        print(f"  [createOrderFromAgent BLOQUEADO no teste: {k.get('customer_name')} "
-              f"R$ {k.get('total')}]"),
-        {"success": True, "order_id": "TESTE", "display_id": "T000", "status": "simulado"},
+        print(f"  [TESTE — PEDIDO NAO FOI PARA A FABRICA] createOrderFromAgent "
+              f"bloqueado: {k.get('customer_name')} R$ {k.get('total')}"),
+        {"success": True, "order_id": "PEDIDO-DE-TESTE",
+         "display_id": "TESTE-NAO-PREPARAR", "status": "simulado"},
     )[1]
 
     conversation_memory.load = lambda phone: dict(_ficha) or conversation_memory._empty()

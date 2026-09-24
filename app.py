@@ -1414,6 +1414,27 @@ def _quantidade_da_ficha(itens_do_modelo: list, memoria: dict) -> list:
     return saida
 
 
+def _mensagem_de_fechamento(pagamento: str) -> str:
+    """Avisa que o pedido entrou, quando o modelo escreveu outra coisa.
+
+    Nao da para deixar a resposta do modelo no ar: ela pode estar perguntando
+    algo, e o cliente ficaria sem saber que o pedido ja existe.
+
+    Recebe o pagamento por parametro, e nao a ficha: quando isto e chamado a
+    ficha ja foi fechada pelo registrar_pedido_enviado.
+    """
+    pagamento = (pagamento or "").strip().lower()
+    if pagamento.startswith("pix"):
+        return (
+            "Pedido registrado! 💛 Assim que você enviar o comprovante do Pix "
+            "por aqui, nossa equipe confere e libera a produção."
+        )
+    return (
+        "Pedido confirmado! 💛 Já está com a nossa equipe. "
+        "Muito obrigado por escolher a BALBS!"
+    )
+
+
 def _conferir_tamanho(user: str, reply: str, memoria: dict) -> str:
     """Tira a pergunta de tamanho quando a quantidade ja resolveu o tamanho.
 
@@ -2455,8 +2476,13 @@ def handle_flush(user: str, items: list[dict]) -> None:
         # nunca foi chamada — o pedido nao existe em lugar nenhum e o cliente
         # foi embora achando que pediu. Aconteceu no 2o teste do dono (22/09
         # 09:46): "Pedido agendado!" sem nenhum registro em cardapio_orders.
+        # O cliente aceitou o espelho. Se a ficha esta completa, o pedido SAI —
+        # nao importa o que o modelo escreveu. Antes exigia-se que ele tivesse
+        # anunciado o fechamento, e quando ele respondia outra coisa o pedido
+        # simplesmente nao existia: o cliente ia embora achando que tinha
+        # pedido. Aconteceu em 2 de 4 rodadas do aceite do dono.
         if (_aceitou_o_resumo and not _pedido_saiu and not _pedido_nao_entrou
-                and not _transfer_done and _parece_fechamento(reply)):
+                and not _transfer_done):
             # Antes de transferir, TENTA ENVIAR. A ficha tem tudo o que o
             # pedido precisa, e transferir obriga uma pessoa a refazer o pedido
             # inteiro — no Pix e na retirada isso e pior do que precisa ser.
@@ -2466,7 +2492,17 @@ def handle_flush(user: str, items: list[dict]) -> None:
             except (TypeError, ValueError):
                 _total_ficha = 0.0
 
-            if _itens_ficha and _total_ficha > 0:
+            # faltando() e mais rigoroso do que itens+total: cobre dia,
+            # horario, endereco e pagamento. Sem isso o codigo fecharia um
+            # pedido que ainda tem pergunta em aberto.
+            _falta_na_ficha = conversation_memory.faltando(_memoria)
+            _tentou_enviar = bool(_itens_ficha) and _total_ficha > 0 and not _falta_na_ficha
+            # Lido AGORA: o envio bem sucedido chama registrar_pedido_enviado,
+            # que fecha a ficha — depois dele o pagamento ja nao esta la, e a
+            # mensagem de Pix saia como a de cartao.
+            _pagamento_antes = _memoria.get("payment_method", "")
+
+            if _tentou_enviar:
                 # subtotal/frete/retorno nao sao guardados como tal: o frete vem
                 # de registrar_frete e o retorno da regra do BLOCO 3.
                 try:
@@ -2490,19 +2526,26 @@ def handle_flush(user: str, items: list[dict]) -> None:
             else:
                 # Sem total nao existe pedido: se o calculate_order nunca rodou,
                 # qualquer valor aqui seria invencao. Melhor uma pessoa.
-                print(f"[flush] user={user} modelo ANUNCIOU fechamento sem chamar "
-                      f"a tool, e a ficha nao tem itens/total para enviar "
-                      f"(itens={len(_itens_ficha)} total={_total_ficha})")
+                print(f"[flush] user={user} aceite do resumo sem ficha completa "
+                      f"para enviar (itens={len(_itens_ficha)} total={_total_ficha} "
+                      f"falta={_falta_na_ficha})")
                 _resultado_auto = ""
 
             if _pedido_saiu:
-                # Deu certo: a mensagem que o modelo ja escreveu passa a ser
-                # verdade. Vale inclusive no Pix — o texto do BLOCO 5 pedindo o
-                # comprovante e exatamente o certo para um pedido retido em
-                # aguardando_pix, que o painel mostra com o botao Validar Pix.
-                print(f"[flush] user={user} pedido enviado pela ficha; "
-                      f"resposta do modelo mantida")
-            else:
+                # Deu certo. Se o modelo ja tinha anunciado o fechamento, a
+                # mensagem dele passa a ser verdade — vale inclusive no Pix, em
+                # que o texto do BLOCO 5 pedindo o comprovante e exatamente o
+                # certo para um pedido retido em aguardando_pix. Se ele escreveu
+                # outra coisa, quem avisa o cliente e o codigo: o pedido existe,
+                # e ele precisa saber disso.
+                if _parece_fechamento(reply):
+                    print(f"[flush] user={user} pedido enviado pela ficha; "
+                          f"resposta do modelo mantida")
+                else:
+                    print(f"[flush] user={user} pedido enviado pela ficha; "
+                          f"modelo nao anunciou o fechamento, texto do codigo")
+                    reply = _mensagem_de_fechamento(_pagamento_antes)
+            elif _tentou_enviar or _parece_fechamento(reply):
                 reply = MENSAGEM_PEDIDO_NAO_ENTROU
                 perform_transfer(user, reason="modelo disse que fechou o pedido sem "
                                               "chamar send_order_to_cardapio, e o "
