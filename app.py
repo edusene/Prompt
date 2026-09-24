@@ -2609,7 +2609,15 @@ def handle_flush(user: str, items: list[dict]) -> None:
         # anunciado o fechamento, e quando ele respondia outra coisa o pedido
         # simplesmente nao existia: o cliente ia embora achando que tinha
         # pedido. Aconteceu em 2 de 4 rodadas do aceite do dono.
-        if (_aceitou_o_resumo and not _pedido_saiu and not _pedido_nao_entrou
+        # Duas portas, nao uma. A primeira: o cliente aceitou o espelho — o
+        # pedido sai, escreva o modelo o que escrever. A segunda: o modelo
+        # ANUNCIOU que fechou sem que o cliente tivesse aceitado espelho nenhum
+        # ("Pedido finalizado com sucesso! Ja esta sendo preparado", logo apos
+        # a forma de pagamento). Aqui ele mentiu: nao existia pedido. Com a
+        # ficha completa, o codigo torna a frase verdadeira em vez de deixar o
+        # cliente ir embora achando que pediu.
+        if ((_aceitou_o_resumo or _parece_fechamento(reply))
+                and not _pedido_saiu and not _pedido_nao_entrou
                 and not _transfer_done):
             # Antes de transferir, TENTA ENVIAR. A ficha tem tudo o que o
             # pedido precisa, e transferir obriga uma pessoa a refazer o pedido
