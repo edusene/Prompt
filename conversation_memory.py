@@ -755,6 +755,33 @@ def render_ficha(memoria: dict) -> str:
             "Os itens acima sao o que o cliente pediu. O preco deles vem de "
             "consultar_preco/calculate_order - nunca do seu calculo."
         )
+        # O codigo ja parou de mandar perguntar o tamanho acima de 20 unidades,
+        # mas o modelo continuava perguntando por conta propria - consultar_preco
+        # devolve o sabor de pacote E o salgado grande com o mesmo nome, e ele
+        # resolvia a duvida perguntando. Aqui a regra vira instrucao positiva:
+        # nessa quantidade nao ha duvida nenhuma a resolver.
+        try:
+            import facts as _f
+            _minimo = _f.QTD_MINIMA_FESTA
+        except Exception:
+            _minimo = 21
+        _qtds = []
+        for _it in memoria["items"]:
+            if not isinstance(_it, dict):
+                continue
+            try:
+                _qtds.append(int(float(_it.get("quantity", 0) or 0)))
+            except (ValueError, TypeError):
+                pass
+        if _qtds and all(q >= _minimo for q in _qtds):
+            bloco.append(
+                f"TAMANHO JA DEFINIDO PELA QUANTIDADE: todo item deste pedido "
+                f"tem {_minimo} unidades ou mais, entao e FESTA (lote de 25 por "
+                f"sabor), no preco de pacote. E PROIBIDO perguntar 'festa ou "
+                f"salgado grande de balcao?', 'porcao ou unidade avulsa?' ou "
+                f"qualquer variante disso - nao ha duvida a resolver. Essa "
+                f"pergunta so existe de 1 a {_minimo - 1} unidades."
+            )
 
     if lote_quebrado:
         bloco.append(lote_quebrado)
