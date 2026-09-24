@@ -1361,6 +1361,59 @@ _RX_LINHA_DE_RESUMO = _re_mod.compile(
     _re_mod.IGNORECASE)
 
 
+def _quantidade_da_ficha(itens_do_modelo: list, memoria: dict) -> list:
+    """Devolve os itens com a QUANTIDADE que esta na ficha, quando ela sabe.
+
+    O modelo dobrou as quantidades ao montar a chamada: a ficha tinha 50
+    coxinhas e 50 churros e ele mandou 100 de cada para o calculate_order. A
+    tool respondeu R$ 174,00 — certo para a entrada errada — e a trava do
+    dinheiro, que confere a resposta contra o retorno da tool, IMPOS o valor
+    dobrado ao cliente. Nenhuma conferencia de soma pega isso: a soma estava
+    certa, a entrada e que nao era.
+
+    A ficha nao inventa quantidade: ela vem da extracao deterministica e dos
+    ajustes que o proprio codigo aplicou (lote, escolha de pacote). Onde ela
+    sabe, ela manda.
+
+    Item que a ficha nao conhece passa intacto — foi assim que um pedido com 3
+    itens, numa ficha com 2, seguiu inteiro.
+    """
+    if not itens_do_modelo or not memoria.get("items"):
+        return itens_do_modelo
+
+    def _casa(a: str, b: str) -> bool:
+        x, y = facts.normalize(a or ""), facts.normalize(b or "")
+        if not x or not y:
+            return False
+        return x == y or (min(len(x), len(y)) >= 4 and (x in y or y in x))
+
+    saida, trocas = [], []
+    for bruto in itens_do_modelo:
+        item = dict(bruto)
+        nome = str(item.get("name", ""))
+        try:
+            qtd = int(float(item.get("quantity", 0) or 0))
+        except (ValueError, TypeError):
+            saida.append(item)
+            continue
+        for da_ficha in memoria["items"]:
+            if not isinstance(da_ficha, dict) or not _casa(nome, da_ficha.get("name", "")):
+                continue
+            try:
+                qtd_ficha = int(float(da_ficha.get("quantity", 0) or 0))
+            except (ValueError, TypeError):
+                break
+            if qtd_ficha > 0 and qtd_ficha != qtd:
+                trocas.append(f"{nome}: {qtd} -> {qtd_ficha}")
+                item["quantity"] = qtd_ficha
+            break
+        saida.append(item)
+
+    if trocas:
+        print(f"[cardápio] quantidade corrigida pela ficha: {'; '.join(trocas)}")
+    return saida
+
+
 def _conferir_tamanho(user: str, reply: str, memoria: dict) -> str:
     """Tira a pergunta de tamanho quando a quantidade ja resolveu o tamanho.
 
@@ -1564,13 +1617,6 @@ _MARCAS_DE_FECHAMENTO = (
 )
 
 
-# Como a oferta de ajuste de quantidade aparece na resposta da Sandrinha.
-_MARCAS_DE_AJUSTE_DE_LOTE = (
-    "ajusto para", "ajustar para", "de 25 em 25", "porcoes fechadas",
-    "porcao fechada", "multiplo de 25", "fechamos de 25",
-)
-
-
 # Como o cliente escolhe o lado da duvida "pacote ou salgado grande".
 _MARCAS_ESCOLHEU_PACOTE = (
     "pacote", "porcao", "porcoes", "festa", "de 25", "25 de cada", "meio cento",
@@ -1587,12 +1633,6 @@ def _escolheu_pacote(texto: str) -> bool:
     if any(m in limpo for m in _MARCAS_ESCOLHEU_BALCAO):
         return False          # citou o outro lado: nao decida por ele
     return any(m in limpo for m in _MARCAS_ESCOLHEU_PACOTE)
-
-
-def _ofereceu_ajuste_de_lote(texto: str) -> bool:
-    """A ultima resposta ofereceu arredondar a quantidade para o lote?"""
-    limpo = " ".join(facts.normalize(texto or "").split())
-    return any(facts.normalize(m) in limpo for m in _MARCAS_DE_AJUSTE_DE_LOTE)
 
 
 def _parece_fechamento(texto: str) -> bool:
@@ -1886,7 +1926,11 @@ def handle_flush(user: str, items: list[dict]) -> None:
                 print(f"[memoria] {user}: cliente escolheu o pacote -> "
                       f"{'; '.join(_escolha)}")
 
-        if (_ofereceu_ajuste_de_lote(last_assistant_text)
+        # Quem diz que ha ajuste pendente e a FICHA, nao a redacao da volta
+        # anterior. Medido em 8 rodadas do mesmo cenario: em 2 delas o modelo
+        # tinha perguntado o nome no lugar de oferecer o ajuste, o gatilho por
+        # frase nao viu nada, e o "Isso, 25 de cada" do cliente caiu no vazio.
+        if (conversation_memory.pendencia_de_lote(_memoria)
                 and _e_concordancia(text_only)):
             _ajustes = conversation_memory.aplicar_ajuste_de_lote(_memoria)
             if _ajustes:
@@ -2198,6 +2242,8 @@ def handle_flush(user: str, items: list[dict]) -> None:
                 print(f"[cardápio] itens do modelo eram so rotulo de formato "
                       f"({[i.get('name') for i in (items or [])]}); usando os da ficha")
                 _itens = _memoria["items"]
+
+            _itens = _quantidade_da_ficha(_itens, _memoria)
 
             resultado = _calculate_order_handler(
                 _itens, bairro,
