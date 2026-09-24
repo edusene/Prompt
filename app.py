@@ -2681,7 +2681,9 @@ def handle_flush(user: str, items: list[dict]) -> None:
                     print(f"[flush] user={user} pedido enviado pela ficha; "
                           f"modelo nao anunciou o fechamento, texto do codigo")
                     reply = _mensagem_de_fechamento(_pagamento_antes)
-            elif _tentou_enviar or _parece_fechamento(reply):
+            elif _tentou_enviar:
+                # Tentamos enviar e o cardapio recusou. Ai sim e falha de
+                # verdade, e uma pessoa precisa assumir.
                 reply = MENSAGEM_PEDIDO_NAO_ENTROU
                 perform_transfer(user, reason="modelo disse que fechou o pedido sem "
                                               "chamar send_order_to_cardapio, e o "
@@ -2689,6 +2691,16 @@ def handle_flush(user: str, items: list[dict]) -> None:
                                               f"{str(_resultado_auto)[:120]}",
                                  send_message=False)
                 _transfer_done = True
+            elif _parece_fechamento(reply):
+                # O modelo anunciou fechamento com a ficha pela metade — ainda
+                # falta dado. Nao ha falha de sistema para avisar nem nada para
+                # um humano resolver: o pedido nem esta montado. Dizer "nao
+                # consegui registrar" e transferir aqui seria criar um problema
+                # onde havia so uma pergunta pendente.
+                print(f"[flush] user={user} modelo anunciou fechamento com a "
+                      f"ficha incompleta (falta={_falta_na_ficha}); "
+                      f"seguindo o funil")
+                reply = _proxima_pergunta_do_funil(_memoria)
 
         # Pedido recusado pelo cardapio: o que o modelo escreveu e descartado.
         # Ele ja respondeu "Pedido agendado!" por cima de um 401 — nao ha
