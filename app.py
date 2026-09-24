@@ -1362,7 +1362,7 @@ _RX_LINHA_DE_RESUMO = _re_mod.compile(
 
 
 def _quantidade_da_ficha(itens_do_modelo: list, memoria: dict) -> list:
-    """Devolve os itens com a QUANTIDADE que esta na ficha, quando ela sabe.
+    """Reconcilia os itens da chamada com a ficha: quantidade E conjunto.
 
     O modelo dobrou as quantidades ao montar a chamada: a ficha tinha 50
     coxinhas e 50 churros e ele mandou 100 de cada para o calculate_order. A
@@ -1409,9 +1409,126 @@ def _quantidade_da_ficha(itens_do_modelo: list, memoria: dict) -> list:
             break
         saida.append(item)
 
+    # Item que esta na ficha e NAO veio na chamada: o modelo esqueceu dele. A
+    # tool responde certo para o que recebeu, e a trava do dinheiro impoe esse
+    # valor menor — foi assim que um pedido de R$ 94,00 foi cobrado R$ 54,00,
+    # com os 50 churros fora da conta. Volta para a lista.
+    faltando_na_chamada = []
+    for da_ficha in memoria["items"]:
+        if not isinstance(da_ficha, dict):
+            continue
+        nome_ficha = str(da_ficha.get("name", ""))
+        if not nome_ficha:
+            continue
+        if any(_casa(nome_ficha, str(i.get("name", ""))) for i in saida):
+            continue
+        try:
+            qtd_ficha = int(float(da_ficha.get("quantity", 0) or 0))
+        except (ValueError, TypeError):
+            continue
+        if qtd_ficha <= 0:
+            continue
+        faltando_na_chamada.append(f"{nome_ficha} ({qtd_ficha} un)")
+        saida.append(dict(da_ficha))
+
     if trocas:
         print(f"[cardápio] quantidade corrigida pela ficha: {'; '.join(trocas)}")
+    if faltando_na_chamada:
+        print(f"[cardápio] itens que o modelo deixou de fora, repostos pela "
+              f"ficha: {'; '.join(faltando_na_chamada)}")
     return saida
+
+
+# Como cada dado aparece numa linha de lista de coleta. So palavras que
+# identificam o campo sem ambiguidade — "numero" sozinho, por exemplo, apareceria
+# em "numero do pedido".
+_PEDIDO_DE_DADO = {
+    "name": ("nome",),
+    "bairro": ("bairro",),
+    "endereco": ("rua", "endereco", "logradouro", "rua com numero"),
+    "data_agendada": ("data", "dia"),
+    "horario": ("horario", "que horas"),
+    "payment_method": ("forma de pagamento", "pagamento"),
+}
+
+
+def _conferir_pedido_de_dados(user: str, reply: str, memoria: dict) -> str:
+    """Tira da lista de coleta as linhas que pedem o que a ficha ja tem.
+
+    A diretiva da ficha ja lista SO o que falta e proibe repetir pergunta de
+    dado respondido. Mesmo assim o modelo reescrevia a lista inteira: o cliente
+    mandava bairro e rua, e a mensagem seguinte pedia bairro e rua de novo
+    (3 de 8 rodadas). O dono pediu isso por escrito — "perguntar apenas o dado
+    que faltou, sem repetir perguntas ja respondidas".
+
+    Age so em linha de LISTA (marcador, ou linha curta de rotulo). Nunca no
+    espelho do pedido, nunca na primeira linha, e nunca se isso esvaziar a
+    lista inteira: mensagem quebrada e pior do que pergunta repetida.
+    """
+    if not reply or _RX_LINHA_DE_RESUMO.search(reply):
+        return reply
+
+    linhas = reply.split("\n")
+    if len(linhas) < 3:
+        return reply          # nao e mensagem de lista
+
+    ja_tem = [campo for campo, _p in _PEDIDO_DE_DADO.items() if memoria.get(campo)]
+    if not ja_tem:
+        return reply
+
+    def _e_linha_de_lista(linha: str) -> bool:
+        limpo = linha.strip()
+        return bool(limpo) and (limpo[0] in "-*•—" or len(limpo) <= 42)
+
+    def _pede_o_que_ja_tem(linha: str) -> bool:
+        if not _e_linha_de_lista(linha):
+            return False
+        norm = facts.normalize(linha)
+        for campo in ja_tem:
+            if any(p in norm for p in _PEDIDO_DE_DADO[campo]):
+                return True
+        return False
+
+    cabeca, corpo = linhas[0], linhas[1:]
+    mantidas = [l for l in corpo if not _pede_o_que_ja_tem(l)]
+    cortadas = [l.strip() for l in corpo if l not in mantidas]
+    if not cortadas:
+        return reply
+
+    # Sobrou alguma linha de lista de verdade? Se nao, a mensagem virou so a
+    # abertura ("Por favor, informe:") e nao pergunta nada.
+    if not any(l.strip() and _e_linha_de_lista(l) for l in mantidas):
+        return reply
+
+    print(f"[coleta] user={user} a ficha ja tem o que estas linhas pediam: "
+          f"{' | '.join(cortadas)[:140]}")
+    return "\n".join([cabeca] + mantidas).strip()
+
+
+# Verbos com que a Sandrinha pede um dado. Sem um deles a mencao ao campo e
+# so contexto ("anotei o bairro Olaria"), nao pergunta.
+_VERBOS_DE_PEDIDO = (
+    "informe", "envie", "manda", "mande", "preciso", "poderia", "pode me",
+    "qual", "quais", "confirme", "me diga", "digite", "falta", "faltam",
+)
+
+
+def _repete_pergunta_respondida(reply: str, memoria: dict) -> list:
+    """Campos ja preenchidos que a resposta esta pedindo DE NOVO.
+
+    Olha frase a frase: o campo so conta quando esta na mesma frase que um
+    verbo de pedido. "Anotei o bairro Olaria. Qual a data?" nao e recoleta;
+    "informe bairro, rua e data" e.
+    """
+    repetidos = []
+    for frase in _re_mod.split(r"[.!?\n]", reply or ""):
+        norm = facts.normalize(frase)
+        if not norm or not any(v in norm for v in _VERBOS_DE_PEDIDO):
+            continue
+        for campo, palavras in _PEDIDO_DE_DADO.items():
+            if memoria.get(campo) and any(p in norm for p in palavras):
+                repetidos.append(campo)
+    return sorted(set(repetidos))
 
 
 def _mensagem_de_fechamento(pagamento: str) -> str:
@@ -2471,6 +2588,17 @@ def handle_flush(user: str, items: list[dict]) -> None:
             # nao ha duvida a resolver, e a frase nao pode chegar ao cliente
             # por mais que o modelo insista em escreve-la.
             reply = _conferir_tamanho(user, reply, _memoria)
+            # E nao pede de novo o que o cliente ja respondeu.
+            reply = _conferir_pedido_de_dados(user, reply, _memoria)
+            # A recoleta escrita em UMA frase ("informe nome, bairro, rua com
+            # numero, data e pagamento") nao da para aparar linha a linha: a
+            # mensagem inteira e a pergunta errada. Quem pergunta e o codigo.
+            _repetidos = _repete_pergunta_respondida(reply, _memoria)
+            _falta_agora = conversation_memory.faltando(_memoria)
+            if _repetidos and _falta_agora and not _RX_LINHA_DE_RESUMO.search(reply):
+                print(f"[coleta] user={user} a resposta pedia de novo "
+                      f"{_repetidos}; pergunta reescrita pelo codigo")
+                reply = _proxima_pergunta_do_funil(_memoria)
 
         # O cliente confirmou o resumo, o modelo escreveu que fechou, mas a tool
         # nunca foi chamada — o pedido nao existe em lugar nenhum e o cliente
