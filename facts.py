@@ -331,6 +331,21 @@ def buscar_linha(categoria: str, item: str) -> dict | None:
     return None
 
 
+# A partir desta quantidade o pedido e SEMPRE de festa (lote de 25 por sabor).
+# Abaixo dela o mesmo nome ainda pode ser o salgado grande de balcao, vendido
+# por unidade — e so ai vale perguntar ao cliente qual dos dois ele quer.
+#
+# Regra da fabrica, dada pelo dono em 24/09: "25 unidades ou mais e SEMPRE
+# festa; perguntar se e balcao so existe para pedidos de 1 a 20 unidades".
+# Dai o corte em 21: de 21 a 24 nao se pergunta nada, o preco ja e de pacote e
+# a trava de lote arredonda para 25.
+#
+# O numero estava cravado em tres arquivos com valores que podiam divergir.
+# Mora aqui porque quem decide o PRECO e resolve_unit_price: silenciar a
+# pergunta sem mudar o preco cobraria balcao caladamente, dez vezes mais caro.
+QTD_MINIMA_FESTA = 21
+
+
 def resolve_unit_price(nome: str, quantity: int = 1) -> dict | None:
     """Preco unitario oficial de um item do pedido.
 
@@ -386,7 +401,7 @@ def resolve_unit_price(nome: str, quantity: int = 1) -> dict | None:
 
     # 1) nome ambiguo: existe como sabor de lote E como salgado grande avulso
     #    ("coxinha" e "rissole de carne" sao os dois). Quem decide e a
-    #    quantidade: a partir de 25 e lote, abaixo disso e avulso. Esta checagem
+    #    quantidade (ver QTD_MINIMA_FESTA). Esta checagem
     #    vem antes do match exato justamente porque o nome bate dos dois lados.
     sabores = [p for p in candidatos if p["preco"] is None and alvo in normalize(p["item"])]
     avulsos = [
@@ -396,9 +411,10 @@ def resolve_unit_price(nome: str, quantity: int = 1) -> dict | None:
     ]
 
     if sabores and avulsos:
-        escolhido = _como_sabor(sabores[0], False) if quantity >= 25 else _como_linha(avulsos[0], False)
+        e_festa = quantity >= QTD_MINIMA_FESTA
+        escolhido = _como_sabor(sabores[0], False) if e_festa else _como_linha(avulsos[0], False)
         if escolhido:
-            outro = avulsos[0] if quantity >= 25 else sabores[0]
+            outro = avulsos[0] if e_festa else sabores[0]
             escolhido["ambiguo"] = True
             escolhido["alternativa"] = f"{outro['item']} ({outro['categoria']})"
             return escolhido

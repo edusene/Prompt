@@ -466,10 +466,10 @@ def _itens_ambiguos(memoria: dict) -> list[str]:
     com Catupiry. A diferenca de preco e grande (R$ 0,80/un no pacote contra
     R$ 9,00/un avulso), entao o agente confirma em vez de escolher sozinho.
 
-    So vale para quantidade ABAIXO de 25: de 25 para cima a leitura de pacote e
-    segura (ninguem pede 50 coxinhas grandes a R$ 9,00 cada) e perguntar seria
-    so atrito. A duvida real e o pedido pequeno, onde as duas leituras fazem
-    sentido.
+    So vale abaixo de facts.QTD_MINIMA_FESTA: dali para cima a leitura de
+    pacote e a unica que faz sentido (ninguem pede 50 coxinhas grandes a
+    R$ 9,00 cada) e perguntar seria so atrito. A duvida real e o pedido
+    pequeno, onde as duas leituras fazem sentido.
     """
     try:
         import facts
@@ -485,7 +485,7 @@ def _itens_ambiguos(memoria: dict) -> list[str]:
             qtd = int(float(item.get("quantity", 0) or 0))
         except (ValueError, TypeError):
             continue
-        if qtd >= 25:
+        if qtd >= facts.QTD_MINIMA_FESTA:
             continue
         try:
             oficial = facts.resolve_unit_price(nome, qtd)

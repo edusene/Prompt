@@ -488,7 +488,7 @@ def _normalizar_itens(items: list[dict]) -> tuple[list[dict], list[str], list[st
             # mesma pergunta tres vezes seguidas (23/09 22:45). A regra e a
             # mesma de conversation_memory._itens_ambiguos, que ja so
             # perguntava abaixo de 25.
-            if oficial.get("ambiguo") and quantidade < LOTE_MINIMO:
+            if oficial.get("ambiguo") and quantidade < facts.QTD_MINIMA_FESTA:
                 avisos.append(
                     f"'{nome}' cobrado como {oficial['item_oficial']} "
                     f"({_brl(oficial['preco_unitario'])}/un) por causa da quantidade "
@@ -580,11 +580,6 @@ _MODALIDADE_ROTULO = {
 # Cartao de Credito tem taxa fixa de R$ 2,00. No Pix antecipado e na retirada,
 # e isenta". Fica em codigo porque estava so no texto: a tool devolvia
 # return_fee=0 sempre, e o total saia R$ 2,00 menor do que o devido.
-# A partir desta quantidade o pedido e necessariamente de pacote (festa): e o
-# tamanho minimo de uma porcao. Abaixo disso o mesmo nome ainda pode ser o
-# salgado grande avulso, e so ai vale perguntar.
-LOTE_MINIMO = 25
-
 TAXA_RETORNO = 2.00
 
 _PAGAMENTOS_COM_RETORNO = {
