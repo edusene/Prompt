@@ -163,6 +163,14 @@ checa("1 pacote com rotulo vira 50 unidades",
       _envio_aceita([{"name": "Meio cento (50 un) Coxinha frango", "quantity": 1}]))
 checa("rotulo de formato SOZINHO continua bloqueado",
       not _envio_aceita([{"name": "Cento (100 un)", "quantity": 1}]))
+# 25/09: 3 rissoles avulsos (R$ 9,00 cada) batiam na regra de lote e nao
+# havia como precificar — a trava mandava "ajuste para 25", R$ 225,00.
+checa("pedido pequeno de nome ambiguo sai como avulso",
+      _envio_aceita([{"name": "Rissole de Carne", "quantity": 3}]))
+checa("o mesmo nome em quantidade de festa continua sendo pacote",
+      _envio_aceita([{"name": "Rissole de Carne", "quantity": 25}]))
+checa("sabor sem versao avulsa continua exigindo o lote",
+      not _envio_aceita([{"name": "Quibe", "quantity": 5}]))
 
 # ── Dinheiro ───────────────────────────────────────────────────────────────
 secao("--- dinheiro ---")

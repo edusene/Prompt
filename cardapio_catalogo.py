@@ -387,8 +387,22 @@ def traduzir(items: list[dict]) -> tuple[list[dict], list[str]]:
 
         linha = _linha_da_planilha(nome)
 
+        # Nome que existe nas DUAS familias, em quantidade pequena, e o salgado
+        # grande avulso — e o de-para tem entrada propria para ele. Sem esta
+        # saida, 3 rissoles (R$ 9,00 cada, pedido legitimo) batiam na regra de
+        # lote e nao havia como precificar o pedido: a trava mandava "ajuste
+        # para 25", que no avulso seriam R$ 225,00 (teste do dono, 25/09).
+        _avulso = _achar(MAPA, nome)
+        _pequeno = False
+        if _avulso and linha is not None and linha["preco"] is None:
+            try:
+                import facts as _f
+                _pequeno = qtd < _f.QTD_MINIMA_FESTA
+            except Exception:
+                _pequeno = False
+
         # Sabor de pacote
-        if linha is not None and linha["preco"] is None:
+        if linha is not None and linha["preco"] is None and not _pequeno:
             familia = linha["categoria"]
             if "canudinho" in _norm(nome):
                 familia = "Canudinhos"
