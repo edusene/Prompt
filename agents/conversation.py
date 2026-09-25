@@ -701,13 +701,41 @@ _NAO_E_RUA = re.compile(
 # pastel", "uma porcao de quibe". E a forma mais natural de pedir salgado no
 # balcao, e a extracao ignorava as tres — a ficha ficava sem item e a Sandrinha
 # pedia os itens de novo depois de o cliente ja ter dito (teste do dono, 25/09).
+# Os termos de volume do dono (25/09): meio cento = 50, cento = 100,
+# cento e meio = 150, dois centos = 200. "cento e meio" vem ANTES de "cento"
+# na alternancia, senao casaria so o "cento" e o pedido sairia pela metade.
 _PACOTE_POR_EXTENSO = re.compile(
-    r"\b(?:(uma?|1)\s+)?(por[cç][aã]o|meio\s+cento|cento)\s+"
-    r"(?:de\s+|d[eo]s\s+)?([a-zà-ÿ][a-zà-ÿ\s]{2,40}?)"
+    r"\b(?:(uma?|1)\s+)?("
+    r"por[cç][aã]o|meio\s+cento|cento\s+e\s+meio|"
+    r"(?:dois|duas|tr[eê]s|quatro|\d{1,2})\s+centos?|cento"
+    r")\s+(?:de\s+|d[eo]s\s+)?([a-zà-ÿ][a-zà-ÿ\s]{2,40}?)"
     r"(?=\s*(?:[,;.!?]|\be\b|\bpara\b|\bpra\b|\bcom\b|$))",
     re.IGNORECASE)
 
-_UNIDADES_DO_PACOTE = {"porcao": 25, "porção": 25, "meio cento": 50, "cento": 100}
+_UNIDADES_DO_PACOTE = {
+    "porcao": 25, "porção": 25,
+    "meio cento": 50,
+    "cento": 100,
+    "cento e meio": 150,
+}
+
+_CENTOS_POR_EXTENSO = {"dois": 2, "duas": 2, "tres": 3, "três": 3, "quatro": 4}
+
+
+def _unidades_do_formato(formato: str) -> int:
+    """Quantas unidades o termo de volume vale. 0 quando nao for um deles."""
+    chave = " ".join((formato or "").lower().split())
+    if chave in _UNIDADES_DO_PACOTE:
+        return _UNIDADES_DO_PACOTE[chave]
+    # "dois centos", "3 centos"
+    partes = chave.split()
+    if len(partes) == 2 and partes[1].startswith("cento"):
+        quantos = _CENTOS_POR_EXTENSO.get(partes[0])
+        if quantos is None and partes[0].isdigit():
+            quantos = int(partes[0])
+        if quantos and 0 < quantos <= 20:
+            return quantos * 100
+    return 0
 
 
 def _forma_de_busca(nome: str) -> str:
@@ -780,12 +808,25 @@ def _produto_conhecido(bruto: str) -> str | None:
     return None
 
 
+def volume_sem_sabor(msg_lower: str) -> int:
+    """Unidades pedidas por volume SEM dizer o sabor. 0 quando nao ha.
+
+    "Quero um cento de salgados fritos" nao tem sabor nenhum para virar item, e
+    a ficha ficava vazia. A regra do dono (25/09) pede resposta especifica:
+    oferecer ate Total/25 sabores e perguntar o preparo.
+    """
+    for _um, formato, produto in _PACOTE_POR_EXTENSO.findall(msg_lower):
+        unidades = _unidades_do_formato(formato)
+        if unidades and not _produto_conhecido(produto):
+            return unidades
+    return 0
+
+
 def _itens_por_extenso(msg_lower: str) -> list[dict]:
     """Itens pedidos por formato em vez de numero. [] quando nao ha nenhum."""
     achados = []
     for _um, formato, produto in _PACOTE_POR_EXTENSO.findall(msg_lower):
-        chave = " ".join(formato.lower().split())
-        unidades = _UNIDADES_DO_PACOTE.get(chave)
+        unidades = _unidades_do_formato(formato)
         if not unidades:
             continue
         canonico = _produto_conhecido(produto)
@@ -932,6 +973,12 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
             if len(product_name) < 3:
                 continue
 
+            # "2 centos de coxinha" e VOLUME, nao quantidade: o numero conta
+            # centos, nao unidades. Quem trata e _itens_por_extenso, logo
+            # abaixo — aqui sairia um pedido de 2 coxinhas.
+            if product_name.startswith("cento"):
+                continue
+
             # Remove plural
             if product_name.endswith('s') and not product_name.endswith('es'):
                 product_name_singular = product_name[:-1]
@@ -973,6 +1020,11 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
 
         if items_found:
             extracted["items"] = items_found
+        else:
+            # Volume dito sem sabor: guarda para a ficha pedir os sabores.
+            unidades = volume_sem_sabor(msg_lower)
+            if unidades:
+                extracted["volume_pendente"] = unidades
 
     # ── Referencia ──────────────────────────────────────────────────────────
     if not state.referencia:

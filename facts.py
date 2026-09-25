@@ -335,15 +335,17 @@ def buscar_linha(categoria: str, item: str) -> dict | None:
 # Abaixo dela o mesmo nome ainda pode ser o salgado grande de balcao, vendido
 # por unidade — e so ai vale perguntar ao cliente qual dos dois ele quer.
 #
-# Regra da fabrica, dada pelo dono em 24/09: "25 unidades ou mais e SEMPRE
-# festa; perguntar se e balcao so existe para pedidos de 1 a 20 unidades".
-# Dai o corte em 21: de 21 a 24 nao se pergunta nada, o preco ja e de pacote e
-# a trava de lote arredonda para 25.
+# Regra da fabrica, especificada pelo dono em 25/09: "1 a 24 un sem tamanho
+# especificado: pergunte se e grande (lanche) ou mini (festa). 25 un ou mais do
+# mesmo sabor: envie direto para o fluxo de festa."
+#
+# Em 24/09 ele tinha dito "1 a 20", e o corte ficou em 21; a especificacao de
+# 25/09 e explicita e detalhada, e manda. De 21 a 24 volta a perguntar.
 #
 # O numero estava cravado em tres arquivos com valores que podiam divergir.
 # Mora aqui porque quem decide o PRECO e resolve_unit_price: silenciar a
 # pergunta sem mudar o preco cobraria balcao caladamente, dez vezes mais caro.
-QTD_MINIMA_FESTA = 21
+QTD_MINIMA_FESTA = 25
 
 
 def resolve_unit_price(nome: str, quantity: int = 1) -> dict | None:

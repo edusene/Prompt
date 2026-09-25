@@ -198,13 +198,24 @@ checa("bairro novo do dono esta na tabela",
 checa("bairro reconhecido dentro da frase",
       detectar_bairro("entrega no bairro Nova Porto Velho, rua Amazonas 1234")
       == "Nova Porto Velho")
-checa("corte de festa em 21 unidades", facts.QTD_MINIMA_FESTA == 21)
-checa("abaixo de 21 a duvida de tamanho existe",
-      bool(memoria_mod.pendencia_de_item(
-          {"items": [{"name": "Coxinha", "quantity": 10}]})))
-checa("de 21 para cima nao ha duvida",
-      not memoria_mod.pendencia_de_item(
-          {"items": [{"name": "Coxinha", "quantity": 50}]}))
+checa("corte de festa em 25 unidades", facts.QTD_MINIMA_FESTA == 25)
+for _q, _pergunta in ((1, True), (20, True), (24, True), (25, False), (50, False)):
+    checa(f"{_q:>3} un -> pergunta tamanho? {_pergunta}",
+          bool(memoria_mod.pendencia_de_item(
+              {"items": [{"name": "Coxinha", "quantity": _q}]})) == _pergunta)
+_dir = memoria_mod.pendencia_de_item({"items": [{"name": "Coxinha", "quantity": 5}]})
+checa("a pergunta e 'grande (lanche) ou mini (festa)'",
+      "grande (lanche) ou mini (festa)" in _dir)
+checa("manda isolar so o item sem tamanho", "ISOLANDO SO ESSE ITEM" in _dir)
+
+# 25/09: termos de volume do dono.
+checa("cento e meio = 150", _itens("cento e meio de coxinha") == [(150, "Coxinha")])
+checa("dois centos = 200", _itens("dois centos de coxinha") == [(200, "Coxinha")])
+checa("2 centos = 200 (nao 2 unidades)",
+      _itens("2 centos de coxinha") == [(200, "Coxinha")])
+checa("volume sem sabor fica pendente, sem virar item",
+      _extract_data_from_message("quero um cento de salgados fritos",
+                                 ConversationState()).get("volume_pendente") == 100)
 
 # ── Higiene do proprio codigo ──────────────────────────────────────────────
 secao("--- higiene ---")

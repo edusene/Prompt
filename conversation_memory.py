@@ -23,7 +23,7 @@ _CAMPOS_REVISAVEIS = (
     "horario", "data_agendada", "data_iso", "payment_method",
 )
 
-_CAMPOS = _CAMPOS_REVISAVEIS + ("items",)
+_CAMPOS = _CAMPOS_REVISAVEIS + ("items", "volume_pendente")
 
 _ROTULOS = {
     "name": "Nome do cliente",
@@ -49,6 +49,7 @@ def _empty() -> dict:
     return {
         "name": "",
         "items": [],
+        "volume_pendente": 0,
         "modality": "",
         "bairro": "",
         "endereco": "",
@@ -500,6 +501,29 @@ def _itens_ambiguos(memoria: dict) -> list[str]:
     return avisos
 
 
+def _itens_ambiguos_detalhe(memoria: dict) -> list[dict]:
+    """[{qtd, sabor}] dos itens sem tamanho definido, para montar a pergunta."""
+    saida = []
+    for item in memoria.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        nome = str(item.get("name", ""))
+        try:
+            qtd = int(float(item.get("quantity", 0) or 0))
+        except (ValueError, TypeError):
+            continue
+        if qtd <= 0 or qtd >= _minimo_de_festa():
+            continue
+        try:
+            import facts
+            oficial = facts.resolve_unit_price(nome, qtd)
+        except Exception:
+            continue
+        if oficial and oficial.get("ambiguo"):
+            saida.append({"qtd": qtd, "sabor": nome})
+    return saida
+
+
 def pendencia_de_item(memoria: dict) -> str:
     """Duvida sobre O QUE o cliente pediu. Tem prioridade sobre o funil.
 
@@ -509,13 +533,26 @@ def pendencia_de_item(memoria: dict) -> str:
     ambiguos = _itens_ambiguos(memoria)
     if not ambiguos:
         return ""
+
+    # A frase e do dono (25/09): "1 a 24 un sem tamanho especificado: isole
+    # apenas esse item e pergunte 'Essas [Qtd] [Sabor] seriam tamanho grande
+    # (lanche) ou mini (festa)?'". Antes a Sandrinha citava os nomes de
+    # catalogo ("Coxinha de Frango com Catupiry ou Coxinha frango"), que nao
+    # dizem nada para quem esta comprando.
+    exemplos = "; ".join(
+        f"Essas {a['qtd']} {a['sabor']} seriam tamanho grande (lanche) "
+        f"ou mini (festa)? 😊"
+        for a in _itens_ambiguos_detalhe(memoria)
+    )
     return (
-        "ITEM AMBIGUO - o mesmo nome existe como sabor de pacote e como salgado "
-        "grande avulso, com precos bem diferentes: " + "; ".join(ambiguos)
-        + ". Pergunte ao cliente qual das duas opcoes ele quer, citando as duas "
-        "com o preco, ANTES de seguir para entrega/retirada. E PROIBIDO "
-        "transferir para humano por causa disto: a duvida se resolve "
-        "perguntando, e o cliente ainda esta montando o pedido."
+        "TAMANHO NAO INFORMADO - " + "; ".join(ambiguos)
+        + ". Pergunte AGORA, ISOLANDO SO ESSE ITEM e nesta forma: "
+        + (exemplos or "'seriam tamanho grande (lanche) ou mini (festa)? 😊'")
+        + " NAO explique a regra dos 25 nem cite nome de catalogo: a pergunta e "
+        "so grande (lanche) ou mini (festa). Se ele responder LANCHE ou GRANDE, "
+        "aceite a quantidade que ele pediu. Se responder MINI ou FESTA, avise "
+        "com gentileza que o mini fecha em 25 por sabor. E PROIBIDO transferir "
+        "para humano por causa disto."
     )
 
 
@@ -838,6 +875,24 @@ def render_ficha(memoria: dict) -> str:
             "para somar ao pedido que acabou de sair ou se e um pedido novo. "
             "Somar ao anterior e alteracao (BLOCO 0: transfira). Pedido novo e "
             "atendimento normal: siga o funil desde a modalidade."
+        )
+
+    # Volume dito sem sabor ("quero um cento"): a regra do dono manda oferecer
+    # ate Total/25 sabores e perguntar o preparo, em vez de so perguntar "qual
+    # sabor?" — o cliente nao sabe que pode dividir.
+    _volume = 0
+    try:
+        _volume = int(memoria.get("volume_pendente") or 0)
+    except (TypeError, ValueError):
+        _volume = 0
+    if _volume and not memoria.get("items"):
+        _quantos = max(1, _volume // 25)
+        bloco.append(
+            f"VOLUME SEM SABOR: o cliente pediu {_volume} unidades e nao disse "
+            f"os sabores. Diga que ele pode escolher ate {_quantos} "
+            f"{'sabor' if _quantos == 1 else 'sabores'} (25 por opcao) e "
+            f"pergunte QUAIS sabores e o PREPARO (frito ou assado). Nao "
+            f"pergunte so 'qual sabor?': ele nao sabe que pode dividir."
         )
 
     if memoria.get("items"):

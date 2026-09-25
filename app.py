@@ -1345,7 +1345,8 @@ def _conferir_dinheiro(user: str, reply: str, memoria: dict,
 # normalizado (sem acento), porque o modelo escreve "balcão" e "porção".
 _RX_PERGUNTA_TAMANHO = _re_mod.compile(
     r"(balcao|avuls|grande ou|porcao ou|festa ou|ou a porcao|ou grande|"
-    r"unidade avuls|salgado grande)",
+    r"unidade avuls|salgado grande|catupiry|por unidade|lanche ou|"
+    r"ou mini|mini ou)",
     _re_mod.IGNORECASE,
 )
 
@@ -1536,7 +1537,8 @@ _RX_PEDE_LICENCA = _re_mod.compile(
     r"(posso (seguir|passar|apresentar|montar|continuar|fechar|calcular|"
     r"mandar|enviar|gerar)|quer que eu (passe|mostre|monte|calcule)|"
     r"deseja que eu (passe|mostre|monte)|posso ja (passar|mostrar)|"
-    r"podemos confirmar|posso confirmar)",
+    r"podemos confirmar|posso confirmar|"
+    r"voce pediu|correto\?|certo\?|confere\?)",
     _re_mod.IGNORECASE,
 )
 
@@ -1885,10 +1887,12 @@ _MARCAS_DE_FECHAMENTO = (
 
 # Como o cliente escolhe o lado da duvida "pacote ou salgado grande".
 _MARCAS_ESCOLHEU_PACOTE = (
-    "pacote", "porcao", "porcoes", "festa", "de 25", "25 de cada", "meio cento",
-    "cento",
+    "pacote", "porcao", "porcoes", "festa", "mini", "de 25", "25 de cada",
+    "meio cento", "cento",
 )
-_MARCAS_ESCOLHEU_BALCAO = ("balcao", "avuls", "grande", "unidade", "catupiry")
+_MARCAS_ESCOLHEU_BALCAO = (
+    "balcao", "avuls", "grande", "lanche", "unidade", "catupiry",
+)
 
 
 def _escolheu_pacote(texto: str) -> bool:
