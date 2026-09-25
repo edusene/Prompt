@@ -1541,6 +1541,41 @@ _RX_PEDE_LICENCA = _re_mod.compile(
 )
 
 
+# A saudacao do BLOCO 1 que apresenta o cardapio e pergunta o que o cliente
+# quer. Certa para quem chegou dizendo "oi"; errada para quem chegou com o
+# pedido pronto.
+_RX_CARDAPIO_DE_BOAS_VINDAS = _re_mod.compile(
+    r"(cardapio completo|ocardapio\.net|balbs-cardapio|"
+    r"quais delicias|qual delicia|o que vamos pedir)",
+    _re_mod.IGNORECASE,
+)
+
+
+def _conferir_cardapio_no_pedido(user: str, reply: str, memoria: dict) -> str:
+    """Nao apresenta o cardapio a quem ja disse o que quer.
+
+    O BLOCO 1 manda mandar o link do cardapio no primeiro contato com nome
+    identificado. Quando o cliente chega com nome E pedido na mesma mensagem
+    — "Meu nome e Eduardo. Quero 25 canudinhos de camarao para retirar hoje
+    as 15h" — a regra disparava assim mesmo: ele recebia o link e a pergunta
+    "quais delicias vamos pedir hoje?", e tinha de repetir o pedido inteiro.
+    Aconteceu em 4 dos 9 testes do Eduardo (25/09).
+
+    So age quando a ficha JA tem item: e a prova de que o cliente disse o que
+    queria e nao foi ouvido.
+    """
+    if not reply or not (memoria.get("items") or []):
+        return reply
+    if _RX_LINHA_DE_RESUMO.search(reply):
+        return reply                  # ja e o espelho
+    if not _RX_CARDAPIO_DE_BOAS_VINDAS.search(facts.normalize(reply)):
+        return reply
+
+    print(f"[cardapio] user={user} pedido ja estava na mensagem; "
+          f"cardapio de boas-vindas trocado pelo proximo passo")
+    return _proxima_pergunta_do_funil(memoria)
+
+
 def _conferir_permissao(user: str, reply: str, memoria: dict) -> str:
     """Troca o "posso seguir com o resumo?" pelo resumo.
 
@@ -2710,6 +2745,8 @@ def handle_flush(user: str, items: list[dict]) -> None:
             reply = _conferir_pedido_de_dados(user, reply, _memoria)
             # E, com tudo coletado, nao pede licenca: mostra o resumo.
             reply = _conferir_permissao(user, reply, _memoria)
+            # E nao apresenta o cardapio a quem ja fez o pedido.
+            reply = _conferir_cardapio_no_pedido(user, reply, _memoria)
             # A recoleta escrita em UMA frase ("informe nome, bairro, rua com
             # numero, data e pagamento") nao da para aparar linha a linha: a
             # mensagem inteira e a pergunta errada. Quem pergunta e o codigo.
