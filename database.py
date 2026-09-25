@@ -806,6 +806,26 @@ def save_message(
     return None
 
 
+def mensagem_ja_recebida(wa_message_id: str) -> bool:
+    """A Meta ja entregou esta mensagem antes?
+
+    save_message devolve None em dois casos bem diferentes: duplicata e falha
+    ao gravar. Quem decide se PROCESSA a mensagem precisa saber qual dos dois
+    foi — descartar uma duplicata e o certo, descartar uma falha de banco e
+    perder o cliente. Por isso a pergunta e feita em separado.
+    """
+    if not wa_message_id:
+        return False
+    try:
+        return bool(db.fetch_one(
+            "SELECT 1 FROM messages WHERE wa_message_id=?", (wa_message_id,)
+        ))
+    except Exception as e:
+        # Na duvida, processa: responder duas vezes incomoda, nao responder perde.
+        print(f"[db] WARN mensagem_ja_recebida({wa_message_id}): {e}")
+        return False
+
+
 def update_message_media(msg_id: int, media_url: str) -> None:
     """Guarda o data-URI base64 da média baixada (image/audio/video/sticker)."""
     try:

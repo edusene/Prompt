@@ -3095,6 +3095,25 @@ def webhook():
                 wa_message_id=str(message_id) if message_id else None,
                 wa_media_id=wa_media_id,
             )
+            # A Meta REENTREGA o mesmo wamid quando o ack demora — foi assim
+            # que um unico "#RESET" do dono virou dois resets no banco, com
+            # 51 segundos de diferenca (24/09, 02:42:21 e 02:43:02). Ali foi
+            # inofensivo; num pedido, a segunda entrega seria uma segunda
+            # resposta, e num "SIM" seria um segundo pedido.
+            #
+            # save_message devolve None em DOIS casos: duplicata e falha ao
+            # gravar. So o primeiro pode ser descartado — descartar o segundo
+            # seria deixar um cliente sem resposta por causa de um erro nosso.
+            _ja_processada = False
+            if saved is None and message_id:
+                _ja_processada = database.mensagem_ja_recebida(str(message_id))
+                if _ja_processada:
+                    print(f"[webhook] REENTREGA ignorada wamid={message_id} "
+                          f"from={number}")
+                else:
+                    print(f"[webhook] WARN falha ao gravar wamid={message_id}; "
+                          f"processando assim mesmo para nao perder o cliente")
+
             # A partir daqui nada mais precisa ser feito ANTES de comecar a
             # contar o debounce. O que vem abaixo — CRM, follow-ups, SSE do
             # painel — sao 1,4s de banco que o cliente estava esperando de pe,
@@ -3104,7 +3123,7 @@ def webhook():
             # save_message fica acima porque e ele quem faz a deduplicacao (a
             # Meta reentrega o mesmo wamid) e quem devolve o msg_id da midia.
             # Comecar o debounce antes dele processaria a mensagem duas vezes.
-            if not e_pedido_de_reset(body):
+            if not e_pedido_de_reset(body) and not _ja_processada:
                 # Download de midia em background — antes do CRM, para ter os
                 # 3s inteiros do debounce e chegar pronta em _build_user_parts.
                 if saved and wa_media_id and msg_type != "text":
@@ -3137,14 +3156,14 @@ def webhook():
                     "message_id": str(message_id),
                 })
                 print(f"[webhook] MSG SALVA conv={conv['id']} from={number} len={len(body)}")
-            else:
-                print(f"[webhook] MSG DUPLICADA msg_id={message_id}")
+            elif not _ja_processada:
+                print(f"[webhook] MSG NAO GRAVADA msg_id={message_id}")
 
             # #reset nao entra no debounce — a palavra nao e conversa, e
             # comando — e roda DEPOIS do CRM justamente por nao ter pressa:
             # ele precisa funcionar quando a conversa esta em modo humano, que
             # e onde handle_flush desiste logo no inicio.
-            if e_pedido_de_reset(body):
+            if e_pedido_de_reset(body) and not _ja_processada:
                 try:
                     perform_reset(number, origem="cliente")
                 except Exception as e:
