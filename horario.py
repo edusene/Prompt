@@ -235,17 +235,39 @@ def resolver_data(texto: str, now: datetime | None = None) -> date | None:
     return None
 
 
+# Onde ha dinheiro na frase, virgula e centavo - nao minuto.
+_RX_DINHEIRO = re.compile(r"r\$|reais|troco|pagar")
+
+# "(?<!\d)" em vez de "\b": o cliente cola a hora na palavra anterior
+# ("PODE SER PARA AS19:50") e "\b" nao ve fronteira entre "s" e "1", entao o
+# horario nao existia para o parser e a pergunta era repetida (teste do dono,
+# 25/09). As duas metades da concatenacao sao raw de proposito: "\\b" num
+# literal sem o r vira byte de backspace e o regex nunca casa.
+_RX_HORA = re.compile(r"(?<!\d)(\d{1,2})\s*(?:h|:|horas?)\s*(\d{2})?\b")
+
+# A virgula e como se escreve hora aqui ("19,50"), mas EXIGE os dois digitos de
+# minuto: sem isso "45, amanha as 16h" casava "45," como hora, 45 nao e hora
+# valida e o horario da mensagem inteira se perdia.
+_RX_HORA_VIRGULA = re.compile(r"(?<!\d)(\d{1,2})\s*,\s*(\d{2})\b")
+
+
 def parse_horario(texto: str) -> tuple[int, int] | None:
-    """'18h', '18:30', 'as 8h15', '18 horas' -> (hora, minuto)."""
+    """'18h', '18:30', 'as 8h15', '18 horas', '19,50' -> (hora, minuto)."""
     t = _norm(texto)
-    m = re.search(r"\b(\d{1,2})\s*(?:h|:|horas?)\s*(\d{2})?\b", t)
-    if not m:
-        return None
-    hora = int(m.group(1))
-    minuto = int(m.group(2) or 0)
-    if hora > 23 or minuto > 59:
-        return None
-    return hora, minuto
+    moldes = [_RX_HORA]
+    if not _RX_DINHEIRO.search(t):
+        moldes.append(_RX_HORA_VIRGULA)
+
+    # Percorre TODOS os candidatos em vez de desistir no primeiro: numa frase
+    # como "45, amanha as 16h" o primeiro numero nao e hora, e o horario esta
+    # mais adiante.
+    for molde in moldes:
+        for m in molde.finditer(t):
+            hora = int(m.group(1))
+            minuto = int(m.group(2) or 0)
+            if hora <= 23 and minuto <= 59:
+                return hora, minuto
+    return None
 
 
 def formatar_horario(hora: int, minuto: int) -> str:
@@ -292,7 +314,11 @@ def validar_agendamento(
             "A gente só começa às 07h40! Pode ser a partir desse horário? 😊"
         ), None
 
-    if minuto_pedido >= _minutos(*FECHAMENTO):
+    # ">" e nao ">=": a loja atende ATE as 20h, entao 20h00 e horario valido
+    # - o ultimo. Com ">=" ela recusava as 20h em ponto e mandava o cliente
+    # escolher "antes disso", e o dono bateu nisso tres vezes seguidas no
+    # teste de 25/09 as 18h.
+    if minuto_pedido > _minutos(*FECHAMENTO):
         return False, (
             "Nosso atendimento vai até às 20h00! Qual horário antes disso "
             "funciona melhor pra você? 😊"

@@ -162,14 +162,14 @@ Vale repetir emendando o horário: `PEDRINHAS RUA FLORES 120 AS 18 HORAS`
 
 ### 1.9 Entrega sem número da casa
 
-O pedido do dono de 25/09 fechou em R$ 92,00 para `RUA GUANABARA` — rua sem
-número, e ninguém perguntou. O motoboy sairia com endereço incompleto.
+O pedido de 25/09 fechou em R$ 92,00 para `RUA GUANABARA` — rua sem número, e
+ninguém perguntou. O motoboy sairia com endereço incompleto.
 
 ```
 #reset
 ```
 ```
-Meu nome é Eduardo. Quero 50 coxinhas para entrega
+Meu nome é Balbino. Quero 50 coxinhas para entrega
 ```
 Depois, de propósito **sem número**:
 ```
@@ -179,16 +179,94 @@ OLARIA RUA GUANABARA PAGAMENTO NO PIX
 | | |
 |---|---|
 | ✅ Esperado | pede o **número da casa** junto com data e horário, numa mensagem só |
-| 🚩 Alerta | apresentar o resumo ou fechar o pedido sem número |
+| 🚩 Alerta | qualquer menção a **S/N** ou "pode ser sem número" · fechar o pedido sem número |
 
-Responda `É S/N, casa sem número` → tem que **aceitar e seguir**. Quem mora em
-casa sem numeração não pode ficar preso.
-
-Vale testar a resposta junta, que é como as pessoas respondem de verdade:
+Responda com a resposta junta, que é como as pessoas escrevem:
 `45, amanhã às 16h` → o endereço final tem que sair `RUA GUANABARA, 45`.
 
-**Não se aplica** quando o cliente já deu ponto de referência (quem disse como
-achar a casa já resolveu) nem na retirada.
+### 1.10 Casa que realmente não tem número
+
+O S/N foi cortado — sem número o motoboy não acha a casa. Mas quem mora em rua
+sem numeração não pode ficar preso, e o que resolve na prática é a referência.
+
+Seguindo do teste acima, responda:
+```
+a casa não tem número
+```
+
+| | |
+|---|---|
+| ✅ Esperado | pede um **ponto de referência** para o motoboy achar |
+| 🚩 Alerta | aceitar assim e seguir sem nada · oferecer S/N · insistir no número |
+
+Depois `é em frente ao mercado do João` → o pedido tem que **seguir**.
+
+**Não se aplica** na retirada, nem quando o cliente já deu referência antes.
+
+### 1.11 As 20 horas são horário de atendimento
+
+Ela recusou `AS 20 HORAS` três vezes seguidas, mandando escolher "antes disso".
+A loja atende **até** 20h — 20h00 é horário válido, o último.
+
+```
+#reset
+```
+```
+Meu nome é Balbino. Quero 50 coxinhas para retirar hoje às 20 horas
+```
+
+| | |
+|---|---|
+| ✅ Esperado | aceita, Total **R$ 40,00** |
+| 🚩 Alerta | "Nosso atendimento vai até às 20h00!" |
+
+Teste também o que **deve** ser recusado: `às 20:10` → passou do fechamento.
+
+E a hora colada na palavra, que ela não lia (repetia a pergunta à toa):
+
+| Mande | ✅ Esperado |
+|---|---|
+| `PODE SER PARA AS19:50` | entende 19h50 |
+| `19,50` | entende 19h50 |
+| `vou pagar 19,50 reais` | **não** é horário |
+
+### 1.12 Volume grande de dois sabores
+
+O churros simplesmente não foi cobrado no fim.
+
+```
+#reset
+```
+```
+Meu nome é Balbino. Quero meio cento de coxinha e um cento e meio de churros para hoje às 20 horas
+```
+Depois `ENTREGA NA RUA GOITACAZ BAIRRO APONIA` e
+`PAGAMENTO NO DEBITO NUMERO DA CASA 2135`
+
+| | |
+|---|---|
+| ✅ Esperado | `50 un - Coxinha frango — R$ 40,00` + `150 un - Churros doce de leite — R$ 120,00` · Total **R$ 170,00** |
+| 🚩 Alerta | churros ausente do resumo · endereço sem o `2135` · rua virar só `RUA 2135` |
+
+### 1.13 Pedido certo não leva aula (de novo)
+
+Já estava no roteiro, mas voltou num turno mais adiante: com 50 coxinhas e 150
+churros na ficha — os dois múltiplos de 25 — ela explicou a regra dos 25 e
+ainda pediu confirmação.
+
+```
+#reset
+```
+```
+Meu nome é Balbino. Quero 50 coxinhas e 50 churros e meio cento de bolinha
+```
+
+| | |
+|---|---|
+| ✅ Esperado | segue o funil (entrega ou retirada?), sem explicação |
+| 🚩 Alerta | "tudo em porções de 25 unidades" · "de 25 em 25" · "múltiplos de 25" · "a porção mínima é de 25" |
+
+**Siga até o fim** — a frase apareceu no terceiro turno, não no primeiro.
 
 ---
 

@@ -23,7 +23,7 @@ _CAMPOS_REVISAVEIS = (
     "horario", "data_agendada", "data_iso", "payment_method",
 )
 
-_CAMPOS = _CAMPOS_REVISAVEIS + ("items", "volume_pendente")
+_CAMPOS = _CAMPOS_REVISAVEIS + ("items", "volume_pendente", "sem_numero")
 
 _ROTULOS = {
     "name": "Nome do cliente",
@@ -31,7 +31,8 @@ _ROTULOS = {
     "modality": "Modalidade (entrega/retirada)",
     "bairro": "Bairro",
     "endereco": "Endereco (rua e numero)",
-    "endereco_numero": "Numero da casa (ou S/N)",
+    "endereco_numero": "Numero da casa",
+    "endereco_referencia": "Ponto de referencia (a casa nao tem numero)",
     "referencia": "Ponto de referencia",
     "data_agendada": "Data",
     "horario": "Horario",
@@ -55,6 +56,10 @@ def _empty() -> dict:
         "bairro": "",
         "endereco": "",
         "referencia": "",
+        # O cliente afirmou que a casa nao tem numero. Nao completa o
+        # endereco - troca a pendencia do numero pela do ponto de referencia,
+        # que e o que o motoboy usa para achar a casa.
+        "sem_numero": False,
         "horario": "",
         "data_agendada": "",
         # Dia resolvido (AAAA-MM-DD). data_agendada e o texto que vai para a
@@ -313,15 +318,17 @@ def capturar_numero_da_casa(memoria: dict, texto: str) -> str:
     norm = _normalizar_sem_acento(bruto)
     endereco = str(memoria.get("endereco") or "").strip()
     if _SEM_NUMERO_ACEITO.search(norm):
-        novo = f"{endereco}, S/N"
-    else:
-        numero = _numero_da_casa_no_texto(norm)
-        if not numero:
-            return ""
-        novo = f"{endereco}, {numero}"
+        # Nao completa o endereco: marca que nao ha numero, e a pendencia
+        # passa a ser o ponto de referencia.
+        memoria["sem_numero"] = True
+        return "casa sem numero - vai pedir ponto de referencia"
 
-    memoria["endereco"] = novo
-    return novo
+    numero = _numero_da_casa_no_texto(norm)
+    if not numero:
+        return ""
+    memoria["endereco"] = f"{endereco}, {numero}"
+    memoria["sem_numero"] = False
+    return memoria["endereco"]
 
 
 def capturar_resposta_direta(memoria: dict, pergunta_anterior: str, texto: str) -> str:
@@ -552,8 +559,6 @@ def endereco_sem_numero(memoria: dict) -> bool:
         return False          # falta o endereco inteiro: quem cobra e o campo
     if any(c.isdigit() for c in endereco):
         return False
-    if _SEM_NUMERO_ACEITO.search(_normalizar_sem_acento(endereco)):
-        return False
     if str(memoria.get("referencia") or "").strip():
         return False
     return True
@@ -583,7 +588,11 @@ def faltando(memoria: dict) -> list[str]:
     # propria, porque faltando() ja e o que governa as tres portas: a diretiva
     # de coleta, a troca por resumo e o fechamento do pedido.
     if "endereco" not in pendentes and endereco_sem_numero(memoria):
-        pendentes.append("endereco_numero")
+        # O dono cortou o "pode ser S/N" em 25/09: sem numero o motoboy nao
+        # acha a casa. Quem afirma que a casa nao tem numero cai no unico
+        # substituto que funciona - o ponto de referencia.
+        pendentes.append("endereco_referencia" if memoria.get("sem_numero")
+                         else "endereco_numero")
     return pendentes
 
 
@@ -1052,6 +1061,18 @@ def render_ficha(memoria: dict) -> str:
 
     if lote_quebrado:
         bloco.append(lote_quebrado)
+    elif memoria.get("items") and not duvida_item:
+        # O dono foi explicito em 25/09: pedido certo nao leva aula. Com 50
+        # coxinhas e 150 churros na ficha - os dois multiplos de 25 - ela
+        # respondeu "a porcao minima e de 25 por sabor, o pedido deve ser em
+        # multiplos de 25" e ainda pediu confirmacao.
+        bloco.append(
+            "QUANTIDADES JA NA REGRA DE LOTE: fecham nos multiplos exigidos, "
+            "nao ha nada a ajustar. E PROIBIDO explicar 'multiplos de 25', "
+            "'minimo por sabor', 'porcoes de 25' ou 'de 25 em 25', e PROIBIDO "
+            "pedir confirmacao do que ja esta certo - confirme o pedido e siga "
+            "o funil."
+        )
 
     if duvida_item:
         bloco.append(duvida_item)

@@ -1578,6 +1578,34 @@ def _conferir_cardapio_no_pedido(user: str, reply: str, memoria: dict) -> str:
     return _proxima_pergunta_do_funil(memoria)
 
 
+# Como ela oferecia a saida que o dono cortou: "(pode ser S/N)", "ou S/N",
+# "pode ser sem numero". Sem numero o motoboy nao acha a casa (25/09).
+_RX_OFERECE_SEM_NUMERO = _re_mod.compile(
+    '\\s*(?:[(\\[]\\s*)?(?:ou\\s+)?(?:pode\\s+ser\\s+)?(?:\\bs\\s*/?\\s*n\\b|sem\\s+n[u\\u00fa]mero)(?:\\s*[)\\]])?',
+    _re_mod.IGNORECASE)
+
+
+def _conferir_sem_numero(user: str, reply: str) -> str:
+    """Tira da resposta qualquer oferta de casa sem numero.
+
+    O dono cortou isso em 25/09, com a razao pratica: "NAO PODE FALAR PODE
+    SER SEM NUMERO COMO QUE MOTOBOY VAI ACHAR?". O prompt ja proibe, mas
+    proibir no prompt e instrucao - a frase saiu assim mesmo no teste dele.
+
+    Nao mexe no espelho: um endereco ja fechado nao se reescreve.
+    """
+    if not reply or _RX_LINHA_DE_RESUMO.search(reply):
+        return reply
+    limpo = _RX_OFERECE_SEM_NUMERO.sub("", reply)
+    if limpo == reply:
+        return reply
+    # Se o corte esvaziou a mensagem, pergunto direto em vez de devolver
+    # um toco sem sentido.
+    if len([c for c in limpo if c.isalpha()]) < 12:
+        limpo = "Qual é o número da casa? 🛵"
+    print(f"[endereco] user={user} cortada a oferta de casa sem numero")
+    return limpo.strip()
+
 def _conferir_permissao(user: str, reply: str, memoria: dict) -> str:
     """Troca o "posso seguir com o resumo?" pelo resumo.
 
@@ -1728,6 +1756,49 @@ def _conferir_tamanho(user: str, reply: str, memoria: dict) -> str:
     # escreve a proxima pergunta do funil, como ja faz em outras recusas.
     return _proxima_pergunta_do_funil(memoria)
 
+
+# Como ela explica a regra de lote. Serve para cortar a explicacao quando
+# nao ha nada a corrigir - o dono foi explicito: pedido certo nao leva aula.
+_RX_AULA_DE_LOTE = _re_mod.compile(
+    '(?:m[u\\u00fa]ltiplos?\\s+de\\s+25|m[i\\u00ed]nim[oa]\\s+(?:de\\s+)?25|por[c\\u00e7][a\\u00e3]o\\s+m[i\\u00ed]nima|25\\s+em\\s+25|(?:por[c\\u00e7][o\\u00f5]es|lotes?)\\s+(?:fechad[ao]s?\\s+)?de\\s+25|(?:em|de)\\s+por[c\\u00e7][o\\u00f5]es\\s+de\\s+25|25\\s+unidades\\s+por\\s+sabor|de\\s+25\\s+em\\s+25)',
+    _re_mod.IGNORECASE)
+
+
+def _conferir_aula_de_lote(user: str, reply: str, memoria: dict) -> str:
+    """Tira a explicacao da regra dos 25 de um pedido que ja esta na regra.
+
+    Irmao de _conferir_tamanho. O dono pediu em 25/09: quando a quantidade
+    esta certa, confirmar e seguir, sem aula. Ela fazia o contrario - com
+    50 coxinhas e 150 churros na ficha (ambos multiplos de 25) respondeu
+    "a porcao minima e de 25 unidades por sabor, e o pedido deve ser em
+    multiplos de 25" e ainda pediu confirmacao, queimando uma volta.
+
+    So age quando NAO ha pendencia de lote nem duvida de item: com algo
+    fora da regra a explicacao e necessaria, e e ela que evita o pedido
+    impossivel de produzir.
+    """
+    if not reply or _RX_LINHA_DE_RESUMO.search(reply):
+        return reply
+    if not (memoria.get("items") or []):
+        return reply
+    if conversation_memory.pendencia_de_lote(memoria):
+        return reply
+    if conversation_memory.pendencia_de_item(memoria):
+        return reply
+
+    frases = _RX_FIM_DE_FRASE.split(reply)
+    limpas = [f for f in frases if not _RX_AULA_DE_LOTE.search(f)]
+    if len(limpas) == len(frases):
+        return reply
+
+    cortadas = [f.strip() for f in frases if f not in limpas]
+    print(f"[lote] user={user} pedido ja esta na regra; explicacao removida: "
+          f"{' | '.join(cortadas)[:160]}")
+    novo = " ".join(f.strip() for f in limpas if f.strip()).strip()
+    # Mesma licao de _conferir_tamanho: um toco de mensagem nao serve.
+    if len(_re_mod.sub(r"[^A-Za-zÀ-ÿ]", "", novo)) >= 12:
+        return novo
+    return _proxima_pergunta_do_funil(memoria)
 
 def _proxima_pergunta_do_funil(memoria: dict) -> str:
     """Texto de codigo para seguir o atendimento, sem passar pelo modelo."""
@@ -2756,6 +2827,8 @@ def handle_flush(user: str, items: list[dict]) -> None:
             reply = _conferir_tamanho(user, reply, _memoria)
             # E nao pede de novo o que o cliente ja respondeu.
             reply = _conferir_pedido_de_dados(user, reply, _memoria)
+            reply = _conferir_sem_numero(user, reply)
+            reply = _conferir_aula_de_lote(user, reply, _memoria)
             # E, com tudo coletado, nao pede licenca: mostra o resumo.
             reply = _conferir_permissao(user, reply, _memoria)
             # E nao apresenta o cardapio a quem ja fez o pedido.

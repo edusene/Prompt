@@ -238,7 +238,9 @@ def _falta_numero(**extra) -> bool:
 checa("rua sem numero fica pendente (caso real do dono)",
       _falta_numero(endereco="RUA GUANABARA"))
 checa("rua com numero passa", not _falta_numero(endereco="Rua das Flores 120"))
-checa("S/N passa", not _falta_numero(endereco="Av Calama, S/N"))
+# O dono cortou o S/N em 25/09: "COMO QUE MOTOBOY VAI ACHAR?". Escrever S/N
+# na rua nao completa mais o endereco.
+checa("S/N na rua NAO completa o endereco", _falta_numero(endereco="Av Calama, S/N"))
 checa("ponto de referencia substitui o numero",
       not _falta_numero(endereco="Rua X", referencia="casa azul da esquina"))
 checa("retirada nao cobra numero",
@@ -258,7 +260,16 @@ def _capturou(texto: str, endereco: str = "RUA GUANABARA") -> str:
 
 checa("numero solto entra na ficha", _capturou("45").endswith(", 45"))
 checa("numero com preambulo entra", _capturou("e o 120").endswith(", 120"))
-checa("S/N entra", _capturou("e S/N, casa sem numero").endswith(", S/N"))
+# Quem diz que a casa nao tem numero cai no unico substituto que o motoboy
+# usa: o ponto de referencia.
+_ficha_sn = _ficha_entrega(endereco="RUA GUANABARA")
+memoria_mod.capturar_numero_da_casa(_ficha_sn, "e S/N, a casa nao tem numero")
+checa("S/N nao escreve no endereco", _ficha_sn["endereco"] == "RUA GUANABARA")
+checa("S/N marca a casa sem numero", _ficha_sn.get("sem_numero") is True)
+checa("sem numero, o que falta e a referencia",
+      memoria_mod.faltando(_ficha_sn) == ["endereco_referencia"])
+_ficha_sn["referencia"] = "em frente ao mercado"
+checa("referencia completa o endereco", not memoria_mod.faltando(_ficha_sn))
 checa("horario nao vira numero de casa", not _capturou("hoje as 16h"))
 checa("quantidade nao vira numero de casa", not _capturou("quero 50 coxinhas"))
 checa("valor nao vira numero de casa", not _capturou("vou pagar 100 reais"))
@@ -285,6 +296,72 @@ _ficha_render = memoria_mod.render_ficha(_ficha_entrega(endereco="RUA GUANABARA"
 checa("ficha marca a rua como incompleta", "SEM O NUMERO DA CASA" in _ficha_render)
 checa("ficha lista o numero no que falta", "Numero da casa" in _ficha_render)
 
+# ── Horario ─────────────────────────────────────────────────────
+secao("--- horario ---")
+import horario  # noqa: E402
+
+# "20 HORAS" foi recusado tres vezes seguidas no teste do dono (25/09 18h),
+# com o limite escrito ">=": a loja atende ATE as 20h, entao 20h00 vale.
+_MANHA_DE_HOJE = datetime(2026, 9, 25, 10, 0, 0)
+_HOJE = date(2026, 9, 25)
+
+
+def _aceita(texto: str) -> bool:
+    ok, _msg, _dia = horario.validar_agendamento(_HOJE, texto, _MANHA_DE_HOJE)
+    return ok
+
+
+checa("20 horas e horario valido", _aceita("20 horas"))
+checa("20:00 e horario valido", _aceita("20:00"))
+checa("20:10 passa do fechamento", not _aceita("20:10"))
+checa("19:55 vale", _aceita("19:55"))
+checa("07:00 e antes de abrir", not _aceita("07:00"))
+checa("13:00 cai no almoco", not _aceita("13:00"))
+
+# A hora colada na palavra anterior nao existia para o parser, e a pergunta
+# era repetida: "PODE SER PARA AS19:50" (teste do dono).
+checa("hora colada na palavra", horario.parse_horario("PODE SER PARA AS19:50") == (19, 50))
+checa("virgula como separador", horario.parse_horario("19,50") == (19, 50))
+checa("formatos de sempre seguem valendo",
+      [horario.parse_horario(t) for t in ("18h", "18:30", "as 8h15", "18 horas")]
+      == [(18, 0), (18, 30), (8, 15), (18, 0)])
+checa("dinheiro nao vira horario",
+      [horario.parse_horario(t) for t in ("vou pagar 19,50 reais", "troco para 50,00")]
+      == [None, None])
+checa("numero de casa nao vira horario", horario.parse_horario("2135") is None)
+
+# ── Pedido certo nao leva aula ──────────────────────────────────
+secao("--- conduta ---")
+import app  # noqa: E402
+
+_NA_REGRA = {"name": "B", "modality": "entrega",
+             "items": [{"name": "Coxinha", "quantity": 50},
+                       {"name": "Churros", "quantity": 150}]}
+_FORA_DA_REGRA = {"name": "B", "modality": "entrega",
+                  "items": [{"name": "Coxinha", "quantity": 30}]}
+
+_AULA = ("Para o churros, a porcao minima e de 25 unidades por sabor, e o pedido "
+         "deve ser em multiplos de 25. Vou confirmar: 50 Coxinha e 150 Churros. "
+         "Esta correto?")
+checa("aula cortada quando o pedido ja esta na regra",
+      "multiplos de 25" not in app._conferir_aula_de_lote("55", _AULA, _NA_REGRA))
+checa("aula mantida quando algo esta fora da regra",
+      app._conferir_aula_de_lote("55", _AULA, _FORA_DA_REGRA) == _AULA)
+checa("aula cortada nao deixa a mensagem vazia",
+      len(app._conferir_aula_de_lote("55", _AULA, _NA_REGRA)) > 20)
+
+# O dono: "NAO PODE FALAR PODE SER SEM NUMERO COMO QUE MOTOBOY VAI ACHAR?"
+for _frase in ("Qual e o numero da residencia? (pode ser S/N) 🛵",
+               "Numero da casa (ou S/N)",
+               "Pode ser sem numero?"):
+    _saida = app._conferir_sem_numero("55", _frase)
+    checa(f"oferta de S/N cortada: {_frase[:28]!r}",
+          "s/n" not in _saida.lower() and "sem numero" not in _saida.lower())
+for _frase in ("Qual e o numero da casa? 🛵", "Quero 50 coxinhas no ponto",
+               "Sem mais nada?", "salgados nossos"):
+    checa(f"frase legitima intacta: {_frase[:26]!r}",
+          app._conferir_sem_numero("55", _frase) == _frase)
+
 # ── Higiene do proprio codigo ──────────────────────────────────────────────
 secao("--- higiene ---")
 # Escrever "\\b" por engano num arquivo grava um byte de backspace, e o regex
@@ -298,6 +375,33 @@ for caminho in glob.glob("*.py") + glob.glob("agents/*.py"):
     if any(ord(c) < 9 or 10 < ord(c) < 32 for c in texto):
         sujos.append(caminho)
 checa("nenhum caractere de controle no codigo", not sujos, str(sujos))
+
+# Irma da checagem acima, para o caso que ela NAO pega: "\\b" num literal
+# sem o prefixo r vira byte de backspace so em tempo de execucao - no arquivo
+# continua sendo backslash+b, entao a checagem de bytes do fonte passa batido.
+# Foi assim que o regex de horario passou a nunca casar: a segunda metade de
+# uma concatenacao estava sem o r. Aqui eu avalio o VALOR do literal.
+import ast  # noqa: E402
+import tokenize  # noqa: E402
+
+escondidos = []
+for caminho in glob.glob("*.py") + glob.glob("agents/*.py"):
+    with open(caminho, "rb") as fh:
+        try:
+            for tok in tokenize.tokenize(fh.readline):
+                if tok.type != tokenize.STRING:
+                    continue
+                try:
+                    valor = ast.literal_eval(tok.string)
+                except Exception:
+                    continue
+                if not isinstance(valor, str):
+                    continue
+                if any(ord(c) < 9 or 10 < ord(c) < 32 for c in valor):
+                    escondidos.append(f"{caminho}:{tok.start[0]}")
+        except tokenize.TokenError:
+            pass
+checa("nenhum literal virando byte de controle", not escondidos, str(escondidos[:6]))
 
 print()
 print("=" * 78)
