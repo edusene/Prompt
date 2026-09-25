@@ -160,6 +160,36 @@ OLARIA RUA GUANABARA 45 PAGAMENTO NO PIX
 Vale repetir emendando o horário: `PEDRINHAS RUA FLORES 120 AS 18 HORAS`
 → o endereço tem que ser só `RUA FLORES 120`.
 
+### 1.9 Entrega sem número da casa
+
+O pedido do dono de 25/09 fechou em R$ 92,00 para `RUA GUANABARA` — rua sem
+número, e ninguém perguntou. O motoboy sairia com endereço incompleto.
+
+```
+#reset
+```
+```
+Meu nome é Eduardo. Quero 50 coxinhas para entrega
+```
+Depois, de propósito **sem número**:
+```
+OLARIA RUA GUANABARA PAGAMENTO NO PIX
+```
+
+| | |
+|---|---|
+| ✅ Esperado | pede o **número da casa** junto com data e horário, numa mensagem só |
+| 🚩 Alerta | apresentar o resumo ou fechar o pedido sem número |
+
+Responda `É S/N, casa sem número` → tem que **aceitar e seguir**. Quem mora em
+casa sem numeração não pode ficar preso.
+
+Vale testar a resposta junta, que é como as pessoas respondem de verdade:
+`45, amanhã às 16h` → o endereço final tem que sair `RUA GUANABARA, 45`.
+
+**Não se aplica** quando o cliente já deu ponto de referência (quem disse como
+achar a casa já resolveu) nem na retirada.
+
 ---
 
 ## Parte 2 — as regras que o dono pediu

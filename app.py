@@ -2194,6 +2194,15 @@ def handle_flush(user: str, items: list[dict]) -> None:
         # Troco tem captura propria: capturar_resposta_direta descarta qualquer
         # candidato com digito, guarda que e justamente o que impede "50" de
         # virar nome ou bairro.
+        # Numero da casa respondido sozinho ("45", "e S/N"). Sem isto a
+        # pergunta do numero nao tinha resposta possivel e o pedido travava.
+        _numero_casa = conversation_memory.capturar_numero_da_casa(
+            _memoria, text_only
+        )
+        if _numero_casa:
+            conversation_memory.save(user, _memoria)
+            print(f"[memoria] {user}: numero da casa -> {_numero_casa}")
+
         _troco_capturado = conversation_memory.capturar_troco(
             _memoria, last_assistant_text, text_only
         )

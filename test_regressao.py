@@ -217,6 +217,74 @@ checa("volume sem sabor fica pendente, sem virar item",
       _extract_data_from_message("quero um cento de salgados fritos",
                                  ConversationState()).get("volume_pendente") == 100)
 
+# ── Numero da casa na entrega ────────────────────────────────────
+secao("--- numero da casa ---")
+# 25/09: o pedido do dono fechou em R$ 92,00 para "RUA GUANABARA", sem numero
+# e sem ninguem perguntar. O prompt pedia; pedir nao e garantir.
+
+
+def _ficha_entrega(**extra) -> dict:
+    base = {"name": "Eduardo", "items": [{"product_name": "Coxinha", "quantity": 50}],
+            "modality": "entrega", "bairro": "Olaria", "payment_method": "pix",
+            "data_agendada": "amanha", "horario": "16:00"}
+    base.update(extra)
+    return base
+
+
+def _falta_numero(**extra) -> bool:
+    return "endereco_numero" in memoria_mod.faltando(_ficha_entrega(**extra))
+
+
+checa("rua sem numero fica pendente (caso real do dono)",
+      _falta_numero(endereco="RUA GUANABARA"))
+checa("rua com numero passa", not _falta_numero(endereco="Rua das Flores 120"))
+checa("S/N passa", not _falta_numero(endereco="Av Calama, S/N"))
+checa("ponto de referencia substitui o numero",
+      not _falta_numero(endereco="Rua X", referencia="casa azul da esquina"))
+checa("retirada nao cobra numero",
+      "endereco_numero" not in memoria_mod.faltando(
+          {"name": "E", "items": [1], "modality": "retirada",
+           "data_agendada": "amanha", "horario": "16:00"}))
+checa("endereco vazio cobra o endereco, nao o numero",
+      memoria_mod.faltando(_ficha_entrega(endereco="")).count("endereco") == 1
+      and not _falta_numero(endereco=""))
+
+# A pergunta precisa ter resposta possivel: sem captura, o cliente respondia
+# "45" e a pendencia continuava de pe para sempre.
+def _capturou(texto: str, endereco: str = "RUA GUANABARA") -> str:
+    ficha = _ficha_entrega(endereco=endereco)
+    return memoria_mod.capturar_numero_da_casa(ficha, texto)
+
+
+checa("numero solto entra na ficha", _capturou("45").endswith(", 45"))
+checa("numero com preambulo entra", _capturou("e o 120").endswith(", 120"))
+checa("S/N entra", _capturou("e S/N, casa sem numero").endswith(", S/N"))
+checa("horario nao vira numero de casa", not _capturou("hoje as 16h"))
+checa("quantidade nao vira numero de casa", not _capturou("quero 50 coxinhas"))
+checa("valor nao vira numero de casa", not _capturou("vou pagar 100 reais"))
+checa("nada a capturar quando o endereco ja tem numero",
+      not _capturou("45", endereco="Rua das Flores 120"))
+
+# A diretiva pede os tres dados numa mensagem so, entao a resposta vem junta.
+# Antes disto o numero ficava solto e o modelo lhe dava sentido proprio: leu
+# "45" como quantidade e respondeu com a regra do minimo de 25.
+checa("resposta junta: numero antes da data", _capturou("45, amanha as 16h").endswith(", 45"))
+checa("resposta junta: numero depois da data",
+      _capturou("amanha as 16h, numero 45").endswith(", 45"))
+checa("resposta junta sem pontuacao", _capturou("45 amanha 16h").endswith(", 45"))
+checa("data numerica nao vira numero de casa",
+      _capturou("casa 1200, dia 26/09 as 18h").endswith(", 1200"))
+checa("dia e hora juntos nao viram numero", not _capturou("dia 26 as 16h"))
+checa("produto citado nao vira numero", not _capturou("quero 50 pao pizza"))
+checa("dois horarios nao viram numero", not _capturou("amanha as 10h e as 16h"))
+checa("volume nao vira numero", not _capturou("pode ser 2 centos de coxinha"))
+
+# A ficha nao pode dizer as duas coisas: rua confirmada ("nao pergunte de
+# novo") e numero faltando. O modelo desempatava descartando o numero.
+_ficha_render = memoria_mod.render_ficha(_ficha_entrega(endereco="RUA GUANABARA"))
+checa("ficha marca a rua como incompleta", "SEM O NUMERO DA CASA" in _ficha_render)
+checa("ficha lista o numero no que falta", "Numero da casa" in _ficha_render)
+
 # ── Higiene do proprio codigo ──────────────────────────────────────────────
 secao("--- higiene ---")
 # Escrever "\\b" por engano num arquivo grava um byte de backspace, e o regex

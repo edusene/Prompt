@@ -31,6 +31,7 @@ _ROTULOS = {
     "modality": "Modalidade (entrega/retirada)",
     "bairro": "Bairro",
     "endereco": "Endereco (rua e numero)",
+    "endereco_numero": "Numero da casa (ou S/N)",
     "referencia": "Ponto de referencia",
     "data_agendada": "Data",
     "horario": "Horario",
@@ -242,6 +243,87 @@ _NAO_E_RESPOSTA = {
 }
 
 
+# A diretiva de coleta pede data, horario e numero NUMA MENSAGEM SO, entao a
+# resposta vem junta: "45, amanha as 16h". Para achar o numero da casa ali eu
+# apago os numeros que sao de outra coisa; se sobrar exatamente um, e ele.
+# Sem isto o numero ficava solto na conversa e o modelo inventava sentido para
+# ele - leu "45" como quantidade e respondeu com a regra do minimo de 25.
+_NUMERO_DE_OUTRA_COISA = _re.compile(
+    r"\d{1,2}\s*[:h]\s*\d{0,2}\b"                    # 16h, 16:30
+    r"|\b(?:as|ate|apos|depois\s+das)\s+\d{1,2}\b"      # as 16
+    r"|\d{1,2}\s*(?:horas?|hrs?|hs)\b"                    # 16 horas
+    r"|\d{1,2}\s*/\s*\d{1,2}(?:\s*/\s*\d{2,4})?"   # 26/09/2026
+    r"|\bdia\s+\d{1,2}\b"                                # dia 26
+    r"|\d{1,2}\s+de\s+\w+"                              # 26 de setembro
+    r"|\d+\s*(?:un\b|unidades?|centos?|por[cs][oa]{1,2}es?|por[cs]ao|salgad\w*)"
+    r"|\d+\s*reais|r$\s*\d[\d.,]*",                      # dinheiro
+    _re.IGNORECASE)
+
+# "numero 45", "n 45", "casa 45": rotulo explicito dispensa adivinhacao.
+_NUMERO_COM_ROTULO = _re.compile(
+    r"\b(?:numero|num|n|no|casa|lote)\s*[.:]?\s*(?:o\s*)?(\d{1,6})\b",
+    _re.IGNORECASE)
+
+_QUALQUER_NUMERO = _re.compile(r"\b(\d{1,6})\b")
+
+# Quem esta mexendo no pedido nao esta respondendo o endereco.
+_MEXENDO_NO_PEDIDO = _re.compile(
+    r"\b(quero|queria|gostaria|manda|coloca|poe|adiciona|acrescenta|"
+    r"tira|troca|mais)\b", _re.IGNORECASE)
+
+
+def _numero_da_casa_no_texto(norm: str) -> str:
+    """O numero de casa dentro de uma frase, ou "" quando nao da para afirmar."""
+    rotulado = _NUMERO_COM_ROTULO.search(norm)
+    if rotulado:
+        return rotulado.group(1)
+
+    # Um produto citado significa pedido, nao endereco: "quero 50 pao pizza"
+    # nao pode virar casa 50.
+    try:
+        from agents.conversation import _produto_conhecido
+        for pedaco in _re.split(r"[^a-z]+", norm):
+            if len(pedaco) > 3 and _produto_conhecido(pedaco):
+                return ""
+    except Exception:
+        pass
+    if _MEXENDO_NO_PEDIDO.search(norm):
+        return ""
+
+    sobrou = _QUALQUER_NUMERO.findall(_NUMERO_DE_OUTRA_COISA.sub(" ", norm))
+    return sobrou[0] if len(sobrou) == 1 else ""
+
+
+def capturar_numero_da_casa(memoria: dict, texto: str) -> str:
+    """Junta ao endereco o numero que o cliente acabou de responder.
+
+    Sem isto a pergunta nao tinha resposta possivel: o cliente dizia "45" ou
+    "e S/N, casa sem numero", nada entrava na ficha, e a pendencia do numero
+    ficava de pe para sempre. Exigir sem saber receber e travar o pedido.
+
+    So age quando o numero esta REALMENTE pendente, e devolve o endereco novo
+    (ou "" quando nao capturou).
+    """
+    if not endereco_sem_numero(memoria):
+        return ""
+    bruto = " ".join((texto or "").split())
+    if not bruto or len(bruto) > 120:
+        return ""
+
+    norm = _normalizar_sem_acento(bruto)
+    endereco = str(memoria.get("endereco") or "").strip()
+    if _SEM_NUMERO_ACEITO.search(norm):
+        novo = f"{endereco}, S/N"
+    else:
+        numero = _numero_da_casa_no_texto(norm)
+        if not numero:
+            return ""
+        novo = f"{endereco}, {numero}"
+
+    memoria["endereco"] = novo
+    return novo
+
+
 def capturar_resposta_direta(memoria: dict, pergunta_anterior: str, texto: str) -> str:
     """Preenche o campo que a pergunta anterior pediu, a partir da resposta seca.
 
@@ -446,6 +528,45 @@ def capturar_troco(memoria: dict, pergunta_anterior: str, texto: str) -> str:
     return ""
 
 
+# "S/N", "SN", "sem numero": o proprio prompt oferece essa saida a quem mora
+# em casa sem numeracao. Vale como numero respondido.
+_SEM_NUMERO_ACEITO = _re.compile(r"\bs\s*/?\s*n\b|sem\s+numero", _re.IGNORECASE)
+
+
+def endereco_sem_numero(memoria: dict) -> bool:
+    """Entrega com rua, mas sem numero e sem nada que o substitua.
+
+    O funil exigia so que o campo endereco nao estivesse vazio, e "RUA
+    GUANABARA" contava como completo: o pedido do dono fechou assim em 25/09,
+    R$ 92,00 para uma rua sem numero de casa. O prompt pedia o numero; pedir
+    nao e garantir.
+
+    NAO cobra quando o cliente deu ponto de referencia: quem disse como achar
+    a casa ja resolveu o problema que o numero resolve, e o dono cortou a
+    cobranca de referencia justamente para nao empilhar pergunta.
+    """
+    if (memoria.get("modality") or "") != "entrega":
+        return False
+    endereco = str(memoria.get("endereco") or "").strip()
+    if not endereco:
+        return False          # falta o endereco inteiro: quem cobra e o campo
+    if any(c.isdigit() for c in endereco):
+        return False
+    if _SEM_NUMERO_ACEITO.search(_normalizar_sem_acento(endereco)):
+        return False
+    if str(memoria.get("referencia") or "").strip():
+        return False
+    return True
+
+
+def _normalizar_sem_acento(texto: str) -> str:
+    try:
+        import facts
+        return facts.normalize(texto)
+    except Exception:
+        return (texto or "").lower()
+
+
 def faltando(memoria: dict) -> list[str]:
     """Campos obrigatorios ainda nao coletados, na ordem do funil."""
     obrigatorios = list(_OBRIGATORIOS_COMUNS)
@@ -456,7 +577,14 @@ def faltando(memoria: dict) -> list[str]:
         # Na retirada o pagamento e no balcao e perguntar e proibido; so a
         # entrega precisa da forma de pagamento antes do resumo.
         obrigatorios.append("payment_method")
-    return [c for c in obrigatorios if not memoria.get(c)]
+    pendentes = [c for c in obrigatorios if not memoria.get(c)]
+
+    # Rua sem numero e endereco incompleto. Entra aqui, e nao numa pendencia
+    # propria, porque faltando() ja e o que governa as tres portas: a diretiva
+    # de coleta, a troca por resumo e o fechamento do pedido.
+    if "endereco" not in pendentes and endereco_sem_numero(memoria):
+        pendentes.append("endereco_numero")
+    return pendentes
 
 
 def _itens_ambiguos(memoria: dict) -> list[str]:
@@ -826,6 +954,12 @@ def render_ficha(memoria: dict) -> str:
             numerica = _data_numerica(memoria.get("data_iso", ""))
             if numerica:
                 valor = f"{numerica}" + (f" ({valor})" if valor else "")
+        if campo == "endereco" and valor and endereco_sem_numero(memoria):
+            # Sem esta marca a ficha se contradizia: a rua entrava na lista do
+            # que ja esta confirmado ("nao pergunte de novo") e o numero na
+            # lista do que falta coletar. O modelo desempatava descartando o
+            # numero - pedia so data e horario em 4 de 5 rodadas.
+            valor = f"{valor} <-- SEM O NUMERO DA CASA, o numero ainda FALTA"
         if valor:
             linhas.append(f"- {_ROTULOS[campo]}: {valor}")
 
