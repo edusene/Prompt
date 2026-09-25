@@ -544,7 +544,8 @@ def pendencia_de_lote(memoria: dict) -> str:
         print(f"[memoria] WARN pendencia_de_lote: {e}")
         return ""
 
-    quebrados = [b for b in bloqueados if "multiplos de" in b]
+    quebrados = [b for b in bloqueados
+                 if "multiplos de" in b or "exige no minimo" in b]
     if not quebrados:
         return ""
 

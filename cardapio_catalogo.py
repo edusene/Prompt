@@ -290,13 +290,18 @@ def quebras_de_lote(items: list[dict]) -> list[dict]:
             familia = "Canudinhos"
         if familia not in LOTES:
             continue
-        passo = LOTES[familia]["passo"]
-        if qtd % passo == 0:
+        cfg = LOTES[familia]
+        passo = cfg["passo"]
+        # O minimo nao e o passo: o cardapio digital nao tem porcao de 25 de
+        # ASSADOS, so meio cento. 25 esfirras e multiplo de 25 e ainda assim nao
+        # fecha — era um pedido banal que ia para a fila do humano.
+        minimo = min(p["minimo"] for p in cfg["pacotes"])
+        if qtd % passo == 0 and qtd >= minimo:
             continue
 
-        # Multiplo mais proximo, nunca abaixo de um pacote: 30 -> 25, 40 -> 50,
-        # 20 -> 25. E a mesma regra de arredondamento do prompt do cardapio.
-        sugerida = max(passo, round(qtd / passo) * passo)
+        # Multiplo mais proximo, nunca abaixo do minimo da familia: 30 -> 25,
+        # 40 -> 50, 20 -> 25, e 25 assados -> 50.
+        sugerida = max(minimo, round(qtd / passo) * passo)
         quebras.append({
             "indice": indice,
             "sabor": _sabor_oficial(familia, nome) or nome,

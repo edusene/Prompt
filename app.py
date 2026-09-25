@@ -1570,6 +1570,28 @@ def _conferir_permissao(user: str, reply: str, memoria: dict) -> str:
     return resumo
 
 
+def _aceitou_a_quantidade(texto: str, memoria: dict) -> bool:
+    """O cliente respondeu dizendo o NUMERO que a Sandrinha ofereceu?
+
+    "Pode ser 50 entao" nao e concordancia seca — tem palavra a mais e some no
+    _e_concordancia. Mas cita exatamente a quantidade sugerida, e isso e sinal
+    melhor do que qualquer lista de frases: e o proprio numero do ajuste.
+    """
+    if not texto:
+        return False
+    numeros = set(_re_mod.findall(r"\d+", texto))
+    if not numeros:
+        return False
+    try:
+        import cardapio_catalogo
+        quebras = cardapio_catalogo.quebras_de_lote(
+            [dict(i) for i in (memoria.get("items") or [])]
+        )
+    except Exception:
+        return False
+    return any(str(q["sugerida"]) in numeros for q in quebras)
+
+
 def _mensagem_de_fechamento(pagamento: str, total: float = 0.0) -> str:
     """Avisa que o pedido entrou, quando o modelo escreveu outra coisa.
 
@@ -2146,7 +2168,8 @@ def handle_flush(user: str, items: list[dict]) -> None:
         # tinha perguntado o nome no lugar de oferecer o ajuste, o gatilho por
         # frase nao viu nada, e o "Isso, 25 de cada" do cliente caiu no vazio.
         if (conversation_memory.pendencia_de_lote(_memoria)
-                and _e_concordancia(text_only)):
+                and (_e_concordancia(text_only)
+                     or _aceitou_a_quantidade(text_only, _memoria))):
             _ajustes = conversation_memory.aplicar_ajuste_de_lote(_memoria)
             if _ajustes:
                 conversation_memory.save(user, _memoria)

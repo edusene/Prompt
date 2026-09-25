@@ -858,13 +858,39 @@ def calcular_pedido(items: list[dict], bairro: str = "", modalidade: str = "",
     items_api, bloqueados = cardapio_catalogo.traduzir(items)
 
     if bloqueados and not test_mode:
+        # Ha dois tipos de bloqueio e eles pedem coisas opostas.
+        #
+        # QUANTIDADE ("so aceita multiplos de 25", "exige no minimo 50") se
+        # resolve na conversa: basta oferecer a quantidade que fecha. Mandar
+        # transferir aqui jogava para a fila do humano um pedido de 25 esfirras
+        # — banal, e que o cardapio digital aceita a partir de 50.
+        #
+        # PRODUTO AUSENTE ("sem equivalente conferido") nao tem saida pelo
+        # agente: o item existe na planilha e nao existe no cardapio digital.
+        # Ai o humano e a resposta honesta.
+        _de_quantidade = [b for b in bloqueados
+                          if "multiplos de" in b or "exige no minimo" in b]
+        if len(_de_quantidade) == len(bloqueados):
+            return {
+                "success": False,
+                "erro": "QUANTIDADE_NAO_FECHA",
+                "itens_bloqueados": bloqueados,
+                "instrucao": (
+                    "So falta ajustar a quantidade: " + "; ".join(bloqueados)
+                    + ". Ofereca ao cliente a quantidade que fecha, com o nome do "
+                    "sabor, e chame calculate_order de novo quando ele aceitar. "
+                    "NAO transfira o atendimento e NAO informe total antes disso."
+                ),
+            }
+
         return {
             "success": False,
             "error": (
                 "Estes itens nao podem ser fechados pelo agente: "
                 + "; ".join(bloqueados)
-                + ". Informe ao cliente que precisa confirmar com a equipe e "
-                "transfira o atendimento. NAO informe total."
+                + ". Diga ao cliente QUAL item e, que ele precisa ser confirmado "
+                "com a equipe, e ofereca os outros itens do cardapio enquanto "
+                "isso. Depois transfira o atendimento. NAO informe total."
             ),
             "itens_bloqueados": bloqueados,
         }
