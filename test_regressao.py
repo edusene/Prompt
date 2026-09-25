@@ -213,6 +213,21 @@ checa("cento e meio = 150", _itens("cento e meio de coxinha") == [(150, "Coxinha
 checa("dois centos = 200", _itens("dois centos de coxinha") == [(200, "Coxinha")])
 checa("2 centos = 200 (nao 2 unidades)",
       _itens("2 centos de coxinha") == [(200, "Coxinha")])
+# O dono escreveu o pedido entre aspas (25/09 19h20) e o ultimo item sumiu: o
+# terminador do sabor era a lista fechada [,;.!?], que nao inclui a aspa. Agora
+# qualquer caractere que nao seja letra nem espaco encerra o sabor.
+checa("pedido entre aspas mantem os dois itens",
+      _itens('"Quero meio cento de coxinha e um cento e meio de churros"')
+      == [(50, "Coxinha"), (150, "Churros")])
+checa("aspa simples tambem encerra",
+      _itens("'meio cento de coxinha e um cento de churros'")
+      == [(50, "Coxinha"), (100, "Churros")])
+checa("parentese encerra o sabor",
+      _itens("meio cento de coxinha (para hoje)") == [(50, "Coxinha")])
+checa("exclamacao segue valendo",
+      _itens("meio cento de coxinha e um cento de churros!")
+      == [(50, "Coxinha"), (100, "Churros")])
+
 checa("volume sem sabor fica pendente, sem virar item",
       _extract_data_from_message("quero um cento de salgados fritos",
                                  ConversationState()).get("volume_pendente") == 100)

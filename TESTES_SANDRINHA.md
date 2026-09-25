@@ -268,6 +268,30 @@ Meu nome é Balbino. Quero 50 coxinhas e 50 churros e meio cento de bolinha
 
 **Siga até o fim** — a frase apareceu no terceiro turno, não no primeiro.
 
+### 1.14 Pedido escrito entre aspas
+
+O dono colou o pedido entre aspas e o churros desapareceu — sem aviso, sem erro.
+O terminador do sabor só aceitava `, ; . ! ?`, e a aspa não estava na lista.
+
+```
+#reset
+```
+```
+Meu nome é Balbino. "Quero meio cento de coxinha e um cento e meio de churros"
+```
+
+| | |
+|---|---|
+| ✅ Esperado | 50 Coxinha **e** 150 Churros na ficha; segue o funil |
+| 🚩 Alerta | churros ausente · "você pode escolher até 2 sabores" (os sabores **já** foram ditos) |
+
+Vale repetir com parênteses e aspa simples — mesma família:
+
+| Mande | ✅ Esperado |
+|---|---|
+| `'meio cento de coxinha e um cento de churros'` | 50 + 100 |
+| `meio cento de coxinha (para hoje)` | 50 Coxinha |
+
 ---
 
 ## Parte 2 — as regras que o dono pediu

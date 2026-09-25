@@ -709,7 +709,7 @@ _PACOTE_POR_EXTENSO = re.compile(
     r"por[cç][aã]o|meio\s+cento|cento\s+e\s+meio|"
     r"(?:dois|duas|tr[eê]s|quatro|\d{1,2})\s+centos?|cento"
     r")\s+(?:de\s+|d[eo]s\s+)?([a-zà-ÿ][a-zà-ÿ\s]{2,40}?)"
-    r"(?=\s*(?:[,;.!?]|\be\b|\bpara\b|\bpra\b|\bcom\b|$))",
+    r"(?=\s*(?:[^a-z\u00e0-\u00ff\s]|\be\b|\bpara\b|\bpra\b|\bcom\b|$))",
     re.IGNORECASE)
 
 _UNIDADES_DO_PACOTE = {
