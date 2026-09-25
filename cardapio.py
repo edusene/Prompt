@@ -1040,6 +1040,16 @@ def criar_pedido(
             "aguardando_validacao_humana": True,
         }
 
+    # O NOME oficial primeiro. calcular_pedido normalizava antes de traduzir e
+    # esta funcao nao — entao o MESMO pedido precificava certo e era recusado no
+    # envio: a ficha guarda "Coxinha" e "Churros", o de-para casa por nome exato
+    # da planilha ("Coxinha frango", "Churros doce de leite"), e o cliente ouvia
+    # "nao consegui registrar" com o pedido inteiro pronto (teste do Eduardo,
+    # 24/09). Duas portas para o mesmo catalogo tinham de aplicar a mesma regra.
+    _norm, _avisos_nome, _fora = _normalizar_itens([dict(i) for i in (items or [])])
+    if _norm and not _fora:
+        items = _norm
+
     # Itens no formato do cardapio digital (pacote + selected_flavors).
     import cardapio_catalogo
     items, bloqueados = cardapio_catalogo.traduzir(items)

@@ -1531,7 +1531,7 @@ def _repete_pergunta_respondida(reply: str, memoria: dict) -> list:
     return sorted(set(repetidos))
 
 
-def _mensagem_de_fechamento(pagamento: str) -> str:
+def _mensagem_de_fechamento(pagamento: str, total: float = 0.0) -> str:
     """Avisa que o pedido entrou, quando o modelo escreveu outra coisa.
 
     Nao da para deixar a resposta do modelo no ar: ela pode estar perguntando
@@ -1541,14 +1541,20 @@ def _mensagem_de_fechamento(pagamento: str) -> str:
     ficha ja foi fechada pelo registrar_pedido_enviado.
     """
     pagamento = (pagamento or "").strip().lower()
+    try:
+        valor = float(total or 0)
+    except (TypeError, ValueError):
+        valor = 0.0
+    quanto = f" O total é {cardapio._brl(valor)}." if valor > 0 else ""
+
     if pagamento.startswith("pix"):
         return (
-            "Pedido registrado! 💛 Assim que você enviar o comprovante do Pix "
-            "por aqui, nossa equipe confere e libera a produção."
+            f"Pedido registrado!{quanto} 💛 Assim que você enviar o comprovante "
+            f"do Pix por aqui, nossa equipe confere e libera a produção."
         )
     return (
-        "Pedido confirmado! 💛 Já está com a nossa equipe. "
-        "Muito obrigado por escolher a BALBS!"
+        f"Pedido confirmado!{quanto} 💛 Já está com a nossa equipe. "
+        f"Muito obrigado por escolher a BALBS!"
     )
 
 
@@ -1972,7 +1978,30 @@ def handle_flush(user: str, items: list[dict]) -> None:
         _agora = horario.agora()
         _expediente = horario.status(_agora)
 
-        if not _expediente["aberto"] and not _memoria.get("aviso_horario_dado"):
+        # Fora do expediente, mas o cliente JA marcou dia e hora que cabem: o
+        # aviso generico ("posso agendar para amanha a partir das 07h40?")
+        # perguntaria de novo o que ele acabou de responder. Ele pediu 11h de
+        # amanha; oferecer 07h40 soa como quem nao leu (teste do Eduardo,
+        # 24/09). Nesse caso o funil segue direto.
+        _agendou_valido = False
+        if not _expediente["aberto"] and _memoria.get("data_iso") and _memoria.get("horario"):
+            try:
+                _ok_ag, _, _ = horario.validar_agendamento(
+                    date.fromisoformat(_memoria["data_iso"]),
+                    _memoria["horario"], _agora,
+                )
+                _agendou_valido = bool(_ok_ag)
+            except (TypeError, ValueError):
+                _agendou_valido = False
+            if _agendou_valido and not _memoria.get("aviso_horario_dado"):
+                _memoria["aviso_horario_dado"] = True
+                conversation_memory.save(user, _memoria)
+                print(f"[expediente] user={user} fora do horario, mas ja agendou "
+                      f"{_memoria.get('data_agendada')} {_memoria['horario']}; "
+                      f"sem aviso generico")
+
+        if (not _expediente["aberto"] and not _agendou_valido
+                and not _memoria.get("aviso_horario_dado")):
             _memoria["aviso_horario_dado"] = True
             if not _expediente["aceita_hoje"] and _memoria.get("data_iso") == _agora.date().isoformat():
                 # Cliente pediu para hoje, mas hoje ja nao cabe: o dia volta a
@@ -2637,6 +2666,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
             # que fecha a ficha — depois dele o pagamento ja nao esta la, e a
             # mensagem de Pix saia como a de cartao.
             _pagamento_antes = _memoria.get("payment_method", "")
+            _total_antes = _total_ficha
 
             if _tentou_enviar:
                 # subtotal/frete/retorno nao sao guardados como tal: o frete vem
@@ -2674,13 +2704,21 @@ def handle_flush(user: str, items: list[dict]) -> None:
                 # certo para um pedido retido em aguardando_pix. Se ele escreveu
                 # outra coisa, quem avisa o cliente e o codigo: o pedido existe,
                 # e ele precisa saber disso.
-                if _parece_fechamento(reply):
+                if _parece_fechamento(reply) and _aceitou_o_resumo:
+                    # O cliente acabou de aceitar o espelho: ele JA viu o total,
+                    # e o texto do modelo esta certo.
                     print(f"[flush] user={user} pedido enviado pela ficha; "
                           f"resposta do modelo mantida")
                 else:
+                    # Ou o modelo nao anunciou nada, ou anunciou sem nunca ter
+                    # mostrado o espelho — foi o que aconteceu no teste do
+                    # Eduardo (24/09): "Pedido agendado! O pagamento e feito na
+                    # retirada" sem o cliente ter visto R$ 20,00 em lugar
+                    # nenhum. Fechar sem dizer o valor nao da; quem diz e o
+                    # codigo, que tem o numero na mao.
                     print(f"[flush] user={user} pedido enviado pela ficha; "
-                          f"modelo nao anunciou o fechamento, texto do codigo")
-                    reply = _mensagem_de_fechamento(_pagamento_antes)
+                          f"cliente nao viu o espelho, texto do codigo")
+                    reply = _mensagem_de_fechamento(_pagamento_antes, _total_antes)
             elif _tentou_enviar:
                 # Tentamos enviar e o cardapio recusou. Ai sim e falha de
                 # verdade, e uma pessoa precisa assumir.
