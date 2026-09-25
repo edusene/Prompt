@@ -1531,6 +1531,45 @@ def _repete_pergunta_respondida(reply: str, memoria: dict) -> list:
     return sorted(set(repetidos))
 
 
+# Frases com que o modelo pede LICENCA para fazer o que ja devia ter feito.
+_RX_PEDE_LICENCA = _re_mod.compile(
+    r"(posso (seguir|passar|apresentar|montar|continuar|fechar|calcular|"
+    r"mandar|enviar|gerar)|quer que eu (passe|mostre|monte|calcule)|"
+    r"deseja que eu (passe|mostre|monte)|posso ja (passar|mostrar)|"
+    r"podemos confirmar|posso confirmar)",
+    _re_mod.IGNORECASE,
+)
+
+
+def _conferir_permissao(user: str, reply: str, memoria: dict) -> str:
+    """Troca o "posso seguir com o resumo?" pelo resumo.
+
+    Com a ficha completa nao falta nada para perguntar: o proximo passo e
+    apresentar o espelho. O modelo, em vez disso, pedia licenca — "Voce
+    confirmou 1 porcao de 25 coxinhas, certo? Posso seguir com o resumo do
+    pedido?" — e queimava uma volta inteira. O Eduardo levou tres mensagens
+    para chegar onde uma bastava (24/09).
+
+    O resumo sai de _numeros_do_pedido, que e a mesma fonte de dinheiro do
+    _conferir_dinheiro: calculado em codigo, nunca escrito pelo modelo.
+    """
+    if not reply or _RX_LINHA_DE_RESUMO.search(reply):
+        return reply                      # ja e o espelho: nada a fazer
+    if not _RX_PEDE_LICENCA.search(facts.normalize(reply)):
+        return reply
+    if conversation_memory.faltando(memoria):
+        return reply                      # falta dado: a pergunta e legitima
+
+    numeros = _numeros_do_pedido(memoria)
+    resumo = (numeros or {}).get("resumo_formatado") or ""
+    if not resumo:
+        return reply                      # sem numero confiavel, nao invente
+
+    print(f"[resumo] user={user} ficha completa e o modelo pediu licenca; "
+          f"apresentando o espelho no lugar")
+    return resumo
+
+
 def _mensagem_de_fechamento(pagamento: str, total: float = 0.0) -> str:
     """Avisa que o pedido entrou, quando o modelo escreveu outra coisa.
 
@@ -1602,7 +1641,11 @@ def _conferir_tamanho(user: str, reply: str, memoria: dict) -> str:
           f"pergunta removida: {' | '.join(cortadas)[:160]}")
 
     novo = " ".join(f.strip() for f in limpas if f.strip()).strip()
-    if novo:
+    # "Mensagem de verdade" nao e o que sobrou de qualquer jeito: cortando a
+    # frase do meio ja sobrou so "😊", que o cliente recebeu como resposta
+    # (teste do Eduardo, 24/09). Exige-se texto com letras suficientes para
+    # dizer alguma coisa; senao, quem escreve e o funil.
+    if len(_re_mod.sub(r"[^A-Za-zÀ-ÿ]", "", novo)) >= 12:
         return novo
 
     # A pergunta era a mensagem inteira. Nao da para devolver vazio: o codigo
@@ -1614,8 +1657,13 @@ def _proxima_pergunta_do_funil(memoria: dict) -> str:
     """Texto de codigo para seguir o atendimento, sem passar pelo modelo."""
     pendentes = conversation_memory.faltando(memoria)
     if not pendentes:
-        return ("Confirmando o seu pedido! Posso seguir para o resumo com os "
-                "valores? 💛")
+        # Nada falta: o proximo passo e o espelho, nao mais uma pergunta. Pedir
+        # licenca aqui seria o codigo repetindo o vicio que ele acabou de tirar
+        # do modelo.
+        resumo = (_numeros_do_pedido(memoria) or {}).get("resumo_formatado") or ""
+        if resumo:
+            return resumo
+        return "Confirmando o seu pedido! Pode confirmar para eu fechar? 💛"
     rotulos = [conversation_memory._ROTULOS.get(c, c) for c in pendentes]
     if len(rotulos) == 1:
         return f"Para seguir, me confirma: {rotulos[0].lower()}? 😊"
@@ -2619,6 +2667,8 @@ def handle_flush(user: str, items: list[dict]) -> None:
             reply = _conferir_tamanho(user, reply, _memoria)
             # E nao pede de novo o que o cliente ja respondeu.
             reply = _conferir_pedido_de_dados(user, reply, _memoria)
+            # E, com tudo coletado, nao pede licenca: mostra o resumo.
+            reply = _conferir_permissao(user, reply, _memoria)
             # A recoleta escrita em UMA frase ("informe nome, bairro, rua com
             # numero, data e pagamento") nao da para aparar linha a linha: a
             # mensagem inteira e a pergunta errada. Quem pergunta e o codigo.

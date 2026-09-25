@@ -1046,9 +1046,26 @@ def criar_pedido(
     # da planilha ("Coxinha frango", "Churros doce de leite"), e o cliente ouvia
     # "nao consegui registrar" com o pedido inteiro pronto (teste do Eduardo,
     # 24/09). Duas portas para o mesmo catalogo tinham de aplicar a mesma regra.
-    _norm, _avisos_nome, _fora = _normalizar_itens([dict(i) for i in (items or [])])
-    if _norm and not _fora:
-        items = _norm
+    # A ORDEM importa. _sem_rotulo tira o rotulo do formato E converte a
+    # quantidade: "Meio cento (50 un) Coxinha frango" com quantity=1 vira
+    # "Coxinha frango" com 50. _normalizar_itens tambem tira o rotulo, mas NAO
+    # converte — normalizar primeiro deixava 1 unidade e o de-para recusava
+    # "multiplos de 25 por sabor - ajuste coxinha de frango (1 un)" (teste do
+    # Eduardo, 24/09: o nome ficou certo e a quantidade virou 1).
+    import cardapio_catalogo as _cat
+    _expandidos = []
+    for _it in (items or []):
+        _novo_it = dict(_it)
+        try:
+            _q = int(float(_novo_it.get("quantity", 0) or 0))
+        except (ValueError, TypeError):
+            _q = 0
+        _n, _q = _cat._sem_rotulo(str(_novo_it.get("name", "")), _q)
+        _novo_it["name"], _novo_it["quantity"] = _n, _q
+        _expandidos.append(_novo_it)
+
+    _norm, _avisos_nome, _fora = _normalizar_itens([dict(i) for i in _expandidos])
+    items = _norm if (_norm and not _fora) else _expandidos
 
     # Itens no formato do cardapio digital (pacote + selected_flavors).
     import cardapio_catalogo
