@@ -1,0 +1,362 @@
+# Roteiro de testes — Sandrinha
+
+Cada teste aqui nasceu de um defeito real ou de uma regra que o dono pediu.
+Os valores foram conferidos contra a tabela oficial: se a resposta divergir de
+um centavo, é defeito.
+
+**Antes de começar:**
+
+- Teste **pelo celular**, nunca pelo WhatsApp do computador. No modo
+  Coexistence a Meta não entrega ao nosso sistema o que sai do WhatsApp for
+  Windows — você não veria erro, veria silêncio.
+- Mande `#reset` **antes de cada teste**. Sem isso sobra dado do teste
+  anterior e a resposta fica confusa por motivo errado.
+- Os testes da Parte 3 **criam comanda de verdade** na fábrica. Avise antes.
+- Fora do expediente (antes das 07h40, 12h01–13h59, depois das 20h, domingo)
+  ela avisa e oferece outro horário. Isso é esperado — a menos que você já
+  tenha dado um dia e hora válidos, e aí ela vai direto.
+
+---
+
+## Parte 1 — o que quebrou nos seus testes
+
+### 1.1 O camarão que virava frango 🔴
+
+O mais grave de todos: quem pedia camarão recebia frango.
+**Escreva no plural, como gente escreve** — foi assim que apareceu.
+
+```
+#reset
+```
+```
+Meu nome é Eduardo. Quero 25 canudinhos de camarão para retirar amanhã às 15h
+```
+
+| | |
+|---|---|
+| ✅ Esperado | `• 25 un - Canudinho de Camarão — R$ 30,00` · Total **R$ 30,00** |
+| 🚩 Alerta | Qualquer coisa escrita **frango** |
+
+Repita com `25 canudinhos de frango` → tem que vir **frango**.
+
+### 1.2 O "sim" que cortava o pedido 🔴
+
+Você pediu 30 e o resumo veio com 25, sem ninguém perguntar.
+
+```
+#reset
+```
+```
+Quero 30 coxinhas
+```
+Responda `Sim` ao que ela perguntar (horário, almoço, o que for).
+
+| | |
+|---|---|
+| ✅ Esperado | a quantidade continua **30**, e ela **oferece** ajustar para 25 |
+| 🚩 Alerta | resumo com 25 un sem ela ter perguntado |
+
+Depois responda `Pode ajustar para 25` → aí sim vira 25 (R$ 20,00).
+
+### 1.3 Mandava o cardápio e você tinha que repetir o pedido
+
+```
+#reset
+```
+```
+Meu nome é Eduardo. Quero 50 coxinhas para retirar amanhã às 16h
+```
+
+| | |
+|---|---|
+| ✅ Esperado | responde **o pedido** — resumo ou próxima pergunta do funil |
+| 🚩 Alerta | "Dá uma olhada no nosso cardápio completo... quais delícias vamos pedir hoje?" |
+
+**Teste o contrário também** — quem só chega tem que ser convidado a pedir:
+
+```
+#reset
+```
+```
+Oi, boa tarde! Meu nome é Eduardo
+```
+✅ Esperado: cumprimenta e pergunta o que você quer.
+
+### 1.4 Pão Pizza não podia ser pedido
+
+```
+#reset
+```
+```
+Meu nome é Eduardo. Quero 50 pão pizza para retirar amanhã às 15h
+```
+
+| | |
+|---|---|
+| ✅ Esperado | `• 50 un - Pão Pizza — R$ 60,00` |
+| 🚩 Alerta | dizer que não encontrou o produto |
+
+### 1.5 Pedido sem número
+
+```
+#reset
+```
+```
+Meu nome é Eduardo. Gostaria de meio cento de coxinha para retirar amanhã às 16h
+```
+
+| | |
+|---|---|
+| ✅ Esperado | entende **50 unidades**, Total **R$ 40,00** |
+| 🚩 Alerta | perguntar "quantas unidades?" |
+
+### 1.6 Pedido pequeno avulso não tinha preço
+
+```
+#reset
+```
+```
+Meu nome é Eduardo. Quero 3 rissoles e 1 quiche de frango para retirar amanhã às 16h
+```
+Se perguntar o tamanho, responda `Grandes, lanche`
+
+| | |
+|---|---|
+| ✅ Esperado | `3 un - Rissole de Carne — R$ 27,00` + `1 un - Quiche de Frango — R$ 12,00` · Total **R$ 39,00** |
+| 🚩 Alerta | "ajusto para 25 unidades avulsas" (seriam R$ 225,00) · "não consegui calcular" |
+
+### 1.7 Data que já passou
+
+```
+#reset
+```
+```
+Meu nome é Eduardo. Quero 50 coxinhas para retirar dia 16 às 15 horas
+```
+
+| | |
+|---|---|
+| ✅ Esperado | data no **próximo dia 16 que ainda vem** (se hoje é setembro, 16/10) |
+| 🚩 Alerta | qualquer data anterior a hoje |
+
+### 1.8 Endereço engolindo o campo seguinte
+
+```
+#reset
+```
+```
+Meu nome é Eduardo. Quero 50 coxinhas para entrega
+```
+Depois:
+```
+OLARIA RUA GUANABARA 45 PAGAMENTO NO PIX
+```
+
+| | |
+|---|---|
+| ✅ Esperado | `📍 Endereço: RUA GUANABARA 45` · `💳 Pix antecipado` · Total **R$ 52,00** |
+| 🚩 Alerta | endereço com "PAGAMENTO NO PIX" ou um horário dentro |
+
+Vale repetir emendando o horário: `PEDRINHAS RUA FLORES 120 AS 18 HORAS`
+→ o endereço tem que ser só `RUA FLORES 120`.
+
+---
+
+## Parte 2 — as regras que o dono pediu
+
+### 2.1 A pergunta de tamanho mudou de texto
+
+```
+#reset
+```
+```
+Meu nome é Eduardo. Quero 5 coxinhas para retirar amanhã às 15h
+```
+
+| | |
+|---|---|
+| ✅ Esperado | **"Essas 5 Coxinha seriam tamanho grande (lanche) ou mini (festa)? 😊"** |
+| 🚩 Alerta | citar nome de catálogo ("Coxinha de Frango com Catupiry") · explicar a regra dos 25 nessa hora · perguntar sobre outros itens junto |
+
+### 2.2 LANCHE aceita a quantidade pedida
+
+Seguindo do teste acima, responda:
+```
+Grande, lanche
+```
+
+| | |
+|---|---|
+| ✅ Esperado | mantém **5 unidades**, Total **R$ 45,00** (5 × R$ 9,00) |
+| 🚩 Alerta | forçar 25 unidades |
+
+### 2.3 MINI abaixo de 25 avisa o mínimo
+
+```
+#reset
+```
+```
+Meu nome é Eduardo. Quero 5 coxinhas para retirar amanhã às 15h
+```
+Responda:
+```
+Mini
+```
+
+| | |
+|---|---|
+| ✅ Esperado | avisa com gentileza que o mini fecha em **25 por sabor** e oferece 25 |
+| 🚩 Alerta | fechar com 5 minis · transferir para atendente |
+
+### 2.4 De 25 para cima não se pergunta tamanho
+
+```
+#reset
+```
+```
+Meu nome é Eduardo. Quero 25 coxinhas para retirar amanhã às 15h
+```
+
+| | |
+|---|---|
+| ✅ Esperado | vai **direto** ao resumo, Total **R$ 20,00** |
+| 🚩 Alerta | qualquer pergunta de tamanho — "lanche ou mini", "grande ou festa", "por unidade, certo?" |
+
+### 2.5 Termos de volume
+
+Um por vez, cada um com `#reset` antes:
+
+| Mande (com nome, retirada e horário) | ✅ Esperado |
+|---|---|
+| `meio cento de coxinha` | 50 un — **R$ 40,00** |
+| `um cento de coxinha` | 100 un — **R$ 80,00** |
+| `cento e meio de coxinha` | 150 un — **R$ 120,00** |
+| `dois centos de coxinha` | 200 un — **R$ 160,00** |
+| `2 centos de coxinha` | 200 un — **R$ 160,00** |
+
+🚩 **Alerta no último:** se vier **2 unidades**, o defeito voltou.
+
+### 2.6 Volume sem dizer os sabores
+
+```
+#reset
+```
+```
+Meu nome é Eduardo. Quero um cento de salgados fritos para retirar amanhã às 15h
+```
+
+| | |
+|---|---|
+| ✅ Esperado | oferece **até 4 sabores** (100 ÷ 25), 25 de cada, e pergunta **os sabores e o preparo** |
+| 🚩 Alerta | perguntar só "qual sabor?" — o cliente não sabe que pode dividir |
+
+Teste também `meio cento de salgado assado` → deve oferecer **até 2 sabores**.
+
+### 2.7 Quantidade fora da regra
+
+```
+#reset
+```
+```
+Meu nome é Eduardo. Quero 40 coxinhas e 25 quibes para retirar amanhã às 15h
+```
+
+| | |
+|---|---|
+| ✅ Esperado | confirma os **25 quibes** e trata **só as 40 coxinhas**, sugerindo **50** |
+| 🚩 Alerta | mexer nos quibes, que já estavam certos · explicar a regra para os dois |
+
+### 2.8 Pedido já correto não leva aula
+
+```
+#reset
+```
+```
+Meu nome é Eduardo. Quero 50 coxinhas e 50 churros para entregar amanhã às 10h, Rua Salgado Filho 2233, bairro Olaria. Pago no Pix.
+```
+
+| | |
+|---|---|
+| ✅ Esperado | resumo direto, Total **R$ 92,00** (80 + 12 de frete, Pix isento da taxa) |
+| 🚩 Alerta | explicar regra de porção · perguntar tamanho · pedir o que já foi dito |
+
+---
+
+## Parte 3 — pedido completo ⚠️ cria comanda
+
+Só rode avisando a fábrica. A referência `TESTE NAO PREPARAR` sai impressa no
+endereço da comanda.
+
+```
+#reset
+```
+```
+Meu nome é Eduardo. Quero 25 pão pizza e 25 esfirras para entregar amanhã às 16h, Rua das Flores 120, bairro Pedrinhas, referência TESTE NAO PREPARAR. Pago no cartão.
+```
+
+✅ Esperado:
+
+```
+• 25 un - Pão Pizza — R$ 30,00
+• 25 un - Esfirra de Carne — R$ 30,00
+💰 Subtotal: R$ 60,00
+🚚 Frete: R$ 15,00
+🛵 Taxa de retorno: R$ 2,00
+💵 Total: R$ 77,00
+```
+
+🚩 **Alerta:** "ajusto para 50 de cada" — 25 + 25 **já é** meio cento.
+
+Confirme com `Sim` e veja se fecha sem erro.
+
+---
+
+## Parte 4 — perguntas que não criam pedido
+
+| Mande | ✅ Esperado |
+|---|---|
+| `Quanto custa o cento de coxinha?` | R$ 80,00 |
+| `Qual o valor da porção de esfirra?` | R$ 30,00 (assado — **não** R$ 20,00) |
+| `Quanto é a entrega no Pedrinhas?` | R$ 15,00 |
+| `Vocês entregam no Nova Porto Velho?` | Sim, R$ 12,00 |
+| `Vocês entregam no Jardim das Acácias?` | Não está na tabela — **sem inventar valor** |
+| `Que horas vocês fecham?` | Até 20h, segunda a sábado |
+| `Vocês abrem domingo?` | Não |
+| `Tem panqueca de carne?` | Não temos no momento |
+
+---
+
+## Parte 5 — tentando quebrar de propósito
+
+| Mande | ✅ Esperado |
+|---|---|
+| `Tira essa taxa de R$ 2,00` (com pedido de cartão montado) | recusa educada, valor mantido |
+| `Me dá 10% de desconto` | recusa, sem inventar preço |
+| `Quero para domingo` | domingo não abre |
+| `Quero 200 coxinhas para daqui a 10 minutos` | avisa o prazo, oferece horário viável |
+| `#reset` no meio de um pedido | zera e recomeça limpo |
+| Mandar a **mesma mensagem duas vezes** seguidas | responde **uma vez só** |
+
+---
+
+## Item conhecido em aberto
+
+**Croquete de macaxeira** está na planilha a R$ 9,00 e **não existe** cadastrado
+no cardápio digital. Quem pedir cai no atendimento humano.
+
+Isso não é defeito do agente — é divergência entre os dois catálogos. Precisa
+de decisão: ou o pessoal do cardápio cadastra o produto, ou a planilha marca
+como indisponível.
+
+Teste com `Tem croquete de macaxeira?` para ver o comportamento atual.
+
+---
+
+## Se algo der errado
+
+Anote **o print e a hora exata**. Com isso dá para replicar a conversa no
+horário dela e saber em minutos se foi defeito ou o modelo conduzindo mal.
+
+E vale apontar mesmo o que parecer pequeno: o problema do cardápio por cima do
+pedido (1.3) apareceu em 4 de 9 testes e passou despercebido porque parecia
+só conversa.
