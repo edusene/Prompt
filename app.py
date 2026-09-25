@@ -1570,6 +1570,21 @@ def _conferir_permissao(user: str, reply: str, memoria: dict) -> str:
     return resumo
 
 
+# Como a Sandrinha oferece o ajuste de quantidade. Serve para saber se o "sim"
+# do cliente foi sim A ISSO — e nao ao aviso de almoco, por exemplo.
+_MARCAS_DE_AJUSTE_DE_LOTE = (
+    "ajusto para", "ajustar para", "de 25 em 25", "porcoes fechadas",
+    "porcao fechada", "multiplo de 25", "multiplos de 25", "fechamos de 25",
+    "quantidade minima", "minimo de", "fechadas de 25",
+)
+
+
+def _ofereceu_ajuste_de_lote(texto: str) -> bool:
+    """A resposta anterior tratou do ajuste de quantidade?"""
+    limpo = " ".join(facts.normalize(texto or "").split())
+    return any(facts.normalize(m) in limpo for m in _MARCAS_DE_AJUSTE_DE_LOTE)
+
+
 def _aceitou_a_quantidade(texto: str, memoria: dict) -> bool:
     """O cliente respondeu dizendo o NUMERO que a Sandrinha ofereceu?
 
@@ -1584,9 +1599,11 @@ def _aceitou_a_quantidade(texto: str, memoria: dict) -> bool:
         return False
     try:
         import cardapio_catalogo
-        quebras = cardapio_catalogo.quebras_de_lote(
+        norm, _avisos, fora = cardapio._normalizar_itens(
             [dict(i) for i in (memoria.get("items") or [])]
         )
+        base = norm if (norm and not fora) else (memoria.get("items") or [])
+        quebras = cardapio_catalogo.quebras_de_lote([dict(i) for i in base])
     except Exception:
         return False
     return any(str(q["sugerida"]) in numeros for q in quebras)
@@ -2168,7 +2185,8 @@ def handle_flush(user: str, items: list[dict]) -> None:
         # tinha perguntado o nome no lugar de oferecer o ajuste, o gatilho por
         # frase nao viu nada, e o "Isso, 25 de cada" do cliente caiu no vazio.
         if (conversation_memory.pendencia_de_lote(_memoria)
-                and (_e_concordancia(text_only)
+                and ((_ofereceu_ajuste_de_lote(last_assistant_text)
+                      and _e_concordancia(text_only))
                      or _aceitou_a_quantidade(text_only, _memoria))):
             _ajustes = conversation_memory.aplicar_ajuste_de_lote(_memoria)
             if _ajustes:

@@ -710,26 +710,72 @@ _PACOTE_POR_EXTENSO = re.compile(
 _UNIDADES_DO_PACOTE = {"porcao": 25, "porção": 25, "meio cento": 50, "cento": 100}
 
 
-def _produto_conhecido(bruto: str) -> str | None:
-    """Nome canonico do produto citado, ou None. Mesma cascata do item numerado."""
-    nome = " ".join((bruto or "").lower().split())
-    if len(nome) < 3:
-        return None
-    if nome.endswith("es") and len(nome) > 3:
-        singular = nome[:-2]
-    elif nome.endswith("s"):
-        singular = nome[:-1]
-    else:
-        singular = nome
-    for chave, canonico in _TODOS_PRODUTOS.items():
-        if chave == nome or chave == singular:
-            return canonico
-    for chave, canonico in _TODOS_PRODUTOS.items():
-        if (chave in nome or nome in chave) and min(len(chave), len(nome)) >= 4:
-            return canonico
-    if len(singular) >= 4:
+def _forma_de_busca(nome: str) -> str:
+    """minusculo, sem acento e sem plural — 'Canudinhos' casa com 'canudinho'."""
+    try:
+        import facts
+        limpo = facts.normalize(nome)
+    except Exception:
+        limpo = " ".join((nome or "").lower().split())
+    palavras = []
+    for p in limpo.split():
+        if len(p) > 3 and p.endswith("s"):
+            p = p[:-1]
+        palavras.append(p)
+    return " ".join(palavras)
+
+
+_INDICE_PRODUTOS: dict[str, str] | None = None
+
+
+def _indice_de_produtos() -> dict:
+    """{forma de busca: nome canonico}, montado uma vez."""
+    global _INDICE_PRODUTOS
+    if _INDICE_PRODUTOS is None:
+        _INDICE_PRODUTOS = {}
         for chave, canonico in _TODOS_PRODUTOS.items():
-            if chave.startswith(singular[:4]) or singular.startswith(chave[:4]):
+            forma = _forma_de_busca(chave)
+            atual = _INDICE_PRODUTOS.get(forma)
+            if atual is None or (atual == _forma_de_busca(atual).title()
+                                 and canonico != _forma_de_busca(canonico).title()):
+                _INDICE_PRODUTOS[forma] = canonico
+    return _INDICE_PRODUTOS
+
+
+def _produto_conhecido(bruto: str) -> str | None:
+    """Nome canonico do produto citado, ou None.
+
+    Casa sem acento e sem plural, e prefere sempre a chave MAIS LONGA. Era
+    aqui que "25 canudinhos de camarao" virava Canudinho de FRANGO: o plural
+    quebrava o casamento exato e sobrava um atalho de 4 letras, que pegava a
+    primeira chave comecando em "canu" — o frango. Sabor errado na comanda,
+    com camarao no meio (teste do Eduardo, 25/09).
+    """
+    alvo = _forma_de_busca(bruto)
+    if len(alvo) < 3:
+        return None
+
+    indice = _indice_de_produtos()
+    if alvo in indice:
+        return indice[alvo]
+
+    # Contido nos dois sentidos, vencendo a chave mais longa: "canudinho de
+    # camarao" ganha de "canudinho".
+    melhor, tamanho = None, 0
+    for chave, canonico in indice.items():
+        if len(chave) < 4:
+            continue
+        if (chave in alvo or alvo in chave) and len(chave) > tamanho:
+            melhor, tamanho = canonico, len(chave)
+    if melhor:
+        return melhor
+
+    # Prefixo so quando o cliente NAO foi mais especifico do que a chave.
+    # Sem esta condicao, "canudinho de camarao" caia de novo no frango.
+    if len(alvo.split()) <= 1:
+        for chave, canonico in indice.items():
+            if len(chave) >= 4 and (chave.startswith(alvo[:4])
+                                    or alvo.startswith(chave[:4])):
                 return canonico
     return None
 
@@ -895,25 +941,7 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
                 product_name_singular = product_name
 
             # Busca produto conhecido
-            matched_name = None
-            # Tenta match exato primeiro
-            for key, canonical in _TODOS_PRODUTOS.items():
-                if key == product_name or key == product_name_singular:
-                    matched_name = canonical
-                    break
-            # Depois, o nome do produto contido no texto (ou vice-versa),
-            # exigindo um trecho longo o bastante para nao casar por acaso
-            if not matched_name:
-                for key, canonical in _TODOS_PRODUTOS.items():
-                    if (key in product_name or product_name in key) and min(len(key), len(product_name)) >= 4:
-                        matched_name = canonical
-                        break
-            # Por ultimo, prefixo de 4 letras (trata plural/typo leve)
-            if not matched_name and len(product_name_singular) >= 4:
-                for key, canonical in _TODOS_PRODUTOS.items():
-                    if key.startswith(product_name_singular[:4]) or product_name_singular.startswith(key[:4]):
-                        matched_name = canonical
-                        break
+            matched_name = _produto_conhecido(product_name)
 
             if matched_name and qty > 0:
                 # O preco oficial vem da planilha; o mapa local so entra se a

@@ -105,6 +105,14 @@ checa("uma porcao de quibe = 25", _itens("uma porcao de quibe") == [(25, "Quibe"
 checa("'o cento sai por quanto?' nao e pedido", _itens("o cento sai por quanto?") == [])
 checa("formato sem sabor nao inventa item",
       _itens("meio cento de salgado assado") == [])
+# 25/09: "canudinhos" no plural caia num atalho de 4 letras e virava FRANGO.
+checa("plural nao troca o sabor: camarao continua camarao",
+      "camar" in _itens("25 canudinhos de camarão")[0][1].lower())
+checa("plural nao atrapalha o frango",
+      "frango" in _itens("25 canudinhos de frango")[0][1].lower())
+checa("quiche no plural nao vira outro sabor",
+      "quiche" in _itens("2 quiches de carne de sol")[0][1].lower()
+      and "carne" in _itens("2 quiches de carne de sol")[0][1].lower())
 
 # ── Endereco: o campo seguinte nao entra no endereco ───────────────────────
 secao("--- endereco ---")
