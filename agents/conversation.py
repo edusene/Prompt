@@ -670,6 +670,17 @@ def detectar_referencia(message: str) -> str:
     return texto if len(texto) >= 2 else ""
 
 
+# Onde o nome da rua termina: o proximo campo do pedido. Sem isto o endereco
+# engolia pagamento, horario e dia, e ia inteiro para a comanda.
+_FIM_DA_RUA = re.compile(
+    r"\s+(?:bairro|pagamento|pago|vou\s+pagar|pix|cart[aã]o|dinheiro|troco|"
+    r"[aà]s\s|\d{1,2}\s*h(?:oras)?\b|hoje|amanh[aã]|depois\s+de\s+amanh[aã]|"
+    r"data|hor[aá]rio|ponto\s+de\s+refer|refer[eê]ncia|entrega|retirada|"
+    r"para\s+(?:hoje|amanh|as|às)|segunda|ter[cç]a|quarta|quinta|sexta|"
+    r"s[aá]bado|domingo)",
+    re.IGNORECASE)
+
+
 # Rua respondida sem rotulo: "SALGADO FILHO,2233", "Duque de Caxias 500".
 # Duas palavras ou mais e o numero no fim, e a mensagem inteira, para nao
 # confundir com um trecho de pedido.
@@ -745,8 +756,13 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
         )
         if addr_match:
             addr = addr_match.group(1).strip()
-            # Remove "bairro" e o que vem depois se estiver junto
-            addr = re.split(r'\s+bairro', addr, flags=re.IGNORECASE)[0].strip()
+            # O nome da rua so parava em virgula ou ponto, e o cliente escreve
+            # tudo emendado e sem pontuacao. "OLARIA RUA GUANABARA PAGAMENTO NO
+            # PIX" virava endereco "RUA GUANABARA PAGAMENTO NO PIX", e
+            # "RUA FLORES AS 18 HORAS" levou o horario junto — os dois foram
+            # impressos na comanda assim (teste do dono, 25/09). O nome da rua
+            # termina onde comeca outro campo do pedido.
+            addr = _FIM_DA_RUA.split(addr, maxsplit=1)[0].strip(" ,-")
             extracted["endereco"] = addr
         elif state.bairro and "entrega" in (state.modality,
                                             extracted.get("modality")):

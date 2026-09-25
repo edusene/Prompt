@@ -207,6 +207,24 @@ def resolver_data(texto: str, now: datetime | None = None) -> date | None:
                 return None
         return resolvida
 
+    # "dia 16", "para o dia 2": so o numero do dia, sem mes. E como o cliente
+    # marca quando o mes e obvio. Sem isto a extracao devolvia None, a ficha
+    # ficava sem data e o modelo preenchia sozinho — no teste do dono ele
+    # escreveu "16/09/2026", que ja tinha passado nove dias antes (25/09).
+    m = re.search(r"\bdia\s+(\d{1,2})\b", t)
+    if m:
+        dia = int(m.group(1))
+        for ano, mes in ((hoje.year, hoje.month),
+                         (hoje.year + (hoje.month == 12), hoje.month % 12 + 1)):
+            try:
+                candidata = date(ano, mes, dia)
+            except ValueError:
+                continue
+            # Dia que ja passou neste mes e o mesmo dia do mes que vem.
+            if candidata >= hoje:
+                return candidata
+        return None
+
     for nome, indice in _DIAS_ENTRADA.items():
         if re.search(r"\b" + re.escape(nome) + r"\b", t):
             delta = (indice - hoje.weekday()) % 7

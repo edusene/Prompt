@@ -272,6 +272,7 @@ def quebras_de_lote(items: list[dict]) -> list[dict]:
     Devolve [{"sabor", "qtd", "passo", "sugerida"}].
     """
     quebras: list[dict] = []
+    por_familia: dict[str, list[dict]] = {}
     for indice, item in enumerate(items or []):
         nome = str(item.get("name", "")).strip()
         try:
@@ -292,23 +293,45 @@ def quebras_de_lote(items: list[dict]) -> list[dict]:
             continue
         cfg = LOTES[familia]
         passo = cfg["passo"]
-        # O minimo nao e o passo: o cardapio digital nao tem porcao de 25 de
-        # ASSADOS, so meio cento. 25 esfirras e multiplo de 25 e ainda assim nao
-        # fecha — era um pedido banal que ia para a fila do humano.
-        minimo = min(p["minimo"] for p in cfg["pacotes"])
-        if qtd % passo == 0 and qtd >= minimo:
+        # O PASSO e por sabor: cada sabor tem de fechar em multiplo de 25.
+        # O MINIMO e do PACOTE, sobre o total da familia — nao de cada sabor.
+        # Cobrar o minimo sabor a sabor quebrava o produto mais comum da casa:
+        # meio cento de assados com 2 sabores (25 + 25 = 50) virava "ajusto
+        # para 50 de cada?", ou seja, 100 unidades (teste do dono, 25/09).
+        if qtd % passo:
+            quebras.append({
+                "indice": indice,
+                "familia": familia,
+                "sabor": _sabor_oficial(familia, nome) or nome,
+                "qtd": qtd,
+                "passo": passo,
+                "sugerida": max(passo, round(qtd / passo) * passo),
+            })
             continue
-
-        # Multiplo mais proximo, nunca abaixo do minimo da familia: 30 -> 25,
-        # 40 -> 50, 20 -> 25, e 25 assados -> 50.
-        sugerida = max(minimo, round(qtd / passo) * passo)
-        quebras.append({
+        por_familia.setdefault(familia, []).append({
             "indice": indice,
+            "familia": familia,
             "sabor": _sabor_oficial(familia, nome) or nome,
             "qtd": qtd,
             "passo": passo,
-            "sugerida": sugerida,
         })
+
+    # Familia cujos sabores fecham no passo mas cujo TOTAL nao alcanca o pacote
+    # minimo: 25 esfirras sozinhas nao viram meio cento. Aqui a sugestao sobe
+    # o total, nao cada sabor.
+    for familia, itens_ok in por_familia.items():
+        cfg = LOTES[familia]
+        minimo = min(p["minimo"] for p in cfg["pacotes"])
+        total = sum(i["qtd"] for i in itens_ok)
+        if total >= minimo:
+            continue
+        falta = minimo - total
+        passo = cfg["passo"]
+        subir = max(passo, -(-falta // passo) * passo)      # arredonda para cima
+        primeiro = itens_ok[0]
+        quebras.append({**primeiro, "sugerida": primeiro["qtd"] + subir})
+
+    quebras.sort(key=lambda q: q["indice"])
     return quebras
 
 
