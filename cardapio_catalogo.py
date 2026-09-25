@@ -291,6 +291,21 @@ def quebras_de_lote(items: list[dict]) -> list[dict]:
             familia = "Canudinhos"
         if familia not in LOTES:
             continue
+
+        # Nome que existe nas duas familias e esta ABAIXO do corte de festa
+        # esta sendo lido como salgado grande avulso — e ali a regra de lote
+        # nao vale. Sem isto, 3 rissoles (avulsos, R$ 9,00 cada) recebiam
+        # "ajusto para 25?", e a Sandrinha chegou a dizer "25 unidades
+        # avulsas", que seriam R$ 225,00 (teste do dono, 25/09).
+        try:
+            import facts
+            oficial = facts.resolve_unit_price(nome, qtd)
+            if (oficial and oficial.get("ambiguo")
+                    and qtd < facts.QTD_MINIMA_FESTA):
+                continue
+        except Exception:
+            pass
+
         cfg = LOTES[familia]
         passo = cfg["passo"]
         # O PASSO e por sabor: cada sabor tem de fechar em multiplo de 25.

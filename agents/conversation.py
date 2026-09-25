@@ -697,6 +697,66 @@ _NAO_E_RUA = re.compile(
     r"sim|n[aã]o|obrigad[oa])\b")
 
 
+# Como o cliente pede sem dizer numero: "meio cento de coxinha", "um cento de
+# pastel", "uma porcao de quibe". E a forma mais natural de pedir salgado no
+# balcao, e a extracao ignorava as tres — a ficha ficava sem item e a Sandrinha
+# pedia os itens de novo depois de o cliente ja ter dito (teste do dono, 25/09).
+_PACOTE_POR_EXTENSO = re.compile(
+    r"\b(?:(uma?|1)\s+)?(por[cç][aã]o|meio\s+cento|cento)\s+"
+    r"(?:de\s+|d[eo]s\s+)?([a-zà-ÿ][a-zà-ÿ\s]{2,40}?)"
+    r"(?=\s*(?:[,;.!?]|\be\b|\bpara\b|\bpra\b|\bcom\b|$))",
+    re.IGNORECASE)
+
+_UNIDADES_DO_PACOTE = {"porcao": 25, "porção": 25, "meio cento": 50, "cento": 100}
+
+
+def _produto_conhecido(bruto: str) -> str | None:
+    """Nome canonico do produto citado, ou None. Mesma cascata do item numerado."""
+    nome = " ".join((bruto or "").lower().split())
+    if len(nome) < 3:
+        return None
+    if nome.endswith("es") and len(nome) > 3:
+        singular = nome[:-2]
+    elif nome.endswith("s"):
+        singular = nome[:-1]
+    else:
+        singular = nome
+    for chave, canonico in _TODOS_PRODUTOS.items():
+        if chave == nome or chave == singular:
+            return canonico
+    for chave, canonico in _TODOS_PRODUTOS.items():
+        if (chave in nome or nome in chave) and min(len(chave), len(nome)) >= 4:
+            return canonico
+    if len(singular) >= 4:
+        for chave, canonico in _TODOS_PRODUTOS.items():
+            if chave.startswith(singular[:4]) or singular.startswith(chave[:4]):
+                return canonico
+    return None
+
+
+def _itens_por_extenso(msg_lower: str) -> list[dict]:
+    """Itens pedidos por formato em vez de numero. [] quando nao ha nenhum."""
+    achados = []
+    for _um, formato, produto in _PACOTE_POR_EXTENSO.findall(msg_lower):
+        chave = " ".join(formato.lower().split())
+        unidades = _UNIDADES_DO_PACOTE.get(chave)
+        if not unidades:
+            continue
+        canonico = _produto_conhecido(produto)
+        if not canonico:
+            continue          # "meio cento de salgado assado": falta o sabor
+        preco = 0.0
+        try:
+            import facts
+            oficial = facts.resolve_unit_price(canonico, unidades)
+            if oficial:
+                preco = oficial["preco_unitario"]
+        except Exception:
+            pass
+        achados.append({"name": canonico, "quantity": unidades, "price": preco})
+    return achados
+
+
 def _extract_data_from_message(message: str, state: "ConversationState") -> dict:
     """Extrai dados estruturados da mensagem do cliente (nome, itens, modalidade, endereco, horario, pagamento).
 
@@ -812,7 +872,7 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
             r'(\d+)\s*(?:unidades?|un\.?|pcs\.?)?\s*(de\s+)?([a-záàãâéêíóôõúç\s]+?)'
             r'(?:\s*(?:[,;.!?]|\be\b|\bpra\b|\bpara\b|\bcom\b|\bno\b|\bna\b|\bem\b'
             r'|\bhoje\b|\bamanh[aã]\b|\bàs\b|\bas\b|\bde\s+r\$|r\$'
-            r"|(?![a-z\u00e0-\u00ff])|$))",
+            r"|(?![a-z\u00e0-\u00ff\s])|$))",
             msg_lower
         )
         items_found = []
@@ -874,6 +934,14 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
                     "quantity": qty,
                     "price": unit_price,
                 })
+
+        # "meio cento de coxinha" nao tem numero e escapava do padrao acima.
+        # So entra o produto que o padrao numerado nao pegou.
+        ja_vistos = {i["name"] for i in items_found}
+        for extra in _itens_por_extenso(msg_lower):
+            if extra["name"] not in ja_vistos:
+                items_found.append(extra)
+                ja_vistos.add(extra["name"])
 
         if items_found:
             extracted["items"] = items_found

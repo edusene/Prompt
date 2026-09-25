@@ -93,6 +93,19 @@ checa("hifen entre itens nao apaga item",
 # 23/09: "hoje as 18h" virava "18 x Coxinha".
 checa("horario nao vira item", _itens("hoje as 18h") == [])
 
+# 25/09: "pao pizza" parava em "pao" e "canudinho de camarao" virava frango.
+checa("nome de produto com espaco fica inteiro",
+      _itens("25 pao pizza") == [(25, "Pao Pizza")])
+checa("camarao nao vira frango",
+      _itens("25 canudinho de camarao") == [(25, "Canudinho de Camarao")])
+# 25/09: "meio cento de X" nao era pedido para a extracao.
+checa("meio cento de coxinha = 50", _itens("meio cento de coxinha") == [(50, "Coxinha")])
+checa("um cento de coxinha = 100", _itens("um cento de coxinha") == [(100, "Coxinha")])
+checa("uma porcao de quibe = 25", _itens("uma porcao de quibe") == [(25, "Quibe")])
+checa("'o cento sai por quanto?' nao e pedido", _itens("o cento sai por quanto?") == [])
+checa("formato sem sabor nao inventa item",
+      _itens("meio cento de salgado assado") == [])
+
 # ── Endereco: o campo seguinte nao entra no endereco ───────────────────────
 secao("--- endereco ---")
 # 25/09: os dois foram impressos na comanda assim.
@@ -130,6 +143,13 @@ checa("25 assados sozinhos sobem para 50",
 checa("30 fritos arredondam para 25",
       _sugestoes([{"name": "Coxinha frango", "quantity": 30}]) == [25])
 checa("25 fritos ja fecham", _sugestoes([{"name": "Coxinha frango", "quantity": 25}]) == [])
+
+# 25/09: a trava de lote mandava ajustar 3 rissoles avulsos para 25, e a
+# Sandrinha chegou a dizer "25 unidades avulsas" — R$ 225,00.
+checa("avulso abaixo de 21 nao entra na regra de lote",
+      _sugestoes([{"name": "Rissole de Carne", "quantity": 3}]) == [])
+checa("sabor que so existe em pacote ainda sobe para 25",
+      _sugestoes([{"name": "Quibe", "quantity": 5}]) == [25])
 
 # ── Envio: o nome e a quantidade que chegam ao cardapio digital ────────────
 secao("--- caminho do envio ---")
