@@ -37,13 +37,77 @@ def _temperatura() -> float:
         return float(_TEMPERATURA_PADRAO)
 
 
+# Consumo acumulado desde que o processo subiu. Existe porque ninguem sabia
+# quanto custa um atendimento: a conta da OpenAI vinha fechada, sem dizer se
+# o peso estava no prompt, no historico ou nas voltas de tool. Somado em
+# _create, que e por onde passam TODAS as chamadas do arquivo - inclusive o
+# retry sem tools.
+#
+# 'entrada' e o total que a OpenAI cobrou como prompt; 'cache' e a parte dele
+# que veio do cache do prefixo, que custa um quarto do preco. Guardar os dois
+# separados e o que permite ver se o cache esta pegando.
+_CONSUMO = {"chamadas": 0, "entrada": 0, "cache": 0, "saida": 0}
+
+# Precos por 1M de tokens (gpt-4.1-mini, tabela oficial de 26/09/2026).
+PRECO_ENTRADA_USD = 0.40
+PRECO_CACHE_USD = 0.10
+PRECO_SAIDA_USD = 1.60
+
+
+def _somar_consumo(response) -> None:
+    """Acumula o usage de uma resposta. Nunca levanta: e contabilidade."""
+    try:
+        uso = getattr(response, "usage", None)
+        if not uso:
+            return
+        detalhe = getattr(uso, "prompt_tokens_details", None)
+        _CONSUMO["chamadas"] += 1
+        _CONSUMO["entrada"] += int(getattr(uso, "prompt_tokens", 0) or 0)
+        _CONSUMO["cache"] += int(getattr(detalhe, "cached_tokens", 0) or 0)
+        _CONSUMO["saida"] += int(getattr(uso, "completion_tokens", 0) or 0)
+    except Exception as e:
+        print(f"[llm] WARN contagem de consumo falhou: {e}")
+
+
+def consumo() -> dict:
+    """Copia do acumulado, para quem quiser somar por conta propria."""
+    return dict(_CONSUMO)
+
+
+def zerar_consumo() -> None:
+    for k in _CONSUMO:
+        _CONSUMO[k] = 0
+
+
+def custo(usd_brl: float = 5.18) -> dict:
+    """O que o acumulado custou, em dolar e em real.
+
+    A entrada cobrada tem duas faixas: o que veio do cache sai por um quarto
+    do preco. Cobrar tudo a preco cheio superestimaria em quase 3x num
+    prompt como o nosso, em que o prefixo fixo e 94% da entrada.
+    """
+    c = dict(_CONSUMO)
+    entrada_cheia = max(0, c["entrada"] - c["cache"])
+    usd = (entrada_cheia / 1e6 * PRECO_ENTRADA_USD
+           + c["cache"] / 1e6 * PRECO_CACHE_USD
+           + c["saida"] / 1e6 * PRECO_SAIDA_USD)
+    return {
+        **c,
+        "entrada_cheia": entrada_cheia,
+        "usd": round(usd, 6),
+        "brl": round(usd * usd_brl, 4),
+        "brl_por_chamada": round(usd * usd_brl / c["chamadas"], 4) if c["chamadas"] else 0.0,
+    }
+
 def _create(**kwargs):
     """chat.completions.create com temperatura, tolerante a modelo que a recusa."""
     modelo = kwargs.get("model", "")
     if modelo not in _SEM_TEMPERATURA:
         kwargs.setdefault("temperature", _temperatura())
     try:
-        return _client.chat.completions.create(**kwargs)
+        _r = _client.chat.completions.create(**kwargs)
+        _somar_consumo(_r)
+        return _r
     except Exception as e:
         if "temperature" not in str(e).lower() or "temperature" not in kwargs:
             raise
@@ -52,7 +116,9 @@ def _create(**kwargs):
         print(f"[llm] modelo {modelo} nao aceita temperature; seguindo sem ela")
         _SEM_TEMPERATURA.add(modelo)
         kwargs.pop("temperature", None)
-        return _client.chat.completions.create(**kwargs)
+        _r = _client.chat.completions.create(**kwargs)
+        _somar_consumo(_r)
+        return _r
 
 
 def _convert_history(history: list[dict]) -> list[dict]:

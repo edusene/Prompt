@@ -539,6 +539,81 @@ checa("ficha incompleta nao troca pelo espelho",
                                  _FICHA_INCOMPLETA)
       == "nao existe meio cento para churros")
 
+# ── A escolha do tamanho tem de entrar na ficha ────────────────────
+secao("--- escolha de tamanho ---")
+# Havia tratamento para quem escolhia o PACOTE e nenhum para quem escolhia o
+# LANCHE: o cliente respondia "Grande, lanche", nada entrava na ficha, a
+# pendencia de tamanho ficava de pe e o espelho nao saia - ela encerrava com
+# "posso ajudar com mais alguma coisa?" e o pedido de R$ 45,00 morria ali.
+
+
+def _ficha_5_coxinhas() -> dict:
+    return {"name": "Eduardo", "modality": "retirada",
+            "items": [{"name": "Coxinha", "quantity": 5}],
+            "data_agendada": "amanha (29/09)", "data_iso": "2026-09-29",
+            "horario": "15h"}
+
+
+_f_lanche = _ficha_5_coxinhas()
+checa("5 coxinhas comecam com duvida de tamanho",
+      bool(memoria_mod.pendencia_de_item(_f_lanche)))
+checa("a escolha do lanche e gravada",
+      memoria_mod.aplicar_escolha_de_lanche(_f_lanche) != [])
+checa("gravada, a duvida fecha", not memoria_mod.pendencia_de_item(_f_lanche))
+checa("LANCHE mantem a quantidade pedida (regra do dono)",
+      _f_lanche["items"][0]["quantity"] == 5)
+checa("ficha completa depois da escolha", not memoria_mod.faltando(_f_lanche))
+
+checa("'Grande, lanche' e lanche, nao pacote",
+      app._escolheu_lanche("Grande, lanche") and not app._escolheu_pacote("Grande, lanche"))
+checa("'Mini' e pacote, nao lanche",
+      app._escolheu_pacote("Mini") and not app._escolheu_lanche("Mini"))
+checa("'em porcao' e pacote", app._escolheu_pacote("em porcao"))
+checa("'avulsa' e lanche", app._escolheu_lanche("avulsa"))
+
+# ── Confirmar o bairro sem dizer o frete ────────────────────────
+secao("--- frete na confirmacao ---")
+# "Voces entregam no Nova Porto Velho?" devolvia so "Sim, entregamos", e o
+# cliente tinha de perguntar o preco de novo. O valor estava em maos.
+_COM_FRETE = {"frete": 12.0}
+checa("confirmar o bairro traz o valor",
+      "R$ 12,00" in app._conferir_frete_dito(
+          "55", "Sim, entregamos no bairro Nova Porto Velho.", _COM_FRETE))
+# A negativa tem de ser vista ANTES: normalize tira a pontuacao, e
+# "Nao entregamos no seu bairro" casa com "entregamos no".
+for _recusa in ("Nao entregamos no seu bairro no momento.",
+                "Esse bairro nao esta na nossa tabela de entrega.",
+                "Voce esta fora da nossa area, mas pode retirar na loja.",
+                "Nao fazemos entrega ai."):
+    checa(f"recusa de bairro NAO recebe valor: {_recusa[:26]!r}",
+          app._conferir_frete_dito("55", _recusa, _COM_FRETE) == _recusa)
+checa("resposta que ja tem valor fica intacta",
+      app._conferir_frete_dito("55", "Sim, entregamos. A taxa e R$ 15,00.", _COM_FRETE)
+      == "Sim, entregamos. A taxa e R$ 15,00.")
+# Quando o modelo confirma pela base de conhecimento, sem chamar a tool, nao ha
+# frete na ficha - o valor sai da tabela, pelo bairro que ela citou.
+for _frase, _valor in (("Sim, entregamos no bairro Nova Porto Velho.", "R$ 12,00"),
+                       ("Sim, entregamos no Pedrinhas!", "R$ 15,00"),
+                       ("Atendemos o Igarape", "R$ 8,00")):
+    checa(f"frete vem da tabela: {_frase[:28]!r}",
+          _valor in app._conferir_frete_dito("55", _frase, {}))
+# Bairro fora da tabela nao recebe valor nenhum: inventar frete e pior do que
+# responder pela metade.
+checa("bairro fora da tabela nao recebe valor",
+      app._conferir_frete_dito("55", "Sim, entregamos no Jardim das Acacias.", {})
+      == "Sim, entregamos no Jardim das Acacias.")
+# "(?i:...)" so no verbo: com IGNORECASE global, "atendemos o senhor" viraria
+# bairro "senhor".
+checa("'atendemos o senhor' nao e bairro",
+      app._conferir_frete_dito("55", "Atendemos o senhor com carinho", {})
+      == "Atendemos o senhor com carinho")
+
+# Sem frete na ficha o valor vem da tabela (caso acima). O que garante que nada
+# e inventado e o bairro inexistente, testado logo antes - e a resposta que nao
+# cita bairro nenhum:
+checa("sem bairro citado, nada e acrescentado",
+      app._conferir_frete_dito("55", "Sim, entregamos!", {}) == "Sim, entregamos!")
+
 # ── Higiene do proprio codigo ──────────────────────────────────────────────
 secao("--- higiene ---")
 # Escrever "\\b" por engano num arquivo grava um byte de backspace, e o regex

@@ -151,6 +151,7 @@ Depois:
 ```
 OLARIA RUA GUANABARA 45 PAGAMENTO NO PIX
 ```
+Responda `amanhã às 16h` para fechar a conta.
 
 | | |
 |---|---|
@@ -189,7 +190,16 @@ Responda com a resposta junta, que é como as pessoas escrevem:
 O S/N foi cortado — sem número o motoboy não acha a casa. Mas quem mora em rua
 sem numeração não pode ficar preso, e o que resolve na prática é a referência.
 
-Seguindo do teste acima, responda:
+```
+#reset
+```
+```
+Meu nome é Balbino. Quero 50 coxinhas para entrega
+```
+```
+OLARIA RUA GUANABARA PAGAMENTO NO PIX
+```
+Quando ela pedir o número, responda:
 ```
 a casa não tem número
 ```
@@ -425,13 +435,13 @@ Meu nome é Eduardo. Quero 25 coxinhas para retirar amanhã às 15h
 
 Um por vez, cada um com `#reset` antes:
 
-| Mande (com nome, retirada e horário) | ✅ Esperado |
+| Mande | ✅ Esperado |
 |---|---|
-| `meio cento de coxinha` | 50 un — **R$ 40,00** |
-| `um cento de coxinha` | 100 un — **R$ 80,00** |
-| `cento e meio de coxinha` | 150 un — **R$ 120,00** |
-| `dois centos de coxinha` | 200 un — **R$ 160,00** |
-| `2 centos de coxinha` | 200 un — **R$ 160,00** |
+| `Meu nome é Balbino. Quero meio cento de coxinha para retirar amanhã às 15h` | 50 un — **R$ 40,00** |
+| `Meu nome é Balbino. Quero um cento de coxinha para retirar amanhã às 15h` | 100 un — **R$ 80,00** |
+| `Meu nome é Balbino. Quero cento e meio de coxinha para retirar amanhã às 15h` | 150 un — **R$ 120,00** |
+| `Meu nome é Balbino. Quero dois centos de coxinha para retirar amanhã às 15h` | 200 un — **R$ 160,00** |
+| `Meu nome é Balbino. Quero 2 centos de coxinha para retirar amanhã às 15h` | 200 un — **R$ 160,00** |
 
 🚩 **Alerta no último:** se vier **2 unidades**, o defeito voltou.
 

@@ -1905,6 +1905,75 @@ def _conferir_troco(user: str, reply: str, memoria: dict,
             f'precisa ser maior que o total da compra. Dinheiro para '
             f'quanto? 💵')
 
+# Como ela confirma que entrega num bairro.
+# O bairro que ela citou ao confirmar, para consultar a tabela.
+_RX_BAIRRO_CITADO = _re_mod.compile(
+    # "(?i:...)" so no verbo: a inicial MAIUSCULA e o que identifica o nome do
+    # bairro, entao o resto do padrao continua sensivel a caixa. Com IGNORECASE
+    # global, "atendemos o senhor" viraria bairro "senhor".
+    r'(?i:entregamos|atendemos)\s+(?:sim,?\s+)?(?:no|na|em|o|a)?\s*'
+    r'(?:bairro\s+)?([A-ZÀ-Ý][\wÀ-ÿ]*'
+    r'(?:\s+(?:de\s+|da\s+|do\s+|das\s+|dos\s+)?'
+    r'[A-ZÀ-Ý][\wÀ-ÿ]*){0,3})')
+
+# Recusa de bairro. Vem antes da confirmacao na checagem.
+_RX_NEGA_ENTREGA = _re_mod.compile(
+    r'nao entregamos|nao atendemos|nao esta na (nossa )?tabela'
+    r'|fora da (nossa )?area|nao fazemos entrega',
+    _re_mod.IGNORECASE)
+
+_RX_CONFIRMA_ENTREGA = _re_mod.compile(
+    r'sim,? entregamos|entregamos (sim|no|na|em|nesse|nesta)'
+    r'|atendemos (o|no|na|em|esse|este)|fazemos entrega',
+    _re_mod.IGNORECASE)
+
+
+def _conferir_frete_dito(user: str, reply: str, memoria: dict) -> str:
+    '''Junta a taxa de entrega quando ela confirma o bairro e nao diz o valor.
+
+    'Voces entregam no Nova Porto Velho?' devolvia so 'Sim, entregamos' - e o
+    cliente tinha de perguntar o preco numa segunda mensagem. O valor estava
+    em maos: consultar_frete rodou no mesmo turno e gravou o frete na ficha.
+    O dono pediu esse bairro a R$ 12,00 em 25/09; confirmar sem o valor
+    entrega metade da resposta (medido 0 de 3, 26/09).
+
+    So age quando nao ha valor nenhum na resposta - o espelho sempre tem, e
+    por isso nunca e tocado aqui.
+    '''
+    if not reply or 'R$' in reply:
+        return reply
+    _norm = facts.normalize(reply)
+    # A negativa tem de ser testada ANTES: normalize tira a pontuacao, entao
+    # "Nao entregamos no seu bairro" casa com "entregamos no" e a resposta saia
+    # "nao entregamos... a taxa de entrega e R$ 12,00".
+    if _RX_NEGA_ENTREGA.search(_norm):
+        return reply
+    if not _RX_CONFIRMA_ENTREGA.search(_norm):
+        return reply
+    try:
+        frete = float(memoria.get('frete') or 0)
+    except (TypeError, ValueError):
+        frete = 0.0
+    # O modelo as vezes confirma o bairro pela base de conhecimento, sem chamar
+    # consultar_frete - ai nao ha frete na ficha. O valor existe na tabela: le
+    # o bairro que ELA acabou de citar e consulta. Se a tabela nao tiver, nao
+    # acrescenta nada; inventar frete e pior do que responder pela metade.
+    if frete <= 0:
+        achado = _RX_BAIRRO_CITADO.search(reply)
+        if not achado:
+            return reply
+        try:
+            oficial = facts.lookup_frete(achado.group(1).strip())
+        except Exception:
+            oficial = None
+        if not oficial or not oficial.get('taxa'):
+            return reply
+        frete = float(oficial['taxa'])
+    if frete <= 0:
+        return reply
+    print(f'[frete] user={user} confirmou a entrega sem o valor; acrescentado R$ {frete:.2f}')
+    return (reply.rstrip() + f' A taxa de entrega é {conversation_memory._brl(frete)}. 🛵')
+
 def _conferir_tamanho(user: str, reply: str, memoria: dict) -> str:
     """Tira a pergunta de tamanho quando a quantidade ja resolveu o tamanho.
 
@@ -2178,6 +2247,21 @@ def _escolheu_pacote(texto: str) -> bool:
     if any(m in limpo for m in _MARCAS_ESCOLHEU_BALCAO):
         return False          # citou o outro lado: nao decida por ele
     return any(m in limpo for m in _MARCAS_ESCOLHEU_PACOTE)
+
+
+def _escolheu_lanche(texto: str) -> bool:
+    """O cliente optou pelo salgado grande de balcao, e nao pelo pacote?
+
+    Espelho de _escolheu_pacote. Sem isto a resposta "Grande, lanche" nao ia
+    para lugar nenhum: a pendencia de tamanho ficava aberta e o espelho nunca
+    saia.
+    """
+    limpo = " ".join(facts.normalize(texto or "").split())
+    if not limpo:
+        return False
+    if any(m in limpo for m in _MARCAS_ESCOLHEU_PACOTE):
+        return False          # citou o outro lado: nao decida por ele
+    return any(m in limpo for m in _MARCAS_ESCOLHEU_BALCAO)
 
 
 def _parece_fechamento(texto: str) -> bool:
@@ -2507,6 +2591,13 @@ def handle_flush(user: str, items: list[dict]) -> None:
             if _escolha:
                 conversation_memory.save(user, _memoria)
                 print(f"[memoria] {user}: cliente escolheu o pacote -> "
+                      f"{'; '.join(_escolha)}")
+        elif (conversation_memory.pendencia_de_item(_memoria)
+                and _escolheu_lanche(text_only)):
+            _escolha = conversation_memory.aplicar_escolha_de_lanche(_memoria)
+            if _escolha:
+                conversation_memory.save(user, _memoria)
+                print(f"[memoria] {user}: cliente escolheu o lanche -> "
                       f"{'; '.join(_escolha)}")
 
         # Quem diz que ha ajuste pendente e a FICHA, nao a redacao da volta
@@ -3065,6 +3156,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
             # nao ha duvida a resolver, e a frase nao pode chegar ao cliente
             # por mais que o modelo insista em escreve-la.
             reply = _conferir_troco(user, reply, _memoria, _calculo_da_volta)
+            reply = _conferir_frete_dito(user, reply, _memoria)
             reply = _conferir_tamanho(user, reply, _memoria)
             # E nao pede de novo o que o cliente ja respondeu.
             reply = _conferir_pedido_de_dados(user, reply, _memoria)

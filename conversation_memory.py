@@ -652,6 +652,8 @@ def _itens_ambiguos(memoria: dict) -> list[str]:
             continue
         if qtd >= facts.QTD_MINIMA_FESTA:
             continue
+        if item.get("tamanho"):
+            continue          # o cliente ja respondeu: nao pergunte de novo
         try:
             oficial = facts.resolve_unit_price(nome, qtd)
         except Exception:
@@ -678,6 +680,8 @@ def _itens_ambiguos_detalhe(memoria: dict) -> list[dict]:
             continue
         if qtd <= 0 or qtd >= _minimo_de_festa():
             continue
+        if item.get("tamanho"):
+            continue          # respondido: fora da pergunta
         try:
             import facts
             oficial = facts.resolve_unit_price(nome, qtd)
@@ -840,6 +844,57 @@ def aplicar_ajuste_de_lote(memoria: dict) -> list[str]:
 # Tamanho minimo de um lote de festa. Abaixo disso o cardapio digital nao
 # aceita, entao quem escolhe o pacote esta escolhendo, no minimo, uma porcao.
 _PORCAO = 25
+
+
+def aplicar_escolha_de_lanche(memoria: dict) -> list[str]:
+    """Grava que o cliente quer o salgado GRANDE, e nao o sabor de pacote.
+
+    Irma de aplicar_escolha_de_pacote, e existia so metade: havia tratamento
+    para quem escolhia o pacote, e nenhum para quem escolhia o lanche. O cliente
+    respondia "Grande, lanche", nada entrava na ficha, a pendencia de tamanho
+    continuava de pe e o espelho nao saia - ela encerrava com "posso ajudar com
+    mais alguma coisa?" e o pedido de R$ 45,00 morria ali (medido em 1 de 3
+    rodadas, 26/09).
+
+    A regra e do dono: LANCHE aceita a quantidade pedida. Entao a quantidade NAO
+    muda - so se registra o tamanho, e o preco volta para a tabela resolver (a
+    mesma quantidade abaixo de 25 resolve como salgado grande).
+
+    Devolve a lista de mudancas, para o log.
+    """
+    itens = memoria.get("items") or []
+    if not itens:
+        return []
+    try:
+        import facts
+    except Exception:
+        return []
+
+    minimo = _minimo_de_festa()
+    novos, mudancas = [], []
+    for bruto in itens:
+        it = dict(bruto)
+        try:
+            qtd = int(float(it.get("quantity", 0) or 0))
+        except (ValueError, TypeError):
+            novos.append(it)
+            continue
+        if qtd >= minimo or it.get("tamanho"):
+            novos.append(it)
+            continue
+        try:
+            oficial = facts.resolve_unit_price(it.get("name", ""), qtd)
+        except Exception:
+            oficial = None
+        if oficial and oficial.get("ambiguo"):
+            it["tamanho"] = "lanche"
+            it["price"] = 0.0     # quem precifica e a tabela, nunca este codigo
+            mudancas.append(f"{it.get('name')} {qtd} un -> lanche (grande)")
+        novos.append(it)
+
+    if mudancas:
+        memoria["items"] = novos
+    return mudancas
 
 
 def aplicar_escolha_de_pacote(memoria: dict) -> list[str]:
