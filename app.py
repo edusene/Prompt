@@ -1594,7 +1594,11 @@ _RX_PEDE_LICENCA = _re_mod.compile(
     r"mandar|enviar|gerar)|quer que eu (passe|mostre|monte|calcule)|"
     r"deseja que eu (passe|mostre|monte)|posso ja (passar|mostrar)|"
     r"podemos confirmar|posso confirmar|"
-    r"voce pediu|correto\?|certo\?|confere\?)",
+    r"voce pediu|correto\?|certo\?|confere\?|"
+    # Formas colhidas na varredura de 26/09, com a ficha completa: com
+    # tudo coletado nao ha licenca a pedir, o proximo passo e o espelho.
+    r"poderia confirmar|pode confirmar|me confirma|confirma para eu|"
+    r"para eu calcular|posso lhe apresentar|deseja confirmar)",
     _re_mod.IGNORECASE,
 )
 
@@ -1679,42 +1683,71 @@ _RX_NEGA_FORMATO = _re_mod.compile(
     _re_mod.IGNORECASE)
 
 
+# O que uma resposta fala quando fala DO PEDIDO. Nao e lista de recusas: e a
+# marca de que o assunto e o pedido em si, e nao uma pergunta lateral do
+# cliente ('voces abrem domingo?'), que com a ficha completa continua valida.
+_RX_FALA_DO_PEDIDO = _re_mod.compile(
+    r'pedido|formato|ajustar|ajusto|porc[ao]|porcoes|cento|unidades'
+    r'|calcular|confirmar|cadastrad|cardapio|total|sabor',
+    _re_mod.IGNORECASE)
+
+
 def _conferir_nega_formato(user: str, reply: str, memoria: dict) -> str:
-    '''Troca pelo espelho a recusa de um pedido que o catalogo aceita.
+    '''Com a ficha completa e nada pendente, a resposta tem de ser o espelho.
 
-    'Quero meio cento de coxinha e cento e meio de churros' e um pedido
-    valido - os termos de volume sao a regra que o proprio dono escreveu, e
-    150 fecha em multiplos de 25. Ela respondia que churros nao tem meio
-    cento, ou que so existe como sabor dentro do pacote, e pedia ajuste: 4
-    de 5 rodadas no teste dele. Isso nao atrasa o pedido, mata a venda.
+    Comecou como lista de recusas - 'nao existe meio cento para churros',
+    'e vendido como sabor incluso no pacote' - e cada varredura achava uma
+    frase nova: 'nao esta cadastrado no cardapio', 'nao esta no formato
+    correto'. Catar frase nao acaba nunca.
 
-    So age quando o codigo JA garantiu que nao ha nada a resolver - ficha
-    completa, sem quebra de lote e sem duvida de item - e quando a recusa
-    fala de um item que esta na ficha. Produto que nao existe de verdade
-    ('tem panqueca?') nao entra na ficha, e a recusa daquele segue de pe.
+    Entao a regra virou estrutural, e e a mesma que a ficha ja manda: com
+    tudo coletado e nenhuma pendencia, o proximo passo e apresentar o
+    espelho e pedir a confirmacao. Nao ha outra resposta certa sobre o
+    pedido nesse ponto - nem recusa, nem aviso de espera, nem pedido de
+    confirmacao do que ja esta na ficha.
+
+    O que fica de fora, de proposito:
+      - o espelho, que ja e o certo;
+      - resposta a pergunta lateral ('voces abrem domingo?'), que nao fala
+        do pedido;
+      - qualquer coisa com pendencia de verdade (lote quebrado, duvida de
+        tamanho, troco invalido), porque ai ha o que resolver antes.
+
+    Produto que nao existe ('tem panqueca?') nao entra na ficha; a recusa
+    dele nao cita item da ficha nem fala do pedido montado, e segue de pe.
     '''
     if not reply or _RX_LINHA_DE_RESUMO.search(reply):
         return reply
-    _norm_reply = facts.normalize(reply)
-    _enrolou = bool(_RX_ENROLA.search(_norm_reply))
-    if not (_enrolou or _RX_NEGA_FORMATO.search(_norm_reply)):
+    # A recusa de troco vem de _conferir_troco, que roda antes nesta cadeia e
+    # limpou o troco da ficha - o que apaga a pendencia e faria esta funcao
+    # trocar a recusa pelo espelho, com o troco impossivel dentro. Um filtro
+    # desfazendo o outro: a varredura de 26/09 caiu de 8/8 para 0/8 assim.
+    if _RX_TROCO_INSUFICIENTE.search(facts.normalize(reply)):
         return reply
     if conversation_memory.faltando(memoria):
         return reply
-    if (conversation_memory.pendencia_de_lote(memoria)
-            or conversation_memory.pendencia_de_item(memoria)
-            or conversation_memory.pendencia_de_detalhe(memoria)):
-        return reply
 
     norm = facts.normalize(reply)
-    itens = memoria.get('items') or []
-    def _citado(item):
+
+    def _citado(item) -> bool:
         nome = facts.normalize(str(item.get('name')
                                    or item.get('product_name') or ''))
         primeira = nome.split()[0] if nome.split() else ''
         return len(primeira) > 3 and primeira in norm
-    # Anunciar o calculo nao precisa citar item: nao ha outra leitura possivel.
-    if not _enrolou and not any(_citado(i) for i in itens):
+
+    fala_do_pedido = (bool(_RX_FALA_DO_PEDIDO.search(norm))
+                      or bool(_RX_ENROLA.search(norm))
+                      or bool(_RX_NEGA_FORMATO.search(norm))
+                      or any(_citado(i) for i in (memoria.get('items') or [])))
+    if not fala_do_pedido:
+        return reply
+
+    # As pendencias ficam para DEPOIS do filtro barato: cada uma consulta o
+    # catalogo, e rodar as tres em toda resposta deixou a volta lenta o
+    # bastante para o cliente receber resposta vazia (26/09).
+    if (conversation_memory.pendencia_de_lote(memoria)
+            or conversation_memory.pendencia_de_item(memoria)
+            or conversation_memory.pendencia_de_detalhe(memoria)):
         return reply
 
     numeros = _numeros_do_pedido(memoria)
@@ -1722,8 +1755,8 @@ def _conferir_nega_formato(user: str, reply: str, memoria: dict) -> str:
     if not resumo:
         return reply
 
-    print(f'[formato] user={user} recusa de pedido valido trocada pelo espelho: '
-          f'{reply[:120]!r}')
+    print(f'[espelho] user={user} ficha completa; resposta sobre o pedido '
+          f'trocada pelo espelho: {reply[:110]!r}')
     return resumo
 
 def _conferir_permissao(user: str, reply: str, memoria: dict) -> str:
@@ -2970,6 +3003,31 @@ def handle_flush(user: str, items: list[dict]) -> None:
             )
         except Exception as e:
             print(f"[flush] ERRO llm p/ {user}: {e}")
+            # "return" seco era silencio: o cliente mandava a mensagem e nao
+            # recebia nada, sem ninguem saber que houve falha. Acontece de
+            # verdade - o limite de tokens por minuto da OpenAI (429) estoura
+            # num sabado cheio, e foi assim que apareceu aqui, com 8 conversas
+            # ao mesmo tempo na medicao de 26/09.
+            #
+            # O funil nao depende do modelo para andar: a ficha sabe o que
+            # falta, e o resumo sai de calculate_order. Quando nem isso da,
+            # pedir para repetir e honesto e deixa o cliente agir.
+            _saida = ""
+            try:
+                if conversation_memory.faltando(_memoria):
+                    _saida = _proxima_pergunta_do_funil(_memoria)
+                else:
+                    _saida = ((_numeros_do_pedido(_memoria) or {})
+                              .get("resumo_formatado") or "")
+            except Exception as _e2:
+                print(f"[flush] WARN fallback de falha tambem falhou: {_e2}")
+            if not _saida:
+                _saida = ("Tive uma instabilidade aqui agora 💛 "
+                          "Pode repetir, por favor?")
+            print(f"[flush] user={user} modelo indisponivel; "
+                  f"resposta escrita pelo codigo")
+            memory.append(user, "assistant", _saida)
+            enviar_em_blocos(user, _saida, _chegada)
             return
         _gasto_llm = time.monotonic() - _t_llm
 

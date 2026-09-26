@@ -510,6 +510,15 @@ _COM_CERTO = ("o seu pedido e meio cento de Coxinha (50 un), certo? "
 checa("normalizacao preserva o ?", "?" in app._sem_acento_com_pergunta(_COM_CERTO))
 checa("pergunta de licenca com 'certo?' casa",
       bool(app._RX_PEDE_LICENCA.search(app._sem_acento_com_pergunta(_COM_CERTO))))
+# Formas de pedir licenca colhidas na varredura de 26/09. Com a ficha completa
+# nao ha licenca a pedir: o proximo passo e o espelho.
+for _licenca in ("Poderia confirmar para eu calcular certinho o seu pedido?",
+                 "Pode confirmar o pedido?",
+                 "Posso seguir com o resumo?",
+                 "Deseja confirmar assim?"):
+    checa(f"licenca reconhecida: {_licenca[:30]!r}",
+          bool(app._RX_PEDE_LICENCA.search(app._sem_acento_com_pergunta(_licenca))))
+
 checa("afirmacao sem ? nao e pedido de licenca",
       not app._RX_PEDE_LICENCA.search(
           app._sem_acento_com_pergunta("O total esta correto e o pedido segue")))
