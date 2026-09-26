@@ -292,6 +292,73 @@ Vale repetir com parênteses e aspa simples — mesma família:
 | `'meio cento de coxinha e um cento de churros'` | 50 + 100 |
 | `meio cento de coxinha (para hoje)` | 50 Coxinha |
 
+### 1.15 Quem dá o bairro está pedindo entrega
+
+O cliente disse "1 cento de coxinha … **aqui no Agenor de Carvalho**" e ela
+perguntou "entrega ou retirada?" — duas vezes, mesmo depois de ele dar a rua.
+E a conversa travava ali: sem modalidade não há total, e sem total nada mais
+avança.
+
+```
+#reset
+```
+```
+Meu nome é Balbino. Quero 1 cento de coxinha para amanhã às 9h aqui no Agenor de Carvalho. Vou pagar no dinheiro e preciso de troco pra 50.
+```
+
+| | |
+|---|---|
+| ✅ Esperado | **não** pergunta entrega/retirada; pede só a rua com número |
+| 🚩 Alerta | "será para entrega ou retirada?" · pedir de novo o bairro, a data ou o pagamento |
+
+**Teste o contrário:** `sou do Agenor de Carvalho mas quero retirar` → tem que
+valer **retirada**. E `quanto é a entrega no Pedrinhas?` (sem pedido) não pode
+virar um pedido de entrega.
+
+### 1.16 Troco menor que o total
+
+Seguindo do teste acima, responda:
+```
+RUA DOS PIONEIROS 450
+```
+
+O total dá **R$ 94,00** e o troco pedido foi **R$ 50,00** — impossível. Ela
+apresentou o resumo pedindo confirmação assim mesmo.
+
+| | |
+|---|---|
+| ✅ Esperado | "O total do seu pedido deu R$ 94,00. O valor para troco precisa ser maior que o total da compra. Dinheiro para quanto? 💵" |
+| 🚩 Alerta | resumo com "troco para R$ 50,00" · pedir confirmação · enviar o pedido |
+
+Responda `troco para 100` → tem que **aceitar e seguir**. (Se ela ignorar o 100
+e repetir a pergunta, o defeito voltou: o troco antigo não foi limpo.)
+
+### 1.17 Volume válido não pode ser recusado 🔴
+
+Este eu encontrei medindo, e **em 4 de 5 rodadas** ela matava a venda: dizia que
+churros não tem meio cento, ou que só existe como sabor dentro do pacote.
+Existe — é a regra que o senhor mesmo escreveu.
+
+```
+#reset
+```
+```
+Meu nome é Balbino. "Boa noite, quero meio cento de coxinha de frango e cento e meio de churros para entregar" AMANHA AS 8 HORAS
+```
+Depois:
+```
+BAIRRO OLARIA RUA SALGADO 2325 CARTAO
+```
+
+| | |
+|---|---|
+| ✅ Esperado | `50 un - Coxinha frango — R$ 40,00` + `150 un - Churros doce de leite — R$ 120,00` · Subtotal **R$ 160,00** · Total **R$ 174,00** |
+| 🚩 Alerta | "não existe meio cento para churros" · "é vendido como sabor incluso no pacote" · pedir para ajustar · **Subtotal R$ 280,00 / Total R$ 294,00** |
+
+**Confira o subtotal com a calculadora.** No teste do senhor saiu R$ 280,00 num
+pedido de R$ 160,00 — R$ 120 a mais — e passou despercebido. A soma das linhas
+tem que dar o subtotal, sempre.
+
 ---
 
 ## Parte 2 — as regras que o dono pediu

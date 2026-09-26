@@ -1266,6 +1266,37 @@ def _numeros_do_pedido(memoria: dict) -> dict:
     return resultado if resultado.get("success") else {}
 
 
+def _unidades(itens) -> int:
+    total = 0
+    for i in itens or []:
+        try:
+            total += int(float(i.get('quantity') or 0))
+        except (TypeError, ValueError):
+            pass
+    return total
+
+
+def _calculo_confere_com_a_ficha(calculo: dict | None, memoria: dict) -> bool:
+    '''O calculo do turno foi feito sobre o pedido que esta na ficha?
+
+    calculate_order e confiavel; o que o modelo passa para ela nao. Com 50
+    coxinhas e 150 churros na ficha ele chamou a tool com 350 unidades, a
+    tool devolveu R$ 294,00 corretamente para 350, e _conferir_dinheiro
+    apresentou isso como valor oficial - trocando o total CERTO que o modelo
+    tinha escrito (R$ 174,00) por um errado (teste do dono, 25/09 20h05).
+
+    A tool agrupa sabores numa linha só ('Cento de salgadinhos fritos', 200
+    un), entao comparar item por item nao serve. O que tem de bater e o
+    total de unidades.
+    '''
+    if not calculo:
+        return False
+    na_ficha = _unidades(memoria.get('items'))
+    no_calculo = _unidades(calculo.get('items'))
+    if na_ficha <= 0 or no_calculo <= 0:
+        return False
+    return na_ficha == no_calculo
+
 def _conferir_dinheiro(user: str, reply: str, memoria: dict,
                        calculo: dict | None = None, pular: bool = False) -> str:
     """Troca o dinheiro inventado pelo resumo que o codigo calculou.
@@ -1313,6 +1344,12 @@ def _conferir_dinheiro(user: str, reply: str, memoria: dict,
                   f"nunca foi calculada; nao da para conferir sem arriscar piorar")
             return reply
 
+    # So confia no calculo do turno se ele foi feito sobre a ficha. Senao a
+    # conta sai da ficha, que e o pedido que o cliente realmente fez.
+    if calculo and not _calculo_confere_com_a_ficha(calculo, memoria):
+        print(f'[dinheiro] user={user} calculate_order rodou sobre {_unidades(calculo.get("items"))} un, '
+              f'mas a ficha tem {_unidades(memoria.get("items"))} un; usando a ficha')
+        calculo = None
     numeros = calculo or _numeros_do_pedido(memoria)
     if not numeros:
         if negou_retorno:
@@ -1533,6 +1570,25 @@ def _repete_pergunta_respondida(reply: str, memoria: dict) -> list:
 
 
 # Frases com que o modelo pede LICENCA para fazer o que ja devia ter feito.
+def _sem_acento_com_pergunta(texto: str) -> str:
+    '''Como facts.normalize, mas preserva o "?".
+
+    facts.normalize troca toda pontuacao por espaco, entao as alternativas
+    'correto?', 'certo?' e 'confere?' de _RX_PEDE_LICENCA nunca casavam -
+    estavam mortas desde que foram escritas. Era o que deixava passar
+    'o seu pedido e meio cento de coxinha, certo? Os salgados sao fritos,
+    correto?' com a ficha completa, em vez de mostrar o espelho.
+
+    O "?" e o que distingue a pergunta da afirmacao ('esta correto' num
+    resumo nao pode ser cortado), por isso ele tem de sobreviver.
+    '''
+    import unicodedata
+    t = (texto or '').strip().lower()
+    t = unicodedata.normalize('NFKD', t)
+    t = ''.join(c for c in t if not unicodedata.combining(c))
+    t = _re_mod.sub(r'[^a-z0-9?\s]', ' ', t)
+    return _re_mod.sub(r'\s+', ' ', t).strip()
+
 _RX_PEDE_LICENCA = _re_mod.compile(
     r"(posso (seguir|passar|apresentar|montar|continuar|fechar|calcular|"
     r"mandar|enviar|gerar)|quer que eu (passe|mostre|monte|calcule)|"
@@ -1606,6 +1662,70 @@ def _conferir_sem_numero(user: str, reply: str) -> str:
     print(f"[endereco] user={user} cortada a oferta de casa sem numero")
     return limpo.strip()
 
+# Como ela nega um formato que o catalogo aceita. Formas colhidas do teste do
+# dono de 25/09 20h05, em 4 de 5 rodadas: 'nao existe meio cento ou cento e
+# meio para churros', 'o formato correto e por porcao de 25', 'e vendido como
+# sabor incluso no pacote de fritos, nao em porcoes separadas'.
+# Como ela anuncia que vai calcular e para: com a ficha completa, o proximo
+# passo e o espelho, nao um aviso de espera.
+_RX_ENROLA = _re_mod.compile(
+    r'vou calcular|vou considerar|vou montar|vou verificar|vou somar'
+    r'|um instante|so um momento|um momento por favor|aguarde'
+    r'|deixa eu calcular|ja calculo|calculando',
+    _re_mod.IGNORECASE)
+
+_RX_NEGA_FORMATO = _re_mod.compile(
+    r'nao existe (meio cento|cento|porcao|porcoes)|sabor incluso no pacote|inclus[oa] no pacote de|nao ha (meio cento|cento)|nao (e|sao) vendid[oa]s? (em|por|como)|nao trabalhamos com (meio cento|cento|porcao)|o formato correto (e|seria)|o nome correto|vendido no formato|vendido apenas|nao em (cento|meio cento|porcoes|porcao)|nao em porcoes separadas|nao esta no (nosso )?cardapio|nao consta no (nosso )?cardapio',
+    _re_mod.IGNORECASE)
+
+
+def _conferir_nega_formato(user: str, reply: str, memoria: dict) -> str:
+    '''Troca pelo espelho a recusa de um pedido que o catalogo aceita.
+
+    'Quero meio cento de coxinha e cento e meio de churros' e um pedido
+    valido - os termos de volume sao a regra que o proprio dono escreveu, e
+    150 fecha em multiplos de 25. Ela respondia que churros nao tem meio
+    cento, ou que so existe como sabor dentro do pacote, e pedia ajuste: 4
+    de 5 rodadas no teste dele. Isso nao atrasa o pedido, mata a venda.
+
+    So age quando o codigo JA garantiu que nao ha nada a resolver - ficha
+    completa, sem quebra de lote e sem duvida de item - e quando a recusa
+    fala de um item que esta na ficha. Produto que nao existe de verdade
+    ('tem panqueca?') nao entra na ficha, e a recusa daquele segue de pe.
+    '''
+    if not reply or _RX_LINHA_DE_RESUMO.search(reply):
+        return reply
+    _norm_reply = facts.normalize(reply)
+    _enrolou = bool(_RX_ENROLA.search(_norm_reply))
+    if not (_enrolou or _RX_NEGA_FORMATO.search(_norm_reply)):
+        return reply
+    if conversation_memory.faltando(memoria):
+        return reply
+    if (conversation_memory.pendencia_de_lote(memoria)
+            or conversation_memory.pendencia_de_item(memoria)
+            or conversation_memory.pendencia_de_detalhe(memoria)):
+        return reply
+
+    norm = facts.normalize(reply)
+    itens = memoria.get('items') or []
+    def _citado(item):
+        nome = facts.normalize(str(item.get('name')
+                                   or item.get('product_name') or ''))
+        primeira = nome.split()[0] if nome.split() else ''
+        return len(primeira) > 3 and primeira in norm
+    # Anunciar o calculo nao precisa citar item: nao ha outra leitura possivel.
+    if not _enrolou and not any(_citado(i) for i in itens):
+        return reply
+
+    numeros = _numeros_do_pedido(memoria)
+    resumo = (numeros or {}).get('resumo_formatado') or ''
+    if not resumo:
+        return reply
+
+    print(f'[formato] user={user} recusa de pedido valido trocada pelo espelho: '
+          f'{reply[:120]!r}')
+    return resumo
+
 def _conferir_permissao(user: str, reply: str, memoria: dict) -> str:
     """Troca o "posso seguir com o resumo?" pelo resumo.
 
@@ -1620,7 +1740,7 @@ def _conferir_permissao(user: str, reply: str, memoria: dict) -> str:
     """
     if not reply or _RX_LINHA_DE_RESUMO.search(reply):
         return reply                      # ja e o espelho: nada a fazer
-    if not _RX_PEDE_LICENCA.search(facts.normalize(reply)):
+    if not _RX_PEDE_LICENCA.search(_sem_acento_com_pergunta(reply)):
         return reply
     if conversation_memory.faltando(memoria):
         return reply                      # falta dado: a pergunta e legitima
@@ -1700,6 +1820,57 @@ def _mensagem_de_fechamento(pagamento: str, total: float = 0.0) -> str:
         f"Muito obrigado por escolher a BALBS!"
     )
 
+
+# Como ela ja recusa um troco insuficiente. Serve para nao reescrever a
+# propria recusa a cada volta.
+_RX_TROCO_INSUFICIENTE = _re_mod.compile(
+    r'maior que o total|precisa ser maior|dinheiro para quanto',
+    _re_mod.IGNORECASE)
+
+
+def _conferir_troco(user: str, reply: str, memoria: dict,
+                    calculo: dict | None = None) -> str:
+    '''Barra o pedido cujo troco nao cobre o total.
+
+    O cliente pediu troco para R$ 50,00 num pedido de R$ 94,00 e ela
+    apresentou o espelho pedindo a confirmacao de um pedido que o motoboy
+    nao consegue fechar (teste do dono, 25/09 20h45).
+
+    A regra existia em pendencia_de_detalhe, mas chegava um turno tarde: a
+    diretiva so entra na ficha depois que o total existe, e o total nasce no
+    MESMO turno em que o modelo ja escreveu o espelho. Aqui a conta esta em
+    maos antes de a resposta sair.
+
+    Limpa o troco invalido da ficha: sem isso capturar_troco ignora a
+    correcao do cliente, porque ela so age com o campo vazio.
+    '''
+    if not reply:
+        return reply
+    try:
+        troco = float(memoria.get('troco_para') or 0)
+    except (TypeError, ValueError):
+        return reply
+    if troco <= 0:
+        return reply                       # nao, nao_informado ou vazio
+    if conversation_memory.faltando(memoria):
+        return reply                       # ainda coletando: corrige no fim
+    # Ja esta barrando: nao reescrever a propria recusa e virar laco.
+    if _RX_TROCO_INSUFICIENTE.search(facts.normalize(reply)):
+        return reply
+
+    numeros = calculo or _numeros_do_pedido(memoria)
+    total = round(float((numeros or {}).get('total') or 0), 2)
+    if total <= 0 or troco > total:
+        return reply
+
+    print(f'[troco] user={user} troco R$ {troco:.2f} nao cobre o total '
+          f'R$ {total:.2f}; pedido barrado')
+    memoria['troco_para'] = ''
+    conversation_memory.save(user, memoria)
+    return (f'O total do seu pedido deu {conversation_memory._brl(total)}. O valor '
+            f'para troco '
+            f'precisa ser maior que o total da compra. Dinheiro para '
+            f'quanto? 💵')
 
 def _conferir_tamanho(user: str, reply: str, memoria: dict) -> str:
     """Tira a pergunta de tamanho quando a quantidade ja resolveu o tamanho.
@@ -2138,6 +2309,12 @@ def handle_flush(user: str, items: list[dict]) -> None:
         _extracted_fresh = _extract_data_from_message(text_only, ConversationState(phone=user))
 
         _memoria, _mudancas = conversation_memory.merge(_memoria, _extracted, _extracted_fresh)
+
+        # Bairro ou rua na ficha, com itens pedidos, e entrega: ninguem da o
+        # proprio endereco para buscar no balcao. Sem isto a conversa travava
+        # em "entrega ou retirada?" e o total nunca era calculado.
+        if conversation_memory.inferir_modalidade(_memoria):
+            print(f"[memoria] {user}: modalidade inferida pelo endereco -> entrega")
         conversation_memory.save(user, _memoria)
         if _mudancas:
             print(f"[memoria] {user}: {', '.join(_mudancas)}")
@@ -2646,8 +2823,13 @@ def handle_flush(user: str, items: list[dict]) -> None:
                     conversation_memory.registrar_frete(user, _memoria, float(dados["delivery_fee"]))
                 # O total fica na ficha porque a regra do troco ("maior que o
                 # total") so pode ser conferida contra ele.
-                if dados.get("total"):
+                if dados.get("total") and _calculo_confere_com_a_ficha(dados, _memoria):
                     _memoria["total"] = float(dados["total"])
+                elif dados.get("total"):
+                    # Calculo feito sobre quantidade que nao e a do pedido. Guardar
+                    # esse total envenenaria a trava do troco, que se mede contra ele.
+                    print(f"[dinheiro] {user}: total de calculate_order ignorado, "
+                          f"rodou sobre outra quantidade")
                     conversation_memory.save(user, _memoria)
             except Exception:
                 pass
@@ -2824,12 +3006,14 @@ def handle_flush(user: str, items: list[dict]) -> None:
             # Mesma ideia, para a pergunta de tamanho: com 21 unidades ou mais
             # nao ha duvida a resolver, e a frase nao pode chegar ao cliente
             # por mais que o modelo insista em escreve-la.
+            reply = _conferir_troco(user, reply, _memoria, _calculo_da_volta)
             reply = _conferir_tamanho(user, reply, _memoria)
             # E nao pede de novo o que o cliente ja respondeu.
             reply = _conferir_pedido_de_dados(user, reply, _memoria)
             reply = _conferir_sem_numero(user, reply)
             reply = _conferir_aula_de_lote(user, reply, _memoria)
             # E, com tudo coletado, nao pede licenca: mostra o resumo.
+            reply = _conferir_nega_formato(user, reply, _memoria)
             reply = _conferir_permissao(user, reply, _memoria)
             # E nao apresenta o cardapio a quem ja fez o pedido.
             reply = _conferir_cardapio_no_pedido(user, reply, _memoria)
@@ -2985,10 +3169,27 @@ def handle_flush(user: str, items: list[dict]) -> None:
                 pass
             return
 
+        # Modelo que responde so com tool call, ou cuja resposta some, deixava o
+        # cliente sem mensagem nenhuma: "if not reply: return" era silencio. Em
+        # medicao apareceu em 2 de 6 rodadas do pedido de meio cento + cento e
+        # meio - e silencio e pior do que resposta errada, porque ninguem sabe
+        # que houve falha. Quem escreve nesse caso e o codigo, que sabe
+        # exatamente em que ponto do funil a conversa esta.
+        if not reply and not _pedido_saiu:
+            if conversation_memory.faltando(_memoria):
+                reply = _proxima_pergunta_do_funil(_memoria)
+            else:
+                reply = ((_numeros_do_pedido(_memoria) or {})
+                         .get("resumo_formatado") or "")
+            if reply:
+                print(f"[flush] user={user} resposta vazia do modelo; "
+                      f"escrita pelo codigo")
+
         memory.append(user, "assistant", reply)
         print(f"[flush] user={user} reply_len={len(reply)}")
 
         if not reply:
+            print(f"[flush] user={user} WARN nada a enviar")
             return
 
         enviar_em_blocos(user, reply, _chegada)

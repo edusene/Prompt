@@ -377,6 +377,159 @@ for _frase in ("Qual e o numero da casa? 🛵", "Quero 50 coxinhas no ponto",
     checa(f"frase legitima intacta: {_frase[:26]!r}",
           app._conferir_sem_numero("55", _frase) == _frase)
 
+# ── Modalidade inferida pelo endereco ─────────────────────────────
+secao("--- modalidade ---")
+# "1 cento de coxinha ... aqui no Agenor de Carvalho" e ela perguntou "entrega
+# ou retirada?" duas vezes (25/09 20h45). E travava ali: sem modalidade nao ha
+# total, e sem total a trava do troco nunca dispara.
+
+
+def _modalidade(**ficha) -> str:
+    m = {"items": [], "bairro": "", "endereco": "", "modality": ""}
+    m.update(ficha)
+    memoria_mod.inferir_modalidade(m)
+    return m.get("modality", "")
+
+
+_UM_ITEM = [{"name": "Coxinha", "quantity": 100}]
+checa("bairro no pedido = entrega",
+      _modalidade(items=_UM_ITEM, bairro="Agenor de Carvalho") == "entrega")
+checa("rua no pedido = entrega",
+      _modalidade(items=_UM_ITEM, endereco="RUA X 45") == "entrega")
+checa("retirada dita vence a inferencia",
+      _modalidade(items=_UM_ITEM, bairro="Olaria", modality="retirada") == "retirada")
+checa("pergunta de frete sem pedido nao vira entrega",
+      _modalidade(bairro="Pedrinhas") == "")
+checa("pedido sem endereco nenhum fica sem modalidade",
+      _modalidade(items=_UM_ITEM) == "")
+checa("volume pendente com bairro = entrega",
+      _modalidade(volume_pendente=100, bairro="Olaria") == "entrega")
+
+# ── Trava de troco ─────────────────────────────────────────
+secao("--- troco ---")
+# Troco para R$ 50,00 num pedido de R$ 94,00, e ela pediu a confirmacao. A
+# regra existia, mas chegava um turno depois do espelho.
+
+_FICHA_TROCO = {
+    "name": "Balbino", "modality": "entrega", "bairro": "Agenor de Carvalho",
+    "endereco": "RUA DOS PIONEIROS 450", "payment_method": "dinheiro",
+    "data_agendada": "amanha (26/09)", "data_iso": "2026-09-26", "horario": "9h",
+    "items": [{"name": "Coxinha", "quantity": 100}], "total": 94.0,
+}
+# Montado com chr(10) de proposito: escape em payload de patch ja virou
+# newline de verdade uma vez, e o arquivo parou de compilar.
+_ESPELHO_TROCO = chr(10).join([
+    'Cliente: Balbino',
+    'Total: R$ 94,00',
+    'Pagamento: Dinheiro na entrega (troco para R$ 50,00)',
+    'Posso confirmar?',
+])
+
+
+def _troco(**extra) -> str:
+    ficha = dict(_FICHA_TROCO)
+    ficha.update(extra)
+    return app._conferir_troco("55", _ESPELHO_TROCO, ficha)
+
+
+checa("troco de 50 num total de 94 e barrado",
+      "maior que o total" in _troco(troco_para="50.00"))
+# Sem limpar, capturar_troco ignora a correcao do cliente: ela so age com o
+# campo vazio, e o cliente ficaria preso repetindo um valor que nunca entra.
+_ficha_barrada = dict(_FICHA_TROCO, troco_para="50.00")
+app._conferir_troco("55", _ESPELHO_TROCO, _ficha_barrada)
+checa("a barra limpa o troco da ficha, para aceitar a correcao",
+      _ficha_barrada["troco_para"] == "")
+checa("depois de limpo, o novo troco entra",
+      memoria_mod.capturar_troco(_ficha_barrada, "", "troco para 100") == "100.00")
+checa("troco que cobre o total passa",
+      _troco(troco_para="100.00") == _ESPELHO_TROCO)
+checa("cliente com valor trocado passa", _troco(troco_para="nao") == _ESPELHO_TROCO)
+checa("ficha incompleta nao barra ainda",
+      _troco(troco_para="50.00", horario="") == _ESPELHO_TROCO)
+checa("sem dinheiro nao ha troco a conferir",
+      _troco(payment_method="cartao", troco_para="") == _ESPELHO_TROCO)
+
+# ── Tool chamada com quantidade errada ──────────────────────────
+secao("--- calculo vs ficha ---")
+# calculate_order e confiavel; o que o modelo passa para ela, nao. Com 200 un na
+# ficha ele chamou com 350, a tool devolveu R$ 294,00 certo para 350, e o filtro
+# apresentou isso como oficial - trocando o total CERTO do modelo por um errado.
+_FICHA_200 = {"items": [{"name": "Coxinha", "quantity": 50},
+                        {"name": "Churros", "quantity": 150}]}
+checa("calculo sobre a mesma quantidade vale",
+      app._calculo_confere_com_a_ficha({"items": [{"quantity": 200}]}, _FICHA_200))
+checa("calculo sobre outra quantidade e descartado",
+      not app._calculo_confere_com_a_ficha({"items": [{"quantity": 350}]}, _FICHA_200))
+checa("sabores agrupados pela tool continuam batendo",
+      app._calculo_confere_com_a_ficha(
+          {"items": [{"quantity": 50}, {"quantity": 150}]}, _FICHA_200))
+checa("sem calculo, nada a confiar",
+      not app._calculo_confere_com_a_ficha(None, _FICHA_200))
+
+# ── Recusa de pedido valido ───────────────────────────────
+secao("--- recusa indevida ---")
+# "nao existe meio cento ou cento e meio para churros" - existe, e a regra e do
+# proprio dono. Em 4 de 5 rodadas ela matava a venda assim.
+_FICHA_VALIDA = {
+    "name": "Balbino", "modality": "entrega", "bairro": "Olaria",
+    "endereco": "RUA SALGADO 2325", "payment_method": "cartao",
+    "data_agendada": "amanha (26/09)", "data_iso": "2026-09-26", "horario": "8h",
+    "items": [{"name": "Coxinha", "quantity": 50}, {"name": "Churros", "quantity": 150}],
+}
+for _recusa in (
+    "para o churros, o formato correto e por porcao de 25 unidades, nao existe "
+    "meio cento ou cento e meio para churros",
+    "o nome correto no cardapio e Churros doce de leite e ele e vendido como "
+    "sabor incluso no pacote de fritos, nao em porcoes separadas",
+    "o nome correto do item e Churros doce de leite e ele e vendido no formato "
+    "porcao de 25 unidades, nao em cento e meio",
+):
+    _saida = app._conferir_nega_formato("55", _recusa, dict(_FICHA_VALIDA))
+    checa(f"recusa trocada pelo espelho: {_recusa[:30]!r}",
+          "Total" in _saida or "Subtotal" in _saida)
+
+# Anunciar o calculo e parar deixa o cliente esperando pelo que nunca vem.
+for _enrola in ("Agora vou calcular o valor total com a taxa de entrega. Um "
+                "instante, por favor.",
+                "Vou considerar 50 un de Coxinha e 150 de Churros. Ja calculo!"):
+    checa(f"enrolacao trocada pelo espelho: {_enrola[:26]!r}",
+          "Total" in app._conferir_nega_formato("55", _enrola, dict(_FICHA_VALIDA)))
+
+# "nao esta no nosso cardapio" dito de um item que ESTA na ficha e recusa
+# indevida; dito de um produto que nao existe, e resposta correta.
+checa("item da ficha dito fora do cardapio vira espelho",
+      "Total" in app._conferir_nega_formato(
+          "55", 'o item "cento e meio de churros" nao esta no nosso cardapio oficial',
+          dict(_FICHA_VALIDA)))
+
+# facts.normalize apaga a pontuacao, e as alternativas com "?" do regex de
+# licenca nunca casavam - estavam mortas desde que foram escritas.
+_COM_CERTO = ("o seu pedido e meio cento de Coxinha (50 un), certo? "
+              "So para confirmar, os salgados sao fritos, correto?")
+checa("normalizacao preserva o ?", "?" in app._sem_acento_com_pergunta(_COM_CERTO))
+checa("pergunta de licenca com 'certo?' casa",
+      bool(app._RX_PEDE_LICENCA.search(app._sem_acento_com_pergunta(_COM_CERTO))))
+checa("afirmacao sem ? nao e pedido de licenca",
+      not app._RX_PEDE_LICENCA.search(
+          app._sem_acento_com_pergunta("O total esta correto e o pedido segue")))
+checa("ficha completa + 'certo?' vira espelho",
+      "Total" in app._conferir_permissao("55", _COM_CERTO, dict(_FICHA_VALIDA)))
+
+checa("produto que nao existe segue recusado",
+      app._conferir_nega_formato(
+          "55", "Nao temos panqueca de carne no momento.", dict(_FICHA_VALIDA))
+      == "Nao temos panqueca de carne no momento.")
+checa("resposta comum fica intacta",
+      app._conferir_nega_formato("55", "Sera para entrega ou retirada?",
+                                 dict(_FICHA_VALIDA))
+      == "Sera para entrega ou retirada?")
+_FICHA_INCOMPLETA = dict(_FICHA_VALIDA, horario="")
+checa("ficha incompleta nao troca pelo espelho",
+      app._conferir_nega_formato("55", "nao existe meio cento para churros",
+                                 _FICHA_INCOMPLETA)
+      == "nao existe meio cento para churros")
+
 # ── Higiene do proprio codigo ──────────────────────────────────────────────
 secao("--- higiene ---")
 # Escrever "\\b" por engano num arquivo grava um byte de backspace, e o regex

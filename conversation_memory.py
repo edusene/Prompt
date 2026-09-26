@@ -572,6 +572,33 @@ def _normalizar_sem_acento(texto: str) -> str:
         return (texto or "").lower()
 
 
+def inferir_modalidade(memoria: dict) -> str:
+    """Bairro ou rua na ficha, com itens pedidos, significa ENTREGA.
+
+    Ninguem informa o proprio bairro para buscar no balcao. O cliente disse
+    "1 cento de coxinha ... aqui no Agenor de Carvalho", e ela perguntou
+    "entrega ou retirada?" - duas vezes, mesmo depois de ele dar a rua (teste
+    do dono, 25/09 20h45). E a conversa travava ali: sem modalidade nao ha
+    total, e sem total a trava do troco nunca dispara. As duas queixas dele
+    eram este mesmo defeito.
+
+    So preenche quando esta VAZIO: quem disse "retirada" tem a palavra, mesmo
+    tendo dado o bairro. E so com itens no pedido, para uma pergunta de frete
+    solta ("quanto e a entrega no Pedrinhas?") nao virar pedido de entrega.
+
+    Devolve "entrega" quando inferiu, ou "" quando nao havia o que inferir.
+    """
+    if memoria.get("modality"):
+        return ""
+    if not (memoria.get("items") or memoria.get("volume_pendente")):
+        return ""
+    if not (str(memoria.get("bairro") or "").strip()
+            or str(memoria.get("endereco") or "").strip()):
+        return ""
+    memoria["modality"] = "entrega"
+    return "entrega"
+
+
 def faltando(memoria: dict) -> list[str]:
     """Campos obrigatorios ainda nao coletados, na ordem do funil."""
     obrigatorios = list(_OBRIGATORIOS_COMUNS)
