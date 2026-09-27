@@ -483,6 +483,10 @@ _FICHA_VALIDA = {
     "name": "Balbino", "modality": "entrega", "bairro": "Olaria",
     "endereco": "RUA SALGADO 2325", "payment_method": "cartao",
     "data_agendada": "amanha (26/09)", "data_iso": "2026-09-26", "horario": "8h",
+    # A oferta adicional entrou no funil em 26/09 e agora tambem e pendencia:
+    # com ela em aberto, a resposta certa nao e o espelho, e a oferta. Esta
+    # ficha testa o espelho, entao o upsell ja saiu.
+    "upsell_feito": True,
     "items": [{"name": "Coxinha", "quantity": 50}, {"name": "Churros", "quantity": 150}],
 }
 for _recusa in (
@@ -952,6 +956,231 @@ _frase_dois = memoria_mod.pergunta_bloqueante(_FICHA_DOIS_TAMANHOS)
 checa("a pergunta cita os dois itens de uma vez",
       "Coxinha" in _frase_dois and "Rissole" in _frase_dois, _frase_dois)
 checa("e continua sendo uma pergunta so", _frase_dois.count("?") == 1)
+
+
+secao("--- 27/09: a unica oscilacao que sobrou ---")
+# 50 testes x 3 rodadas: um ponto so variou. Em 1 de 3 rodadas o teste 2.2 saiu
+# "Como sera a retirada, Eduardo? Por favor, confirme o nome, a data 29/09/2026
+# e o horario 15h" - com os tres dados na ficha. Escapou de tudo porque o mapa
+# de frases tem "confirmar" e ela escreveu "confirme". O gatilho agora e
+# estrutural: ficha completa + nada travado + cliente sem pergunta = espelho.
+_FICHA_PRONTA = dict(memoria_mod._empty(), **{
+    "name": "Eduardo", "modality": "retirada",
+    "data_agendada": "amanhã, terça-feira (29/09)", "data_iso": "2026-09-29",
+    "horario": "15h", "upsell_feito": True,
+    "items": [{"name": "Coxinha", "quantity": 25}],
+})
+checa("a ficha de controle esta completa mesmo",
+      not memoria_mod.faltando(_FICHA_PRONTA)
+      and not memoria_mod.pergunta_bloqueante(_FICHA_PRONTA))
+
+
+def _espelho_obrig(reply: str, msg: str = "Não, obrigado",
+                   aceitou: bool = False, ficha=None) -> str:
+    return app._conferir_espelho_obrigatorio(
+        "55", reply, dict(ficha or _FICHA_PRONTA), msg, aceitou)
+
+
+_A_FRASE_QUE_OSCILOU = ("Como será a retirada, Eduardo? Por favor, confirme o "
+                        "nome, a data 29/09/2026 e o horário 15h para a "
+                        "retirada no balcão da fábrica.")
+_saida_osc = _espelho_obrig(_A_FRASE_QUE_OSCILOU)
+checa("a frase que oscilou vira espelho",
+      app._RX_LINHA_DE_RESUMO.search(_saida_osc) is not None,
+      _saida_osc[:50].replace(chr(10), " | "))
+checa("e o espelho traz o total do codigo", "20,00" in _saida_osc)
+# Qualquer outra redacao do mesmo erro cai junto - e o que "estrutural" quer
+# dizer. Sao formas que nenhum mapa de frases pegaria.
+for _redacao in ("Perfeito! Vou seguir com o seu pedido então. 😊",
+                 "Me confirme por favor os dados para eu prosseguir.",
+                 "Anotado, Eduardo! Aguarde um instante.",
+                 "Certo! Vamos lá então."):
+    checa(f"tambem vira espelho: {_redacao[:32]!r}",
+          app._RX_LINHA_DE_RESUMO.search(_espelho_obrig(_redacao)) is not None)
+
+# O que a trava NAO pode atropelar.
+checa("espelho que ja saiu nao e refeito",
+      _espelho_obrig(_espelho) == _espelho)
+checa("mensagem de fechamento passa",
+      "Pedido" in _espelho_obrig(
+          "Pedido finalizado com sucesso! Já está sendo preparado com carinho."))
+checa("recusa de troco passa",
+      "maior que o total" in _espelho_obrig(
+          "O valor para troco precisa ser maior que o total da compra. "
+          "Dinheiro para quanto?"))
+checa("aceite do espelho passa (e caminho do fechamento)",
+      _espelho_obrig("Tudo certo!", msg="sim", aceitou=True) == "Tudo certo!")
+# Regra 10: a pergunta do cliente vem antes do funil.
+for _pergunta in ("Vocês abrem domingo?", "me diz se voces abrem domingo",
+                  "quanto fica o frete", "voces tem panqueca",
+                  "qual o horario de fechamento", "da pra entregar mais cedo"):
+    _resp = "Fechamos às 20h, de segunda a sábado! 😊"
+    checa(f"pergunta do cliente nao e atropelada: {_pergunta[:30]!r}",
+          _espelho_obrig(_resp, msg=_pergunta) == _resp)
+# Ficha aberta ou etapa travada continuam mandando.
+checa("ficha incompleta nao forca espelho",
+      _espelho_obrig("Certo!", ficha=dict(_FICHA_PRONTA, horario="")) == "Certo!")
+checa("upsell pendente nao e pulado pelo espelho",
+      _espelho_obrig("Certo!",
+                     ficha=dict(_FICHA_PRONTA, upsell_feito=False)) == "Certo!")
+checa("lote quebrado nao e pulado pelo espelho",
+      _espelho_obrig("Certo!", ficha=dict(
+          _FICHA_PRONTA, items=[{"name": "Coxinha", "quantity": 30}])) == "Certo!")
+
+# E _conferir_nega_formato passou a ler as MESMAS pendencias, para nao forcar o
+# espelho por cima de uma etapa travada.
+checa("nega_formato respeita o upsell pendente",
+      app._conferir_nega_formato(
+          "55", "Nao existe meio cento de coxinha.",
+          dict(_FICHA_PRONTA, upsell_feito=False))
+      == "Nao existe meio cento de coxinha.")
+
+
+secao("--- 27/09: fiado ia para a fila do humano ---")
+# Medido em 4 de 4 rodadas do "amigo do Balbino": ela dava a negativa certa do
+# fiado e chamava transfer_to_human em seguida, motivo "Pedido com solicitacao
+# de fiado, que nao e permitido pela politica da empresa". A HIERARQUIA do dono
+# diz o contrario - "BLOCO 6 (Defesa de Preco): pedido de desconto NUNCA
+# transborda para atendente humano" - e a transferencia pula toda a cadeia de
+# conferencia, que e onde as negativas sao garantidas.
+for _motivo in ("Pedido com solicitação de fiado, que não é permitido pela "
+                "política da empresa.",
+                "Pedido de fiado e liberação de produção sem pagamento antecipado",
+                "cliente insiste em desconto no frete",
+                "cliente pede abatimento no valor",
+                "cliente diz ser amigo do dono e quer condição especial",
+                "negociação de preço fora da tabela"):
+    checa(f"BLOCO 6 nao transborda: {_motivo[:38]!r}",
+          app.transbordo_proibido(_motivo))
+# O que TEM de continuar transbordando. Risco e pos-venda nao sao BLOCO 6.
+for _motivo in ("cliente mencionou 'procon'",
+                "cliente mencionou 'falar com atendente'",
+                "cliente mencionou 'reclamacao'",
+                "cliente mencionou 'cancelar'",
+                "cliente passando mal apos comer o salgado",
+                "encontrou inseto no pedido",
+                "pedido acima de 1000 unidades, equipe comercial",
+                "pedido nao entrou no cardapio: 401 Unauthorized"):
+    checa(f"risco/pos-venda continua transbordando: {_motivo[:38]!r}",
+          not app.transbordo_proibido(_motivo))
+checa("motivo vazio nao e transbordo proibido",
+      not app.transbordo_proibido("") and not app.transbordo_proibido(None))
+# A trava vale na porta de fora tambem: perform_transfer recusa sozinha.
+checa("perform_transfer recusa o motivo do BLOCO 6",
+      app.perform_transfer("55", reason="cliente pediu fiado",
+                           send_message=False) is False)
+
+
+secao("--- 27/09: modelo fora do ar nao apaga o BLOCO 6 ---")
+# O 429 da OpenAI derruba a chamada e a resposta passa a ser escrita pelo
+# codigo - por um caminho que dava return antes da cadeia de conferencia. O
+# cliente propunha fiado e recebia so a proxima pergunta do funil. Nao era
+# oscilacao do modelo: era o limite de taxa.
+_FICHA_VOLUME = dict(memoria_mod._empty(), name="Balbino", volume_pendente=100)
+_SAIDA_DE_CODIGO = "Para seguir, me confirma:\n• Itens do pedido"
+checa("fallback de falha recebe a negativa de fiado",
+      "não libera fiado" in app._conferir_fiado(
+          "55", "deixa anotado que acerto no fim do mês", _SAIDA_DE_CODIGO,
+          _FICHA_VOLUME))
+checa("fallback de falha recebe a defesa de preco",
+      "direto de fábrica" in app._conferir_desconto(
+          "55", "me dá um desconto no frete", _SAIDA_DE_CODIGO))
+checa("mensagem de instabilidade tambem recebe a negativa",
+      "não libera fiado" in app._conferir_fiado(
+          "55", "pode ser fiado?",
+          "Tive uma instabilidade aqui agora 💛 Pode repetir, por favor?",
+          _FICHA_VOLUME))
+
+
+secao("--- 27/09: a coleta de entrega pode ter duas perguntas ---")
+# A excecao e do proprio prompt: definida a modalidade, bairro/rua/dia/horario/
+# pagamento vao numa mensagem so, em lista vertical. Se o modelo escrever essa
+# lista com "?" em duas linhas, cortar uma perderia um dado - o oposto do que a
+# regra de "uma pergunta" existe para evitar.
+_FICHA_COLETA = dict(memoria_mod._empty(), **{
+    "name": "Balbino", "modality": "entrega", "upsell_feito": True,
+    "items": [{"name": "Coxinha", "quantity": 50}],
+})
+# chr(10) pelo mesmo motivo do _ESPELHO_TROCO acima: escape em payload de patch
+# vira newline de verdade e o arquivo para de compilar. Aconteceu de novo aqui.
+_LISTA_COM_DOIS = chr(10).join([
+    "Para seguir, me confirma:",
+    "Qual é o bairro?",
+    "Qual a forma de pagamento?",
+])
+checa("lista de coleta com dois '?' nao e cortada",
+      app._conferir_uma_pergunta("55", _LISTA_COM_DOIS, _FICHA_COLETA)
+      == _LISTA_COM_DOIS)
+# Mas duas perguntas que NAO sao coleta continuam virando uma.
+checa("duas perguntas fora da coleta continuam virando uma",
+      app._conferir_uma_pergunta(
+          "55", "Bora montar o pedido? Quais sabores prefere?",
+          _FICHA_COLETA).count("?") == 1)
+# E sem ficha o comportamento antigo vale (a funcao e usada em teste solto).
+checa("sem ficha, duas perguntas viram uma",
+      app._conferir_uma_pergunta(
+          "55", "Tudo bem? Qual é o bairro?").count("?") == 1)
+
+
+secao("--- 27/09: esfirra cotada como frito (R$ 20,00 em vez de R$ 30,00) ---")
+# "Qual o valor da porcao de esfirra?" recebeu "a porcao de 25 unidades de
+# salgados FRITOS, que inclui sabores como a Esfirra... R$ 20,00" em 2 de 3
+# rodadas. Esfirra e ASSADO: a porcao e R$ 30,00. O roteiro do dono marca esse
+# caso por escrito - "R$ 30,00 (assado - NAO R$ 20,00)".
+checa("esfirra e da linha de assados",
+      app._familia_do_sabor("Esfirra de Carne") == "Assados")
+checa("coxinha e da linha de fritos",
+      app._familia_do_sabor("Coxinha frango") == "Fritos")
+checa("salgado grande nao e sabor de lote",
+      app._familia_do_sabor("Quiche de Frango") == "")
+
+_ERRO_DA_ESFIRRA = ("Bom dia! A porção de 25 unidades de salgados fritos, que "
+                    "inclui sabores como a Esfirra de Carne, custa R$ 20,00.")
+_corrigido = app._conferir_familia_do_sabor("55", _ERRO_DA_ESFIRRA)
+checa("a linha errada e corrigida", _corrigido != _ERRO_DA_ESFIRRA)
+checa("e o preco passa a ser o de assados", "30,00" in _corrigido, _corrigido[:60])
+checa("o valor errado sai da mensagem", "20,00" not in _corrigido)
+checa("e a correcao diz a linha certa", "assados" in _corrigido)
+# O contrario tambem: frito descrito como assado cobraria R$ 10,00 a mais.
+_corrigido2 = app._conferir_familia_do_sabor(
+    "55", "A porção de 25 coxinhas assadas sai R$ 30,00.")
+checa("frito dito assado tambem e corrigido", "20,00" in _corrigido2, _corrigido2[:60])
+
+# O que NAO pode ser tocado.
+for _certo in ("A esfirra é vendida na linha de salgados assados, e a porção "
+               "de 25 sai R$ 30,00.",
+               "A porção de 25 coxinhas fritas sai R$ 20,00.",
+               "Para 50 salgados fritos com coxinha e 50 assados com esfirra, "
+               "o total é R$ 100,00.",
+               "Qual é o número da casa? 🛵"):
+    checa(f"resposta certa fica intacta: {_certo[:34]!r}",
+          app._conferir_familia_do_sabor("55", _certo) == _certo)
+checa("espelho do pedido nunca e reescrito aqui",
+      app._conferir_familia_do_sabor("55", _espelho) == _espelho)
+
+
+secao("--- 27/09: fallback do codigo respeita a ordem do funil ---")
+# Com o pedido inteiro numa mensagem nada falta na ficha, e os dois caminhos de
+# fallback (modelo fora do ar, resposta vazia) iam direto ao espelho - pulando
+# a oferta adicional. So aparecia quando um 429 desviava para esse caminho: 1 de
+# 6 rodadas, com o upsell chegando DEPOIS do espelho.
+_FICHA_SEM_UPSELL = dict(memoria_mod._empty(), **{
+    "name": "Eduardo", "modality": "entrega", "bairro": "Olaria",
+    "endereco": "Rua Jamari 2125", "payment_method": "cartao",
+    "data_agendada": "segunda-feira (28/09)", "data_iso": "2026-09-28",
+    "horario": "16h", "items": [{"name": "Coxinha", "quantity": 50}],
+})
+checa("a ficha nao tem pendencia de campo",
+      not memoria_mod.faltando(_FICHA_SEM_UPSELL))
+checa("mas a oferta adicional esta pendente",
+      bool(memoria_mod.upsell_pendente(_FICHA_SEM_UPSELL)))
+_pergunta = app._proxima_pergunta_do_funil(_FICHA_SEM_UPSELL)
+checa("o texto do codigo e a OFERTA, nao o espelho",
+      app._ofereceu_acompanhamento(_pergunta)
+      and not app._RX_LINHA_DE_RESUMO.search(_pergunta), _pergunta[:60])
+checa("com o upsell feito, ai sim vem o espelho",
+      app._RX_LINHA_DE_RESUMO.search(app._proxima_pergunta_do_funil(
+          dict(_FICHA_SEM_UPSELL, upsell_feito=True))) is not None)
 
 
 secao("--- higiene ---")

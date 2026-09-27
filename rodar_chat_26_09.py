@@ -14,6 +14,7 @@ import contextlib
 import io
 import re
 import sys
+import time
 from datetime import datetime
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
@@ -42,16 +43,39 @@ USD_BRL = 5.184277
 RODADAS = int(next((a for a in sys.argv[1:] if a.isdigit()), 1))
 
 
+_AGORA = [AGORA]
+
+
 def conversa(msgs: list) -> list:
-    horario.agora = lambda: AGORA
-    t_ag._ficha.clear()
-    t_ag._enviadas.clear()
-    app._orders_sent.clear()
-    memory._store.pop(t_ag.TELEFONE, None)
-    out = []
-    for m in msgs:
-        with contextlib.redirect_stdout(io.StringIO()):
-            out.append(t_ag.enviar(m) or "")
+    """A conversa inteira. Refaz quando a OpenAI devolve 429.
+
+    Sem isto o limite de taxa vira diagnostico errado: na varredura de 27/09 uma
+    rodada caiu em 429, o codigo respondeu pelo fallback de falha (que nao passa
+    pela cadeia de conferencia) e o relatorio acusou "a negativa de fiado sumiu"
+    - defeito que nao existia. Ruido de rede tem de ser refeito, nao medido.
+    """
+    horario.agora = lambda a=_AGORA[0]: a
+    for tentativa in (1, 2, 3):
+        t_ag._ficha.clear()
+        t_ag._enviadas.clear()
+        app._orders_sent.clear()
+        memory._store.pop(t_ag.TELEFONE, None)
+        out, limitou = [], False
+        for m in msgs:
+            with contextlib.redirect_stdout(io.StringIO()) as buf:
+                out.append(t_ag.enviar(m) or "")
+            log = buf.getvalue()
+            if "no credits" in log or "insufficient_quota" in log:
+                raise SystemExit(
+                    "\nABORTADO: a OpenAI respondeu 'no credits remaining'. "
+                    "Nada foi medido."
+                )
+            if "429" in log or "Rate limit" in log:
+                limitou = True
+        if not limitou:
+            return out
+        print(f"    (429 na rodada; refazendo em {20 * tentativa}s)")
+        time.sleep(20 * tentativa)
     return out
 
 

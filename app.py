@@ -1009,6 +1009,14 @@ def _build_user_parts(items: list[dict]) -> list[dict]:
 # ── Transfer ──────────────────────────────────────────────────────────────────
 
 def perform_transfer(phone: str, reason: str = "", send_message: bool = True) -> bool:
+    # Porta de fora da trava do BLOCO 6. O handler da tool ja recusa, mas
+    # perform_transfer e chamada de outros pontos (keywords, falha de envio) e
+    # uma delas pode receber o motivo de fiado/desconto amanha. Duas linhas aqui
+    # valem mais do que confiar que nenhum caminho novo vai esquecer.
+    if transbordo_proibido(reason):
+        print(f"[transbordo] {phone} RECUSADO pelo BLOCO 6 em perform_transfer: "
+              f"{reason!r}")
+        return False
     """Transfere a conversa de um usuário para atendimento humano.
 
     - Muda auto_mode do contato para 0
@@ -1681,6 +1689,157 @@ _RX_CARDAPIO_DE_BOAS_VINDAS = _re_mod.compile(
 )
 
 
+# O cliente PERGUNTOU alguma coisa? A regra 10 manda responder a pergunta dele
+# antes de puxar o funil, e e por isso que o espelho obrigatorio abaixo tem de
+# saber distinguir "Nao, obrigado" de "voces abrem domingo?". Nao e preciso o
+# "?": muita gente escreve "me diz se voces abrem domingo".
+_RX_CLIENTE_PERGUNTOU = _re_mod.compile(
+    r"\?|\bquanto\b|\bquantos\b|\bqual\b|\bquais\b|\bcomo\b|\bquando\b"
+    r"|\bonde\b|\bpor que\b|\bporque\b|\bpor quê\b|\bque horas\b"
+    r"|\bvoc[êe]s\b|\bvcs\b|\btem\b|\bteria\b|\bteriam\b|\baceita\b"
+    r"|\baceitam\b|\bfunciona\b|\babre\b|\babrem\b|\bfecha\b|\bfecham\b"
+    r"|\bexiste\b|\bd[áa] pra\b|\bd[áa] para\b|\bpode me\b|\bpoderia\b"
+    r"|\bme diz\b|\bme fala\b|\bme informa\b|\bme explica\b",
+    _re_mod.IGNORECASE)
+
+
+# Como a resposta diz a que LINHA um sabor pertence. Fritos e Assados tem preco
+# diferente (R$ 20,00 e R$ 30,00 a porcao de 25), entao trocar a linha do sabor
+# e errar o preco.
+_RX_DIZ_FRITO = _re_mod.compile(r"\bfrit[oa]s?\b", _re_mod.IGNORECASE)
+_RX_DIZ_ASSADO = _re_mod.compile(r"\bassad[oa]s?\b", _re_mod.IGNORECASE)
+
+_FAMILIA_POR_SABOR: dict | None = None
+
+
+def _familia_do_sabor(nome: str) -> str:
+    """'Fritos' ou 'Assados' para um sabor de lote. '' quando nao e sabor."""
+    global _FAMILIA_POR_SABOR
+    if _FAMILIA_POR_SABOR is None:
+        _FAMILIA_POR_SABOR = {}
+        try:
+            import cardapio_catalogo
+            for familia, sabores in cardapio_catalogo.SABORES.items():
+                if familia == "Canudinhos":
+                    continue      # repete os canudinhos de Assados
+                for sabor in sabores:
+                    _FAMILIA_POR_SABOR[facts.normalize(sabor)] = familia
+        except Exception as e:
+            print(f"[familia] WARN nao montou o indice: {e}")
+    return _FAMILIA_POR_SABOR.get(facts.normalize(nome), "")
+
+
+def _sabores_citados(reply: str) -> list:
+    """[(sabor oficial, familia)] dos sabores de lote nomeados na resposta."""
+    norm = facts.normalize(reply or "")
+    _familia_do_sabor("")            # garante o indice montado
+    achados = []
+    for chave, familia in (_FAMILIA_POR_SABOR or {}).items():
+        # A primeira palavra e o que identifica: a resposta escreve "Esfirra",
+        # nao "Esfirra de Carne".
+        primeira = chave.split()[0] if chave.split() else ""
+        if len(primeira) > 4 and primeira in norm:
+            achados.append((chave, familia))
+    return achados
+
+
+def _conferir_familia_do_sabor(user: str, reply: str) -> str:
+    """Corrige a resposta que poe um sabor na linha errada do cardapio.
+
+    "Qual o valor da porcao de esfirra?" recebeu "A porcao de 25 unidades de
+    salgados FRITOS, que inclui sabores como a Esfirra... R$ 20,00" em 2 de 3
+    rodadas (27/09). Esfirra e ASSADO, e a porcao de assados custa R$ 30,00 -
+    a resposta cobrava R$ 10,00 a menos numa porcao, e o roteiro do dono marca
+    esse caso por escrito: "R$ 30,00 (assado - NAO R$ 20,00)".
+
+    Nao e erro de redacao e nao da para corrigir palavra: quem erra a linha
+    erra o preco junto. A resposta certa e conta, e sai daqui - com o preco
+    oficial de facts, nunca do modelo.
+
+    So age quando a resposta nomeia UMA familia de sabores e diz a outra. Com
+    sabores das duas linhas na mesma mensagem (um pedido misto), as duas
+    palavras sao legitimas e nada e tocado.
+    """
+    if not reply or _RX_LINHA_DE_RESUMO.search(reply):
+        return reply
+    citados = _sabores_citados(reply)
+    if not citados:
+        return reply
+    familias = {f for _s, f in citados}
+    if len(familias) != 1:
+        return reply                 # pedido misto: as duas palavras cabem
+    familia = familias.pop()
+    disse_frito = bool(_RX_DIZ_FRITO.search(reply))
+    disse_assado = bool(_RX_DIZ_ASSADO.search(reply))
+    errou = ((familia == "Assados" and disse_frito and not disse_assado)
+             or (familia == "Fritos" and disse_assado and not disse_frito))
+    if not errou:
+        return reply
+
+    sabor = citados[0][0]
+    try:
+        oficial = facts.resolve_unit_price(sabor, 25)
+    except Exception:
+        oficial = None
+    if not oficial:
+        return reply
+    porcao = float(oficial["preco_unitario"]) * 25
+    nome = oficial.get("item_oficial") or sabor
+    linha = "assados" if familia == "Assados" else "fritos"
+    print(f"[familia] user={user} resposta pos '{nome}' na linha errada "
+          f"(disse {'frito' if disse_frito else 'assado'}, e {familia}); "
+          f"resposta reescrita com {porcao:.2f}")
+    return (f"A porção de 25 unidades de {nome} sai "
+            f"{conversation_memory._brl(porcao)} — ela é da nossa linha de "
+            f"salgados {linha}! Quer que eu já anote? 😊")
+
+
+def _conferir_espelho_obrigatorio(user: str, reply: str, memoria: dict,
+                                  pedido_do_cliente: str,
+                                  aceitou_resumo: bool) -> str:
+    """Ficha completa, nada pendente, cliente nao perguntou nada: sai o espelho.
+
+    Irma de _conferir_nega_formato, e a mesma regra - com tudo coletado o
+    proximo passo e o espelho. A diferenca e o gatilho: aquela exige que a
+    resposta FALE do pedido, e foi por ai que escapou a unica oscilacao que
+    sobrou depois das correcoes de 26/09. Em 1 de 3 rodadas do teste 2.2 a
+    resposta foi "Como sera a retirada, Eduardo? Por favor, confirme o nome, a
+    data 29/09/2026 e o horario 15h para a retirada no balcao" - ela pediu de
+    volta os tres dados que a ficha ja tinha. Nao casava com nada: o mapa de
+    frases tem "confirmar" e ela escreveu "confirme", tem "me confirma" e ela
+    escreveu "confirme o nome". Catar a frase nova seria a terceira vez.
+
+    Aqui o gatilho e estrutural e nao depende de redacao: se nao falta dado, se
+    nao ha etapa travada e se o cliente nao fez pergunta nenhuma, existe uma
+    unica resposta certa - o espelho, com os numeros do codigo.
+
+    O que fica de fora, de proposito:
+      - o espelho e o fechamento, que ja sao o certo;
+      - a recusa de troco, que e pendencia de verdade;
+      - o aceite do espelho, que e o caminho do send_order_to_cardapio;
+      - resposta a uma PERGUNTA do cliente, que vem antes do funil (regra 10).
+    """
+    if not reply or aceitou_resumo:
+        return reply
+    if _RX_LINHA_DE_RESUMO.search(reply) or _parece_fechamento(reply):
+        return reply
+    if _RX_TROCO_INSUFICIENTE.search(facts.normalize(reply)):
+        return reply
+    if _RX_CLIENTE_PERGUNTOU.search(pedido_do_cliente or ""):
+        return reply
+    if conversation_memory.faltando(memoria):
+        return reply
+    if (conversation_memory.pergunta_bloqueante(memoria)
+            or conversation_memory.pendencia_de_detalhe(memoria)):
+        return reply
+    resumo = (_numeros_do_pedido(memoria) or {}).get("resumo_formatado") or ""
+    if not resumo:
+        return reply
+    print(f"[espelho] user={user} ficha completa e nada a responder; "
+          f"espelho no lugar de: {reply[:110]!r}")
+    return resumo
+
+
 def _conferir_cardapio_no_pedido(user: str, reply: str, memoria: dict) -> str:
     """Nao apresenta o cardapio a quem ja disse o que quer.
 
@@ -1813,8 +1972,14 @@ def _conferir_nega_formato(user: str, reply: str, memoria: dict) -> str:
     # As pendencias ficam para DEPOIS do filtro barato: cada uma consulta o
     # catalogo, e rodar as tres em toda resposta deixou a volta lenta o
     # bastante para o cliente receber resposta vazia (26/09).
-    if (conversation_memory.pendencia_de_lote(memoria)
-            or conversation_memory.pendencia_de_item(memoria)
+    #
+    # pergunta_bloqueante cobre as cinco de uma vez (tamanho, sabor nao
+    # identificado, sabor esgotado, lote quebrado, oferta adicional). Listar as
+    # pendencias a mao aqui era o jeito de esquecer as novas: com o upsell
+    # pendente, esta funcao trocava a resposta pelo espelho e pulava a etapa
+    # que o dono cobrou quatro vezes - so nao chegava ao cliente porque
+    # _conferir_etapa_travada roda depois e desfazia.
+    if (conversation_memory.pergunta_bloqueante(memoria)
             or conversation_memory.pendencia_de_detalhe(memoria)):
         return reply
 
@@ -2281,6 +2446,36 @@ def _ofereceu_acompanhamento(reply: str) -> bool:
     return bool(reply) and bool(_RX_OFERECEU_ACOMPANHAMENTO.search(reply))
 
 
+# Motivo de transferencia que o BLOCO 6 PROIBE. A hierarquia do dono e
+# explicita: "BLOCO 6 (Defesa de Preco): pedido de desconto NUNCA transborda
+# para atendente humano", e o proprio bloco diz "Pedido insistente de desconto:
+# PROIBIDO TRANSBORDAR PARA SUPORTE". Fiado, desconto e amizade com a gerencia
+# tem resposta pronta da fabrica - nao ha o que um humano decida.
+_RX_MOTIVO_DO_BLOCO_6 = _re_mod.compile(
+    r"fiad[oa]|desconto|abatiment|cortesia|caderneta|pendura"
+    r"|pagar depois|pagamento posterior|prazo para pagar|sem pagamento"
+    r"|pagamento antecipado|amig[oa] d[oe]|amizade|conhecid[oa] d[oe]"
+    r"|politica de pre[cç]o|negocia[cç][ãa]o de pre[cç]o|valor menor",
+    _re_mod.IGNORECASE)
+
+
+def transbordo_proibido(motivo: str) -> bool:
+    """A transferencia por este motivo e proibida pelo BLOCO 6?
+
+    Existe porque a trava estava so no prompt e nao segurou: medido em 4 de 4
+    rodadas do teste do "amigo do Balbino" (27/09), ela deu a negativa certa do
+    fiado e CHAMOU transfer_to_human em seguida, com motivo "Pedido com
+    solicitacao de fiado, que nao e permitido pela politica da empresa". O
+    cliente caia na fila do humano por uma regra que ela mesma acabou de
+    responder - e, pior, a transferencia pula toda a cadeia de conferencia, que
+    e onde as negativas do BLOCO 6 sao garantidas.
+
+    Risco grave (procon, vigilancia, passando mal) continua passando: essas
+    palavras nao estao aqui, e o BLOCO 4 tem prioridade sobre tudo.
+    """
+    return bool(motivo) and bool(_RX_MOTIVO_DO_BLOCO_6.search(motivo))
+
+
 def _conferir_fiado(user: str, pedido_do_cliente: str, reply: str,
                     memoria: dict) -> str:
     """Nega o fiado sempre que o cliente propor pagar depois.
@@ -2496,18 +2691,27 @@ def _conferir_troco_no_espelho(user: str, reply: str, memoria: dict) -> str:
 _RX_FRASE_COM_PERGUNTA = _re_mod.compile(r"[^.!?\n]*\?")
 
 
-def _conferir_uma_pergunta(user: str, reply: str) -> str:
+def _conferir_uma_pergunta(user: str, reply: str, memoria: dict | None = None) -> str:
     """Deixa UMA pergunta na mensagem, a ultima.
 
     "A regra exige terminar com apenas uma pergunta objetiva" - o dono, 26/09
     19h27, depois de receber "Bora montar o seu pedido? (...) Quais sabores e
     preparo prefere?" na mesma mensagem.
 
-    Nao toca no espelho (que termina com a confirmacao) nem em lista vertical
-    de coleta, onde o "?" unico fica no cabecalho.
+    Nao toca no espelho (que termina com a confirmacao) nem na COLETA DE
+    ENTREGA, que e a excecao escrita no proprio prompt: "definida a modalidade,
+    a logistica da ENTREGA (bairro, rua com numero, dia, horario e pagamento) e
+    pedida numa UNICA mensagem, em lista vertical - nunca uma pergunta por
+    vez". Quando o modelo escreve essa lista com "?" em duas linhas, cortar uma
+    delas perderia um dado que o cliente precisa mandar - e o defeito seria o
+    oposto do que esta funcao existe para evitar.
     """
     if not reply or _RX_LINHA_DE_RESUMO.search(reply):
         return reply
+    if memoria is not None:
+        _falta = conversation_memory.faltando(memoria)
+        if len(_campos_pedidos_na_resposta(reply, _falta)) >= 2:
+            return reply
     perguntas = [p.strip() for p in _RX_FRASE_COM_PERGUNTA.findall(reply)
                  if p.strip()]
     if len(perguntas) < 2:
@@ -3317,6 +3521,22 @@ def handle_flush(user: str, items: list[dict]) -> None:
 
         def _transfer_handler(reason: str = "", **kwargs) -> str:
             nonlocal _transfer_done
+            if transbordo_proibido(reason):
+                # Nao transfere e nao deixa o modelo achar que transferiu: a
+                # tool devolve a instrucao do BLOCO 6, e ele responde na mesma
+                # volta. A negativa ainda passa por _conferir_fiado e
+                # _conferir_desconto depois - o que nao passaria se o
+                # _transfer_done tivesse sido ligado aqui.
+                print(f"[transbordo] user={user} RECUSADO pelo BLOCO 6: {reason!r}")
+                return (
+                    "TRANSFERENCIA RECUSADA. Fiado, desconto, abatimento de frete e "
+                    "amizade com a gerencia sao resolvidos por voce, com a resposta "
+                    "pronta do BLOCO 6 - e PROIBIDO transbordar para humano por esses "
+                    "motivos. Responda agora ao cliente: negue o que ele pediu com a "
+                    "frase da fabrica, diga o que voce aceita (Pix, cartao ou "
+                    "dinheiro) e siga o funil do pedido. Nao diga que vai chamar "
+                    "ninguem."
+                )
             performed = perform_transfer(user, reason, send_message=False)
             _transfer_done = True
             if performed:
@@ -3608,16 +3828,28 @@ def handle_flush(user: str, items: list[dict]) -> None:
             # pedir para repetir e honesto e deixa o cliente agir.
             _saida = ""
             try:
-                if conversation_memory.faltando(_memoria):
-                    _saida = _proxima_pergunta_do_funil(_memoria)
-                else:
-                    _saida = ((_numeros_do_pedido(_memoria) or {})
-                              .get("resumo_formatado") or "")
+                # _proxima_pergunta_do_funil ja decide tudo: etapa travada
+                # primeiro, depois o que falta, e o espelho so quando nao falta
+                # nada. O "if faltando / else resumo" que estava aqui pulava a
+                # etapa travada - com o pedido inteiro numa mensagem, nada
+                # faltava na ficha e a oferta adicional era atropelada pelo
+                # espelho (1 de 6 rodadas na varredura de 27/09, e so aparecia
+                # quando o 429 desviava para este caminho).
+                _saida = _proxima_pergunta_do_funil(_memoria)
             except Exception as _e2:
                 print(f"[flush] WARN fallback de falha tambem falhou: {_e2}")
             if not _saida:
                 _saida = ("Tive uma instabilidade aqui agora 💛 "
                           "Pode repetir, por favor?")
+            # As negativas do BLOCO 6 valem mesmo com o modelo fora do ar. Sem
+            # estas duas linhas, o cliente que propunha fiado num 429 recebia a
+            # proxima pergunta do funil e mais nada - a proposta ficava sem
+            # resposta, que e exatamente a queixa do dono. Medido em 27/09: o
+            # limite de taxa da OpenAI estourou no meio da varredura e a
+            # negativa sumiu em 1 de 3 rodadas por esse caminho, nao por
+            # oscilacao do modelo.
+            _saida = _conferir_fiado(user, text_only, _saida, _memoria)
+            _saida = _conferir_desconto(user, text_only, _saida)
             print(f"[flush] user={user} modelo indisponivel; "
                   f"resposta escrita pelo codigo")
             memory.append(user, "assistant", _saida)
@@ -3656,6 +3888,9 @@ def handle_flush(user: str, items: list[dict]) -> None:
             # Primeiro de todos: resposta que fala de gatilho, prompt ou
             # feedback nao e da Sandrinha, e nao ha o que conferir nela.
             reply = _conferir_vazamento_tecnico(user, reply, _memoria)
+            # Antes do dinheiro: a linha do sabor DECIDE o preco, entao
+            # corrigir a linha e corrigir o valor na origem.
+            reply = _conferir_familia_do_sabor(user, reply)
             reply = _conferir_dinheiro(user, reply, _memoria, _calculo_da_volta,
                                        pular=_calculou_na_volta and not _calculo_da_volta)
             reply = _conferir_troco_no_espelho(user, reply, _memoria)
@@ -3675,6 +3910,10 @@ def handle_flush(user: str, items: list[dict]) -> None:
             reply = _conferir_permissao(user, reply, _memoria)
             # E nao apresenta o cardapio a quem ja fez o pedido.
             reply = _conferir_cardapio_no_pedido(user, reply, _memoria)
+            # E, com tudo coletado e nada perguntado, mostra o espelho em vez
+            # de pedir de volta o que a ficha ja tem.
+            reply = _conferir_espelho_obrigatorio(user, reply, _memoria,
+                                                  text_only, _aceitou_o_resumo)
             # A recoleta escrita em UMA frase ("informe nome, bairro, rua com
             # numero, data e pagamento") nao da para aparar linha a linha: a
             # mensagem inteira e a pergunta errada. Quem pergunta e o codigo.
@@ -3850,11 +4089,10 @@ def handle_flush(user: str, items: list[dict]) -> None:
         # que houve falha. Quem escreve nesse caso e o codigo, que sabe
         # exatamente em que ponto do funil a conversa esta.
         if not reply and not _pedido_saiu:
-            if conversation_memory.faltando(_memoria):
-                reply = _proxima_pergunta_do_funil(_memoria)
-            else:
-                reply = ((_numeros_do_pedido(_memoria) or {})
-                         .get("resumo_formatado") or "")
+            # Mesma razao do fallback de falha do modelo: quem sabe a ordem do
+            # funil e _proxima_pergunta_do_funil, e ela poe a etapa travada
+            # antes do espelho.
+            reply = _proxima_pergunta_do_funil(_memoria)
             if reply:
                 print(f"[flush] user={user} resposta vazia do modelo; "
                       f"escrita pelo codigo")
@@ -3868,7 +4106,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
             # E, depois de todas as trocas, a mensagem termina com UMA pergunta
             # objetiva. O dono cobrou isso na dupla pergunta do fechamento
             # (26/09 19h27).
-            reply = _conferir_uma_pergunta(user, reply)
+            reply = _conferir_uma_pergunta(user, reply, _memoria)
 
         # A oferta adicional saiu? Entao ela nao volta na proxima mensagem.
         if reply and not _memoria.get("upsell_feito") and _ofereceu_acompanhamento(reply):
