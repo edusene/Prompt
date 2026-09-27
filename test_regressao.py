@@ -1240,6 +1240,42 @@ checa("a janela de envio continua medida em hora local",
       "horario.agora()" in _io.open("scheduler.py", encoding="utf-8").read())
 
 
+secao("--- 27/09: a conversa aberta parava no comeco ---")
+# O dono: "aparece como ultima mensagem a mensagem certa, mas na conversa,
+# quando abre, ainda aparece so ate a 17:01". Nao era fuso: get_messages fazia
+# "ORDER BY created_at ASC LIMIT 200", que devolve as 200 mais ANTIGAS. A
+# conversa dele tem 765 mensagens; o painel parava em 22/09 17h01 e escondia as
+# outras 565, inclusive a bateria inteira de 26/09. A LISTA mostrava a mensagem
+# certa (ela le last_message_at), a conversa ABERTA mostrava o comeco - o
+# descasamento que ele descreveu.
+import db as _db_raw  # noqa: E402
+
+_maior = _db_raw.fetch_one(
+    "SELECT conversation_id AS cid, count(*) AS c FROM messages "
+    "GROUP BY conversation_id ORDER BY c DESC LIMIT 1"
+)
+if _maior and _maior["c"] > 5:
+    _cid, _total = _maior["cid"], _maior["c"]
+    _ultima_real = _db_raw.fetch_one(
+        "SELECT max(created_at) AS m FROM messages WHERE conversation_id=?", (_cid,)
+    )["m"]
+    _msgs = _db_mod.get_messages(_cid, limit=5)
+    checa("get_messages respeita o limite", len(_msgs) == 5, f"{len(_msgs)} de 5")
+    checa("a ultima devolvida E a ultima da conversa",
+          _msgs[-1]["created_at"] == _ultima_real,
+          f"conv {_cid} ({_total} msgs)")
+    checa("e vem em ordem cronologica, para a tela ler de cima para baixo",
+          all(_msgs[i]["created_at"] <= _msgs[i + 1]["created_at"]
+              for i in range(len(_msgs) - 1)))
+    # offset pagina para TRAS: pula as mais recentes.
+    _antes = _db_mod.get_messages(_cid, limit=5, offset=5)
+    checa("offset pula as mais recentes (pagina para tras)",
+          _antes[-1]["created_at"] < _msgs[0]["created_at"],
+          f"{_antes[-1]['created_at']} < {_msgs[0]['created_at']}")
+else:
+    checa("sem conversa grande no banco para testar", True, "(pulado)")
+
+
 secao("--- higiene ---")
 # Escrever "\\b" por engano num arquivo grava um byte de backspace, e o regex
 # passa a nunca casar. Ja aconteceu tres vezes, sempre silencioso.

@@ -898,10 +898,27 @@ def link_or_save_outgoing(conversation_id: int, phone: str, body: str, wa_messag
 
 
 def get_messages(conversation_id: int, limit: int = 50, offset: int = 0) -> list[dict]:
-    return db.fetch_all(
-        "SELECT * FROM messages WHERE conversation_id=? ORDER BY created_at ASC LIMIT ? OFFSET ?",
+    """As `limit` mensagens MAIS RECENTES, em ordem cronologica para exibir.
+
+    Era "ORDER BY created_at ASC LIMIT 200", que devolve as 200 mais ANTIGAS: a
+    conversa aberta no painel parava no comeco e nunca chegava no fim. Na
+    conversa do dono, com 765 mensagens, o painel mostrava ate 22/09 17h01 e
+    escondia as outras 565 - inclusive a bateria inteira de 26/09 que ele tinha
+    acabado de rodar. Ele viu a mensagem certa na LISTA (que le
+    last_message_at) e a conversa velha ao ABRIR, o que e exatamente esse
+    descasamento.
+
+    `offset` continua sendo "pule as N mais recentes", que e como se pagina
+    conversa - para tras, a partir do fim.
+    """
+    recentes = db.fetch_all(
+        "SELECT * FROM messages WHERE conversation_id=? "
+        "ORDER BY created_at DESC LIMIT ? OFFSET ?",
         (conversation_id, limit, offset),
     )
+    # A consulta vem do mais novo para o mais velho porque e assim que se pega
+    # "as ultimas N"; a tela le de cima para baixo.
+    return list(reversed(list(recentes)))
 
 
 def count_messages(conversation_id: int) -> int:
