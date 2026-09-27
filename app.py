@@ -1078,7 +1078,7 @@ def perform_transfer(phone: str, reason: str = "", send_message: bool = True) ->
                 sender="agent",
                 msg_type="text",
             )
-            database.update_conversation(conv["id"], last_message_at=time.strftime("%Y-%m-%dT%H:%M:%S"))
+            database.update_conversation(conv["id"], last_message_at=database.agora_utc())
         else:
             print(f"[transfer] WARN: falha ao enviar msg de transferência p/ {phone}: {res.get('error')}")
     else:
@@ -1188,7 +1188,7 @@ def perform_reset(phone: str, origem: str = "cliente", avisar: bool = True) -> N
             sender="agent",
             msg_type="text",
         )
-        database.update_conversation(conv["id"], last_message_at=time.strftime("%Y-%m-%dT%H:%M:%S"))
+        database.update_conversation(conv["id"], last_message_at=database.agora_utc())
         # A saudacao acabou de sair: a Sandrinha nao repete na proxima mensagem.
         try:
             ficha = conversation_memory.load(phone)
@@ -4077,7 +4077,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
             send_text(user, transfer_msg)
             try:
                 conv = database.get_or_create_conversation(user)
-                database.update_conversation(conv["id"], last_message_at=time.strftime("%Y-%m-%dT%H:%M:%S"))
+                database.update_conversation(conv["id"], last_message_at=database.agora_utc())
             except Exception:
                 pass
             return
@@ -4146,7 +4146,7 @@ def send_msg_out_to_panel(user: str, text: str) -> None:
         sender="agent",
         msg_type="text",
     )
-    database.update_conversation(conv["id"], last_message_at=time.strftime("%Y-%m-%dT%H:%M:%S"))
+    database.update_conversation(conv["id"], last_message_at=database.agora_utc())
     events.emit("message_sent", {"conversation_id": conv["id"], "phone": user, "body": text})
 
 
@@ -4521,10 +4521,10 @@ def webhook():
                            recebido_em=_chegou_em)
 
             if saved:
-                database.update_conversation(conv["id"], last_message_at=time.strftime("%Y-%m-%dT%H:%M:%S"))
+                database.update_conversation(conv["id"], last_message_at=database.agora_utc())
                 database.increment_unread(conv["id"])
                 # CRM: atualizar última interação e cancelar/recriar follow-ups
-                database.update_contact(contact["id"], last_interaction_at=time.strftime("%Y-%m-%dT%H:%M:%S"))
+                database.update_contact(contact["id"], last_interaction_at=database.agora_utc())
                 database.cancel_follow_ups_for_contact(contact["id"])
                 try:
                     database.create_follow_ups_for_contact(contact["id"])
@@ -5049,7 +5049,7 @@ def api_messages_send():
         msg_type="text",
         wa_message_id=meta_msg_id,
     )
-    database.update_conversation(conv["id"], last_message_at=time.strftime("%Y-%m-%dT%H:%M:%S"))
+    database.update_conversation(conv["id"], last_message_at=database.agora_utc())
     events.emit("message_sent", {"conversation_id": conv["id"], "phone": wa_id, "body": body})
     return jsonify({"ok": True, "phone": wa_id, "message_id": meta_msg_id})
 
@@ -5138,7 +5138,7 @@ def api_messages_send_media():
     
     db_msg_id = saved_msg["id"] if saved_msg else ""
     
-    database.update_conversation(conv["id"], last_message_at=time.strftime("%Y-%m-%dT%H:%M:%S"))
+    database.update_conversation(conv["id"], last_message_at=database.agora_utc())
     events.emit("message_sent", {"conversation_id": conv["id"], "phone": wa_id, "body": body})
     
     return jsonify({"ok": True, "phone": wa_id, "message_id": meta_msg_id, "media_type": media_type, "db_msg_id": db_msg_id})

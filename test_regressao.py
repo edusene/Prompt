@@ -1183,6 +1183,63 @@ checa("com o upsell feito, ai sim vem o espelho",
           dict(_FICHA_SEM_UPSELL, upsell_feito=True))) is not None)
 
 
+secao("--- 27/09: o banco fala UTC, so a tela converte ---")
+# O dono viu a ultima conversa as 19:27 no WhatsApp e outra hora no painel.
+# Causa: o MESMO campo tinha duas leituras. last_message_at e
+# last_interaction_at eram gravados com time.strftime() (hora da maquina),
+# enquanto created_at/updated_at usam utcnow() - e o painel soma "Z" em tudo
+# (static/app.js), ou seja, le tudo como UTC. Num servidor em UTC as duas
+# coincidem e nada aparece; rodando de Porto Velho (UTC-4) a conversa aparece
+# 4h mais cedo. O banco SQLite de 04/09 tem o par exato: last_message_at
+# 19:26:31 e a ultima mensagem 23:26:31.
+import io as _io  # noqa: E402
+import database as _db_mod  # noqa: E402
+import scheduler as _sched  # noqa: E402
+
+_AGORA_UTC = datetime.utcnow()
+_AGORA_LOCAL = datetime.now()
+_OFFSET_MAQUINA = abs((_AGORA_LOCAL - _AGORA_UTC).total_seconds())
+
+_carimbo = datetime.fromisoformat(_db_mod.agora_utc())
+checa("agora_utc() acompanha o relogio UTC",
+      abs((_carimbo - _AGORA_UTC).total_seconds()) < 5,
+      f"{abs((_carimbo - _AGORA_UTC).total_seconds()):.1f}s de utcnow")
+if _OFFSET_MAQUINA > 60:
+    checa("e NAO o relogio local da maquina",
+          abs((_carimbo - _AGORA_LOCAL).total_seconds()) > 60,
+          f"maquina esta {_OFFSET_MAQUINA / 3600:.0f}h fora de UTC")
+else:
+    checa("maquina ja esta em UTC: fuso nao da para testar aqui", True, "(pulado)")
+
+checa("para_utc desfaz o fuso de Porto Velho",
+      abs((horario.para_utc(horario.agora()) - _AGORA_UTC).total_seconds()) < 5)
+
+# O contrato com o painel, preso dos dois lados: se alguem tirar o "Z" do JS,
+# este teste falha e o comentario explica por que ele estava la.
+_JS = _io.open("static/app.js", encoding="utf-8").read()
+checa("o painel le last_message_at como UTC (soma 'Z')",
+      "c.last_message_at + 'Z'" in _JS)
+
+# E o lado do servidor: nenhum carimbo de banco sai do relogio local.
+_APP = _io.open("app.py", encoding="utf-8").read()
+checa("app.py nao grava carimbo com o relogio local",
+      'time.strftime("%Y-%m-%dT%H:%M:%S")' not in _APP)
+checa("app.py usa a fonte unica de agora", "database.agora_utc()" in _APP)
+
+# Follow-up: o prazo conta em UTC, mas a JANELA de envio continua sendo o
+# relogio do cliente ("nao mande antes das 08h" e 08h dele).
+_janela = _sched._next_window_start("08:00")
+checa("proxima janela de envio e gravada em UTC (futuro)",
+      _janela > _AGORA_UTC,
+      f"janela={_janela.isoformat()} utcnow={_AGORA_UTC.isoformat()}")
+_janela_local = _janela - horario._TZ_OFFSET
+checa("e no relogio do cliente ela cai as 08:00",
+      (_janela_local.hour, _janela_local.minute) == (8, 0),
+      _janela_local.isoformat())
+checa("a janela de envio continua medida em hora local",
+      "horario.agora()" in _io.open("scheduler.py", encoding="utf-8").read())
+
+
 secao("--- higiene ---")
 # Escrever "\\b" por engano num arquivo grava um byte de backspace, e o regex
 # passa a nunca casar. Ja aconteceu tres vezes, sempre silencioso.

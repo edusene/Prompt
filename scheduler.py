@@ -38,13 +38,19 @@ def _is_within_send_window(start_str: str, end_str: str) -> bool:
 
 
 def _next_window_start(start_str: str) -> datetime:
-    """Retorna o próximo horário de início da janela de envio."""
+    """Proximo inicio da janela de envio, JA EM UTC para gravar no banco.
+
+    A janela e o relogio do cliente ("nao mande antes das 08h"), entao a conta
+    e feita em hora local; o resultado volta para o banco, que fala UTC. Sem a
+    conversao o follow-up era reagendado 4h no passado e saia no tique
+    seguinte - justamente o prazo que a janela existe para respeitar.
+    """
     now = horario.agora()
     start_h, start_m = _parse_time(start_str)
     today_start = now.replace(hour=start_h, minute=start_m, second=0, microsecond=0)
-    if today_start > now:
-        return today_start
-    return today_start + timedelta(days=1)
+    if today_start <= now:
+        today_start = today_start + timedelta(days=1)
+    return horario.para_utc(today_start)
 
 
 def _para_datetime(valor: str):
@@ -103,7 +109,10 @@ def check_follow_ups():
         if not pending:
             return
 
-        now = horario.agora()
+        # Prazo vencido e conta com data do BANCO, que fala UTC. A janela de
+        # envio, logo abaixo, continua em hora local - ela e o relogio do
+        # cliente, nao o do servidor.
+        now = datetime.utcnow()
         now_iso = now.isoformat()
 
         for fu in pending:

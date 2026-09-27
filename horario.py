@@ -53,6 +53,16 @@ def agora() -> datetime:
     return datetime.utcnow() - _TZ_OFFSET
 
 
+def para_utc(local: datetime) -> datetime:
+    """Hora local de Porto Velho -> UTC.
+
+    O banco fala UTC (ver database.agora_utc). Quando uma conta e feita no
+    relogio do cliente - a janela de envio do follow-up e 08h-18h DELE, nao
+    08h-18h UTC - o resultado precisa voltar para UTC antes de ser gravado.
+    """
+    return local + _TZ_OFFSET
+
+
 def _minutos(hora: int, minuto: int) -> int:
     return hora * 60 + minuto
 

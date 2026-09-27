@@ -736,6 +736,26 @@ def delete_conversation(conv_id: int) -> None:
 
 # ── Conversation States (Sub-agentes) ────────────────────────────────────────
 
+def agora_utc() -> str:
+    """O "agora" que vai para o banco. SEMPRE UTC, com segundos.
+
+    Todo carimbo daqui (created_at, updated_at) nasce de datetime.utcnow(), e o
+    painel confia nisso: static/app.js renderiza a data somando "Z" ao texto
+    ("new Date(c.last_message_at + 'Z')"), ou seja, LE o valor como UTC.
+
+    Quem gravava last_message_at e last_interaction_at era time.strftime(), que
+    devolve a hora LOCAL da maquina. Enquanto o app roda num servidor em UTC as
+    duas coincidem e nada aparece. Rodando de Porto Velho (UTC-4), a mesma
+    conversa fica com created_at em UTC e last_message_at 4h atras - e o painel,
+    que soma "Z" nos dois, mostra a conversa 4h mais cedo do que ela foi. Ja
+    aconteceu: no banco SQLite de 04/09 a conversa 2 tem last_message_at
+    19:26:31 e a ultima mensagem 23:26:31, os mesmos 4 minutos e 4 horas.
+
+    Existe para que ninguem mais precise lembrar disso: chame esta funcao.
+    """
+    return datetime.utcnow().isoformat(timespec="seconds")
+
+
 def save_conversation_state(phone: str, state: dict) -> None:
     """Salva estado da conversa (sub-agentes) pelo phone."""
     now = datetime.utcnow().isoformat()
@@ -1044,10 +1064,16 @@ def get_dashboard_stats() -> dict:
     unread_messages = db.fetch_one(
         "SELECT COALESCE(SUM(unread_count),0) as cnt FROM conversations"
     )["cnt"]
+    # "Mensagens hoje" e o hoje do DONO, mas created_at esta em UTC. Comparar a
+    # data local crua contra carimbo UTC contava errado nas 4 horas em que os
+    # dois calendarios divergem: uma mensagem das 21h de ontem vira 01h UTC de
+    # hoje e entrava na conta de hoje. O corte e a meia-noite local, convertida
+    # para UTC antes de ir ao banco.
     import horario
-    today = horario.agora().strftime("%Y-%m-%d")
+    inicio_local = horario.agora().replace(hour=0, minute=0, second=0, microsecond=0)
+    inicio = horario.para_utc(inicio_local).isoformat()
     messages_today = db.fetch_one(
-        "SELECT COUNT(*) as cnt FROM messages WHERE created_at >= ?", (today,)
+        "SELECT COUNT(*) as cnt FROM messages WHERE created_at >= ?", (inicio,)
     )["cnt"]
     return {
         "total_contacts": total_contacts,
@@ -1469,8 +1495,7 @@ def create_follow_up(automation_id: int, contact_id: int, scheduled_for: str) ->
     )
     if existing:
         return None
-    import horario
-    now = horario.agora().isoformat()
+    now = agora_utc()
     fu_id = db.execute_returning(
         "INSERT INTO crm_follow_ups (automation_id, contact_id, scheduled_for, created_at) VALUES (?,?,?,?)",
         (automation_id, contact_id, scheduled_for, now),
@@ -1487,8 +1512,9 @@ def get_pending_follow_ups() -> list[dict]:
     devolvia todos os pendentes e o scheduler enviava tudo no tique seguinte,
     ignorando os dias configurados na automacao.
     """
-    import horario
-    agora = horario.agora().isoformat()
+    # scheduled_for e gravado em UTC (ver schedule_follow_ups_for_contact e o
+    # reagendamento por janela no scheduler); o filtro compara em UTC.
+    agora = datetime.utcnow().isoformat()
     return db.fetch_all(
         "SELECT fu.*, "
         "a.name as automation_name, a.message_template, a.use_meta_template, "
@@ -1739,11 +1765,16 @@ def create_follow_ups_for_contact(contact_id: int) -> int:
     except Exception:
         return 0
 
-    import horario
-    # last_interaction_at e gravado em hora local (time.strftime), entao a
-    # comparacao tem de ser local tambem. Com utcnow() a diferenca de 4h fazia
-    # prazo curto parecer vencido, e o follow-up de "2 horas" saia em 1 minuto.
-    agora = horario.agora()
+    # last_interaction_at vem do banco, e o banco fala UTC (agora_utc). A
+    # comparacao e em UTC pelo mesmo motivo.
+    #
+    # Ja foi local aqui, e com razao: naquele momento quem gravava o campo era
+    # time.strftime(), que devolve a hora da maquina. So que o MESMO campo e
+    # lido pelo painel como UTC (static/app.js soma "Z"), entao ele era local
+    # para o follow-up e UTC para a tela - uma das duas leituras estava sempre
+    # errada, e qual delas dependia de onde o app estava rodando. Agora o campo
+    # e UTC dos dois lados, e quem converte e so a tela.
+    agora = datetime.utcnow()
 
     automations = db.fetch_all("SELECT * FROM crm_automations WHERE is_active=1")
     created = 0
