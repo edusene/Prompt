@@ -206,7 +206,7 @@ for _q, _pergunta in ((1, True), (20, True), (24, True), (25, False), (50, False
 _dir = memoria_mod.pendencia_de_item({"items": [{"name": "Coxinha", "quantity": 5}]})
 checa("a pergunta e 'grande (lanche) ou mini (festa)'",
       "grande (lanche) ou mini (festa)" in _dir)
-checa("manda isolar so o item sem tamanho", "ISOLANDO SO ESSE ITEM" in _dir)
+checa("manda isolar so o item sem tamanho", "ISOLE SO ESSE ITEM" in _dir)
 
 # 25/09: termos de volume do dono.
 checa("cento e meio = 150", _itens("cento e meio de coxinha") == [(150, "Coxinha")])
@@ -322,7 +322,7 @@ _HOJE = date(2026, 9, 25)
 
 
 def _aceita(texto: str) -> bool:
-    ok, _msg, _dia = horario.validar_agendamento(_HOJE, texto, _MANHA_DE_HOJE)
+    ok, _msg, _dia, _campo = horario.validar_agendamento(_HOJE, texto, _MANHA_DE_HOJE)
     return ok
 
 
@@ -445,8 +445,16 @@ checa("depois de limpo, o novo troco entra",
 checa("troco que cobre o total passa",
       _troco(troco_para="100.00") == _ESPELHO_TROCO)
 checa("cliente com valor trocado passa", _troco(troco_para="nao") == _ESPELHO_TROCO)
-checa("ficha incompleta nao barra ainda",
-      _troco(troco_para="50.00", horario="") == _ESPELHO_TROCO)
+# 26/09 19h02: o cliente ofereceu troco para R$ 80,00 num cento de fritos de
+# R$ 80,00 e a Sandrinha seguiu a conversa sem dizer nada - esperar a ficha
+# fechar chegava um turno tarde. Com a ficha aberta o total ainda nao existe,
+# mas o SUBTOTAL existe e e um piso: troco que nao cobre nem ele e invalido.
+checa("ficha incompleta barra pelo subtotal",
+      "precisa ser maior" in _troco(troco_para="50.00", horario=""))
+checa("ficha incompleta nao fala de 'total' que ainda nao existe",
+      "salgados já dão" in _troco(troco_para="50.00", horario=""))
+checa("troco acima do subtotal passa com a ficha aberta",
+      _troco(troco_para="100.00", horario="") == _ESPELHO_TROCO)
 checa("sem dinheiro nao ha troco a conferir",
       _troco(payment_method="cartao", troco_para="") == _ESPELHO_TROCO)
 
@@ -615,6 +623,337 @@ checa("sem bairro citado, nada e acrescentado",
       app._conferir_frete_dito("55", "Sim, entregamos!", {}) == "Sim, entregamos!")
 
 # ── Higiene do proprio codigo ──────────────────────────────────────────────
+# ══ Testes do dia 26/09 — a bateria do dono no WhatsApp ═══════════════════
+# Cada bloco daqui nasceu de uma queixa escrita dele no chat.txt daquela noite.
+
+secao("--- 26/09: o horario passado apagava a data ---")
+# 19h20, cliente pede "hoje as 19h": o horario ja passou. A recusa fala de
+# "horário" COM ACENTO, e o codigo procurava "horario" sem acento - nunca
+# casava, entao ele limpava a DATA. O cliente corrigia para 20h e era
+# perguntado do DIA de novo. Agora quem diz qual campo nao cabe e a validacao.
+_19H20 = datetime(2026, 9, 26, 19, 20, 0)
+_ok_h, _msg_h, _sug_h, _campo_h = horario.validar_agendamento(
+    date(2026, 9, 26), "19h", _19H20)
+checa("horario de hoje que passou e recusado", not _ok_h)
+checa("o campo invalido e o HORARIO, nao a data", _campo_h == "horario")
+for _texto, _campo_esperado in (("21h", "horario"), ("7h", "horario"),
+                                ("12h30", "horario")):
+    _o, _m, _s, _c = horario.validar_agendamento(date(2026, 9, 28), _texto, _19H20)
+    checa(f"{_texto} fora do expediente -> campo '{_campo_esperado}'",
+          _c == _campo_esperado, _m[:40])
+_o, _m, _s, _c = horario.validar_agendamento(date(2026, 9, 27), "10h", _19H20)
+checa("domingo -> campo 'data'", _c == "data")
+_o, _m, _s, _c = horario.validar_agendamento(date(2026, 9, 28), "19h", _19H20)
+checa("dia e hora validos passam", _o and _c == "")
+
+
+secao("--- 26/09: '30 de carne' virava Quiche de Carne de Sol ---")
+from agents.conversation import _produto_conhecido, sabores_possiveis  # noqa: E402
+checa("palavra que serve a varios sabores nao identifica produto",
+      _produto_conhecido("carne") is None)
+_opcoes = sabores_possiveis("carne")
+checa("'carne' devolve as opcoes de sabor", len(_opcoes) >= 2, str(_opcoes))
+checa("as opcoes sao sabores de lote, nao itens de balcao",
+      "Quiche de Carne de Sol" not in _opcoes and "Bomba de Carne de Sol" not in _opcoes)
+checa("sabor esgotado fica fora das opcoes", "Croquete de Carne" not in _opcoes)
+checa("nome especifico continua resolvendo",
+      _produto_conhecido("pastel de carne") == "Pastel Carne")
+checa("coxinha nao e ambiguo", _produto_conhecido("coxinha") == "Coxinha")
+checa("camarao continua nao virando frango",
+      _produto_conhecido("canudinhos de camarao") == "Canudinho de Camarao")
+
+_pedido_carne = _extract_data_from_message(
+    "Oi, quero 100 salgados fritos: 30 de carne, 30 de queijo e 40 coxinhas.",
+    ConversationState())
+checa("o sabor ambiguo nao vira item errado",
+      all(i["name"] != "Quiche de Carne de Sol"
+          for i in _pedido_carne.get("items", [])))
+checa("o sabor ambiguo tampouco desaparece: fica pendente",
+      any(sp["termo"] == "carne"
+          for sp in _pedido_carne.get("sabores_pendentes", [])))
+checa("'30 de queijo' num pedido de fritos resolve sozinho",
+      any(i["name"] == "Bolinha de Queijo" and i["quantity"] == 30
+          for i in _pedido_carne.get("items", [])))
+
+_ficha_sabor = dict(memoria_mod._empty())
+_ficha_sabor.update(_pedido_carne)
+checa("a ficha cobra o sabor que falta",
+      "SABOR NAO IDENTIFICADO" in memoria_mod.render_ficha(_ficha_sabor))
+checa("e a pergunta bloqueante cita as opcoes",
+      "carne" in memoria_mod.pergunta_bloqueante(_ficha_sabor))
+_aplicou = memoria_mod.aplicar_escolha_de_sabor(_ficha_sabor, "pode ser pastel carne")
+checa("a escolha do sabor vira item na ficha", bool(_aplicou), str(_aplicou))
+checa("e a pendencia de sabor sai da ficha",
+      not _ficha_sabor.get("sabores_pendentes"))
+
+
+secao("--- 26/09: lote quebrado nao trava mais o funil? trava ---")
+# 1a queixa do dono no dia: "o cliente pediu 30, 30 e 40 e ela aceitou sem
+# travar a regra de multiplos de 25 por sabor (...) o fluxo correto e travar a
+# regra dos sabores em lotes de 25 ANTES de puxar os dados de entrega".
+_FICHA_LOTE = dict(memoria_mod._empty(), **{
+    "name": "Balbino", "modality": "entrega", "bairro": "Olaria",
+    "endereco": "Rua Jamari 2125", "data_agendada": "hoje, sábado (26/09)",
+    "data_iso": "2026-09-26", "horario": "19h",
+    "items": [{"name": "Coxinha", "quantity": 30},
+              {"name": "Quibe", "quantity": 30},
+              {"name": "Bolinha de Queijo", "quantity": 40}],
+})
+_render_lote = memoria_mod.render_ficha(_FICHA_LOTE)
+checa("a ficha manda ajustar a quantidade primeiro",
+      "PROXIMA PERGUNTA OBRIGATORIA: o ajuste da QUANTIDADE QUEBRADA" in _render_lote)
+checa("e adia a coleta, sem apagar o que falta",
+      "NAO nesta mensagem" in _render_lote and "Forma de pagamento" in _render_lote)
+_frase_lote = memoria_mod.pergunta_bloqueante(_FICHA_LOTE)
+checa("a pergunta de lote cita TODOS os sabores fora da regra",
+      all(t in _frase_lote.lower() for t in ("coxinha", "quibe", "bolinha")),
+      _frase_lote)
+checa("e traz o multiplo de 25 mais proximo de cada um",
+      "25 coxinha" in _frase_lote.lower() and "50 bolinha" in _frase_lote.lower(),
+      _frase_lote)
+
+# A resposta que pulou a trava e cobrou logistica e reescrita.
+_pulou = ("Para seguir, me confirma:\n• Bairro\n• Endereco (rua e numero)\n"
+          "• Forma de pagamento")
+checa("resposta que cobra logistica com lote quebrado e trocada",
+      "25 em 25" in app._conferir_etapa_travada("55", _pulou, _FICHA_LOTE))
+# Mas o que ela INFORMA nao se perde.
+_informa = "A taxa de entrega para o Olaria é R$ 12,00. Qual é o bairro?"
+_saida_informa = app._conferir_etapa_travada("55", _informa, _FICHA_LOTE)
+checa("o que a resposta informava continua na mensagem",
+      "12,00" in _saida_informa, _saida_informa[:60])
+checa("e a pergunta errada foi trocada pela travada",
+      "25 em 25" in _saida_informa)
+# Espelho com lote quebrado nao sai de jeito nenhum.
+_espelho_errado = "👤 Cliente: Balbino\n💵 Total: R$ 80,00\nPosso confirmar?"
+checa("espelho com lote quebrado e barrado",
+      "25 em 25" in app._conferir_etapa_travada("55", _espelho_errado, _FICHA_LOTE))
+# Pedido em multiplo de 25 nao leva trava nenhuma.
+_FICHA_OK = dict(_FICHA_LOTE, items=[{"name": "Coxinha", "quantity": 25},
+                                     {"name": "Quibe", "quantity": 25}],
+                 upsell_feito=True, payment_method="cartao")
+checa("pedido na regra nao e travado",
+      memoria_mod.pergunta_bloqueante(_FICHA_OK) == "")
+
+
+secao("--- 26/09: o upsell que nunca saia ---")
+# Cobrado em quatro testes: "pulou o bloco de upsell e ja foi direto cobrar
+# endereco e pagamento", "nao ofereceu bebida nem doces antes do resumo final".
+_FICHA_UPSELL = dict(_FICHA_LOTE,
+                     items=[{"name": "Coxinha", "quantity": 25}],
+                     payment_method="cartao")
+_oferta = memoria_mod.upsell_pendente(_FICHA_UPSELL, datetime(2026, 9, 26, 19, 0))
+checa("com o pedido pronto, a oferta adicional esta pendente", bool(_oferta), _oferta)
+checa("a oferta das 19h e refrigerante ou docinho",
+      "Refrigerante" in _oferta or "docinho" in _oferta, _oferta)
+checa("a ficha manda fazer a oferta antes da logistica",
+      "OFERTA ADICIONAL" in memoria_mod.render_ficha(_FICHA_UPSELL))
+checa("oferta ja feita nao volta",
+      memoria_mod.upsell_pendente(dict(_FICHA_UPSELL, upsell_feito=True)) == "")
+checa("quem ja pediu bebida nao ouve a oferta",
+      memoria_mod.upsell_pendente(dict(
+          _FICHA_UPSELL,
+          items=[{"name": "Coxinha", "quantity": 25},
+                 {"name": "Refrigerante Lata", "quantity": 1}])) == "")
+checa("sem item nenhum nao ha oferta a fazer",
+      memoria_mod.upsell_pendente(dict(_FICHA_UPSELL, items=[])) == "")
+checa("lote quebrado vem antes do upsell",
+      memoria_mod.upsell_pendente(_FICHA_LOTE) == "")
+for _faixa, _esperado in ((datetime(2026, 9, 28, 8, 0), "Bolo de Milho"),
+                          (datetime(2026, 9, 28, 11, 0), "Refrigerante 2L"),
+                          (datetime(2026, 9, 28, 15, 0), "Tuchaua"),
+                          (datetime(2026, 9, 28, 18, 0), "docinhos")):
+    checa(f"oferta das {_faixa.hour}h cita {_esperado}",
+          _esperado in memoria_mod.oferta_adicional(_faixa))
+checa("a resposta com a oferta e reconhecida",
+      app._ofereceu_acompanhamento("Pra acompanhar, vai um Refrigerante 2L? 🥤"))
+checa("resposta sem oferta nao marca o upsell como feito",
+      not app._ofereceu_acompanhamento("Qual é o número da casa? 🛵"))
+
+
+secao("--- 26/09: fiado passou batido duas vezes ---")
+_FICHA_FIADO = dict(_FICHA_LOTE, name="Balbino")
+
+
+def _fiado(msg: str, reply: str = "Anotado! Qual é a forma de pagamento?") -> str:
+    return app._conferir_fiado("55", msg, reply, _FICHA_FIADO)
+
+
+checa("'posso te pagar na segunda' recebe a negativa de fiado",
+      "não libera fiado" in _fiado("Posso te pagar na segunda-feira sem falta?"))
+checa("'deixa anotado que acerto no fim do mes' tambem",
+      "não libera fiado" in _fiado(
+          "deixa anotado que acerto com ele no fim do mês"))
+checa("'fiado' cru tambem", "não libera fiado" in _fiado("faz fiado pra mim?"))
+checa("pagar na entrega NAO e fiado",
+      "fiado" not in _fiado("vou pagar em dinheiro na entrega").lower())
+checa("dia do pedido nao e promessa de pagamento",
+      "fiado" not in _fiado("PODE SER PARA SEGUNDA RUA JAMARI 2125").lower())
+checa("troco na entrega nao e fiado",
+      "fiado" not in _fiado(
+          "pago em dinheiro e traz troco pra 80").lower())
+checa("negativa que ja estava na resposta nao e repetida",
+      _fiado("faz fiado?", "A fábrica não libera fiado de jeito nenhum!")
+      == "A fábrica não libera fiado de jeito nenhum!")
+checa("a negativa nao cria uma segunda pergunta",
+      _fiado("faz fiado?", "Qual é o bairro? 😊").count("?") == 1)
+
+
+secao("--- 26/09: desconto no frete ignorado ---")
+
+
+def _desc(msg: str, reply: str = "Anotado! Qual é o bairro?") -> str:
+    return app._conferir_desconto("55", msg, reply)
+
+
+checa("'faz um desconto no frete' recebe a defesa de preco",
+      "direto de fábrica" in _desc("E faz um desconto no frete pra fechar?"))
+checa("'desconto pra fechar logo' tambem",
+      "tabelado" in _desc("me dá um desconto no frete pra fechar logo"))
+checa("'faz por menos' tambem", "direto de fábrica" in _desc("faz por menos?"))
+checa("mensagem sem pedido de desconto fica intacta",
+      _desc("quero 50 coxinhas") == "Anotado! Qual é o bairro?")
+checa("defesa que ja estava na resposta nao e repetida",
+      _desc("desconto?", "Nosso preço já é direto de fábrica, não consigo mexer!")
+      == "Nosso preço já é direto de fábrica, não consigo mexer!")
+
+
+secao("--- 26/09: a Sandrinha falando como programadora ---")
+_FICHA_VAZ = dict(_FICHA_LOTE)
+for _leak in ("Entendi, obrigado pelo feedback detalhado! Vou ajustar o gatilho "
+              "desse bloco.",
+              "Vou corrigir o atendimento conforme as regras.",
+              "Desculpe, houve uma falha no meu prompt.",
+              "Sou uma IA e não posso fazer isso."):
+    _saida = app._conferir_vazamento_tecnico("55", _leak, _FICHA_VAZ)
+    checa(f"vazamento trocado: {_leak[:34]!r}", _saida != _leak, _saida[:48])
+    checa("  e a troca fala do pedido, nao do sistema",
+          not app._RX_VAZAMENTO_TECNICO.search(_saida), _saida[:48])
+_ok_persona = "Fazemos de 25 em 25 por sabor! Ajusto para 25 coxinha? 😊"
+checa("resposta normal nao e tocada",
+      app._conferir_vazamento_tecnico("55", _ok_persona, _FICHA_VAZ) == _ok_persona)
+_espelho = ("👤 Cliente: Balbino\n💰 Subtotal: R$ 20,00\n💵 Total: R$ 34,00\n"
+            "Posso confirmar?")
+checa("espelho do pedido nunca e descartado por vazamento",
+      app._conferir_vazamento_tecnico("55", _espelho, _FICHA_VAZ) == _espelho)
+
+
+secao("--- 26/09: duas perguntas na mesma mensagem ---")
+_duas = ("Que maravilha! 💛 Nosso preço já é direto de fábrica. Bora montar o "
+         "seu pedido? Você pode escolher até 4 sabores. Quais sabores e preparo "
+         "prefere? 😊")
+_uma = app._conferir_uma_pergunta("55", _duas)
+checa("sobra uma pergunta so", _uma.count("?") == 1, _uma[-46:])
+checa("a pergunta que sobra e a ultima", "Quais sabores" in _uma)
+checa("e a informacao anterior nao se perde", "direto de fábrica" in _uma)
+checa("uma pergunta so continua intacta",
+      app._conferir_uma_pergunta("55", "Qual é o número da casa? 🛵")
+      == "Qual é o número da casa? 🛵")
+checa("espelho com uma pergunta nao e tocado",
+      app._conferir_uma_pergunta("55", _espelho) == _espelho)
+checa("lista de coleta sem pergunta nao e tocada",
+      app._conferir_uma_pergunta("55", _pulou) == _pulou)
+
+
+secao("--- 26/09: amnesia de troco no espelho ---")
+# "o cliente pediu troco para 150 e a Sandrinha nao registrou o valor no
+# resumo final". A ficha tinha o valor; o espelho que o MODELO escreveu, nao.
+checa("'traz troco pra 150' e capturado da 1a mensagem",
+      memoria_mod.capturar_troco(
+          dict(memoria_mod._empty(), payment_method="dinheiro"), "",
+          "Quero 50 coxinhas para entregar amanhã às 16h. Vou pagar em dinheiro, "
+          "traz troco pra 150.") == "150.00")
+_FICHA_TROCO_150 = dict(memoria_mod._empty(), **{
+    "name": "Balbino", "modality": "entrega", "bairro": "Nova Porto Velho",
+    "endereco": "Rua Jamari 2125", "payment_method": "dinheiro",
+    "data_agendada": "segunda-feira (28/09)", "data_iso": "2026-09-28",
+    "horario": "16h", "troco_para": "150.00", "upsell_feito": True,
+    "items": [{"name": "Coxinha", "quantity": 50},
+              {"name": "Empadinha de Frango", "quantity": 50}],
+})
+_espelho_sem_troco = chr(10).join([
+    "👤 Cliente: Balbino",
+    "💵 Total: R$ 114,00",
+    "💳 Pagamento: Dinheiro na entrega",
+    "Posso confirmar o seu pedido? 💛",
+])
+_com_troco = app._conferir_troco_no_espelho("55", _espelho_sem_troco, _FICHA_TROCO_150)
+checa("o troco volta para a linha de pagamento do espelho",
+      "troco" in _com_troco.lower(), _com_troco.split(chr(10))[2])
+checa("e o valor e o que o cliente pediu", "150,00" in _com_troco)
+checa("espelho que ja traz o troco nao e reescrito",
+      app._conferir_troco_no_espelho("55", _com_troco, _FICHA_TROCO_150) == _com_troco)
+checa("sem troco na ficha nao se inventa linha",
+      app._conferir_troco_no_espelho(
+          "55", _espelho_sem_troco,
+          dict(_FICHA_TROCO_150, troco_para="")) == _espelho_sem_troco)
+
+
+secao("--- 26/09: coleta picada ---")
+# "disparou duas mensagens e pediu so o bairro, em vez de cobrar o que falta em
+# lista unica".
+_FICHA_PICADA = dict(memoria_mod._empty(), **{
+    "modality": "entrega", "endereco": "Rua Jamari",
+    "data_agendada": "hoje, sábado (26/09)", "data_iso": "2026-09-26",
+    "horario": "19h30", "upsell_feito": True,
+    "items": [{"name": "Coxinha", "quantity": 100}],
+})
+_faltam = memoria_mod.faltando(_FICHA_PICADA)
+checa("faltam vários dados nessa ficha", len(_faltam) >= 2, str(_faltam))
+_so_bairro = "Agora, por favor, me informe o bairro para entrega."
+_completo = app._conferir_coleta_picada("55", _so_bairro, _FICHA_PICADA)
+checa("pedir so o bairro vira a lista inteira",
+      _completo != _so_bairro and "Bairro" in _completo, _completo[:70])
+checa("a lista inclui o numero da casa que faltava",
+      "Numero da casa" in _completo or "úmero" in _completo, _completo)
+checa("espelho nao e tocado pela coleta picada",
+      app._conferir_coleta_picada("55", _espelho, _FICHA_PICADA) == _espelho)
+checa("resposta que nao cobra dado nenhum fica intacta",
+      app._conferir_coleta_picada("55", "A estimativa é de 30 a 40 minutos! 😊",
+                                  _FICHA_PICADA)
+      == "A estimativa é de 30 a 40 minutos! 😊")
+
+
+secao("--- 26/09: croquete de carne virou croquete de macaxeira ---")
+# "o cliente pediu croquete de carne no cento de festa e ela puxou o croquete de
+# macaxeira de balcao (...) falou do nada que o item estava esgotado".
+checa("croquete de carne nao e renomeado na extracao",
+      _itens("50 croquete de carne") == [(50, "Croquete de Carne")])
+_FICHA_ESGOTADO = dict(memoria_mod._empty(),
+                       items=[{"name": "Croquete de Carne", "quantity": 50}])
+checa("o sabor esgotado e uma pendencia da ficha",
+      "SABOR ESGOTADO" in memoria_mod.render_ficha(_FICHA_ESGOTADO))
+checa("e o nome que sai e o do cardapio, nao o do vizinho",
+      "Croquete de carne" in memoria_mod.pergunta_bloqueante(_FICHA_ESGOTADO))
+checa("macaxeira nao aparece na pergunta",
+      "acaxeira" not in memoria_mod.pergunta_bloqueante(_FICHA_ESGOTADO))
+import json as _json  # noqa: E402
+_resp_preco = _json.loads(app._consultar_preco_handler("croquete de carne"))
+checa("consultar_preco avisa do esgotado pelo nome certo",
+      "Croquete de carne" in (_resp_preco.get("aviso") or ""))
+checa("e proibe renomear o pedido do cliente",
+      "renomear" in (_resp_preco.get("aviso") or ""))
+checa("produto disponivel nao recebe aviso de estoque",
+      not _json.loads(app._consultar_preco_handler("coxinha")).get("aviso"))
+
+
+secao("--- 26/09: triagem de tamanho picada ---")
+# "perguntou o tamanho da coxinha e do rissole em mensagens separadas. Deve
+# consolidar a triagem de tamanho em uma unica fala".
+_FICHA_DOIS_TAMANHOS = dict(memoria_mod._empty(),
+                            items=[{"name": "Coxinha", "quantity": 10},
+                                   {"name": "Rissole de Carne", "quantity": 10}])
+_dir_dois = memoria_mod.pendencia_de_item(_FICHA_DOIS_TAMANHOS)
+checa("com 2 itens sem tamanho, a ordem e perguntar junto",
+      "NA MESMA MENSAGEM" in _dir_dois)
+checa("e proibe uma pergunta por item",
+      "uma pergunta de tamanho por item" in _dir_dois)
+_frase_dois = memoria_mod.pergunta_bloqueante(_FICHA_DOIS_TAMANHOS)
+checa("a pergunta cita os dois itens de uma vez",
+      "Coxinha" in _frase_dois and "Rissole" in _frase_dois, _frase_dois)
+checa("e continua sendo uma pergunta so", _frase_dois.count("?") == 1)
+
+
 secao("--- higiene ---")
 # Escrever "\\b" por engano num arquivo grava um byte de backspace, e o regex
 # passa a nunca casar. Ja aconteceu tres vezes, sempre silencioso.

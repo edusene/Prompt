@@ -15,6 +15,12 @@ um centavo, é defeito.
 - Fora do expediente (antes das 07h40, 12h01–13h59, depois das 20h, domingo)
   ela avisa e oferece outro horário. Isso é esperado — a menos que você já
   tenha dado um dia e hora válidos, e aí ela vai direto.
+- **A oferta adicional agora é obrigatória.** Depois que os salgados estão
+  definidos e antes de pedir endereço ou mostrar o resumo, ela oferece bebida,
+  bolo ou docinho (a frase muda com a hora). Responda `Não, obrigado` e o
+  atendimento segue. Se em algum teste o resumo aparecer **sem** essa oferta
+  ter saído antes, é defeito — foi a queixa que o dono repetiu quatro vezes
+  em 26/09.
 
 ---
 

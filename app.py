@@ -239,6 +239,25 @@ def _consultar_preco_handler(produto: str = "", formato: str = "", **kwargs) -> 
 
     print(f"[facts] consultar_preco produto='{produto}' -> {len(itens)} itens")
 
+    # O item que o cliente pediu existe e esta ESGOTADO. Sem dizer isso em voz
+    # alta, o modelo lia a lista inteira, achava o vizinho mais parecido e
+    # respondia "o nome correto do sabor e Croquete de Macaxeira, mas ele esta
+    # esgotado" - trocou o sabor de lote (esgotado) pelo salgado grande de
+    # balcao (disponivel) e inventou uma falta de estoque no produto errado
+    # (teste do dono, 26/09 19h12).
+    _alvo = facts.normalize(produto)
+    _exatos = [i for i in itens if facts.normalize(i["item"]) == _alvo]
+    _aviso_estoque = ""
+    if _exatos and not any(i.get("disponivel", True) for i in _exatos):
+        _aviso_estoque = (
+            f"O item '{_exatos[0]['item']}' EXISTE no cardapio e esta ESGOTADO "
+            f"hoje. Diga isso ao cliente com esse nome EXATO e pergunte por qual "
+            f"sabor ele quer trocar. E PROIBIDO renomear o pedido dele ('o nome "
+            f"correto seria...'), PROIBIDO oferecer outro produto como se fosse o "
+            f"mesmo, e PROIBIDO dizer que esta esgotado qualquer outro item desta "
+            f"lista - os demais estao disponiveis."
+        )
+
     def _forma_de_venda(item: dict) -> str:
         formato = facts.normalize(item["formato"])
         if item["preco"] is None:
@@ -249,6 +268,7 @@ def _consultar_preco_handler(produto: str = "", formato: str = "", **kwargs) -> 
 
     return json.dumps({
         "encontrado": True,
+        **({"aviso": _aviso_estoque} if _aviso_estoque else {}),
         "itens": [
             {
                 "categoria": i["categoria"],
@@ -1489,6 +1509,54 @@ _PEDIDO_DE_DADO = {
     "payment_method": ("forma de pagamento", "pagamento"),
 }
 
+# Os dois campos que faltando() cria alem da ficha. Sem eles a checagem de
+# coleta picada nao via que a resposta estava pedindo (ou deixando de pedir) o
+# numero da casa.
+_PEDIDO_DE_DADO_EXTRA = {
+    "endereco_numero": ("numero da casa", "numero"),
+    "endereco_referencia": ("ponto de referencia", "referencia"),
+}
+
+
+# Como a pergunta de modalidade aparece. Ela e legitima uma vez; depois de o
+# cliente ter dito "para retirar", nao.
+_RX_PERGUNTA_MODALIDADE = _re_mod.compile(
+    r"entrega ou retirada|retirada ou entrega|entregar ou retirar"
+    r"|retirar ou entregar|vai ser entrega|sera entrega",
+    _re_mod.IGNORECASE)
+
+
+def _conferir_modalidade_definida(user: str, reply: str, memoria: dict) -> str:
+    """Tira a pergunta de modalidade quando a ficha ja a tem.
+
+    Irmao de _conferir_tamanho, e pela mesma razao: a ficha dizia
+    "modality: retirada" e a resposta perguntou "Sera para entrega ou retirada
+    na loja?", com o pedido pronto para o espelho. Escapava de
+    _repete_pergunta_respondida porque "modalidade" nao estava no mapa de
+    pedidos de dado e porque "Sera para..." nao e um dos verbos de pedido.
+    """
+    if not reply or not memoria.get("modality"):
+        return reply
+    if _RX_LINHA_DE_RESUMO.search(reply):
+        return reply
+    mantidas, cortadas = [], []
+    for frase in _RX_FIM_DE_FRASE.split(reply):
+        limpo = frase.strip()
+        if not limpo:
+            continue
+        if _RX_PERGUNTA_MODALIDADE.search(facts.normalize(limpo)):
+            cortadas.append(limpo)
+            continue
+        mantidas.append(limpo)
+    if not cortadas:
+        return reply
+    corpo = " ".join(mantidas).strip()
+    if len([c for c in corpo if c.isalpha()]) < 12:
+        corpo = _proxima_pergunta_do_funil(memoria)
+    print(f"[modalidade] user={user} ficha ja tem "
+          f"'{memoria['modality']}'; cortado: {' | '.join(cortadas)[:90]}")
+    return corpo.strip()
+
 
 def _conferir_pedido_de_dados(user: str, reply: str, memoria: dict) -> str:
     """Tira da lista de coleta as linhas que pedem o que a ficha ja tem.
@@ -1885,25 +1953,42 @@ def _conferir_troco(user: str, reply: str, memoria: dict,
         return reply
     if troco <= 0:
         return reply                       # nao, nao_informado ou vazio
-    if conversation_memory.faltando(memoria):
-        return reply                       # ainda coletando: corrige no fim
     # Ja esta barrando: nao reescrever a propria recusa e virar laco.
     if _RX_TROCO_INSUFICIENTE.search(facts.normalize(reply)):
         return reply
 
     numeros = calculo or _numeros_do_pedido(memoria)
     total = round(float((numeros or {}).get('total') or 0), 2)
-    if total <= 0 or troco > total:
+    # Com a ficha incompleta ainda nao existe total - falta frete, taxa de
+    # retorno. Mas o SUBTOTAL ja existe, e ele e um piso: o total nunca vai ser
+    # menor do que ele. Troco que nao cobre nem o subtotal e invalido agora, e
+    # esperar a ficha fechar era chegar um turno tarde - o dono pediu troco de
+    # R$ 80,00 para um cento de fritos de R$ 80,00 e a Sandrinha seguiu a
+    # conversa sem dizer nada (26/09 19h02).
+    piso, fechado = total, True
+    if conversation_memory.faltando(memoria):
+        subtotal = round(float((numeros or {}).get('subtotal') or 0), 2)
+        if subtotal <= 0:
+            return reply
+        piso, fechado = subtotal, False
+    if piso <= 0 or troco > piso:
         return reply
+    total = piso
 
-    print(f'[troco] user={user} troco R$ {troco:.2f} nao cobre o total '
-          f'R$ {total:.2f}; pedido barrado')
+    print(f'[troco] user={user} troco R$ {troco:.2f} nao cobre R$ {total:.2f} '
+          f'do pedido; barrado')
     memoria['troco_para'] = ''
     conversation_memory.save(user, memoria)
-    return (f'O total do seu pedido deu {conversation_memory._brl(total)}. O valor '
-            f'para troco '
-            f'precisa ser maior que o total da compra. Dinheiro para '
-            f'quanto? 💵')
+    if fechado:
+        return (f'O total do seu pedido deu {conversation_memory._brl(total)}. '
+                f'O valor para troco precisa ser maior que o total da compra. '
+                f'Dinheiro para quanto? 💵')
+    # Ficha aberta: o numero em maos e o dos salgados, e o total ainda vai
+    # subir com o frete. Dizer "o total deu" aqui seria informar um valor que
+    # nao e o total.
+    return (f'Só os salgados já dão {conversation_memory._brl(total)}, e ainda '
+            f'entra a taxa de entrega. O valor para troco precisa ser maior que '
+            f'o total da compra. Dinheiro para quanto? 💵')
 
 # Como ela confirma que entrega num bairro.
 # O bairro que ela citou ao confirmar, para consultar a tabela.
@@ -2073,8 +2158,386 @@ def _conferir_aula_de_lote(user: str, reply: str, memoria: dict) -> str:
         return novo
     return _proxima_pergunta_do_funil(memoria)
 
+# -- BLOCO 6: fiado, desconto, e o papel da Sandrinha -----------------------
+
+# Como o cliente pede para pagar depois. Nao e uma palavra: e a promessa de
+# pagamento para OUTRO momento. "Posso te pagar na segunda-feira sem falta?" e
+# "deixa anotado que acerto com ele no fim do mes" passaram batido nos dois
+# testes em que o dono cobrou a trava de fiado (26/09 18h58 e 19h27).
+_RX_FIADO = _re_mod.compile(
+    r"\bfiad[oa]\b|\bcaderneta\b|\bpendura\b"
+    r"|(?:deixa|deixe|pode)\s+(?:ai\s+|a[ií]\s+)?anotad"
+    r"|\banota\s+(?:ai|la|a[ií]|l[áa]|comigo)\b"
+    r"|\bacerto\s+(?:com|no|na|depois|contigo|voce|voc[êe]|tudo)"
+    r"|\bacerta\s+(?:com|no|na|depois)"
+    r"|\bpag(?:o|ar|amos|arei)\s+(?:voce\s+|voc[êe]\s+|te\s+|pra\s+voce\s+|pro\s+|pra\s+)?"
+    r"(?:depois|amanha|amanh[ãa]|semana que vem|na semana|no fim do mes"
+    r"|no fim do m[êe]s|quando|dia \d|no dia|outro dia|mes que vem|m[êe]s que vem"
+    r"|na segunda|na ter[çc]a|na quarta|na quinta|na sexta|no s[áa]bado)"
+    r"|\bpagar\s+depois\b|\bpago\s+depois\b|\bdepois\s+eu\s+pago\b"
+    r"|\bfim\s+do\s+m[êe]s\b|\bquando\s+eu\s+receber\b",
+    _re_mod.IGNORECASE)
+
+# Como ela ja nega o fiado. Serve para nao repetir a negativa em cima dela.
+_RX_NEGA_FIADO = _re_mod.compile(
+    r"nao libera fiado|n[ãa]o libera fiado|nao trabalhamos com fiado"
+    r"|n[ãa]o trabalhamos com fiado|nao fazemos fiado|n[ãa]o fazemos fiado"
+    r"|sem fiado|fiado de jeito nenhum",
+    _re_mod.IGNORECASE)
+
+# Fiado sem duvida nenhuma. Serve para desempatar quando a mensagem tambem fala
+# de pagar na entrega: "acerto com voce na entrega" e pagamento normal,
+# "acerto com ele no fim do mes" e fiado.
+_RX_FIADO_FORTE = _re_mod.compile(
+    r"\bfiad[oa]\b|\bcaderneta\b|\bpendura\b|anotad|\bfim do m[êe]s\b"
+    r"|\bdepois\b|\bsemana que vem\b|\bm[êe]s que vem\b|\bquando eu receber\b"
+    r"|\boutro dia\b",
+    _re_mod.IGNORECASE)
+
+# Pagamento no ato, que NAO e fiado.
+_RX_PAGA_NO_ATO = _re_mod.compile(
+    r"\bna entrega\b|\bno ato\b|\bna hora\b|\bna retirada\b|\bno balc[ãa]o\b"
+    r"|\bantecipad[oa]\b|\badiantad[oa]\b",
+    _re_mod.IGNORECASE)
+
+# Sem o nome do cliente: quem monta a frase preenche.
+_NEGATIVA_DE_FIADO = ("{nome}a fábrica não libera fiado de jeito nenhum! "
+                      "Aceitamos Pix, cartão ou dinheiro.")
+
+# Como o cliente pede abatimento. Inclui o frete, que e o que o dono cobrou
+# duas vezes ("nao defendeu o frete", "ignorou o pedido de desconto no frete").
+_RX_DESCONTO = _re_mod.compile(
+    r"\bdesconto\b|\bdescontinho\b|\babatiment\w*|\bcortesia\b"
+    r"|\bde\s+gra[cç]a\b|\bgratis\b|\bgr[áa]tis\b"
+    r"|\b(?:faz|fazer|sai|sair|deixa|deixar|d[áa]|dar)\s+(?:por\s+)?menos\b"
+    r"|\bmelhora\s+o\s+(?:pre[cç]o|valor|frete)\b"
+    r"|\b(?:baixa|abaixa|tira|reduz)\s+(?:o\s+|a\s+)?(?:pre[cç]o|valor|frete|taxa)\b"
+    r"|\bpre[cç]o\s+especial\b|\bcondi[cç][ãa]o\s+especial\b|\bquebra\s+o\s+galho\b",
+    _re_mod.IGNORECASE)
+
+# Como ela ja defende o preco.
+_RX_DEFENDE_PRECO = _re_mod.compile(
+    r"direto de f[áa]brica|frete (?:e|é) tabelado|tabelado"
+    r"|n[ãa]o consigo mexer|nao consigo mexer|valor m[íi]nimo|inegoci[áa]vel",
+    _re_mod.IGNORECASE)
+
+DEFESA_DE_PRECO = ("Nosso preço já é direto de fábrica no valor mínimo e o "
+                   "frete é tabelado, não consigo mexer mesmo!")
+
+# Vazamento de papel: a Sandrinha falando como quem MANTEM o agente, e nao
+# como quem atende na Balb's. O dono cobrou isso por escrito: "respondeu como
+# programadora ('vou ajustar o gatilho') e saiu do papel de atendente. Tem que
+# blindar o prompt contra vazamento tecnico" (26/09 18h12). Voltou as 19h02
+# ("Entendi, obrigado pelo feedback detalhado! Vou corrigir o atendimento
+# conforme as regras").
+_RX_VAZAMENTO_TECNICO = _re_mod.compile(
+    r"\bgatilh\w+|\bprompt\w*|\bbloco\s*\d|\bfluxo\s+do\s+funil\b|\bfunil\b"
+    # "IA" so em MAIUSCULA: com IGNORECASE, "\bIA\b" casaria com o "ia" de
+    # "ia ficar pronto" e descartaria uma resposta boa.
+    r"|\bfeedback\b|\bsystem\b|\btool\b|(?-i:\bIA\b)|\bintelig[êe]ncia artificial\b"
+    r"|\brob[ôo]\b|\bassistente virtual\b|\bmodelo de linguagem\b"
+    r"|\bconfigura[cç][ãa]o\b|\bconfigurar\b"
+    r"|\bajustar (?:o|a|as|os) \w*(?:regra|gatilho|fluxo|etapa)"
+    r"|\bconforme as regras\b|\bcorrigir o atendimento\b|\bdesenvolvedor\b"
+    r"|\bprogramad\w+|\bc[óo]digo\b|\bscript\b|\binstru[cç][õo]es\b"
+    r"|\bvou ajustar\b|\bvou corrigir\b|\bregra do bloco\b",
+    _re_mod.IGNORECASE)
+
+
+def _tira_pergunta_final(frase: str) -> str:
+    """Transforma o convite final em afirmacao, para nao virar 2a pergunta.
+
+    As frases do BLOCO 6 terminam em convite ("Bora fechar no Pix?"). Quando
+    elas entram em cima de uma resposta que JA pergunta algo, o dono cobra o
+    contrario: "a regra exige terminar com apenas uma pergunta objetiva"
+    (26/09 19h27). Aqui o convite sai e a negativa fica.
+    """
+    partes = [t.strip() for t in _re_mod.split(r"(?<=[.!?])\s+", frase or "")
+              if t.strip()]
+    mantidas = [t for t in partes if "?" not in t]
+    return " ".join(mantidas).strip() or (frase or "").strip()
+
+
+def _juntar_antes(canned: str, reply: str) -> str:
+    """Poe a frase obrigatoria ANTES da resposta, sem criar duas perguntas."""
+    reply = (reply or "").strip()
+    if not reply:
+        return canned
+    if "?" in reply:
+        canned = _tira_pergunta_final(canned)
+    return f"{canned}\n\n{reply}".strip()
+
+
+# Como a oferta adicional do BLOCO 2 aparece na resposta. Serve para marcar na
+# ficha que o upsell ja saiu - sem isso ele voltaria em toda mensagem.
+_RX_OFERECEU_ACOMPANHAMENTO = _re_mod.compile(
+    r"pra acompanhar|pro lanche da tarde|bolo de milho|refrigerante"
+    r"|guaran[áa] tuchaua|tuchaua|docinho|brigadeiro|beijinho|refri",
+    _re_mod.IGNORECASE)
+
+
+def _ofereceu_acompanhamento(reply: str) -> bool:
+    """A resposta fez a oferta adicional (bebida, bolo ou doce)?"""
+    return bool(reply) and bool(_RX_OFERECEU_ACOMPANHAMENTO.search(reply))
+
+
+def _conferir_fiado(user: str, pedido_do_cliente: str, reply: str,
+                    memoria: dict) -> str:
+    """Nega o fiado sempre que o cliente propor pagar depois.
+
+    A regra esta no BLOCO 6 e mesmo assim passou batido em dois testes
+    seguidos. Proibir no prompt e instrucao; aqui e conta.
+    """
+    if not pedido_do_cliente or not _RX_FIADO.search(pedido_do_cliente):
+        return reply
+    # "Acerto com voce na entrega" nao e fiado, e pagamento no ato. So o sinal
+    # forte (fiado, caderneta, anotado, fim do mes, depois) desempata.
+    if (_RX_PAGA_NO_ATO.search(pedido_do_cliente)
+            and not _RX_FIADO_FORTE.search(pedido_do_cliente)):
+        return reply
+    if reply and _RX_NEGA_FIADO.search(reply):
+        return reply
+    nome = (memoria.get("name") or "").strip()
+    if nome:
+        canned = _NEGATIVA_DE_FIADO.format(nome=f"{nome}, ")
+    else:
+        canned = _NEGATIVA_DE_FIADO.format(nome="")
+        canned = canned[0].upper() + canned[1:]
+    print(f"[bloco6] user={user} cliente propos fiado; "
+          f"negativa da fabrica acrescentada")
+    return _juntar_antes(canned, reply)
+
+
+def _conferir_desconto(user: str, pedido_do_cliente: str, reply: str) -> str:
+    """Defende o preco e o frete sempre que o cliente pedir abatimento."""
+    if not pedido_do_cliente or not _RX_DESCONTO.search(pedido_do_cliente):
+        return reply
+    if reply and _RX_DEFENDE_PRECO.search(reply):
+        return reply
+    print(f"[bloco6] user={user} pedido de desconto sem negativa; "
+          f"defesa de preco acrescentada")
+    return _juntar_antes(DEFESA_DE_PRECO, reply)
+
+
+def _conferir_vazamento_tecnico(user: str, reply: str, memoria: dict) -> str:
+    """Descarta a resposta em que a Sandrinha sai do papel de atendente.
+
+    Nao da para aparar frase: quando ela comeca a falar de gatilho, prompt ou
+    feedback, a mensagem inteira e sobre a manutencao do agente e nao sobre o
+    pedido do cliente. Quem escreve nesse caso e o codigo, que sabe em que
+    ponto do funil a conversa esta.
+    """
+    if not reply or not _RX_VAZAMENTO_TECNICO.search(reply):
+        return reply
+    # O espelho do pedido nunca e vazamento: ele tem numero, nao meta-conversa.
+    if _RX_LINHA_DE_RESUMO.search(reply):
+        return reply
+    troca = _proxima_pergunta_do_funil(memoria)
+    print(f"[persona] user={user} resposta saiu do papel da Sandrinha "
+          f"({reply[:70]!r}); reescrita pelo codigo")
+    return troca or "Me conta, qual delícia vamos pedir? 💛"
+
+
+# Linha/frase que COBRA um dado de logistica. Serve para tirar da resposta a
+# coleta que saiu antes da hora, sem jogar fora o que ela informa de util.
+_RX_COBRA_LOGISTICA = _re_mod.compile(
+    r"\bbairro\b|\bendereco\b|\brua\b|\bnumero da casa\b|\bnumero\b"
+    r"|\bforma de pagamento\b|\bpagamento\b|\bpix antecipado\b"
+    r"|\bqual dia\b|\bque dia\b|\bdata do pedido\b|\bhorario\b|\bque horas\b"
+    r"|\bentrega ou retirada\b",
+    _re_mod.IGNORECASE)
+
+
+def _conferir_etapa_travada(user: str, reply: str, memoria: dict) -> str:
+    """Poe de volta a etapa do funil que a resposta pulou.
+
+    Tamanho, sabor nao identificado, sabor esgotado, lote quebrado e oferta
+    adicional vem ANTES de bairro, endereco, dia, horario e pagamento. A ficha
+    ja diz isso e mesmo assim a resposta saiu cobrando logistica com o lote
+    quebrado em tres dos testes de 26/09 - foi a primeira queixa do dono no
+    dia ("o fluxo correto e travar a regra dos sabores em lotes de 25 antes de
+    puxar os dados de entrega") e a ultima (upsell pulado).
+
+    Nao descarta a resposta inteira: o que ela INFORMA (taxa de entrega,
+    prazo, uma duvida respondida) continua valendo - a regra 10 manda
+    responder a pergunta do cliente primeiro. Sai so a coleta prematura e
+    qualquer outra pergunta; entra a etapa travada, no fim.
+    """
+    if not reply:
+        return reply
+    travada = conversation_memory.pergunta_bloqueante(memoria)
+    if not travada:
+        return reply
+
+    # Espelho do pedido com etapa travada nao se conserta por frase: o pedido
+    # inteiro esta errado (quantidade, sabor ou estoque). Vale a pergunta.
+    if _RX_LINHA_DE_RESUMO.search(reply):
+        print(f"[funil] user={user} espelho apresentado com etapa travada "
+              f"({travada[:50]!r}); trocado pela pergunta")
+        return travada
+
+    # Sai so o que cobra LOGISTICA. Uma pergunta qualquer nao e cortada aqui:
+    # cortar por "?" apagava a segunda metade da propria frase de lote
+    # ("Fazemos de 25 em 25 por sabor!" numa sentenca, "Ajusto para 25 coxinha,
+    # 25 quibe e 50 bolinha?" na outra) e o cliente recebia a regra sem os
+    # sabores. Pergunta sobrando e problema de _conferir_uma_pergunta, que roda
+    # depois e mantem a ultima.
+    mantidas, cortadas = [], []
+    for frase in _RX_FIM_DE_FRASE.split(reply):
+        limpo = frase.strip()
+        if not limpo:
+            continue
+        if _RX_COBRA_LOGISTICA.search(facts.normalize(limpo)):
+            cortadas.append(limpo)
+            continue
+        mantidas.append(limpo)
+
+    corpo = " ".join(mantidas).strip()
+    ja_cobriu = conversation_memory.etapa_coberta(memoria, corpo)
+    if not cortadas and ja_cobriu:
+        return reply                        # ja estava certa
+
+    if len([c for c in corpo if c.isalpha()]) < 12:
+        novo = travada
+    elif ja_cobriu:
+        novo = corpo
+    else:
+        novo = f"{corpo}\n\n{travada}"
+    print(f"[funil] user={user} etapa travada ({travada[:40]!r}): "
+          f"cobriu={ja_cobriu} cortado={' | '.join(cortadas)[:100]!r}")
+    return novo.strip()
+
+
+def _campos_pedidos_na_resposta(reply: str, campos: list) -> set:
+    """Quais desses campos a resposta esta pedindo."""
+    norm = facts.normalize(reply or "")
+    mapa = {**_PEDIDO_DE_DADO, **_PEDIDO_DE_DADO_EXTRA}
+    return {c for c in campos
+            if any(p in norm for p in mapa.get(c, (c,)))}
+
+
+def _conferir_coleta_picada(user: str, reply: str, memoria: dict) -> str:
+    """Na entrega, o que falta e cobrado de uma vez - nunca aos pingos.
+
+    O prompt manda pedir bairro, rua com numero, dia, horario e pagamento numa
+    unica mensagem, em lista vertical, e a ficha repete a ordem. Mesmo assim a
+    resposta saiu com duas mensagens pedindo so o bairro, faltando outros tres
+    dados: o dono chamou isso de coleta picada (26/09 19h02).
+    """
+    if not reply or _RX_LINHA_DE_RESUMO.search(reply):
+        return reply
+    if memoria.get("modality") != "entrega":
+        return reply
+    if conversation_memory.pergunta_bloqueante(memoria):
+        return reply          # a etapa travada vem antes; outra guarda trata
+    pendentes = conversation_memory.faltando(memoria)
+    if len(pendentes) < 2:
+        return reply
+    pedidos = _campos_pedidos_na_resposta(reply, pendentes)
+    if not pedidos or pedidos >= set(pendentes):
+        return reply          # nao cobra nada, ou cobra tudo: esta certa
+
+    # Mantem o que a resposta INFORMA e troca o pedaco que cobra dado pela
+    # lista inteira. Perder a resposta a uma duvida do cliente seria pior.
+    mantidas = []
+    for frase in _RX_FIM_DE_FRASE.split(reply):
+        limpo = frase.strip()
+        if not limpo:
+            continue
+        norm = facts.normalize(limpo)
+        if "?" in limpo or _RX_COBRA_LOGISTICA.search(norm):
+            continue
+        mantidas.append(limpo)
+    corpo = " ".join(mantidas).strip()
+    lista = _proxima_pergunta_do_funil(memoria)
+    novo = f"{corpo}\n\n{lista}" if len(
+        [c for c in corpo if c.isalpha()]) >= 12 else lista
+    print(f"[coleta] user={user} a resposta pedia so "
+          f"{sorted(pedidos)} de {pendentes}; lista completa no lugar")
+    return novo.strip()
+
+
+def _conferir_troco_no_espelho(user: str, reply: str, memoria: dict) -> str:
+    """Poe o troco de volta na linha de pagamento do espelho.
+
+    O cliente pediu "traz troco pra 150" na primeira mensagem, a ficha guardou
+    o valor certo, e o espelho saiu com "Pagamento: Dinheiro na entrega" -
+    sem o troco. O dono chamou isso de amnesia de troco (26/09 18h32). O
+    espelho do codigo (montar_resumo) ja traz o troco; o que escapa e o
+    espelho que o MODELO escreve por conta propria, e como o total estava
+    certo _conferir_dinheiro nao tinha motivo para troca-lo.
+    """
+    if not reply or "\U0001f4b3" not in reply:
+        return reply
+    troco = (memoria.get("troco_para") or "").strip()
+    if not troco or troco == "nao_informado":
+        return reply
+    if (memoria.get("payment_method") or "").strip().lower() != "dinheiro":
+        return reply
+    linhas = reply.split("\n")
+    for i, linha in enumerate(linhas):
+        if "\U0001f4b3" not in linha:
+            continue
+        if "troco" in facts.normalize(linha):
+            return reply
+        try:
+            total = float((_numeros_do_pedido(memoria) or {}).get("total") or 0)
+        except (TypeError, ValueError):
+            total = 0.0
+        rotulo = cardapio._rotulo_pagamento("dinheiro", troco, total)
+        linhas[i] = f"\U0001f4b3 Pagamento: {rotulo}"
+        print(f"[troco] user={user} espelho saiu sem o troco da ficha "
+              f"({troco}); linha de pagamento reescrita")
+        return "\n".join(linhas)
+    return reply
+
+
+# Onde termina uma pergunta. Serve para contar quantas a mensagem faz.
+_RX_FRASE_COM_PERGUNTA = _re_mod.compile(r"[^.!?\n]*\?")
+
+
+def _conferir_uma_pergunta(user: str, reply: str) -> str:
+    """Deixa UMA pergunta na mensagem, a ultima.
+
+    "A regra exige terminar com apenas uma pergunta objetiva" - o dono, 26/09
+    19h27, depois de receber "Bora montar o seu pedido? (...) Quais sabores e
+    preparo prefere?" na mesma mensagem.
+
+    Nao toca no espelho (que termina com a confirmacao) nem em lista vertical
+    de coleta, onde o "?" unico fica no cabecalho.
+    """
+    if not reply or _RX_LINHA_DE_RESUMO.search(reply):
+        return reply
+    perguntas = [p.strip() for p in _RX_FRASE_COM_PERGUNTA.findall(reply)
+                 if p.strip()]
+    if len(perguntas) < 2:
+        return reply
+    # Mantem a ULTIMA: e a que puxa o proximo passo do funil. As anteriores
+    # saem, para a mensagem terminar em uma pergunta objetiva.
+    ultima = perguntas[-1]
+    corte = reply.rfind(ultima)
+    cabeca, cauda = reply[:corte], reply[corte:]
+    for p in perguntas[:-1]:
+        cabeca = cabeca.replace(p, "")
+    limpo = _re_mod.sub(r"[ \t]{2,}", " ", cabeca).strip()
+    limpo = _re_mod.sub(r"\n{3,}", "\n\n", limpo)
+    novo = (f"{limpo}\n\n{cauda.strip()}" if limpo else cauda.strip())
+    if len([c for c in novo if c.isalpha()]) < 12:
+        return reply
+    print(f"[formato] user={user} a resposta fazia {len(perguntas)} perguntas; "
+          f"mantida so a ultima")
+    return novo.strip()
+
+
 def _proxima_pergunta_do_funil(memoria: dict) -> str:
     """Texto de codigo para seguir o atendimento, sem passar pelo modelo."""
+    # O que trava o funil vem antes de qualquer coleta: tamanho, sabor nao
+    # identificado, sabor esgotado, lote quebrado e a oferta adicional. Sem
+    # esta linha o codigo pulava as mesmas etapas que ele tira do modelo -
+    # partia direto para pedir bairro e pagamento com o lote ainda quebrado.
+    travada = conversation_memory.pergunta_bloqueante(memoria)
+    if travada:
+        return travada
     pendentes = conversation_memory.faltando(memoria)
     if not pendentes:
         # Nada falta: o proximo passo e o espelho, nao mais uma pergunta. Pedir
@@ -2477,7 +2940,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
         _agendou_valido = False
         if not _expediente["aberto"] and _memoria.get("data_iso") and _memoria.get("horario"):
             try:
-                _ok_ag, _, _ = horario.validar_agendamento(
+                _ok_ag, _, _, _ = horario.validar_agendamento(
                     date.fromisoformat(_memoria["data_iso"]),
                     _memoria["horario"], _agora,
                 )
@@ -2521,13 +2984,19 @@ def handle_flush(user: str, items: list[dict]) -> None:
             return
 
         if _memoria.get("data_iso") and _memoria.get("horario"):
-            _ok, _motivo, _sugestao = horario.validar_agendamento(
+            _ok, _motivo, _sugestao, _campo_invalido = horario.validar_agendamento(
                 date.fromisoformat(_memoria["data_iso"]), _memoria["horario"], _agora
             )
             if not _ok and _motivo and not _motivo.startswith("Falta"):
                 # Limpa so o campo que nao cabe, para o agente reperguntar esse
-                # e nao a ficha inteira.
-                if "horario" in _motivo.lower() or "intervalo" in _motivo.lower() or "20h00" in _motivo:
+                # e nao a ficha inteira. Quem diz qual campo e a validacao: ler
+                # isso do texto da recusa procurava "horario" sem acento numa
+                # mensagem que escreve "horário", nunca casava, e o codigo
+                # apagava a DATA que o cliente tinha acabado de dar. Ele dizia
+                # "hoje as 19h", ouvia que o horario ja passou, respondia "as
+                # 20 horas" e era perguntado do DIA de novo (teste do dono,
+                # 26/09 19h21).
+                if _campo_invalido == "horario":
                     _memoria["horario"] = ""
                 else:
                     _memoria["data_iso"] = ""
@@ -2613,6 +3082,19 @@ def handle_flush(user: str, items: list[dict]) -> None:
                 conversation_memory.save(user, _memoria)
                 print(f"[memoria] {user}: ajuste de lote aceito -> "
                       f"{'; '.join(_ajustes)}")
+
+        # Cliente dizendo qual era o sabor ("pastel de carne mesmo"). Tem de
+        # virar item na FICHA: enquanto ficava so no texto, a pergunta do sabor
+        # voltava a cada mensagem e o pedido nao andava - o mesmo defeito que o
+        # aceite de lote ja tinha tido.
+        if _memoria.get("sabores_pendentes"):
+            _escolha_sabor = conversation_memory.aplicar_escolha_de_sabor(
+                _memoria, text_only
+            )
+            if _escolha_sabor:
+                conversation_memory.save(user, _memoria)
+                print(f"[memoria] {user}: sabor escolhido -> "
+                      f"{'; '.join(_escolha_sabor)}")
 
         if _campo_direto:
             conversation_memory.save(user, _memoria)
@@ -2759,6 +3241,27 @@ def handle_flush(user: str, items: list[dict]) -> None:
             "PERGUNTAR sobre entrega nao e o cliente ESCOLHER entrega."
             "\n9. Quando o cliente define a quantidade (ex: '50 coxinhas'), aceite o lote "
             "correspondente e nao questione o formato."
+            "\n9.1 ORDEM DO FUNIL (inegociavel): Produto/Tamanho -> OFERTA "
+            "ADICIONAL -> Endereco ou Retirada -> Resumo -> Fechamento. Enquanto "
+            "houver quantidade fora do multiplo de 25, sabor nao identificado ou "
+            "sabor esgotado, e PROIBIDO pedir bairro, endereco, dia, horario ou "
+            "forma de pagamento, e PROIBIDO apresentar resumo: primeiro resolva o "
+            "item. A OFERTA ADICIONAL (bebida/bolo/docinho) vem depois do item e "
+            "ANTES da logistica, uma vez por atendimento - e a etapa que mais se "
+            "perde."
+            "\n9.2 PERSONA: voce e a Sandrinha, atendente da BALBS. NUNCA fale de "
+            "prompt, gatilho, bloco, regra, fluxo, configuracao, feedback, codigo "
+            "ou ajuste do atendimento, e nunca se apresente como IA, robo ou "
+            "assistente virtual - nem quando o cliente reclamar do proprio "
+            "atendimento. Nessa hora voce responde como atendente: pede desculpa "
+            "em uma linha e retoma o pedido de onde parou."
+            "\n9.3 FIADO E DESCONTO (BLOCO 6): cliente propondo pagar depois "
+            "(\'pago na segunda\', \'acerto no fim do mes\', \'deixa anotado\') recebe "
+            "a negativa de fiado NA MESMA resposta. Pedido de desconto ou de "
+            "abatimento no frete recebe a defesa de preco NA MESMA resposta. "
+            "Ignorar em silencio nao e opcao."
+            "\n9.4 UMA PERGUNTA: fora da lista vertical de coleta e do espelho, a "
+            "mensagem termina com UMA pergunta objetiva - nunca duas."
             "\n10. SEMPRE responda primeiro a pergunta que o cliente fez (preco, frete, "
             "horario, endereco, forma de pagamento, se tem determinado produto) e so "
             "depois puxe o proximo dado do funil, na mesma mensagem. Isso vale tambem no "
@@ -3150,14 +3653,19 @@ def handle_flush(user: str, items: list[dict]) -> None:
         # vale enquanto o pedido nao foi enviado: depois do envio a resposta
         # fala de um pedido que ja existe, com os valores que foram gravados.
         if not _pedido_saiu and not _transfer_done:
+            # Primeiro de todos: resposta que fala de gatilho, prompt ou
+            # feedback nao e da Sandrinha, e nao ha o que conferir nela.
+            reply = _conferir_vazamento_tecnico(user, reply, _memoria)
             reply = _conferir_dinheiro(user, reply, _memoria, _calculo_da_volta,
                                        pular=_calculou_na_volta and not _calculo_da_volta)
+            reply = _conferir_troco_no_espelho(user, reply, _memoria)
             # Mesma ideia, para a pergunta de tamanho: com 21 unidades ou mais
             # nao ha duvida a resolver, e a frase nao pode chegar ao cliente
             # por mais que o modelo insista em escreve-la.
             reply = _conferir_troco(user, reply, _memoria, _calculo_da_volta)
             reply = _conferir_frete_dito(user, reply, _memoria)
             reply = _conferir_tamanho(user, reply, _memoria)
+            reply = _conferir_modalidade_definida(user, reply, _memoria)
             # E nao pede de novo o que o cliente ja respondeu.
             reply = _conferir_pedido_de_dados(user, reply, _memoria)
             reply = _conferir_sem_numero(user, reply)
@@ -3176,6 +3684,16 @@ def handle_flush(user: str, items: list[dict]) -> None:
                 print(f"[coleta] user={user} a resposta pedia de novo "
                       f"{_repetidos}; pergunta reescrita pelo codigo")
                 reply = _proxima_pergunta_do_funil(_memoria)
+
+            # Por ultimo, porque as tres reescrevem a resposta inteira e tem de
+            # ver o texto final: a etapa do funil que faltava, a coleta em lista
+            # unica, e as negativas de fiado e de desconto. Quando isto rodava
+            # antes do bloco de recoleta acima, a negativa de fiado era posta na
+            # resposta e apagada duas linhas depois.
+            reply = _conferir_etapa_travada(user, reply, _memoria)
+            reply = _conferir_coleta_picada(user, reply, _memoria)
+            reply = _conferir_fiado(user, text_only, reply, _memoria)
+            reply = _conferir_desconto(user, text_only, reply)
 
         # O cliente confirmou o resumo, o modelo escreveu que fechou, mas a tool
         # nunca foi chamada — o pedido nao existe em lugar nenhum e o cliente
@@ -3209,7 +3727,13 @@ def handle_flush(user: str, items: list[dict]) -> None:
             # horario, endereco e pagamento. Sem isso o codigo fecharia um
             # pedido que ainda tem pergunta em aberto.
             _falta_na_ficha = conversation_memory.faltando(_memoria)
-            _tentou_enviar = bool(_itens_ficha) and _total_ficha > 0 and not _falta_na_ficha
+            # Pendencia de item (sabor nao identificado, sabor esgotado, lote
+            # quebrado) nao aparece em faltando(), que so olha campos da ficha.
+            # Sem esta checagem um pedido com 40 coxinhas - que nao fecha lote -
+            # podia ir para a comanda so porque o resto da ficha estava cheio.
+            _travada = conversation_memory.pergunta_bloqueante(_memoria)
+            _tentou_enviar = (bool(_itens_ficha) and _total_ficha > 0
+                              and not _falta_na_ficha and not _travada)
             # Lido AGORA: o envio bem sucedido chama registrar_pedido_enviado,
             # que fecha a ficha — depois dele o pagamento ja nao esta la, e a
             # mensagem de Pix saia como a de cartao.
@@ -3242,7 +3766,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
                 # qualquer valor aqui seria invencao. Melhor uma pessoa.
                 print(f"[flush] user={user} aceite do resumo sem ficha completa "
                       f"para enviar (itens={len(_itens_ficha)} total={_total_ficha} "
-                      f"falta={_falta_na_ficha})")
+                      f"falta={_falta_na_ficha} travada={_travada[:60]!r})")
                 _resultado_auto = ""
 
             if _pedido_saiu:
@@ -3334,6 +3858,23 @@ def handle_flush(user: str, items: list[dict]) -> None:
             if reply:
                 print(f"[flush] user={user} resposta vazia do modelo; "
                       f"escrita pelo codigo")
+
+        if not _pedido_saiu and not _transfer_done:
+            # Valem sobre o texto FINAL, inclusive quando ele foi reescrito pelo
+            # codigo depois das conferencias: sao idempotentes e nao repetem a
+            # negativa que ja estiver na mensagem.
+            reply = _conferir_fiado(user, text_only, reply, _memoria)
+            reply = _conferir_desconto(user, text_only, reply)
+            # E, depois de todas as trocas, a mensagem termina com UMA pergunta
+            # objetiva. O dono cobrou isso na dupla pergunta do fechamento
+            # (26/09 19h27).
+            reply = _conferir_uma_pergunta(user, reply)
+
+        # A oferta adicional saiu? Entao ela nao volta na proxima mensagem.
+        if reply and not _memoria.get("upsell_feito") and _ofereceu_acompanhamento(reply):
+            _memoria["upsell_feito"] = True
+            conversation_memory.save(user, _memoria)
+            print(f"[upsell] user={user} oferta adicional feita")
 
         memory.append(user, "assistant", reply)
         print(f"[flush] user={user} reply_len={len(reply)}")

@@ -278,41 +278,48 @@ def validar_agendamento(
     data_pedido: date | None,
     horario_texto: str,
     now: datetime | None = None,
-) -> tuple[bool, str, date | None]:
+) -> tuple[bool, str, date | None, str]:
     """Checa se data + horario cabem no expediente.
 
-    Retorna (ok, mensagem, data_sugerida). Quando nao cabe, a mensagem ja traz
-    a alternativa para o cliente — a recusa nunca sai sem uma saida — e, se a
-    alternativa for um DIA (e nao um horario no mesmo dia), ele vem no terceiro
-    campo. Quem chama precisa dele: sem guardar o dia oferecido, o "pode sim"
-    do cliente logo depois nao tinha data nenhuma para preencher e a pergunta
-    era repetida.
+    Retorna (ok, mensagem, data_sugerida, campo). Quando nao cabe, a mensagem
+    ja traz a alternativa para o cliente — a recusa nunca sai sem uma saida — e,
+    se a alternativa for um DIA (e nao um horario no mesmo dia), ele vem no
+    terceiro campo. Quem chama precisa dele: sem guardar o dia oferecido, o
+    "pode sim" do cliente logo depois nao tinha data nenhuma para preencher e a
+    pergunta era repetida.
+
+    `campo` diz QUAL dado nao cabe — "data" ou "horario" — para quem chama
+    limpar so esse. Antes quem chamava adivinhava lendo a mensagem
+    (`"horario" in motivo.lower()`), e a mensagem escreve "horário", com
+    acento: a comparacao dava False, o codigo limpava a DATA no lugar da hora e
+    o cliente que ja tinha dito "hoje" era perguntado do dia de novo (teste do
+    dono, 26/09 19h21). Campo em vez de texto nao tem como errar acento.
     """
     now = now or agora()
 
     if data_pedido is None:
-        return False, "Falta a data do pedido.", None
+        return False, "Falta a data do pedido.", None, "data"
 
     if data_pedido < now.date():
-        return False, "Essa data já passou. Para qual dia você quer o pedido? 😊", None
+        return False, "Essa data já passou. Para qual dia você quer o pedido? 😊", None, "data"
 
     if not eh_dia_util(data_pedido):
         proximo = proximo_dia_util(data_pedido + timedelta(days=1))
         return False, (
             "Aos domingos a gente não abre! Posso deixar para "
             f"{formatar_data(proximo, now)}? 😊"
-        ), proximo
+        ), proximo, "data"
 
     hm = parse_horario(horario_texto)
     if hm is None:
-        return False, "Falta o horario do pedido.", None
+        return False, "Falta o horario do pedido.", None, "horario"
 
     minuto_pedido = _minutos(*hm)
 
     if minuto_pedido < _minutos(*ABERTURA):
         return False, (
             "A gente só começa às 07h40! Pode ser a partir desse horário? 😊"
-        ), None
+        ), None, "horario"
 
     # ">" e nao ">=": a loja atende ATE as 20h, entao 20h00 e horario valido
     # - o ultimo. Com ">=" ela recusava as 20h em ponto e mandava o cliente
@@ -322,22 +329,22 @@ def validar_agendamento(
         return False, (
             "Nosso atendimento vai até às 20h00! Qual horário antes disso "
             "funciona melhor pra você? 😊"
-        ), None
+        ), None, "horario"
 
     if _minutos(*INTERVALO_INICIO) <= minuto_pedido <= _minutos(*INTERVALO_FIM):
         return False, (
             "Das 12h01 às 13h59 estamos no intervalo de almoço! Pode ser às 14h "
             "ou prefere antes das 12h? 😊"
-        ), None
+        ), None, "horario"
 
     # Horario de hoje que ja passou nao e agendamento, e pedido perdido.
     if data_pedido == now.date() and minuto_pedido <= _minutos(now.hour, now.minute):
         return False, (
             f"Esse horário de hoje já passou (agora são {now.strftime('%Hh%M')})! "
             "Qual outro horário fica bom? 😊"
-        ), None
+        ), None, "horario"
 
-    return True, "", None
+    return True, "", None, ""
 
 
 def contexto_para_prompt(now: datetime | None = None) -> str:

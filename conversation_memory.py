@@ -23,7 +23,8 @@ _CAMPOS_REVISAVEIS = (
     "horario", "data_agendada", "data_iso", "payment_method",
 )
 
-_CAMPOS = _CAMPOS_REVISAVEIS + ("items", "volume_pendente", "sem_numero")
+_CAMPOS = _CAMPOS_REVISAVEIS + ("items", "volume_pendente", "sem_numero",
+                                "sabores_pendentes")
 
 _ROTULOS = {
     "name": "Nome do cliente",
@@ -52,6 +53,10 @@ def _empty() -> dict:
         "name": "",
         "items": [],
         "volume_pendente": 0,
+        # Quantidades ditas com uma palavra que serve a varios sabores
+        # ("30 de carne"). [{"qtd", "termo", "opcoes"}]. Nao viram item: viram
+        # pergunta. Enquanto ficarem aqui, o funil nao anda.
+        "sabores_pendentes": [],
         "modality": "",
         "bairro": "",
         "endereco": "",
@@ -81,6 +86,11 @@ def _empty() -> dict:
         "pedido_enviado": False,
         # A saudacao sai uma vez so, e na primeira resposta.
         "saudacao_feita": False,
+        # A OFERTA ADICIONAL do BLOCO 2 (bebida/doce/bolo) ja foi feita nesta
+        # conversa. O funil do dono e Produto/Tamanho -> Upsell -> Entrega, e
+        # era sempre o upsell que sumia: em 4 dos testes de 26/09 ela foi
+        # direto do pedido para o endereco, e o dono cobrou isso quatro vezes.
+        "upsell_feito": False,
         # Aviso de "estamos fechados" ja dado nesta conversa.
         "aviso_horario_dado": False,
         # Quando o ultimo pedido foi fechado. Sobrevive a limpeza da ficha: e o
@@ -100,7 +110,7 @@ def _empty() -> dict:
 HORAS_ATE_NOVA_SESSAO = 6
 
 # Marcas que valem por CONVERSA, nao pela vida do cliente.
-_CAMPOS_DE_SESSAO = ("saudacao_feita", "aviso_horario_dado")
+_CAMPOS_DE_SESSAO = ("saudacao_feita", "aviso_horario_dado", "upsell_feito")
 
 
 def _sessao_expirou(updated_at: str, agora=None) -> bool:
@@ -218,6 +228,11 @@ def merge(memoria: dict, extraido: dict, novo_da_mensagem: dict | None = None) -
     if itens_novos and itens_novos != memoria.get("items"):
         memoria["items"] = itens_novos
         mudancas.append(f"items={itens_novos}")
+
+    sabores_novos = (novo_da_mensagem or {}).get("sabores_pendentes")
+    if sabores_novos and sabores_novos != memoria.get("sabores_pendentes"):
+        memoria["sabores_pendentes"] = sabores_novos
+        mudancas.append(f"sabores_pendentes={[s['termo'] for s in sabores_novos]}")
 
     # Troco so existe para dinheiro. Quem pediu troco para 100 e depois trocou
     # para Pix nao pode levar essa observacao para a comanda.
@@ -707,21 +722,239 @@ def pendencia_de_item(memoria: dict) -> str:
     # (lanche) ou mini (festa)?'". Antes a Sandrinha citava os nomes de
     # catalogo ("Coxinha de Frango com Catupiry ou Coxinha frango"), que nao
     # dizem nada para quem esta comprando.
-    exemplos = "; ".join(
-        f"Essas {a['qtd']} {a['sabor']} seriam tamanho grande (lanche) "
-        f"ou mini (festa)? 😊"
-        for a in _itens_ambiguos_detalhe(memoria)
-    )
+    detalhe = _itens_ambiguos_detalhe(memoria)
+    if len(detalhe) > 1:
+        # Dois itens sem tamanho viravam duas mensagens seguidas, cada uma com
+        # a mesma pergunta: "Essas 10 Coxinha...?" e depois "Esses 10 Rissole
+        # de Carne...?". O dono chamou isso de triagem picada e pediu uma fala
+        # so (26/09 19h24). A pergunta e uma, e responde pelos dois.
+        lista = " e ".join(f"{a['qtd']} {a['sabor']}" for a in detalhe)
+        exemplos = (f"'Esses {lista} seriam tamanho grande (lanche) ou mini "
+                    f"(festa)? 😊'")
+        consolida = (
+            f" SAO {len(detalhe)} ITENS SEM TAMANHO: pergunte pelos "
+            f"{len(detalhe)} NA MESMA MENSAGEM, numa frase so. E PROIBIDO "
+            f"mandar uma pergunta de tamanho por item."
+        )
+    else:
+        exemplos = "; ".join(
+            f"Essas {a['qtd']} {a['sabor']} seriam tamanho grande (lanche) "
+            f"ou mini (festa)? 😊"
+            for a in detalhe
+        )
+        consolida = " ISOLE SO ESSE ITEM."
     return (
         "TAMANHO NAO INFORMADO - " + "; ".join(ambiguos)
-        + ". Pergunte AGORA, ISOLANDO SO ESSE ITEM e nesta forma: "
+        + ". Pergunte AGORA, nesta forma: "
         + (exemplos or "'seriam tamanho grande (lanche) ou mini (festa)? 😊'")
+        + consolida
         + " NAO explique a regra dos 25 nem cite nome de catalogo: a pergunta e "
         "so grande (lanche) ou mini (festa). Se ele responder LANCHE ou GRANDE, "
         "aceite a quantidade que ele pediu. Se responder MINI ou FESTA, avise "
         "com gentileza que o mini fecha em 25 por sabor. E PROIBIDO transferir "
         "para humano por causa disto."
     )
+
+
+def pendencia_de_sabor(memoria: dict) -> str:
+    """Quantidade pedida com uma palavra que serve a varios sabores.
+
+    Fura a fila: nao da para ajustar lote, calcular total nem coletar endereco
+    de um sabor que ninguem sabe qual e. Antes a palavra virava o produto de
+    nome mais comprido e o cliente recebia o pedido errado, ou - depois que
+    isso foi barrado - o sabor simplesmente sumia do pedido.
+    """
+    pendentes = memoria.get("sabores_pendentes") or []
+    if not pendentes:
+        return ""
+    perguntas = []
+    for p in pendentes:
+        opcoes = " ou ".join(p.get("opcoes") or [])
+        perguntas.append(f"os {p.get('qtd')} de {p.get('termo')} ({opcoes})")
+    return (
+        "SABOR NAO IDENTIFICADO - o cliente disse a quantidade mas nao qual "
+        "sabor em: " + "; ".join(perguntas) + ". Pergunte AGORA, numa frase so, "
+        "qual sabor ele quer em cada um, OFERECENDO as opcoes entre parenteses. "
+        "E PROIBIDO escolher por ele, PROIBIDO deixar esse item de fora do "
+        "pedido e PROIBIDO apresentar resumo ou total antes de saber o sabor."
+    )
+
+
+def aplicar_escolha_de_sabor(memoria: dict, texto: str) -> list[str]:
+    """O cliente respondeu qual sabor era. Vira item na ficha.
+
+    Sem isto a resposta morria no texto: a pendencia continuava, a pergunta
+    voltava na mensagem seguinte e o pedido nao andava - foi o que ja
+    aconteceu com o aceite de lote (23/09) e com a escolha de tamanho.
+    """
+    pendentes = memoria.get("sabores_pendentes") or []
+    if not pendentes or not texto:
+        return []
+    limpo = _sem_acento(texto)
+    itens = list(memoria.get("items") or [])
+    sobraram, mudancas = [], []
+    for p in pendentes:
+        escolhido = ""
+        for opcao in p.get("opcoes") or []:
+            if _sem_acento(opcao) in limpo:
+                escolhido = opcao
+                break
+        if not escolhido:
+            sobraram.append(p)
+            continue
+        try:
+            qtd = int(p.get("qtd") or 0)
+        except (TypeError, ValueError):
+            qtd = 0
+        if qtd <= 0:
+            continue
+        preco = 0.0
+        try:
+            import facts
+            oficial = facts.resolve_unit_price(escolhido, qtd)
+            if oficial:
+                preco = oficial["preco_unitario"]
+        except Exception:
+            pass
+        ja = next((i for i in itens if isinstance(i, dict)
+                   and _sem_acento(str(i.get("name"))) == _sem_acento(escolhido)), None)
+        if ja:
+            ja["quantity"] = int(ja.get("quantity") or 0) + qtd
+        else:
+            itens.append({"name": escolhido, "quantity": qtd, "price": preco})
+        mudancas.append(f"{p.get('termo')} -> {qtd} x {escolhido}")
+    if mudancas:
+        memoria["items"] = itens
+        memoria["sabores_pendentes"] = sobraram
+    return mudancas
+
+
+# ── Sabor esgotado ──────────────────────────────────────────────────────────
+# Categorias que JA SAO o acompanhamento da oferta adicional. Quem pediu
+# refrigerante nao precisa ouvir a oferta de refrigerante.
+_CATEGORIAS_DE_ACOMPANHAMENTO = ("bebidas", "bolos e doces")
+
+
+def _categoria_do_item(nome: str) -> str:
+    """Categoria oficial do produto na planilha, em minusculo. '' se nao achar."""
+    try:
+        import facts
+        linhas = facts.lookup_preco(nome) or []
+    except Exception:
+        return ""
+    alvo = _sem_acento(nome)
+    for linha in linhas:
+        if _sem_acento(linha.get("item", "")) == alvo:
+            return _sem_acento(linha.get("categoria", ""))
+    return _sem_acento(linhas[0].get("categoria", "")) if linhas else ""
+
+
+def itens_indisponiveis(memoria: dict) -> list[str]:
+    """Nomes OFICIAIS dos itens do pedido que a planilha marca como esgotados.
+
+    Nome oficial, e nao o que o cliente escreveu, porque e justamente a troca
+    de nome que causou o pior erro do dia: pedido de "croquete" num cento de
+    fritos, ela respondeu que "o nome correto do sabor e Croquete de
+    Macaxeira, mas ele esta esgotado" - juntou o sabor de lote (que esta
+    esgotado) com o salgado grande de balcao (que nao esta) e inventou uma
+    falta de estoque que nao existia naquele produto (teste do dono,
+    26/09 19h12).
+    """
+    fora = []
+    for item in memoria.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        nome = str(item.get("name", "")).strip()
+        if not nome:
+            continue
+        try:
+            import facts
+            linhas = facts.lookup_preco(nome) or []
+            if not linhas:
+                continue
+            alvo = _sem_acento(nome)
+            exatos = [l for l in linhas if _sem_acento(l.get("item", "")) == alvo]
+            if not exatos:
+                continue
+            if any(l.get("disponivel", True) for l in exatos):
+                continue
+            oficial = exatos[0].get("item") or nome
+        except Exception:
+            continue
+        if oficial not in fora:
+            fora.append(oficial)
+    return fora
+
+
+def pendencia_de_indisponivel(memoria: dict) -> str:
+    """Sabor pedido que esta ESGOTADO na planilha. Fura a fila do funil."""
+    fora = itens_indisponiveis(memoria)
+    if not fora:
+        return ""
+    lista = ", ".join(fora)
+    return (
+        f"SABOR ESGOTADO - {lista}. Diga AGORA, com o nome EXATO que esta "
+        f"escrito aqui, que esse sabor esta em falta hoje, e pergunte por qual "
+        f"sabor o cliente quer trocar. E PROIBIDO renomear o item ('o nome "
+        f"correto seria...'), PROIBIDO oferecer outro produto como se fosse o "
+        f"mesmo, e PROIBIDO dizer que esta esgotado um item que nao esta nesta "
+        f"lista. Nao apresente resumo nem total enquanto a troca nao for feita."
+    )
+
+
+# ── Oferta adicional (BLOCO 2) ──────────────────────────────────────────────
+# Faixa de horario -> frase exata do dono. Fora das faixas vale a ultima.
+_OFERTAS_POR_HORARIO = (
+    ((7, 40), (10, 0), "Pra acompanhar, vai um Bolo de Milho quentinho? 🌽"),
+    ((10, 1), (14, 0), "Pra acompanhar, que tal um Refrigerante 2L bem gelado? 🥤"),
+    ((14, 1), (17, 0), "Pro lanche da tarde, vai um Bolo de Milho ou um Guaraná "
+                       "Tuchaua 2L geladinho? 🥤"),
+    ((17, 1), (20, 0), "Pra acompanhar, vai um Refrigerante 2L ou docinhos "
+                       "(Brigadeiro/Beijinho)? 🥤🍬"),
+)
+
+
+def oferta_adicional(agora=None) -> str:
+    """A frase de upsell do BLOCO 2 para a hora em que estamos."""
+    try:
+        import horario
+        agora = agora or horario.agora()
+        minuto = agora.hour * 60 + agora.minute
+    except Exception:
+        return _OFERTAS_POR_HORARIO[-1][2]
+    for (h1, m1), (h2, m2), frase in _OFERTAS_POR_HORARIO:
+        if h1 * 60 + m1 <= minuto <= h2 * 60 + m2:
+            return frase
+    return _OFERTAS_POR_HORARIO[-1][2]
+
+
+def upsell_pendente(memoria: dict, agora=None) -> str:
+    """A oferta adicional ainda tem de sair antes de o funil andar?
+
+    O BLOCO 1 fixa o funil em Produto/Tamanho -> Upsell -> Endereco/Retirada ->
+    Resumo, e o upsell era a etapa que sumia. Aqui ele deixa de depender da boa
+    vontade do modelo: enquanto a frase nao sair, a ficha nao libera a coleta
+    de logistica nem o espelho.
+
+    Nao sai quando: nao ha item nenhum ainda, o pedido ja ESTA no acompanhamento
+    (refrigerante, bolo, docinho), ou ainda ha duvida sobre o proprio pedido -
+    tamanho, lote quebrado ou sabor esgotado vem antes.
+    """
+    if memoria.get("upsell_feito"):
+        return ""
+    itens = memoria.get("items") or []
+    if not itens:
+        return ""
+    if pendencia_de_item(memoria) or pendencia_de_lote(memoria):
+        return ""
+    if pendencia_de_indisponivel(memoria) or pendencia_de_sabor(memoria):
+        return ""
+    for item in itens:
+        if not isinstance(item, dict):
+            continue
+        if _categoria_do_item(str(item.get("name", ""))) in _CATEGORIAS_DE_ACOMPANHAMENTO:
+            return ""          # ja tem bebida/doce no pedido
+    return oferta_adicional(agora)
 
 
 def pendencia_de_lote(memoria: dict) -> str:
@@ -1028,6 +1261,130 @@ def tamanho_ja_definido(memoria: dict) -> bool:
     return bool(qtds) and all(q >= minimo for q in qtds)
 
 
+def _frase_de_lote(memoria: dict) -> str:
+    """'Fazemos de 25 em 25 por sabor! Ajusto para X e Y?' — em codigo."""
+    try:
+        import cardapio
+        import cardapio_catalogo
+        norm, _avisos, fora = cardapio._normalizar_itens(
+            [dict(i) for i in (memoria.get("items") or [])]
+        )
+        base = norm if (norm and not fora) else (memoria.get("items") or [])
+        quebras = cardapio_catalogo.quebras_de_lote([dict(i) for i in base])
+    except Exception:
+        quebras = []
+    if not quebras:
+        return ""
+    partes = [f"{q['sugerida']} {q['sabor']}" for q in quebras]
+    if len(partes) > 1:
+        lista = ", ".join(partes[:-1]) + " e " + partes[-1]
+    else:
+        lista = partes[0]
+    return f"Fazemos de 25 em 25 por sabor! Ajusto para {lista}? 😊"
+
+
+def etapa_coberta(memoria: dict, reply: str, agora=None) -> bool:
+    """A resposta JA cumpriu a etapa travada do funil?
+
+    Nao da para decidir isso comparando o texto com a frase que o codigo
+    escreveria: o modelo diz a mesma coisa com outras palavras, e ele tem o
+    direito de dizer. O que conta e a SUBSTANCIA de cada etapa - o tamanho
+    oferecido nas duas opcoes, o sabor perguntado, o esgotado nomeado, cada
+    quantidade quebrada com o multiplo sugerido, a oferta adicional feita.
+
+    Sem esta funcao a checagem era "os 28 primeiros caracteres da minha frase
+    aparecem na resposta?", e a frase de lote tem DUAS sentencas: a resposta
+    certa ("Fazemos de 25 em 25 por sabor! Ajusto para 25 coxinha, 25 quibe e
+    50 bolinha de queijo?") batia so na primeira e perdia a segunda - os
+    sabores eram cortados da mensagem que o cliente recebia.
+    """
+    if not reply:
+        return False
+    texto = _sem_acento(reply)
+
+    detalhe = _itens_ambiguos_detalhe(memoria)
+    if detalhe:
+        if not ("lanche" in texto and ("mini" in texto or "festa" in texto)):
+            return False
+        return all(_sem_acento(a["sabor"]).split()[0] in texto for a in detalhe)
+
+    pendentes = memoria.get("sabores_pendentes") or []
+    if pendentes:
+        return all(_sem_acento(str(p.get("termo"))) in texto for p in pendentes)
+
+    fora = itens_indisponiveis(memoria)
+    if fora:
+        if not ("esgotad" in texto or "em falta" in texto or "indisponivel" in texto):
+            return False
+        return all(_sem_acento(n).split()[0] in texto for n in fora)
+
+    try:
+        import cardapio
+        import cardapio_catalogo
+        norm, _avisos, nao_achados = cardapio._normalizar_itens(
+            [dict(i) for i in (memoria.get("items") or [])]
+        )
+        base = norm if (norm and not nao_achados) else (memoria.get("items") or [])
+        quebras = cardapio_catalogo.quebras_de_lote([dict(i) for i in base])
+    except Exception:
+        quebras = []
+    if quebras:
+        if "25" not in texto:
+            return False
+        for q in quebras:
+            palavra = _sem_acento(str(q["sabor"])).split()[0]
+            if palavra not in texto:
+                return False
+            if str(q["sugerida"]) not in texto:
+                return False
+        return True
+
+    if upsell_pendente(memoria, agora):
+        return any(m in texto for m in (
+            "refrigerante", "refri", "bolo de milho", "tuchaua", "docinho",
+            "brigadeiro", "beijinho", "pra acompanhar"))
+
+    return True
+
+
+def pergunta_bloqueante(memoria: dict, agora=None) -> str:
+    """A pergunta que TEM de sair antes de o funil andar. '' quando nao ha.
+
+    Mesma ordem da ficha, e o texto e o que vai para o cliente. Serve para o
+    codigo reescrever a resposta quando o modelo pula a etapa — foi assim que
+    as travas de tamanho, de troco e de casa sem numero pararam de depender da
+    boa vontade do modelo.
+    """
+    detalhe = _itens_ambiguos_detalhe(memoria)
+    if detalhe:
+        lista = " e ".join(f"{a['qtd']} {a['sabor']}" for a in detalhe)
+        return (f"Esses {lista} seriam tamanho grande (lanche) ou "
+                f"mini (festa)? 😊")
+
+    pendentes = memoria.get("sabores_pendentes") or []
+    if pendentes:
+        partes = []
+        for p in pendentes:
+            opcoes = (p.get("opcoes") or [])
+            if len(opcoes) > 1:
+                texto = ", ".join(opcoes[:-1]) + " ou " + opcoes[-1]
+            else:
+                texto = opcoes[0] if opcoes else ""
+            partes.append(f"os {p.get('qtd')} de {p.get('termo')} ({texto})")
+        return (f"Me confirma o sabor de {'; '.join(partes)}? 😊")
+
+    fora = itens_indisponiveis(memoria)
+    if fora:
+        return (f"O sabor {', '.join(fora)} está em falta hoje! "
+                f"Por qual sabor você quer trocar? 😊")
+
+    frase = _frase_de_lote(memoria)
+    if frase:
+        return frase
+
+    return upsell_pendente(memoria, agora)
+
+
 def render_ficha(memoria: dict) -> str:
     """Bloco compacto para o system prompt: o que ja sei e o que falta."""
     linhas = []
@@ -1069,6 +1426,9 @@ def render_ficha(memoria: dict) -> str:
     detalhe = pendencia_de_detalhe(memoria)
     duvida_item = pendencia_de_item(memoria)
     lote_quebrado = pendencia_de_lote(memoria)
+    esgotado = pendencia_de_indisponivel(memoria)
+    sabor_aberto = pendencia_de_sabor(memoria)
+    upsell = upsell_pendente(memoria)
     bloco = ["=== FICHA DESTE ATENDIMENTO (memoria do cliente) ==="]
     if linhas:
         bloco.append("JA CONFIRMADO PELO CLIENTE - nao pergunte de novo, nao altere:")
@@ -1158,8 +1518,18 @@ def render_ficha(memoria: dict) -> str:
 
     if duvida_item:
         bloco.append(duvida_item)
+    if sabor_aberto:
+        bloco.append(sabor_aberto)
+    if esgotado:
+        bloco.append(esgotado)
     if detalhe:
         bloco.append(detalhe)
+    if upsell:
+        bloco.append(
+            f"OFERTA ADICIONAL PENDENTE (BLOCO 2): o pedido de salgados ja esta "
+            f"definido e voce AINDA NAO ofereceu o acompanhamento. Mande esta "
+            f"frase, exatamente assim: \"{upsell}\""
+        )
 
     # Duas coisas nunca podem ser preenchidas por deducao: a modalidade e o
     # dia. Sao as duas que o agente vinha assumindo sozinho.
@@ -1182,6 +1552,15 @@ def render_ficha(memoria: dict) -> str:
             "o dia que esta confirmando, e a confirmacao final cita dia E horario."
         )
 
+    # Etapa travada nao apaga a lista do que falta: ela so a adia. Sem esta
+    # lista a ficha deixava de dizer, por exemplo, que a rua veio SEM NUMERO -
+    # e o dado voltava a se perder assim que a pergunta obrigatoria fosse
+    # respondida.
+    if (duvida_item or sabor_aberto or esgotado or lote_quebrado or upsell) and pendentes:
+        bloco.append("AINDA FALTA COLETAR, mas NAO nesta mensagem (primeiro a "
+                     "PROXIMA PERGUNTA OBRIGATORIA abaixo):")
+        bloco += [f"- {_ROTULOS[c]}" for c in pendentes]
+
     if duvida_item:
         # Fura a fila do funil: o que o cliente pediu precisa estar definido
         # antes de coletar entrega, dia e horario.
@@ -1189,6 +1568,39 @@ def render_ficha(memoria: dict) -> str:
             "PROXIMA PERGUNTA OBRIGATORIA: esclarecer o ITEM AMBIGUO acima. "
             "Nao pergunte modalidade, endereco, dia, horario nem pagamento "
             "nesta mensagem, e nao apresente resumo."
+        )
+    elif sabor_aberto:
+        bloco.append(
+            "PROXIMA PERGUNTA OBRIGATORIA: qual e o SABOR NAO IDENTIFICADO "
+            "acima. Nao pergunte modalidade, endereco, dia, horario nem "
+            "pagamento nesta mensagem, e nao apresente resumo."
+        )
+    elif esgotado:
+        bloco.append(
+            "PROXIMA PERGUNTA OBRIGATORIA: a troca do SABOR ESGOTADO acima. "
+            "Nao pergunte modalidade, endereco, dia, horario nem pagamento "
+            "nesta mensagem, e nao apresente resumo."
+        )
+    elif lote_quebrado:
+        # Mesma fila furada, e pelo mesmo motivo: a quantidade e parte do que o
+        # cliente pediu. A trava ja estava escrita na ficha, mas a lista de
+        # coleta saia JUNTO com ela na mesma volta - o modelo lia as duas
+        # ordens, escolhia a de baixo e ia cobrar endereco e pagamento com o
+        # lote ainda quebrado. Foi a primeira queixa do dono em 26/09 ("o
+        # fluxo correto e travar a regra dos sabores em lotes de 25 antes de
+        # puxar os dados de entrega") e voltou em outros dois testes.
+        bloco.append(
+            "PROXIMA PERGUNTA OBRIGATORIA: o ajuste da QUANTIDADE QUEBRADA "
+            "acima, com TODOS os sabores fora da regra numa frase so. "
+            "Nao pergunte modalidade, endereco, bairro, dia, horario nem "
+            "pagamento nesta mensagem, e nao apresente resumo."
+        )
+    elif upsell:
+        bloco.append(
+            "PROXIMA PERGUNTA OBRIGATORIA: a OFERTA ADICIONAL acima, sozinha. "
+            "Nao pergunte endereco, bairro, dia, horario nem pagamento nesta "
+            "mensagem, e nao apresente resumo - o upsell vem ANTES da "
+            "logistica, e e a etapa que voce mais pula."
         )
     elif pendentes and memoria.get("modality") == "entrega":
         # Escolhida a entrega, o resto vai numa mensagem so. O dono contou dez

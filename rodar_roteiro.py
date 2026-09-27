@@ -223,7 +223,17 @@ def conversa(msgs):
         app._orders_sent.clear()
         memory._store.pop(t_ag.TELEFONE, None)
         out, limitou = [], False
-        for m in msgs:
+        fila = list(msgs)
+        # A OFERTA ADICIONAL (BLOCO 2) virou etapa obrigatoria do funil em
+        # 26/09: o dono cobrou quatro vezes que ela some, e agora o resumo nao
+        # sai antes de ela ser feita. Nenhum roteiro previa essa resposta, e sem
+        # ela 13 testes paravam na oferta e "faltava" o total - o valor estava
+        # certo, so nao tinha chegado a vez dele. Um cliente de verdade responde
+        # a oferta; o roteiro tambem. Uma vez por conversa, e so quando a
+        # ultima resposta E a oferta.
+        respondeu_oferta = False
+        while fila:
+            m = fila.pop(0)
             with contextlib.redirect_stdout(io.StringIO()) as buf:
                 out.append(t_ag.enviar(m) or "")
             log = buf.getvalue()
@@ -235,6 +245,10 @@ def conversa(msgs):
                 )
             if "429" in log or "Rate limit" in log:
                 limitou = True
+            if (not fila and not respondeu_oferta
+                    and app._ofereceu_acompanhamento(out[-1])):
+                respondeu_oferta = True
+                fila.append("Não, obrigado")
         if not limitou:
             return out
         _limitadas[0] += 1

@@ -243,7 +243,11 @@ _PRODUTOS_FRI_COCOQ = {
     "enroladinho de salsicha": "Enroladinho de Salsicha",
     "pastel": "Pastel",
     "pastel carne": "Pastel Carne",
+    # Como o cliente escreve: "pastel DE carne". Sem o alias o casamento caia
+    # na chave curta "pastel" e o sabor se perdia.
+    "pastel de carne": "Pastel Carne",
     "pastel queijo": "Pastel Queijo",
+    "pastel de queijo": "Pastel Queijo",
     "quibe": "Quibe",
     # Como o cliente escreve de verdade. Sem estes apelidos, "25 kibes" nao era
     # reconhecido e o item sumia da ficha do atendimento.
@@ -787,16 +791,35 @@ def _produto_conhecido(bruto: str) -> str | None:
     if alvo in indice:
         return indice[alvo]
 
-    # Contido nos dois sentidos, vencendo a chave mais longa: "canudinho de
-    # camarao" ganha de "canudinho".
+    # Duas direcoes, e elas nao valem o mesmo.
+    #
+    # O cliente disse MAIS do que a chave ("canudinho de camarao" contem
+    # "canudinho"): a chave mais longa e a mais especifica, e ganha.
+    #
+    # O cliente disse MENOS do que a chave ("carne" cabe dentro de "quiche de
+    # carne de sol", "pastel carne", "rissole de carne", "croquete de carne"...):
+    # a chave mais longa nao e a mais certa, e so a mais comprida. Era assim
+    # que "30 de carne", num pedido de cento de FRITOS, virava 30 Quiches de
+    # Carne de Sol a R$ 12,00 - e como quiche e item de balcao, a trava de lote
+    # nem via o item: o ajuste de 25 em 25 saia sem ele e o sabor desaparecia
+    # do pedido (teste do dono, 26/09 18h18). Palavra que serve para varios
+    # produtos nao identifica nenhum: devolve None e o sabor vira pergunta.
     melhor, tamanho = None, 0
+    candidatos = set()
     for chave, canonico in indice.items():
         if len(chave) < 4:
             continue
-        if (chave in alvo or alvo in chave) and len(chave) > tamanho:
-            melhor, tamanho = canonico, len(chave)
+        if chave in alvo:
+            if len(chave) > tamanho:
+                melhor, tamanho = canonico, len(chave)
+        elif alvo in chave:
+            candidatos.add(canonico)
     if melhor:
         return melhor
+    if len(candidatos) == 1:
+        return candidatos.pop()
+    if candidatos:
+        return None
 
     # Prefixo so quando o cliente NAO foi mais especifico do que a chave.
     # Sem esta condicao, "canudinho de camarao" caia de novo no frango.
@@ -806,6 +829,57 @@ def _produto_conhecido(bruto: str) -> str | None:
                                     or alvo.startswith(chave[:4])):
                 return canonico
     return None
+
+
+# Sabores que existem como SABOR DE LOTE (pacote de 25). Servem para filtrar a
+# lista de opcoes quando o cliente pede um cento e diz so "carne": oferecer
+# Quiche de Carne de Sol, que e item de balcao vendido por unidade, seria
+# responder outra coisa.
+_SABORES_DE_LOTE = frozenset(_PRODUTOS_FRI_COCOQ.values()) | frozenset(_PRODUTOS_ASSADOS.values())
+
+
+def sabores_possiveis(bruto: str, so_lote: bool = True) -> list[str]:
+    """Produtos que a palavra do cliente pode significar, quando serve a varios.
+
+    "30 de carne" nao e pedido de nada em especial: cabe em pastel de carne,
+    rissole de carne, esfirra de carne, croquete de carne. Antes o casamento
+    por substring escolhia a chave mais LONGA e o sabor virava Quiche de Carne
+    de Sol a R$ 12,00 (teste do dono, 26/09 18h18). Devolver a lista e o que
+    permite PERGUNTAR em vez de chutar.
+
+    [] quando a palavra identifica um produto so - ai nao ha o que perguntar.
+    """
+    alvo = _forma_de_busca(bruto)
+    if len(alvo) < 3:
+        return []
+    indice = _indice_de_produtos()
+    if alvo in indice:
+        return []
+    achados = []
+    for chave, canonico in indice.items():
+        if len(chave) < 4:
+            continue
+        if chave in alvo:
+            return []          # o cliente foi MAIS especifico: nao ha duvida
+        if alvo in chave and canonico not in achados:
+            achados.append(canonico)
+    if len(achados) < 2:
+        return []
+    if so_lote:
+        de_lote = [a for a in achados if a in _SABORES_DE_LOTE]
+        if de_lote:
+            achados = de_lote
+    # Esgotado nao entra na lista de opcoes: oferecer o que a fabrica nao tem e
+    # so adiar a pergunta.
+    disponiveis = []
+    for nome in achados:
+        try:
+            import facts
+            if facts.resolve_unit_price(nome, 25):
+                disponiveis.append(nome)
+        except Exception:
+            disponiveis.append(nome)
+    return disponiveis or achados
 
 
 def volume_sem_sabor(msg_lower: str) -> int:
@@ -963,6 +1037,7 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
             msg_lower
         )
         items_found = []
+        sabores_pendentes = []
         for qty_str, _, product_name in item_pattern:
             qty = int(qty_str)
             product_name = product_name.strip()
@@ -989,6 +1064,27 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
 
             # Busca produto conhecido
             matched_name = _produto_conhecido(product_name)
+
+            if not matched_name and qty > 0:
+                # Palavra que serve a varios sabores. Nao vira item (chutar foi
+                # o defeito), mas tambem nao pode sumir: o cliente pediu "30 de
+                # carne" e o ajuste de lote saiu sem esse sabor, como se ele
+                # nunca tivesse falado (teste do dono, 26/09 18h20).
+                opcoes = sabores_possiveis(product_name)
+                if len(opcoes) == 1:
+                    # Depois de descartar os itens de balcao e os esgotados
+                    # sobrou um so: "30 de queijo" num pedido de fritos e
+                    # bolinha de queijo, e nao ha o que perguntar.
+                    matched_name = opcoes[0]
+                elif opcoes:
+                    sabores_pendentes.append({
+                        "qtd": qty,
+                        "termo": product_name.strip(),
+                        "opcoes": opcoes,
+                    })
+                    continue
+                else:
+                    continue
 
             if matched_name and qty > 0:
                 # O preco oficial vem da planilha; o mapa local so entra se a
@@ -1017,6 +1113,9 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
             if extra["name"] not in ja_vistos:
                 items_found.append(extra)
                 ja_vistos.add(extra["name"])
+
+        if sabores_pendentes:
+            extracted["sabores_pendentes"] = sabores_pendentes
 
         if items_found:
             extracted["items"] = items_found
@@ -1147,11 +1246,13 @@ class ConversationManager:
         # 3.2 Data + horario incompativeis com o expediente: corrige na hora.
         if state.data_iso and state.horario:
             from datetime import date as _date
-            ok, motivo, _sugestao = horario.validar_agendamento(
+            ok, motivo, _sugestao, campo = horario.validar_agendamento(
                 _date.fromisoformat(state.data_iso), state.horario, now
             )
             if not ok and motivo and not motivo.startswith("Falta"):
-                if "horario" in motivo.lower() or "intervalo" in motivo.lower() or "20h00" in motivo:
+                # Quem diz qual campo nao cabe e a propria validacao. Ler isso
+                # do texto da mensagem falhava no acento de "horário".
+                if campo == "horario":
                     state.horario = ""
                 else:
                     state.data_iso = ""
