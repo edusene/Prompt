@@ -1370,8 +1370,9 @@ def pergunta_bloqueante(memoria: dict, agora=None) -> str:
                 texto = ", ".join(opcoes[:-1]) + " ou " + opcoes[-1]
             else:
                 texto = opcoes[0] if opcoes else ""
-            partes.append(f"os {p.get('qtd')} de {p.get('termo')} ({texto})")
-        return (f"Me confirma o sabor de {'; '.join(partes)}? 😊")
+            partes.append(f"{p.get('qtd')} de {p.get('termo')} ({texto})")
+        # "dos", nao "de os": a frase sai para o cliente.
+        return f"Me confirma o sabor dos {'; '.join(partes)}? 😊"
 
     fora = itens_indisponiveis(memoria)
     if fora:
