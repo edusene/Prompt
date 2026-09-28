@@ -230,8 +230,3 @@ def start_scheduler():
     print("[crm] scheduler iniciado (check_follow_ups a cada 1 min)")
 
 
-def stop_scheduler():
-    """Para o scheduler."""
-    if scheduler.running:
-        scheduler.shutdown(wait=False)
-        print("[crm] scheduler parado")

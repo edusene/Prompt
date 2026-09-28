@@ -225,15 +225,6 @@ def executescript(sql: str) -> None:
         raise
 
 
-def last_insert_id(cur) -> int | None:
-    """Retorna o ID da última inserção, independente do driver."""
-    if DB_DRIVER == "postgresql":
-        row = cur.fetchone()
-        return row["id"] if row else None
-    else:
-        return cur.lastrowid
-
-
 def execute_returning(query: str, params: tuple | list | None = None) -> int | None:
     """Executa um INSERT ... RETURNING id no PostgreSQL e retorna o ID."""
     conn = _get_conn()

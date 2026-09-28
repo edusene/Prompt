@@ -230,11 +230,6 @@ def get_prompt_system() -> str:
     return _adaptar_prompt_docx(raw)
 
 
-def get_knowledge_dados() -> str:
-    """Retorna os dados do xlsx (cardapio, bairros, horarios, pagamentos, regras)."""
-    return _read_xlsx()
-
-
 def get_full_prompt_with_knowledge() -> str:
     """Retorna apenas o prompt operacional (instrucoes do agente).
 

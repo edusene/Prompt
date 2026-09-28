@@ -35,7 +35,6 @@ import cardapio_catalogo
 import facts
 
 TIMEOUT = 30
-ARQUIVO_CATALOGO = Path(__file__).parent / "cardapio_catalogo.py"
 
 
 def _url() -> str:

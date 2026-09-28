@@ -70,8 +70,3 @@ def reset(user: str) -> None:
         print(f"[memory] WARN nao limpou ficha de {user}: {e}")
 
 
-def reload_from_database(user: str) -> None:
-    """Descarta a cópia em memória e recarrega o histórico do banco."""
-    with _lock:
-        _store.pop(user, None)
-        _load_from_database(user)

@@ -310,20 +310,6 @@ KNOWLEDGE_TOOL = {
 }
 
 
-def _build_knowledge_index() -> str:
-    descriptions = knowledge_rag.get_file_descriptions()
-    if not descriptions:
-        return ""
-    lines = []
-    for d in descriptions:
-        desc = (d.get("description") or "").strip()
-        if desc:
-            lines.append(f"- {d['filename']}: {desc}")
-        else:
-            lines.append(f"- {d['filename']}")
-    return "\n".join(lines)
-
-
 def _knowledge_tool_handler(query: str = "", filename: str = "", **kwargs) -> str:
     print(f"[knowledge] TOOL CHAMADA query='{query}' filename='{filename}'")
     # Se filename foi informado, retorna o conteúdo completo do arquivo
@@ -499,16 +485,6 @@ SEND_ORDER_TOOL = {
         },
     },
 }
-
-
-def _transfer_tool_handler(phone: str):
-    """Retorna uma closure que chama perform_transfer com o phone correto."""
-    def _handler(reason: str = "") -> str:
-        performed = perform_transfer(phone, reason)
-        if performed:
-            return "Transferência realizada com sucesso. O atendente humano continuará o atendimento."
-        return "O cliente já está sendo atendido por um humano."
-    return _handler
 
 
 def _check_transfer_keywords(items: list[dict]) -> str | None:

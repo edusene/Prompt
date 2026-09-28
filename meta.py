@@ -234,23 +234,6 @@ def send_typing(message_id: str) -> dict:
 # ── Mídia (upload/download) ─────────────────────────────────────────────────
 
 
-def upload_media(file_path: str, mime_type: str) -> dict:
-    url = f"{_BASE}/{_PHONE_ID}/media"
-    try:
-        with open(file_path, "rb") as f:
-            r = requests.post(url, headers={"Authorization": f"Bearer {_TOKEN}"},
-                              data={"messaging_product": "whatsapp"},
-                              files={"file": (os.path.basename(file_path), f, mime_type)},
-                              timeout=60)
-        data = r.json() if r.ok else {"error": r.text[:300]}
-        print(f"[meta] POST /media upload -> {r.status_code} | {str(data)[:200]}", flush=True)
-        if r.ok:
-            return {"ok": True, "status": r.status_code, "data": data}
-        return {"ok": False, "status": r.status_code, "error": str(data)[:300]}
-    except Exception as e:
-        return {"ok": False, "status": 0, "error": str(e)}
-
-
 def upload_media_bytes(file_bytes: bytes, mime_type: str, filename: str = "file") -> dict:
     url = f"{_BASE}/{_PHONE_ID}/media"
     try:
@@ -381,18 +364,6 @@ def config_problem() -> str | None:
 
 
 # ── Datafy extras ────────────────────────────────────────────────────────────
-
-
-def get_me() -> dict:
-    """Verifica se o token e valido. Usa o endpoint do phone number (funciona na Datafy)."""
-    url = f"{_BASE}/{_PHONE_ID}"
-    return _request("GET", url)
-
-
-def get_display_name() -> dict:
-    """Retorna nome verificado e status de aprovacao do numero."""
-    url = f"{_BASE}/profile/display-name"
-    return _request("GET", url)
 
 
 def reload_config() -> None:

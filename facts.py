@@ -317,20 +317,6 @@ def preco_unitario_da_categoria(categoria: str) -> tuple[float | None, str]:
     return melhor, origem
 
 
-def buscar_linha(categoria: str, item: str) -> dict | None:
-    """A linha exata da planilha, identificada por categoria + item.
-
-    O nome sozinho nao identifica um produto: "Enroladinho de Salsicha" e sabor
-    de lote (R$ 0,80/un) e tambem salgado grande (R$ 9,00/un). Quem precisa
-    mexer num produto especifico usa este par.
-    """
-    cat, it = normalize(categoria), normalize(item)
-    for p in get()["produtos"]:
-        if normalize(p["categoria"]) == cat and normalize(p["item"]) == it:
-            return p
-    return None
-
-
 # A partir desta quantidade o pedido e SEMPRE de festa (lote de 25 por sabor).
 # Abaixo dela o mesmo nome ainda pode ser o salgado grande de balcao, vendido
 # por unidade — e so ai vale perguntar ao cliente qual dos dois ele quer.
@@ -456,14 +442,6 @@ def _brl(value: float) -> str:
 
 # ── Blocos compactos para o system prompt ────────────────────────────────────
 
-def render_tabela_fretes() -> str:
-    """Tabela de fretes, uma linha por bairro (curta e exata)."""
-    bairros = get()["bairros"]
-    if not bairros:
-        return ""
-    linhas = [f"{b['nome']}: {_brl(b['taxa'])}" for b in bairros]
-    return "TAXAS DE ENTREGA POR BAIRRO (valores oficiais):\n" + "\n".join(linhas)
-
 
 def render_tabela_precos() -> str:
     """Precos com valor numerico, agrupados por categoria."""
@@ -500,23 +478,3 @@ def render_tabela_precos() -> str:
     return "\n".join(blocos)
 
 
-def render_operacao() -> str:
-    """Horarios e formas de pagamento em formato compacto."""
-    dados = get()
-    blocos = []
-    if dados["horarios"]:
-        blocos.append("HORARIOS OFICIAIS:")
-        for h in dados["horarios"]:
-            extra = f" ({h['obs']})" if h["obs"] else ""
-            blocos.append(f"- {h['chave']}: {h['valor']}{extra}")
-    if dados["pagamento"]:
-        blocos.append("PAGAMENTO:")
-        vistos = set()
-        for pg in dados["pagamento"]:
-            chave = (normalize(pg["chave"]), normalize(pg["valor"]))
-            if chave in vistos:
-                continue
-            vistos.add(chave)
-            extra = f" | {pg['obs']}" if pg["obs"] else ""
-            blocos.append(f"- {pg['chave']}: {pg['valor']}{extra}")
-    return "\n".join(blocos)

@@ -571,11 +571,6 @@ def _balcao_em_quantidade_de_festa(items: list[dict]) -> list[str]:
     return suspeitos
 
 
-_MODALIDADE_ROTULO = {
-    "entrega": "Entrega",
-    "retirada": "Retirada na fabrica",
-}
-
 # Prompt operacional, BLOCO 3: "entrega paga em Dinheiro, Cartao de Debito ou
 # Cartao de Credito tem taxa fixa de R$ 2,00. No Pix antecipado e na retirada,
 # e isenta". Fica em codigo porque estava so no texto: a tool devolvia

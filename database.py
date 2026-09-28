@@ -861,42 +861,6 @@ def get_message(msg_id: int) -> dict | None:
     return db.fetch_one("SELECT * FROM messages WHERE id=?", (msg_id,))
 
 
-def link_or_save_outgoing(conversation_id: int, phone: str, body: str, wa_message_id: str | None,
-                          sender: str = "human", msg_type: str = "text") -> dict | None:
-    """Linka ou cria mensagem de saida com protecao contra duplicidade.
-    Prioridade:
-      (1) wa_message_id exato ja existe -> retorna (dedup entre formatos API/webhook).
-      (2) msg recente (30s) mesma conversa+body -> linka o wa_message_id.
-      (3) Nada encontrado -> insere nova via save_message."""
-    print(f"[db] link_or_save: conv={conversation_id} phone={phone} wa_message_id={wa_message_id} body_len={len(body)}")
-
-    if wa_message_id:
-        existing_exact = db.fetch_one(
-            "SELECT id FROM messages WHERE wa_message_id=?", (wa_message_id,),
-        )
-        if existing_exact:
-            print(f"[db] link_or_save: wa_message_id exato ja existe msg_id={existing_exact['id']}")
-            return db.fetch_one("SELECT * FROM messages WHERE id=?", (existing_exact["id"],))
-
-        existing_recent = db.fetch_one(
-            "SELECT id FROM messages WHERE conversation_id=? AND body=? AND direction='out' "
-            f"AND {db.ago_sql('created_at', 30)}",
-            (conversation_id, body),
-        )
-        if existing_recent:
-            print(f"[db] link_or_save: linkando msg id={existing_recent['id']} com wa_message_id={wa_message_id}")
-            db.execute("UPDATE messages SET wa_message_id=? WHERE id=?", (wa_message_id, existing_recent["id"]))
-            return db.fetch_one("SELECT * FROM messages WHERE id=?", (existing_recent["id"],))
-
-    print(f"[db] link_or_save: nenhuma msg anterior, chamando save_message")
-    result = save_message(
-        conversation_id=conversation_id, phone=phone, direction="out",
-        body=body, sender=sender, msg_type=msg_type, wa_message_id=wa_message_id or "",
-    )
-    print(f"[db] link_or_save: save_message retornou id={result['id'] if result else None}")
-    return result
-
-
 def get_messages(conversation_id: int, limit: int = 50, offset: int = 0) -> list[dict]:
     """As `limit` mensagens MAIS RECENTES, em ordem cronologica para exibir.
 
@@ -919,11 +883,6 @@ def get_messages(conversation_id: int, limit: int = 50, offset: int = 0) -> list
     # A consulta vem do mais novo para o mais velho porque e assim que se pega
     # "as ultimas N"; a tela le de cima para baixo.
     return list(reversed(list(recentes)))
-
-
-def count_messages(conversation_id: int) -> int:
-    row = db.fetch_one("SELECT COUNT(*) as cnt FROM messages WHERE conversation_id=?", (conversation_id,))
-    return row["cnt"] if row else 0
 
 
 def search_messages(query: str, limit: int = 50) -> list[dict]:
@@ -1047,10 +1006,6 @@ def list_tasks(contact_id: int | None = None) -> list[dict]:
             "SELECT * FROM tasks WHERE contact_id=? ORDER BY created_at DESC", (contact_id,)
         )
     return db.fetch_all("SELECT * FROM tasks ORDER BY created_at DESC")
-
-
-def get_task(task_id: int) -> dict | None:
-    return db.fetch_one("SELECT * FROM tasks WHERE id=?", (task_id,))
 
 
 def update_task(task_id: int, **fields: Any) -> None:
@@ -1209,18 +1164,6 @@ def delete_knowledge_file(filename: str) -> None:
 
 # ── Knowledge Files (descrições) ──────────────────────────────────────────────
 
-def upsert_knowledge_file(filename: str, description: str = "") -> None:
-    """Insere ou atualiza a descrição de um arquivo knowledge.
-    Descrição vazia NÃO apaga a descrição já cadastrada."""
-    now = datetime.utcnow().isoformat()
-    db.execute(
-        "INSERT INTO knowledge_files (filename, description, created_at, updated_at) VALUES (?,?,?,?) "
-        "ON CONFLICT(filename) DO UPDATE SET "
-        "description=CASE WHEN EXCLUDED.description = '' THEN knowledge_files.description "
-        "ELSE EXCLUDED.description END, updated_at=EXCLUDED.updated_at",
-        (filename, description, now, now),
-    )
-
 
 # ── Documento original (fonte da verdade, sem perdas de chunking) ────────────
 
@@ -1278,11 +1221,6 @@ def get_all_knowledge_descriptions() -> list[dict]:
     )
 
 
-def delete_knowledge_file_meta(filename: str) -> None:
-    """Deleta apenas os metadados (descrição) de um arquivo."""
-    db.execute("DELETE FROM knowledge_files WHERE filename=?", (filename,))
-
-
 # ── Knowledge Batch Operations ────────────────────────────────────────────────
 
 def list_knowledge_files_with_status() -> list[dict]:
@@ -1304,20 +1242,6 @@ def update_knowledge_file_status(filename: str, status: str) -> None:
     db.execute(
         "UPDATE knowledge_files SET status=?, updated_at=? WHERE filename=?",
         (status, now, filename),
-    )
-
-
-def upsert_knowledge_file_with_status(filename: str, description: str = "", status: str = "pending") -> None:
-    """Insere ou atualiza arquivo knowledge com status."""
-    now = datetime.utcnow().isoformat()
-    db.execute(
-        "INSERT INTO knowledge_files (filename, description, status, created_at, updated_at) "
-        "VALUES (?,?,?,?,?) "
-        "ON CONFLICT(filename) DO UPDATE SET "
-        "description=CASE WHEN EXCLUDED.description = '' THEN knowledge_files.description "
-        "ELSE EXCLUDED.description END, "
-        "status=EXCLUDED.status, updated_at=EXCLUDED.updated_at",
-        (filename, description, status, now, now),
     )
 
 
@@ -1353,37 +1277,9 @@ def get_pending_knowledge_files() -> list[dict]:
     )
 
 
-def get_knowledge_chunks_without_embeddings() -> list[dict]:
-    """Retorna chunks sem embeddings (para re-embed)."""
-    return db.fetch_all(
-        "SELECT filename, chunk_index, content FROM knowledge WHERE embedding IS NULL "
-        "ORDER BY filename, chunk_index"
-    )
-
-
 def delete_knowledge_chunks_by_filename(filename: str) -> None:
     """Deleta apenas os chunks (não os metadados)."""
     db.execute("DELETE FROM knowledge WHERE filename=?", (filename,))
-
-
-def insert_knowledge_chunks_batch(records: list[dict]) -> None:
-    """Insere múltiplos chunks em lote. Cada record: {filename, chunk_index, content, embedding, created_at, updated_at}"""
-    now = datetime.utcnow().isoformat()
-    for rec in records:
-        emb = rec.get("embedding")
-        if db.DB_DRIVER == "postgresql" and emb is not None:
-            emb_str = "[" + ",".join(str(x) for x in emb) + "]"
-            db.execute(
-                "INSERT INTO knowledge (filename, chunk_index, content, embedding, created_at, updated_at) "
-                "VALUES (?,?,?,?,?,?)",
-                (rec["filename"], rec["chunk_index"], rec["content"], emb_str, now, now),
-            )
-        else:
-            db.execute(
-                "INSERT INTO knowledge (filename, chunk_index, content, created_at, updated_at) "
-                "VALUES (?,?,?, ?,?)",
-                (rec["filename"], rec["chunk_index"], rec["content"], now, now),
-            )
 
 
 # ── Memory Recovery (load history from DB into memory on restart) ────────────
@@ -1904,18 +1800,6 @@ def deletar_cardapio_order(order_db_id: int) -> bool:
         return False
     db.execute("DELETE FROM cardapio_orders WHERE id=?", (order_db_id,))
     return True
-
-
-def contar_cardapio_orders(test_only: int | None = None) -> int:
-    """Conta total de pedidos."""
-    where = []
-    params: list = []
-    if test_only is not None:
-        where.append("is_test=?")
-        params.append(test_only)
-    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
-    row = db.fetch_one(f"SELECT COUNT(*) as cnt FROM cardapio_orders {where_sql}", tuple(params))
-    return row["cnt"] if row else 0
 
 
 # Status em que o pedido NAO chegou ao cardapio. Fica numa lista explicita
