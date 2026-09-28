@@ -5697,13 +5697,19 @@ def api_knowledge_update(filename):
     content = data.get("content", "")
     description = data.get("description", "").strip()
     try:
-        knowledge_rag.save_knowledge_raw(filename, content, description=description)
+        mudou = knowledge_rag.save_knowledge_raw(filename, content, description=description)
     except knowledge_rag.ConteudoCorrompido as e:
         # Barra aqui: salvar o texto remontado por cima do original foi o que
         # destruiu o prompt operacional uma vez. O arquivo local tambem nao e
         # tocado, entao nada se perde.
         print(f"[knowledge] RECUSADO {filename}: {e}")
         return jsonify({"error": f"Conteudo recusado - {e}"}), 400
+
+    # Texto igual ao salvo: o arquivo local tambem fica como esta. Reescrever
+    # o .docx aqui troca a formatacao original por paragrafos simples.
+    if not mudou:
+        print(f"[knowledge] salvo sem mudanca no texto: {filename}")
+        return jsonify({"ok": True, "unchanged": True})
 
     # Salva de volta no arquivo local (.docx ou .txt/.md)
     if filename.endswith('.docx'):

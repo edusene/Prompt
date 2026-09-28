@@ -474,26 +474,51 @@ def get_knowledge_for_agent(agent_name: str) -> str:
 # ── Knowledge Batch Operations ────────────────────────────────────────────────
 
 
-def save_knowledge_raw(filename: str, content: str, description: str = "") -> None:
-    """Salva knowledge SEM embeddings (status=pending). Para upload em lote."""
+def _mesmo_texto(a: str, b: str) -> bool:
+    """Iguais a menos de quebra de linha Windows e espaco nas pontas.
+
+    O textarea do painel devolve as quebras de linha sempre no formato Unix.
+    """
+    return ("\n".join((a or "").splitlines()).strip()
+            == "\n".join((b or "").splitlines()).strip())
+
+
+def save_knowledge_raw(filename: str, content: str, description: str = "",
+                       forcar: bool = False) -> bool:
+    """Salva knowledge SEM embeddings (status=pending). Para upload em lote.
+
+    Devolve False quando o texto e o mesmo que ja esta salvo: nesse caso os
+    chunks e os embeddings ficam, e so a descricao e atualizada. Sem isso,
+    apertar Salvar no painel sem mudar nada apagava os embeddings e o arquivo
+    voltava a "pendente" minutos depois de ter sido indexado (dono, 28/09).
+    `forcar` refaz os chunks mesmo assim - e o que o reindex_knowledge.py quer.
+    """
     content = (content or "").strip()
     if not content:
-        return
+        return False
 
     problema = detectar_corrupcao(content)
     if problema:
         raise ConteudoCorrompido(f"{filename}: {problema}")
 
+    if not forcar and _mesmo_texto(database.get_knowledge_document(filename), content):
+        status = database.get_knowledge_file_status(filename) or "pending"
+        database.set_knowledge_document(filename, content, description, status=status)
+        invalidate_knowledge_caches()
+        print(f"[rag] {filename}: texto sem mudanca, embeddings mantidos ({status})")
+        return False
+
     database.delete_knowledge_file(filename)
 
     chunks = chunk_text(content)
     if not chunks:
-        return
+        return False
 
     database.insert_knowledge_chunks(filename, chunks, [None] * len(chunks))
     database.set_knowledge_document(filename, content, description, status="pending")
     invalidate_knowledge_caches()
     print(f"[rag] salvo (raw) {filename}: {len(chunks)} chunks (pendente de embedding)")
+    return True
 
 
 def embed_pending_files() -> dict:

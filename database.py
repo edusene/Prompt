@@ -1208,6 +1208,12 @@ def get_all_knowledge_documents() -> list[dict]:
         return []
 
 
+def get_knowledge_file_status(filename: str) -> str:
+    """Status do arquivo (pending/indexed/error), vazio se nao existir."""
+    row = db.fetch_one("SELECT status FROM knowledge_files WHERE filename=?", (filename,))
+    return (row.get("status") or "") if isinstance(row, dict) else ""
+
+
 def get_knowledge_file_description(filename: str) -> str:
     """Retorna a descrição de um arquivo knowledge."""
     row = db.fetch_one("SELECT description FROM knowledge_files WHERE filename=?", (filename,))

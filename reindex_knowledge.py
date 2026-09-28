@@ -155,7 +155,8 @@ def main() -> int:
         )
         if dry_run:
             continue
-        knowledge_rag.save_knowledge_raw(filename, content, description=descricao)
+        knowledge_rag.save_knowledge_raw(filename, content, description=descricao,
+                                         forcar=True)
 
     for obsoleto in DOCX_OBSOLETOS:
         if not database.get_knowledge_document(obsoleto) and not database.get_knowledge_chunks(obsoleto):

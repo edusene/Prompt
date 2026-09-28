@@ -2386,7 +2386,9 @@ async function saveKnowledge() {
         if (data?.error) {
             toast(friendlyError(data.error), 'error');
         } else {
-            toast('Knowledge salvo (pendente de embedding)', 'success');
+            toast(data?.unchanged
+                ? 'Salvo - o texto não mudou, continua indexado'
+                : 'Knowledge salvo (pendente de embedding)', 'success');
             loadKnowledge();
         }
     }
