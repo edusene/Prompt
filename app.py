@@ -2691,6 +2691,51 @@ def _conferir_troco_no_espelho(user: str, reply: str, memoria: dict) -> str:
 _RX_FRASE_COM_PERGUNTA = _re_mod.compile(r"[^.!?\n]*\?")
 
 
+# Abertura que nao informa nada. A regra e do dono, escrita no documento dele:
+# "sem enrolacao ('Claro!', 'Perfeito!', 'Com certeza!')". Ela existia no .docx
+# de 18/09 e caiu do prompt quando as referencias de workflow foram limpas pelo
+# painel - o pedido de 27/09 foi para colocar de volta.
+#
+# A lista e curta de proposito, e nao cresce "por simetria". "Que maravilha!" e
+# "Muito obrigada pelo retorno e pelo carinho!" PARECEM enrolacao e sao frases
+# prontas do dono (BLOCO 6 e BLOCO 0); cortar uma delas seria trocar o texto
+# que ele escreveu por nada. Aqui entram so aberturas que nao dizem
+# absolutamente nada sobre o pedido.
+_RX_ENROLACAO_DE_ABERTURA = _re_mod.compile(
+    r"^\s*(?:claro|perfeito|com certeza|certamente|sem problemas?|"
+    r"com muito prazer)"
+    r"\s*[!,.\u2026]*\s*",
+    _re_mod.IGNORECASE)
+
+
+def _conferir_enrolacao(user: str, reply: str) -> str:
+    """Tira a abertura vazia da mensagem, mantendo o resto intacto.
+
+    Só a PRIMEIRA palavra da mensagem: "Perfeito! Qual e o numero da casa?"
+    vira "Qual e o numero da casa?". No meio da frase nada e tocado - "para
+    sair tudo perfeito e pontual" e texto do BLOCO 0.
+
+    O "maximo 2 a 3 linhas" da mesma regra fica como orientacao no prompt e nao
+    virou corte: o espelho do pedido e a lista de coleta passam das 3 linhas por
+    necessidade, e truncar por contagem quebraria os dois.
+    """
+    if not reply:
+        return reply
+    limpo = _RX_ENROLACAO_DE_ABERTURA.sub("", reply, count=1)
+    if limpo == reply:
+        return reply
+    # Se a enrolacao era a mensagem inteira, ela fica: melhor uma abertura vazia
+    # do que nenhuma mensagem.
+    if len([c for c in limpo if c.isalpha()]) < 12:
+        return reply
+    # A frase seguinte comeca em maiuscula, como se fosse o inicio da mensagem.
+    if limpo[:1].islower():
+        limpo = limpo[:1].upper() + limpo[1:]
+    print(f"[formato] user={user} abertura vazia removida: "
+          f"{reply[:len(reply) - len(limpo) + 10]!r}")
+    return limpo
+
+
 def _conferir_uma_pergunta(user: str, reply: str, memoria: dict | None = None) -> str:
     """Deixa UMA pergunta na mensagem, a ultima.
 
@@ -3466,6 +3511,12 @@ def handle_flush(user: str, items: list[dict]) -> None:
             "Ignorar em silencio nao e opcao."
             "\n9.4 UMA PERGUNTA: fora da lista vertical de coleta e do espelho, a "
             "mensagem termina com UMA pergunta objetiva - nunca duas."
+            "\n9.5 CONCISAO: uma mensagem direta por vez, no maximo 2 a 3 linhas de "
+            "texto corrido, com listas verticais quando houver mais de um dado. E "
+            "PROIBIDO abrir a mensagem com enrolacao que nao informa nada - "
+            "\'Claro!\', \'Perfeito!\', \'Com certeza!\' e parentes. Comece pela "
+            "resposta. Isso nao vale para o espelho do pedido nem para as frases "
+            "prontas dos BLOCOS 0 e 6, que sao texto do dono."
             "\n10. SEMPRE responda primeiro a pergunta que o cliente fez (preco, frete, "
             "horario, endereco, forma de pagamento, se tem determinado produto) e so "
             "depois puxe o proximo dado do funil, na mesma mensagem. Isso vale tambem no "
@@ -4106,6 +4157,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
             # E, depois de todas as trocas, a mensagem termina com UMA pergunta
             # objetiva. O dono cobrou isso na dupla pergunta do fechamento
             # (26/09 19h27).
+            reply = _conferir_enrolacao(user, reply)
             reply = _conferir_uma_pergunta(user, reply, _memoria)
 
         # A oferta adicional saiu? Entao ela nao volta na proxima mensagem.

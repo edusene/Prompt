@@ -1276,6 +1276,55 @@ else:
     checa("sem conversa grande no banco para testar", True, "(pulado)")
 
 
+secao("--- 27/09: sem enrolacao na abertura (regra do dono) ---")
+# "Envie apenas 1 mensagem por vez (maximo 2 a 3 linhas), sem enrolacao
+# ('Claro!', 'Perfeito!', 'Com certeza!')" - estava no .docx de 18/09 e caiu do
+# prompt quando as referencias de workflow foram limpas pelo painel. O dono
+# pediu de volta em 27/09.
+for _com, _sem in (
+    ("Claro! Qual é o número da casa? 🛵", "Qual é o número da casa? 🛵"),
+    ("Perfeito! Anotei 50 coxinhas. Qual é o bairro?",
+     "Anotei 50 coxinhas. Qual é o bairro?"),
+    ("Com certeza! A taxa de entrega é R$ 12,00.",
+     "A taxa de entrega é R$ 12,00."),
+    ("Certamente, vou anotar. Qual o horário?", "Vou anotar. Qual o horário?"),
+    ("Sem problemas! Posso deixar para segunda?",
+     "Posso deixar para segunda?"),
+):
+    checa(f"abertura vazia cortada: {_com[:26]!r}",
+          app._conferir_enrolacao("55", _com) == _sem,
+          app._conferir_enrolacao("55", _com)[:46])
+
+# A lista NAO pode crescer por simetria: estas PARECEM enrolacao e sao frases
+# prontas do dono (BLOCO 0 e BLOCO 6). Cortar uma delas troca o texto dele por
+# nada.
+for _pronta in (
+    "Que maravilha! 💛 Nosso preço já é direto de fábrica no valor mínimo. "
+    "Bora montar o seu pedido?",
+    "Muito obrigada pelo retorno e pelo carinho! 💛 Qualquer coisa estamos por aqui.",
+    "Sinto muito por isso! Já redobramos a atenção aqui com a equipe para sair "
+    "tudo perfeito e pontual desta vez.",
+    "Prontinho, recomecei o atendimento do zero! 💛 Eu sou a Sandrinha da BALBS.",
+    "Qual é o número da casa? 🛵",
+):
+    checa(f"frase pronta do dono fica intacta: {_pronta[:30]!r}",
+          app._conferir_enrolacao("55", _pronta) == _pronta)
+
+checa("enrolacao sozinha nao esvazia a mensagem",
+      app._conferir_enrolacao("55", "Perfeito!") == "Perfeito!")
+checa("espelho do pedido nao e tocado",
+      app._conferir_enrolacao("55", _espelho) == _espelho)
+# "perfeito" no MEIO da frase e texto normal, nao abertura.
+checa("a palavra no meio da frase nao e cortada",
+      app._conferir_enrolacao("55", "Vai sair tudo perfeito! Qual o horário?")
+      == "Vai sair tudo perfeito! Qual o horário?")
+
+# E a regra tambem esta escrita no prompt, para o modelo nao produzir a
+# abertura em primeiro lugar - a guarda e a rede, nao a instrucao.
+checa("a regra esta no bloco de execucao do prompt",
+      "9.5 CONCISAO" in _APP and "PROIBIDO abrir a mensagem com enrolacao" in _APP)
+
+
 secao("--- higiene ---")
 # Escrever "\\b" por engano num arquivo grava um byte de backspace, e o regex
 # passa a nunca casar. Ja aconteceu tres vezes, sempre silencioso.
