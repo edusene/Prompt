@@ -24,7 +24,7 @@ _CAMPOS_REVISAVEIS = (
 )
 
 _CAMPOS = _CAMPOS_REVISAVEIS + ("items", "volume_pendente", "sem_numero",
-                                "sabores_pendentes")
+                                "sabores_pendentes", "preparo_pendente")
 
 _ROTULOS = {
     "name": "Nome do cliente",
@@ -53,6 +53,9 @@ def _empty() -> dict:
         "name": "",
         "items": [],
         "volume_pendente": 0,
+        # "frito"/"assado" dito junto com um volume sem sabor. Sem ele a
+        # pergunta do preparo voltava depois de o cliente ja ter respondido.
+        "preparo_pendente": "",
         # Quantidades ditas com uma palavra que serve a varios sabores
         # ("30 de carne"). [{"qtd", "termo", "opcoes"}]. Nao viram item: viram
         # pergunta. Enquanto ficarem aqui, o funil nao anda.
@@ -1473,11 +1476,20 @@ def render_ficha(memoria: dict) -> str:
         _volume = 0
     if _volume and not memoria.get("items"):
         _quantos = max(1, _volume // 25)
+        _preparo = (memoria.get("preparo_pendente") or "").strip()
+        if _preparo:
+            _pergunta = (
+                f"pergunte QUAIS sabores {_preparo}s ele quer. O cliente JA "
+                f"disse que e {_preparo}: e PROIBIDO perguntar o preparo "
+                f"('frito ou assado') de novo."
+            )
+        else:
+            _pergunta = "pergunte QUAIS sabores e o PREPARO (frito ou assado)."
         bloco.append(
             f"VOLUME SEM SABOR: o cliente pediu {_volume} unidades e nao disse "
             f"os sabores. Diga que ele pode escolher ate {_quantos} "
             f"{'sabor' if _quantos == 1 else 'sabores'} (25 por opcao) e "
-            f"pergunte QUAIS sabores e o PREPARO (frito ou assado). Nao "
+            f"{_pergunta} Nao "
             f"pergunte so 'qual sabor?': ele nao sabe que pode dividir."
         )
 

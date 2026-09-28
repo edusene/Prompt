@@ -1092,6 +1092,61 @@ checa("mensagem de instabilidade tambem recebe a negativa",
           _FICHA_VOLUME))
 
 
+secao("--- 27/09: aviso de domingo nao engole fiado nem desconto ---")
+# O aviso de fora do expediente sai sem o modelo. No teste do dono num domingo
+# o desconto e o fiado da primeira mensagem ficaram sem resposta.
+_AVISO_DOMINGO = ("Aos domingos a gente não abre! Posso deixar seu pedido "
+                  "agendado para amanhã, segunda-feira (28/09)? 😊")
+_ambos = app._negativas_do_bloco_6(
+    "55", "Posso te pagar na segunda-feira sem falta? E me dá um desconto no "
+    "frete pra fechar logo.", _AVISO_DOMINGO, _FICHA_VOLUME)
+checa("aviso de domingo recebe a negativa de fiado", "não libera fiado" in _ambos)
+checa("aviso de domingo recebe a defesa de preco", "direto de fábrica" in _ambos)
+checa("o aviso continua no fim, como a unica pergunta",
+      _ambos.endswith(_AVISO_DOMINGO) and _ambos.count("?") == 1)
+checa("fiado sai antes da defesa de preco",
+      _ambos.index("não libera fiado") < _ambos.index("direto de fábrica"))
+checa("amigo do Balbino no domingo recebe a negativa",
+      "não libera fiado" in app._negativas_do_bloco_6(
+          "55", "Sou muito amigo do Balbino, faz 1 cento frito pra mim hoje às "
+          "20h e deixa anotado que acerto com ele no fim do mês.",
+          _AVISO_DOMINGO, _FICHA_VOLUME))
+checa("pedido comum no domingo sai intacto",
+      app._negativas_do_bloco_6("55", "Quero 50 coxinhas", _AVISO_DOMINGO,
+                                _FICHA_VOLUME) == _AVISO_DOMINGO)
+
+
+secao("--- 27/09: emoji sozinho nao vira mensagem ---")
+# "Perfeito! 😊" + paragrafo: a abertura saia e o emoji chegava como bolha.
+_SO_EMOJI = app._conferir_enrolacao(
+    "55", "Perfeito! 😊\n\nPra acompanhar, vai um Refrigerante 2L ou docinhos?")
+checa("abertura com emoji sai inteira",
+      _SO_EMOJI == "Pra acompanhar, vai um Refrigerante 2L ou docinhos?", _SO_EMOJI)
+checa("emoji na mesma linha do texto fica",
+      app._conferir_enrolacao("55", "Perfeito! 📦 Resumo do pedido: 50 coxinhas")
+      .startswith("📦 Resumo"))
+_PARTES = app.split_reply("😊\n\nPra acompanhar, vai um refrigerante?\n\n💛")
+checa("split_reply nao manda bolha so de emoji",
+      _PARTES == ["😊 Pra acompanhar, vai um refrigerante? 💛"], _PARTES)
+
+
+secao("--- 27/09: preparo ja dito nao e perguntado de novo ---")
+from agents.conversation import preparo_dito  # noqa: E402
+checa("'1 cento frito' guarda frito",
+      preparo_dito("faz 1 cento frito pra mim") == "frito")
+checa("'assados' guarda assado",
+      preparo_dito("quero um cento de salgados assados") == "assado")
+checa("frito e assado juntos nao decide", preparo_dito("frito e assado") == "")
+_FICHA_FRITO = dict(memoria_mod._empty(), volume_pendente=100,
+                    preparo_pendente="frito")
+_CTX_FRITO = memoria_mod.render_ficha(_FICHA_FRITO)
+checa("instrucao nao manda perguntar o preparo ja dito",
+      "(frito ou assado)." not in _CTX_FRITO and "JA disse que e frito" in _CTX_FRITO)
+_CTX_SEM = memoria_mod.render_ficha(
+    dict(memoria_mod._empty(), volume_pendente=100))
+checa("sem preparo dito, ainda pergunta", "PREPARO (frito ou assado)" in _CTX_SEM)
+
+
 secao("--- 27/09: a coleta de entrega pode ter duas perguntas ---")
 # A excecao e do proprio prompt: definida a modalidade, bairro/rua/dia/horario/
 # pagamento vao numa mensagem so, em lista vertical. Se o modelo escrever essa

@@ -896,6 +896,24 @@ def volume_sem_sabor(msg_lower: str) -> int:
     return 0
 
 
+_RX_FRITO = re.compile(r"\bfrit[oa]s?\b")
+_RX_ASSADO = re.compile(r"\bassad[oa]s?\b")
+
+
+def preparo_dito(msg_lower: str) -> str:
+    """'frito' ou 'assado' quando o cliente disse um so. '' se nenhum ou os dois.
+
+    "Faz 1 cento frito" e a ficha nao guardava o preparo: a instrucao de volume
+    sem sabor mandava perguntar "frito ou assado" do mesmo jeito, e o cliente
+    ouvia de novo o que tinha acabado de dizer (teste do dono, 27/09 20h40).
+    """
+    frito = bool(_RX_FRITO.search(msg_lower))
+    assado = bool(_RX_ASSADO.search(msg_lower))
+    if frito == assado:
+        return ""
+    return "frito" if frito else "assado"
+
+
 def _itens_por_extenso(msg_lower: str) -> list[dict]:
     """Itens pedidos por formato em vez de numero. [] quando nao ha nenhum."""
     achados = []
@@ -1124,6 +1142,12 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
             unidades = volume_sem_sabor(msg_lower)
             if unidades:
                 extracted["volume_pendente"] = unidades
+
+    # Preparo dito em qualquer mensagem: o "frito" pode vir junto com o cento
+    # ou na resposta a pergunta dos sabores.
+    preparo = preparo_dito(msg_lower)
+    if preparo:
+        extracted["preparo_pendente"] = preparo
 
     # ── Referencia ──────────────────────────────────────────────────────────
     if not state.referencia:

@@ -827,6 +827,22 @@ def split_reply(text: str) -> list[str]:
     # O modelo as vezes repete a mesma frase em dois paragrafos seguidos —
     # imitando o texto do prompt operacional, que vem do .docx com trechos
     # duplicados. Para o cliente isso chega como a mesma pergunta duas vezes.
+    # Paragrafo sem nenhuma letra ou numero ("😊", "💛") nao e mensagem: vai
+    # colado ao anterior, ou ao seguinte se for o primeiro. Sozinho ele chegava
+    # ao cliente como uma bolha so de emoji.
+    colados: list[str] = []
+    for c in chunks:
+        if c and not _re_mod.search(r"\w", c):
+            if colados:
+                colados[-1] = f"{colados[-1]} {c}"
+            else:
+                colados.append(c)
+            continue
+        if colados and not _re_mod.search(r"\w", colados[-1]):
+            c = f"{colados.pop()} {c}"
+        colados.append(c)
+    chunks = colados
+
     unicos: list[str] = []
     vistos: set[str] = set()
     for c in chunks:
@@ -2514,6 +2530,20 @@ def _conferir_desconto(user: str, pedido_do_cliente: str, reply: str) -> str:
     return _juntar_antes(DEFESA_DE_PRECO, reply)
 
 
+def _negativas_do_bloco_6(user: str, pedido_do_cliente: str, reply: str,
+                          memoria: dict) -> str:
+    """Fiado e desconto negados tambem nas respostas que saem sem o modelo.
+
+    O aviso de fora do expediente e a recusa de dia/horario vao direto ao
+    cliente, e por isso pulavam as conferencias. No teste do dono num domingo
+    (27/09 20h33), desconto e fiado ditos na primeira mensagem ficaram sem
+    resposta em 3 de 4 casos: o "Sim" seguinte ja nao trazia o pedido.
+    Desconto antes, para o fiado sair primeiro na mensagem, como no BLOCO 6.
+    """
+    reply = _conferir_desconto(user, pedido_do_cliente, reply)
+    return _conferir_fiado(user, pedido_do_cliente, reply, memoria)
+
+
 def _conferir_vazamento_tecnico(user: str, reply: str, memoria: dict) -> str:
     """Descarta a resposta em que a Sandrinha sai do papel de atendente.
 
@@ -2728,6 +2758,10 @@ def _conferir_enrolacao(user: str, reply: str) -> str:
     # do que nenhuma mensagem.
     if len([c for c in limpo if c.isalpha()]) < 12:
         return reply
+    # "Perfeito! 😊" em paragrafo proprio: sem a palavra, sobrava o emoji
+    # sozinho, e ele saia como uma mensagem so com "😊" (teste do dono, 27/09
+    # 20h36). So a LINHA sem letra vai junto: "📦 Resumo" na mesma linha fica.
+    limpo = _re_mod.sub(r"^[^\w\n]*\n+", "", limpo)
     # A frase seguinte comeca em maiuscula, como se fosse o inicio da mensagem.
     if limpo[:1].islower():
         limpo = limpo[:1].upper() + limpo[1:]
@@ -3222,7 +3256,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
             _eco = f"Anotei seu pedido: {_itens_lidos}.\n\n" if _itens_lidos else ""
             _resposta = (
                 f"{horario.saudacao(_agora)}{_nome}! Aqui é a Sandrinha da BALBS.\n\n"
-                f"{_eco}{_expediente['mensagem']}"
+                f"{_eco}{_negativas_do_bloco_6(user, text_only, _expediente['mensagem'], _memoria)}"
             )
             _memoria["saudacao_feita"] = True
             # Guarda o dia oferecido na mensagem para o "pode sim" seguinte.
@@ -3255,7 +3289,10 @@ def handle_flush(user: str, items: list[dict]) -> None:
                         _memoria["data_proposta"] = _sugestao.isoformat()
                 _memoria["saudacao_feita"] = True
                 conversation_memory.save(user, _memoria)
-                _responder_direto(user, items, _motivo, _chegada)
+                _responder_direto(
+                    user, items,
+                    _negativas_do_bloco_6(user, text_only, _motivo, _memoria),
+                    _chegada)
                 return
 
         user_parts = _build_user_parts(items)
