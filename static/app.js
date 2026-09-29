@@ -165,7 +165,7 @@ function loadView(view) {
             switchCrmView('dashboard');
             break;
         case 'cardapio':
-            togglePedidosCardapio(false);   // sempre abre com os pedidos escondidos
+            toggleDonoCard('pedidos', false);   // sempre abre com os pedidos fechados
             loadCardapioSettings();
             loadDonoAjustes();
             loadCardapioStats();
@@ -3712,26 +3712,14 @@ async function loadCrmLogs() {
 
 let _cardapioTestMode = true;
 
-/* ── Pedidos da aba Cardápio: começam escondidos ───────────────────────── */
-function togglePedidosCardapio(mostrar) {
-    const area = document.getElementById('cardapio-pedidos');
-    const btn = document.getElementById('cardapio-pedidos-toggle');
-    if (!area) return;
-    const abrir = typeof mostrar === 'boolean' ? mostrar : area.hidden;
-    area.hidden = !abrir;
-    if (btn) {
-        btn.textContent = abrir ? 'Esconder pedidos' : 'Mostrar pedidos';
-        btn.setAttribute('aria-expanded', abrir ? 'true' : 'false');
-    }
-}
-
-/* ── Ajustes do dono: frases da oferta e produtos do cardápio digital ─────
-   O padrão do sistema continua valendo onde nada for salvo. */
-function toggleDonoCard(qual) {
+/* ── Cartões recolhíveis da aba Cardápio (pedidos e ajustes do dono) ──────
+   O padrão do sistema continua valendo onde nada for salvo. `abrir` força o
+   estado; sem ele, alterna. */
+function toggleDonoCard(qual, abrirForcado) {
     const body = document.getElementById(`dono-${qual}-body`);
     const arrow = document.getElementById(`dono-${qual}-arrow`);
     if (!body) return;
-    const abrir = body.style.display === 'none';
+    const abrir = typeof abrirForcado === 'boolean' ? abrirForcado : body.style.display === 'none';
     body.style.display = abrir ? 'block' : 'none';
     if (arrow) arrow.style.transform = abrir ? 'rotate(180deg)' : '';
 }
