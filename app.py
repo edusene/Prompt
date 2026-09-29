@@ -2635,6 +2635,11 @@ def _conferir_etapa_travada(user: str, reply: str, memoria: dict) -> str:
     if not travada:
         return reply
 
+    # "Qual voce quer? (Lata, 600ml ou 2L)": as opcoes entre parenteses DEPOIS
+    # do "?" sao da pergunta. Separadas, a pergunta saia e o parentese ficava
+    # solto na mensagem (teste de 28/09, Coca 2L).
+    reply = _re_mod.sub(r"\?\s*(\([^()\n]{1,160}\))", r" \1?", reply)
+
     # Espelho do pedido com etapa travada nao se conserta por frase: o pedido
     # inteiro esta errado (quantidade, sabor ou estoque). Vale a pergunta.
     if _RX_LINHA_DE_RESUMO.search(reply):
@@ -2951,10 +2956,18 @@ _SO_HORARIO = _re_mod.compile(
 )
 
 
+_RX_CORTESIA_NO_FIM = _re_mod.compile(
+    r"(?:\s+(?:por\s+favor|pfv|pf|pfvr|obrigad[oa]|obg|valeu|viu|t[aá]))+$")
+
+
 def _concorda(frase: str) -> bool:
     """A frase, sozinha, e um 'sim'?"""
     limpo = _re_mod.sub(r"[^\w\s]", " ", (frase or "").lower(), flags=_re_mod.UNICODE)
     limpo = " ".join(limpo.split())
+    # Cortesia no fim nao muda o sim: "PODE SIM POR FAVOR" caia fora da lista,
+    # o ajuste de lote nao era aplicado e a pergunta dos 25 churros voltava
+    # (teste do dono, 28/09 20h06).
+    limpo = _RX_CORTESIA_NO_FIM.sub("", limpo).strip()
     if not limpo:
         return False
     if limpo in _CONCORDANCIAS:

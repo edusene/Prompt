@@ -651,6 +651,13 @@ _o, _m, _s, _c = horario.validar_agendamento(date(2026, 9, 28), "19h", _19H20)
 checa("dia e hora validos passam", _o and _c == "")
 
 
+# Os testes de esgotado abaixo usam o croquete de carne, que estava ESGOTADO
+# na planilha e o dono reativou em 28/09. Eles testam a REGRA, nao o estoque do
+# dia: aqui o croquete e marcado esgotado so dentro do teste.
+for _p in facts.get()["produtos"]:
+    if facts.normalize(_p.get("item", "")) == "croquete de carne":
+        _p["disponivel"] = False
+
 secao("--- 26/09: '30 de carne' virava Quiche de Carne de Sol ---")
 from agents.conversation import _produto_conhecido, sabores_possiveis  # noqa: E402
 checa("palavra que serve a varios sabores nao identifica produto",
@@ -1249,6 +1256,77 @@ memoria_mod.save = _salvar_original
 checa("fechar o pedido guarda a modalidade para o pos-pedido",
       _FICHA_FECHA.get("ultimo_pedido_modalidade") == "retirada"
       and not _FICHA_FECHA.get("items"))
+
+
+secao("--- 28/09 noite: testes do dono depois das 20h ---")
+# "PODE SIM POR FAVOR" nao era sim: o ajuste dos 25 churros voltava.
+checa("'PODE SIM POR FAVOR' e concordancia", app._e_concordancia("PODE SIM POR FAVOR"))
+checa("'NAO OBRIGADO' continua nao sendo", not app._e_concordancia("NAO OBRIGADO"))
+# "HOJE NAO" (recusa da oferta) virava a data de hoje por cima de "amanha".
+checa("'HOJE NAO' nao e data", horario.resolver_data("HOJE NAO") is None)
+checa("'nao hoje, amanha' e amanha",
+      horario.resolver_data("nao hoje, amanha") is not None
+      and horario.resolver_data("nao hoje, amanha") != horario.agora().date())
+checa("'hoje' continua hoje", horario.resolver_data("hoje") == horario.agora().date())
+# "PARA ENTREGA NA CALAMA 2025": a rua sem "Rua" nao era guardada.
+_E_CALAMA = _extract_data_from_message(
+    "QUERO 50 COXINHAS E 50 RISSOLES 20 CHURROS PARA ENTREGA NA CALAMA 2025 "
+    "APONIA PAGAMENTO NO CARTAO", ConversationState())
+checa("'entrega na Calama 2025' guarda o endereco",
+      (_E_CALAMA.get("endereco") or "").upper() == "CALAMA 2025", str(_E_CALAMA.get("endereco")))
+for _f in ("entrega no bairro Olaria", "entregar no dia 29 as 10h", "entrega no Flodoaldo Pontes Pinto"):
+    checa(f"nao e rua: {_f!r}", not _extract_data_from_message(_f, ConversationState()).get("endereco"))
+
+# Bebida: nao existia no indice e sumia do pedido.
+from agents.conversation import bebidas_citadas  # noqa: E402
+
+
+def _beb(f):
+    itens, pend = bebidas_citadas(f.lower())
+    return [(i["name"], i["quantity"]) for i in itens], [p.get("em_falta", "?") for p in pend]
+
+
+checa("'uma coca lata' e Refrigerante Lata", _beb("pode mandar uma coca lata") == ([("Refrigerante Lata", 1)], []))
+checa("'3 refrigerantes 600ml'", _beb("quero 3 refrigerantes 600ml") == ([("Refrigerante 600ml", 3)], []))
+checa("guarana e o Tuchaua 2L", _beb("2 guaranás") == ([("Guaraná Tuchaua 2 Litros", 2)], []))
+checa("refri sem tamanho vira pergunta", _beb("manda um refri") == ([], ["?"]))
+for _f in ("sem refri", "nao quero refrigerante", "NAO OBRIGADO", "HOJE NAO"):
+    checa(f"recusa nao vira bebida: {_f!r}", _beb(_f) == ([], []))
+
+
+def _merge_msg(ficha, msg):
+    return memoria_mod.merge(
+        ficha, _extract_data_from_message(msg, ConversationState(items=ficha.get("items") or [])),
+        _extract_data_from_message(msg, ConversationState()))[0]
+
+
+_F_COCA = _merge_msg(dict(memoria_mod._empty(), items=[
+    {"name": "Coxinha de Frango com Catupiry", "quantity": 10},
+    {"name": "Rissole de Carne", "quantity": 10}]), "PODE MANDAR UMA COCA LATA")
+checa("aceitar a oferta com 'coca lata' SOMA ao pedido",
+      [(i["name"], i["quantity"]) for i in _F_COCA["items"]]
+      == [("Coxinha de Frango com Catupiry", 10), ("Rissole de Carne", 10), ("Refrigerante Lata", 1)])
+_F_C5 = _merge_msg(memoria_mod._empty(), "Quero meio cento frito: 25 coxinhas e 25 bolinhas "
+                   "de queijo, e 1 Coca-Cola de 2 litros gelada. Pra entregar AMANHA às 20h")
+checa("Coca 2L (esgotada) vira pergunta com o aviso",
+      memoria_mod.pergunta_bloqueante(_F_C5).startswith("O Refrigerante 2 Litros está em falta hoje!"),
+      memoria_mod.pergunta_bloqueante(_F_C5)[:60])
+checa("quem pediu bebida nao recebe a oferta de bebida", not memoria_mod.upsell_pendente(_F_C5))
+checa("pergunta da bebida sem avisar a falta nao cobre a etapa",
+      not memoria_mod.etapa_coberta(_F_C5, "Qual sabor você quer na Coca-Cola de 2 litros: "
+                                           "Refrigerante Lata ou 600ml?"))
+_REESCRITA = app._conferir_uma_pergunta("55", app._conferir_etapa_travada(
+    "55", "Boa noite! Qual sabor você quer na Coca-Cola de 2 litros? "
+          "(Refrigerante 600ml ou Refrigerante Lata)", _F_C5), _F_C5)
+checa("parentese depois da pergunta sai junto com ela",
+      "(Refrigerante 600ml" not in _REESCRITA and "em falta hoje" in _REESCRITA, _REESCRITA[:80])
+memoria_mod.aplicar_escolha_de_sabor(_F_C5, "pode ser lata")
+checa("'lata' resolve a pergunta do refrigerante",
+      ("Refrigerante Lata", 1) in [(i["name"], i["quantity"]) for i in _F_C5["items"]]
+      and not _F_C5.get("sabores_pendentes"))
+_F_TROCA = _merge_msg(dict(_F_COCA), "na verdade quero 50 coxinhas")
+checa("correcao dos salgados nao apaga a bebida",
+      any(i["name"] == "Refrigerante Lata" for i in _F_TROCA["items"]), str(_F_TROCA["items"]))
 
 
 secao("--- 27/09: a coleta de entrega pode ter duas perguntas ---")

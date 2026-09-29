@@ -189,6 +189,11 @@ def resolver_data(texto: str, now: datetime | None = None) -> date | None:
     now = now or agora()
     hoje = now.date()
     t = _norm(texto)
+    # "HOJE NAO" e a recusa da oferta de acompanhamento, nao uma data. Lido
+    # como "hoje", trocava o "amanha as 20h" que o cliente ja tinha dado e ele
+    # ouvia que o horario de hoje ja tinha passado (teste do dono, 28/09 20h10).
+    t = re.sub(r"\bhoje\s+n[aã]o\b|\bn[aã]o\s+(?:e\s+|eh\s+|vai\s+ser\s+|sera\s+|pra\s+|para\s+)?hoje\b",
+               " ", t).strip()
     if not t:
         return None
 

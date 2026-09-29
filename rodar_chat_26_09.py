@@ -177,7 +177,13 @@ def nao_renomeia_croquete(r: list) -> str:
     for i, m in enumerate(r):
         if "macaxeira" in norm(m):
             return f"msg {i + 1} trocou o croquete do cliente por macaxeira"
-    if not any("esgotad" in norm(m) or "em falta" in norm(m) for m in r):
+    # Segue a planilha: o dono reativou o croquete em 28/09. Esgotado, ela tem
+    # de avisar; disponivel, avisar seria inventar falta de estoque.
+    import facts
+    avisou = any("esgotad" in norm(m) or "em falta" in norm(m) for m in r)
+    if facts.resolve_unit_price("Croquete de Carne", 50):
+        return "disse que o croquete esta em falta, e ele esta disponivel" if avisou else ""
+    if not avisou:
         return "nao avisou que o sabor esta em falta"
     return ""
 

@@ -701,6 +701,17 @@ _NAO_E_RUA = re.compile(
     r"sim|n[aã]o|obrigad[oa])\b")
 
 
+# Rua dita sem "Rua" logo depois do pedido de entrega: "entrega na Calama
+# 2025". Exige o numero colado ao nome - "entrega no Olaria" e bairro, e
+# "entrega no dia 29" e data.
+_RUA_DEPOIS_DE_ENTREGA = re.compile(
+    r"\bentreg\w*\s+(?:na|no|em)\s+"
+    r"(?P<nome>(?!(?:bairro|dia|data|hora|rua|avenida|av)\b)"
+    r"[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ]+(?:\s+[A-Za-zÀ-ÿ]+){0,3}?)"
+    r"\s*,?\s*(?:n[º°o]?\s*)?(?P<numero>\d{1,6})\b",
+    re.IGNORECASE)
+
+
 # Como o cliente pede sem dizer numero: "meio cento de coxinha", "um cento de
 # pastel", "uma porcao de quibe". E a forma mais natural de pedir salgado no
 # balcao, e a extracao ignorava as tres — a ficha ficava sem item e a Sandrinha
@@ -1000,6 +1011,94 @@ def itens_divididos(msg_lower: str) -> list[dict]:
     return achados
 
 
+# Bebida pedida pelo nome de balcao. O indice de produtos nao tem bebida
+# nenhuma, entao "pode mandar uma coca lata" e "1 Coca-Cola de 2 litros"
+# sumiam do pedido e o espelho saia sem elas (teste do dono, 28/09 20h08).
+_RX_BEBIDA = re.compile(
+    r"(?:\b(?P<qtd>\d{1,2}|uma?|duas|dois|tr[eê]s)\s+)?"
+    r"\b(?P<marca>coca(?:[\s-]*cola)?|refri(?:gerante)?s?|guaran[aá]s?|tuchaua"
+    r"|fanta|sprite|pepsi|kuat|soda)\b"
+    r"(?P<resto>[^,.;!?\n]{0,30})",
+    re.IGNORECASE)
+
+_QTD_POR_EXTENSO = {"um": 1, "uma": 1, "dois": 2, "duas": 2, "tres": 3, "três": 3}
+
+# Nome EXATO da planilha para cada tamanho.
+BEBIDA_LATA = "Refrigerante Lata"
+BEBIDA_600 = "Refrigerante 600ml"
+BEBIDA_2L = "Refrigerante 2 Litros"
+BEBIDA_TUCHAUA = "Guaraná Tuchaua 2 Litros"
+
+# Palavra que basta para escolher o tamanho quando ela pergunta ("lata").
+PALAVRAS_DA_BEBIDA = {
+    BEBIDA_LATA: ("lata", "latinha"),
+    BEBIDA_600: ("600",),
+    BEBIDA_TUCHAUA: ("tuchaua", "guarana"),
+}
+
+
+def bebidas_citadas(msg_lower: str) -> tuple[list[dict], list[dict]]:
+    """(itens, pendentes) de bebida na mensagem.
+
+    O tamanho decide o produto: lata, 600ml, 2 litros. Guarana e sempre o
+    Tuchaua 2L, o unico que a fabrica vende. Refrigerante sem tamanho nao e
+    chutado: volta como pendencia, para ela perguntar qual.
+    """
+    itens, pendentes = [], []
+    for m in _RX_BEBIDA.finditer(msg_lower or ""):
+        # "sem refri", "nao quero refrigerante": e assim que se RECUSA a oferta.
+        if re.search(r"\b(?:sem|n[aã]o|nada\s+de|nem)\b[^,.;!?\n]{0,18}$",
+                     (msg_lower or "")[:m.start()]):
+            continue
+        bruto_qtd = (m.group("qtd") or "").lower()
+        qtd = int(bruto_qtd) if bruto_qtd.isdigit() else _QTD_POR_EXTENSO.get(bruto_qtd, 1)
+        if not 0 < qtd <= 20:
+            continue
+        marca = m.group("marca").lower()
+        resto = (m.group("resto") or "").lower()
+        if re.search(r"\blat(?:a|inha)s?\b", resto):
+            nome = BEBIDA_LATA
+        elif re.search(r"\b600", resto):
+            nome = BEBIDA_600
+        elif marca.startswith(("guaran", "tuchaua")):
+            nome = BEBIDA_TUCHAUA
+        elif re.search(r"\b2\s*l\b|\b2\s*lts?\b|\b(?:2|dois)\s*litros?\b", resto):
+            nome = BEBIDA_2L
+        else:
+            pendentes.append({"qtd": qtd, "termo": "refrigerante",
+                              "opcoes": _opcoes_de_refrigerante()})
+            continue
+        if any(i["name"] == nome for i in itens):
+            continue
+        try:
+            import facts
+            oficial = facts.resolve_unit_price(nome, qtd)
+        except Exception:
+            oficial = {"preco_unitario": 0.0}
+        if not oficial:
+            # Esgotado (o 2L comum): vira a pergunta do tamanho, com o aviso na
+            # frente. Como item, a troca "lata" nao teria por onde entrar.
+            pendentes.append({"qtd": qtd, "termo": "refrigerante",
+                              "opcoes": _opcoes_de_refrigerante(), "em_falta": nome})
+            continue
+        itens.append({"name": nome, "quantity": qtd, "price": oficial["preco_unitario"]})
+    return itens, pendentes[:1]
+
+
+def _opcoes_de_refrigerante() -> list[str]:
+    """Tamanhos que a fabrica tem HOJE (esgotado nao entra na pergunta)."""
+    opcoes = []
+    for nome in (BEBIDA_LATA, BEBIDA_600, BEBIDA_TUCHAUA):
+        try:
+            import facts
+            if not facts.resolve_unit_price(nome, 1):
+                continue
+        except Exception:
+            pass
+        opcoes.append(nome)
+    return opcoes or [BEBIDA_LATA]
+
+
 def _itens_por_extenso(msg_lower: str) -> list[dict]:
     """Itens pedidos por formato em vez de numero. [] quando nao ha nenhum."""
     achados = []
@@ -1089,6 +1188,14 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
             # termina onde comeca outro campo do pedido.
             addr = _FIM_DA_RUA.split(addr, maxsplit=1)[0].strip(" ,-")
             extracted["endereco"] = addr
+        elif _RUA_DEPOIS_DE_ENTREGA.search(message):
+            # "PARA ENTREGA NA CALAMA 2025 APONIA": sem "Rua" nada era
+            # guardado e ela pedia "endereco (rua e numero)" que o cliente ja
+            # tinha mandado na primeira mensagem (teste do dono, 28/09 20h03).
+            m = _RUA_DEPOIS_DE_ENTREGA.search(message)
+            nome = " ".join(m.group("nome").split())
+            if not _NAO_E_RUA.search(nome.lower()):
+                extracted["endereco"] = f"{nome} {m.group('numero')}"
         elif state.bairro and "entrega" in (state.modality,
                                             extracted.get("modality")):
             # Quem responde "qual e a rua e o numero?" responde so a rua:
@@ -1236,6 +1343,16 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
             unidades = volume_sem_sabor(msg_lower)
             if unidades:
                 extracted["volume_pendente"] = unidades
+
+    # Bebida em qualquer mensagem, inclusive com o pedido ja na ficha: ela
+    # costuma vir como resposta a oferta ("pode mandar uma coca lata"). Vai
+    # em campo proprio porque SOMA aos itens - como "items" ela trocaria o
+    # pedido inteiro pela bebida.
+    bebidas, bebida_sem_tamanho = bebidas_citadas(msg_lower)
+    if bebidas:
+        extracted["bebidas"] = bebidas
+    if bebida_sem_tamanho:
+        extracted["bebidas_pendentes"] = bebida_sem_tamanho
 
     # Preparo dito em qualquer mensagem: o "frito" pode vir junto com o cento
     # ou na resposta a pergunta dos sabores.

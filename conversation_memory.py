@@ -211,6 +211,11 @@ def reset(phone: str) -> None:
         print(f"[memoria] WARN falha ao limpar {phone}: {e}")
 
 
+def _e_bebida(nome) -> bool:
+    """O item e bebida (categoria Bebidas da planilha)?"""
+    return _categoria_do_item(str(nome or "")) == "bebidas"
+
+
 def merge(memoria: dict, extraido: dict, novo_da_mensagem: dict | None = None) -> tuple[dict, list]:
     """Funde o que foi extraido da mensagem na memoria acumulada.
 
@@ -237,8 +242,32 @@ def merge(memoria: dict, extraido: dict, novo_da_mensagem: dict | None = None) -
 
     itens_novos = (novo_da_mensagem or {}).get("items")
     if itens_novos and itens_novos != memoria.get("items"):
+        # A correcao troca os salgados; a bebida ja pedida fica. "Troca para
+        # 50 coxinhas" nao e "tira o refrigerante".
+        bebidas_antigas = [i for i in (memoria.get("items") or [])
+                           if isinstance(i, dict) and _e_bebida(i.get("name"))]
+        if not any(_e_bebida(i.get("name")) for i in itens_novos if isinstance(i, dict)):
+            itens_novos = list(itens_novos) + bebidas_antigas
         memoria["items"] = itens_novos
         mudancas.append(f"items={itens_novos}")
+
+    fonte = novo_da_mensagem or extraido or {}
+    bebidas = fonte.get("bebidas") or (extraido or {}).get("bebidas") or []
+    if bebidas:
+        itens = list(memoria.get("items") or [])
+        for b in bebidas:
+            if not any(isinstance(i, dict) and i.get("name") == b["name"] for i in itens):
+                itens.append(dict(b))
+                mudancas.append(f"bebida={b['quantity']} x {b['name']}")
+        memoria["items"] = itens
+    sem_tamanho = fonte.get("bebidas_pendentes") or (extraido or {}).get("bebidas_pendentes") or []
+    if sem_tamanho and not any(_e_bebida(i.get("name")) for i in memoria.get("items") or []
+                               if isinstance(i, dict)):
+        pendentes = list(memoria.get("sabores_pendentes") or [])
+        if not any(p.get("termo") == "refrigerante" for p in pendentes):
+            pendentes += sem_tamanho
+            memoria["sabores_pendentes"] = pendentes
+            mudancas.append("bebida sem tamanho -> pergunta")
 
     sabores_novos = (novo_da_mensagem or {}).get("sabores_pendentes")
     if sabores_novos and sabores_novos != memoria.get("sabores_pendentes"):
@@ -810,6 +839,14 @@ def aplicar_escolha_de_sabor(memoria: dict, texto: str) -> list[str]:
             if _sem_acento(opcao) in limpo:
                 escolhido = opcao
                 break
+        if not escolhido and p.get("termo") == "refrigerante":
+            # "lata", "a de 600": ninguem repete "Refrigerante Lata" inteiro.
+            from agents.conversation import PALAVRAS_DA_BEBIDA
+            for opcao in p.get("opcoes") or []:
+                if any(_re.search(r"\b" + palavra, limpo)
+                       for palavra in PALAVRAS_DA_BEBIDA.get(opcao, ())):
+                    escolhido = opcao
+                    break
         if not escolhido:
             sobraram.append(p)
             continue
@@ -1355,6 +1392,11 @@ def etapa_coberta(memoria: dict, reply: str, agora=None) -> bool:
 
     pendentes = memoria.get("sabores_pendentes") or []
     if pendentes:
+        # Bebida esgotada: perguntar "qual sabor na Coca 2L?" sem dizer que o
+        # 2L acabou deixa o cliente achando que ainda da (teste de 28/09).
+        if any(p.get("em_falta") for p in pendentes) and not (
+                "falta" in texto or "esgotad" in texto):
+            return False
         return all(_sem_acento(str(p.get("termo"))) in texto for p in pendentes)
 
     fora = itens_indisponiveis(memoria)
@@ -1413,6 +1455,14 @@ def pergunta_bloqueante(memoria: dict, agora=None) -> str:
                 f"mini (festa)? 😊")
 
     pendentes = memoria.get("sabores_pendentes") or []
+    refri = next((p for p in pendentes if p.get("termo") == "refrigerante"), None)
+    if refri and len(pendentes) == 1:
+        opcoes = refri.get("opcoes") or []
+        texto = (", ".join(opcoes[:-1]) + " ou " + opcoes[-1]) if len(opcoes) > 1 \
+            else (opcoes[0] if opcoes else "")
+        aviso = (f"O {refri['em_falta']} está em falta hoje! "
+                 if refri.get("em_falta") else "")
+        return f"{aviso}Qual refrigerante você prefere: {texto}? 🥤"
     if pendentes:
         partes = []
         for p in pendentes:

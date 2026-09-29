@@ -172,13 +172,12 @@ Bom dia! Quero um cento sendo metade croquete e a outra metade pastel de carne m
 
 | | |
 |---|---|
-| ✅ Esperado | `O sabor Croquete de carne está em falta hoje! Por qual sabor você quer trocar?` |
+| ✅ Esperado | o cento dividido em **50 Croquete de carne + 50 Pastel carne**, seguindo para o acompanhamento |
 | 🚩 Alerta | aparecer **Macaxeira** · dizer que o nome "correto" seria outro · dizer que está esgotado um item que não está |
 
-> ⚠️ **Atenção, isso é decisão sua:** a planilha marca `Croquete de carne` como
-> **ESGOTADO**. Você disse que ele está disponível. Ela está respondendo certo
-> *para o que a planilha diz* — se o sabor voltou, quem muda é você no painel,
-> em Conhecimento → planilha.
+> ⚠️ Em 28/09 o `Croquete de carne` foi **reativado** na planilha. Se ele for
+> marcado como esgotado de novo, o esperado passa a ser `O sabor Croquete de
+> carne está em falta hoje! Por qual sabor você quer trocar?`.
 
 ### 1.8 Tamanho dos dois itens numa pergunta só, e sem reperguntar o dia
 
