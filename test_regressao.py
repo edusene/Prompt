@@ -1218,6 +1218,19 @@ checa("pedido comum continua com a oferta de sempre",
       not memoria_mod.pergunta_bloqueante(_FICHA_NUMERO).startswith("Fica"))
 
 
+# Teste do Eduardo, 29/09 16h22: o modelo abriu com "Voce pode escolher ate 2
+# sabores (25 de cada)!" com 50 + 50 ja na ficha - aula e conta errada.
+_AULA = app._conferir_aula_de_lote("55", "Você pode escolher até 2 sabores (25 de cada)! 😊\n\n"
+                                   "Fica R$ 80,00 nos salgados!", dict(memoria_mod._empty(), items=[
+                                       {"name": "Coxinha", "quantity": 50},
+                                       {"name": "Pastel Carne", "quantity": 50}]))
+checa("'ate 2 sabores (25 de cada)' sai quando o pedido ja esta certo",
+      "25 de cada" not in _AULA and "R$ 80,00" in _AULA, _AULA)
+checa("sem itens na ficha, 'escolher ate 4 sabores' fica",
+      app._conferir_aula_de_lote("55", "Você pode escolher até 4 sabores (25 de cada)! Quais?",
+                                 dict(memoria_mod._empty(), volume_pendente=100)).startswith("Você pode"))
+
+
 secao("--- 28/09: aviso rapido e acrescimo depois do pedido ---")
 _AGORA_POS = datetime.now()
 _POS_ENTREGA = dict(memoria_mod._empty(), ultimo_pedido_modalidade="entrega",

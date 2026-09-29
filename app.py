@@ -2281,7 +2281,11 @@ def _conferir_tamanho(user: str, reply: str, memoria: dict) -> str:
 # Como ela explica a regra de lote. Serve para cortar a explicacao quando
 # nao ha nada a corrigir - o dono foi explicito: pedido certo nao leva aula.
 _RX_AULA_DE_LOTE = _re_mod.compile(
-    '(?:m[u\\u00fa]ltiplos?\\s+de\\s+25|m[i\\u00ed]nim[oa]\\s+(?:de\\s+)?25|por[c\\u00e7][a\\u00e3]o\\s+m[i\\u00ed]nima|25\\s+em\\s+25|(?:por[c\\u00e7][o\\u00f5]es|lotes?)\\s+(?:fechad[ao]s?\\s+)?de\\s+25|(?:em|de)\\s+por[c\\u00e7][o\\u00f5]es\\s+de\\s+25|25\\s+unidades\\s+por\\s+sabor|de\\s+25\\s+em\\s+25)',
+    '(?:m[u\\u00fa]ltiplos?\\s+de\\s+25|m[i\\u00ed]nim[oa]\\s+(?:de\\s+)?25|por[c\\u00e7][a\\u00e3]o\\s+m[i\\u00ed]nima|25\\s+em\\s+25|(?:por[c\\u00e7][o\\u00f5]es|lotes?)\\s+(?:fechad[ao]s?\\s+)?de\\s+25|(?:em|de)\\s+por[c\\u00e7][o\\u00f5]es\\s+de\\s+25|25\\s+unidades\\s+por\\s+sabor|de\\s+25\\s+em\\s+25'
+    # "Voce pode escolher ate 2 sabores (25 de cada)!" com 50 + 50 ja na ficha
+    # (teste do Eduardo, 29/09 16h22): alem de aula, errava a conta - era um
+    # cento meio a meio, 50 de cada.
+    '|25\\s+de\\s+cada|escolher\\s+at[e\\u00e9]\\s+\\d+\\s+sabor)',
     _re_mod.IGNORECASE)
 
 

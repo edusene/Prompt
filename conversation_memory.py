@@ -1007,10 +1007,17 @@ def e_a_oferta_configurada(reply: str, agora=None) -> bool:
     milho...). Uma frase nova do dono sem nenhuma delas nunca seria reconhecida
     e a oferta se repetiria em toda mensagem. O inicio da frase basta: o modelo
     as vezes troca o emoji ou a pontuacao do fim.
+
+    Vale a frase de QUALQUER faixa, nao so a de agora: a oferta feita as 13h58
+    tem de continuar reconhecida as 14h01, quando a faixa ja virou. (`agora`
+    fica na assinatura por compatibilidade.)
     """
-    frase = _sem_acento(oferta_adicional(agora))
-    inicio = " ".join(frase.split()[:5])
-    return bool(inicio) and inicio in _sem_acento(reply or "")
+    texto = _sem_acento(reply or "")
+    for frase in _frases_de_oferta():
+        inicio = " ".join(_sem_acento(frase).split()[:5])
+        if inicio and inicio in texto:
+            return True
+    return False
 
 
 def upsell_pendente(memoria: dict, agora=None) -> str:
