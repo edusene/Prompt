@@ -165,6 +165,7 @@ function loadView(view) {
             switchCrmView('dashboard');
             break;
         case 'cardapio':
+            togglePedidosCardapio(false);   // sempre abre com os pedidos escondidos
             loadCardapioSettings();
             loadDonoAjustes();
             loadCardapioStats();
@@ -3710,6 +3711,19 @@ async function loadCrmLogs() {
 /* ── Cardápio Digital ──────────────────────────────────────────────────────── */
 
 let _cardapioTestMode = true;
+
+/* ── Pedidos da aba Cardápio: começam escondidos ───────────────────────── */
+function togglePedidosCardapio(mostrar) {
+    const area = document.getElementById('cardapio-pedidos');
+    const btn = document.getElementById('cardapio-pedidos-toggle');
+    if (!area) return;
+    const abrir = typeof mostrar === 'boolean' ? mostrar : area.hidden;
+    area.hidden = !abrir;
+    if (btn) {
+        btn.textContent = abrir ? 'Esconder pedidos' : 'Mostrar pedidos';
+        btn.setAttribute('aria-expanded', abrir ? 'true' : 'false');
+    }
+}
 
 /* ── Ajustes do dono: frases da oferta e produtos do cardápio digital ─────
    O padrão do sistema continua valendo onde nada for salvo. */
