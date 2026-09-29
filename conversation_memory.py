@@ -24,7 +24,8 @@ _CAMPOS_REVISAVEIS = (
 )
 
 _CAMPOS = _CAMPOS_REVISAVEIS + ("items", "volume_pendente", "sem_numero",
-                                "sabores_pendentes", "preparo_pendente")
+                                "sabores_pendentes", "preparo_pendente",
+                                "pedido_por_volume")
 
 _ROTULOS = {
     "name": "Nome do cliente",
@@ -100,6 +101,13 @@ def _empty() -> dict:
         # que distingue "quero mais 30 coxinhas" logo apos um pedido de um
         # pedido novo dias depois.
         "ultimo_pedido_em": "",
+        # Entrega ou retirada do ultimo pedido. Sobrevive a limpeza como o
+        # ultimo_pedido_em: "meu marido ja ta indo buscar" pede a resposta de
+        # retirada, "saiu pra entrega?" a de entrega.
+        "ultimo_pedido_modalidade": "",
+        # Pedido dito por volume dividido ("1 cento pastel e bolinha",
+        # "metade/metade"). O balcao responde esses com o valor na hora.
+        "pedido_por_volume": False,
         # Data (ISO) que o AGENTE ofereceu e o cliente ainda nao aceitou. Sem
         # isto, "Pode sim" depois de "Posso deixar para segunda-feira (21/09)?"
         # nao preenchia data nenhuma e a Sandrinha perguntava o dia de novo.
@@ -960,6 +968,40 @@ def upsell_pendente(memoria: dict, agora=None) -> str:
     return oferta_adicional(agora)
 
 
+def subtotal_dos_salgados(memoria: dict) -> float:
+    """Soma dos itens da ficha pelo preco da planilha. 0 se algum nao tem preco."""
+    total = 0.0
+    for item in memoria.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        try:
+            import facts
+            qtd = int(item.get("quantity") or 0)
+            oficial = facts.resolve_unit_price(str(item.get("name", "")), qtd)
+        except Exception:
+            return 0.0
+        if not oficial or not qtd:
+            return 0.0
+        total += qtd * float(oficial["preco_unitario"])
+    return round(total, 2)
+
+
+def oferta_com_valor(memoria: dict, agora=None) -> str:
+    """A oferta adicional, com o valor na frente quando o pedido veio por volume.
+
+    O balcao responde "metade croquete e metade pastel" com "Ok. 80,00" - o
+    dono pediu calculo imediato para esses pedidos, sem textao (28/09). Nos
+    demais a oferta sai como sempre.
+    """
+    oferta = upsell_pendente(memoria, agora)
+    if not oferta or not memoria.get("pedido_por_volume"):
+        return oferta
+    subtotal = subtotal_dos_salgados(memoria)
+    if not subtotal:
+        return oferta
+    return f"Fica {_brl(subtotal)} nos salgados! {oferta}"
+
+
 def pendencia_de_lote(memoria: dict) -> str:
     """Sabor de lote com quantidade que nao fecha em multiplo de 25.
 
@@ -1343,9 +1385,15 @@ def etapa_coberta(memoria: dict, reply: str, agora=None) -> bool:
         return True
 
     if upsell_pendente(memoria, agora):
-        return any(m in texto for m in (
+        ofereceu = any(m in texto for m in (
             "refrigerante", "refri", "bolo de milho", "tuchaua", "docinho",
             "brigadeiro", "beijinho", "pra acompanhar"))
+        # Pedido por volume: o valor tem de estar na mesma mensagem.
+        if ofereceu and memoria.get("pedido_por_volume"):
+            subtotal = subtotal_dos_salgados(memoria)
+            if subtotal and _brl(subtotal).split()[-1] not in reply:
+                return False
+        return ofereceu
 
     return True
 
@@ -1386,7 +1434,7 @@ def pergunta_bloqueante(memoria: dict, agora=None) -> str:
     if frase:
         return frase
 
-    return upsell_pendente(memoria, agora)
+    return oferta_com_valor(memoria, agora)
 
 
 def render_ficha(memoria: dict) -> str:
@@ -1432,7 +1480,7 @@ def render_ficha(memoria: dict) -> str:
     lote_quebrado = pendencia_de_lote(memoria)
     esgotado = pendencia_de_indisponivel(memoria)
     sabor_aberto = pendencia_de_sabor(memoria)
-    upsell = upsell_pendente(memoria)
+    upsell = oferta_com_valor(memoria)
     bloco = ["=== FICHA DESTE ATENDIMENTO (memoria do cliente) ==="]
     if linhas:
         bloco.append("JA CONFIRMADO PELO CLIENTE - nao pergunte de novo, nao altere:")
@@ -1698,14 +1746,41 @@ def pedido_recente(memoria: dict, agora=None) -> int | None:
     return None
 
 
+# Janela do "pos-pedido": aviso de status ("ja saiu?", "vou autorizar a
+# portaria") e acrescimo ("inclui 2 cocas") so fazem sentido enquanto o pedido
+# ainda esta sendo feito ou entregue. Maior que MINUTOS_PEDIDO_RECENTE porque
+# pedido agendado para a noite continua "em andamento" desde a manha.
+HORAS_POS_PEDIDO = 12
+
+
+def em_pos_pedido(memoria: dict, agora=None, aceita_itens: bool = False) -> bool:
+    """Ha um pedido fechado ha menos de HORAS_POS_PEDIDO e nenhum em montagem?
+
+    `aceita_itens` e para o acrescimo: "inclui 10 coxinhas" poe item na ficha
+    na mesma mensagem, e mesmo assim e acrescimo, nao pedido novo.
+    """
+    if memoria.get("items") and not aceita_itens:
+        return False
+    quando = memoria.get("ultimo_pedido_em")
+    if not quando:
+        return False
+    agora = agora or _dt.datetime.now()
+    try:
+        saiu = _dt.datetime.fromisoformat(str(quando))
+    except (TypeError, ValueError):
+        return False
+    return _dt.timedelta(0) <= (agora - saiu) <= _dt.timedelta(hours=HORAS_POS_PEDIDO)
+
+
 def _so_dados_do_cliente(memoria: dict) -> dict:
     """Ficha zerada mantendo so o que e do CLIENTE, nao do pedido."""
     limpa = _empty()
     for campo in _CAMPOS_DO_CLIENTE:
         if memoria.get(campo):
             limpa[campo] = memoria[campo]
-    if memoria.get("ultimo_pedido_em"):
-        limpa["ultimo_pedido_em"] = memoria["ultimo_pedido_em"]
+    for campo in ("ultimo_pedido_em", "ultimo_pedido_modalidade"):
+        if memoria.get(campo):
+            limpa[campo] = memoria[campo]
     return limpa
 
 
@@ -1726,6 +1801,7 @@ def registrar_pedido_enviado(phone: str, memoria: dict) -> None:
     for campo in _CAMPOS_DE_SESSAO:
         limpa[campo] = memoria.get(campo, False)
     limpa["ultimo_pedido_em"] = _dt.datetime.now().isoformat(timespec="seconds")
+    limpa["ultimo_pedido_modalidade"] = memoria.get("modality") or ""
 
     memoria.clear()
     memoria.update(limpa)

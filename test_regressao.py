@@ -1147,6 +1147,110 @@ _CTX_SEM = memoria_mod.render_ficha(
 checa("sem preparo dito, ainda pergunta", "PREPARO (frito ou assado)" in _CTX_SEM)
 
 
+secao("--- 28/09: girias do balcao viram lotes de 25 ---")
+# Amostra do balcao do dono: "1 cento pastel e bolinha" e 50 de cada, e a
+# ficha ficava so com 100 pasteis; "metade/metade" sem volume e um cento.
+from agents.conversation import itens_divididos  # noqa: E402
+
+
+def _div(frase):
+    return sorted((i["name"], i["quantity"]) for i in itens_divididos(frase.lower()))
+
+
+checa("dois centos de pastel e bolinha somam 100 + 100",
+      _div("1 cento pastel e bolinha e 1 cento pastel e bolinha pra retirada")
+      == [("Bolinha de Queijo", 100), ("Pastel", 100)],
+      str(_div("1 cento pastel e bolinha e 1 cento pastel e bolinha pra retirada")))
+checa("metade/metade sem volume e um cento",
+      _div("Metade croquete e metade pastel de carne")
+      == [("Croquete de Carne", 50), ("Pastel Carne", 50)])
+checa("'sendo metade X e a outra metade Y' divide",
+      _div("quero um cento sendo metade croquete e a outra metade pastel de "
+           "carne massa leve. pra retirar segunda") == [("Croquete de Carne", 50),
+                                                         ("Pastel Carne", 50)])
+checa("'100 salgados metade X metade Y' divide",
+      _div("100 salgados metade coxinha metade kibe") == [("Coxinha", 50), ("Quibe", 50)])
+checa("meio cento de dois sabores da 25 + 25",
+      _div("meio cento de coxinha e quibe") == [("Coxinha", 25), ("Quibe", 25)])
+for _frase in ("um cento de salgados fritos pra entregar hoje. quero 30 coxinhas",
+               "quero 100 salgados fritos: 30 de carne, 30 de queijo e 40 coxinhas",
+               "um cento de coxinha e 50 kibes", "cento de coxinha",
+               "cento de coxinha, bolinha e kibe", "cento de carne e queijo"):
+    checa(f"nao divide: {_frase[:34]!r}", _div(_frase) == [], str(_div(_frase)))
+
+_EXTR = _extract_data_from_message(
+    "1 cento pastel e bolinha e 1 cento pastel e bolinha pra retirada",
+    ConversationState())
+checa("a extracao usa a divisao e marca pedido por volume",
+      sorted((i["name"], i["quantity"]) for i in _EXTR.get("items", []))
+      == [("Bolinha de Queijo", 100), ("Pastel", 100)]
+      and _EXTR.get("pedido_por_volume") is True, str(_EXTR.get("items")))
+
+_FICHA_VOLUME_OK = dict(memoria_mod._empty(), pedido_por_volume=True, items=[
+    {"name": "Pastel", "quantity": 100}, {"name": "Bolinha de Queijo", "quantity": 100}])
+checa("subtotal do balcao: 2 centos fritos = R$ 160,00",
+      memoria_mod.subtotal_dos_salgados(_FICHA_VOLUME_OK) == 160.0,
+      str(memoria_mod.subtotal_dos_salgados(_FICHA_VOLUME_OK)))
+_OFERTA_VALOR = memoria_mod.pergunta_bloqueante(_FICHA_VOLUME_OK)
+checa("a oferta sai com o valor na frente",
+      _OFERTA_VALOR.startswith("Fica R$ 160,00 nos salgados!"), _OFERTA_VALOR[:60])
+checa("oferta sem o valor nao cobre a etapa",
+      not memoria_mod.etapa_coberta(_FICHA_VOLUME_OK, "Pra acompanhar, vai um refri?"))
+checa("oferta com o valor cobre a etapa",
+      memoria_mod.etapa_coberta(_FICHA_VOLUME_OK,
+                                "Fica R$ 160,00! Pra acompanhar, vai um refri?"))
+_FICHA_NUMERO = dict(_FICHA_VOLUME_OK, pedido_por_volume=False)
+checa("pedido comum continua com a oferta de sempre",
+      not memoria_mod.pergunta_bloqueante(_FICHA_NUMERO).startswith("Fica"))
+
+
+secao("--- 28/09: aviso rapido e acrescimo depois do pedido ---")
+_AGORA_POS = datetime.now()
+_POS_ENTREGA = dict(memoria_mod._empty(), ultimo_pedido_modalidade="entrega",
+                    ultimo_pedido_em=_AGORA_POS.isoformat(timespec="seconds"))
+_POS_RETIRADA = dict(_POS_ENTREGA, ultimo_pedido_modalidade="retirada")
+
+
+def _pos(texto, ficha=_POS_ENTREGA):
+    return app.resposta_pos_pedido(texto, ficha)
+
+
+checa("'Saiu pra entrega?' e aviso, sem afirmar que saiu",
+      _pos("Saiu pra entrega?")[0] == "status"
+      and "já sim" not in _pos("Saiu pra entrega?")[1].lower(), _pos("Saiu pra entrega?")[1])
+checa("'marido ja ta indo buscar' e aviso de retirada",
+      _pos("Meu marido já tá indo buscar", _POS_RETIRADA)
+      == ("status", "Combinado! Seu pedido fica separado aqui no balcão 💛"))
+checa("'vou autorizar a portaria' e aviso",
+      _pos("Já vou autorizar a portaria")[0] == "status")
+checa("'da pra incluir 2 cocas?' e acrescimo",
+      _pos("Dá pra incluir 2 cocas?")[0] == "acrescimo")
+checa("acrescimo com item na ficha continua acrescimo",
+      _pos("inclui mais 10 coxinhas", dict(_POS_ENTREGA, items=[
+          {"name": "Coxinha", "quantity": 10}]))[0] == "acrescimo")
+checa("sem pedido recente nao e aviso",
+      _pos("Saiu pra entrega?", memoria_mod._empty()) == ("", ""))
+checa("pedido de 13h atras nao e aviso",
+      _pos("Saiu pra entrega?", dict(_POS_ENTREGA, ultimo_pedido_em=(
+          _AGORA_POS - __import__("datetime").timedelta(hours=13)).isoformat())) == ("", ""))
+checa("pedido novo em montagem nao e aviso",
+      _pos("meu marido vai buscar", dict(_POS_RETIRADA, items=[
+          {"name": "Coxinha", "quantity": 50}])) == ("", ""))
+checa("pedido novo depois do anterior segue o fluxo",
+      _pos("Quero 50 coxinhas pra amanhã") == ("", ""))
+checa("acrescimo nao e barrado pelo BLOCO 6",
+      not app.transbordo_proibido("Acrescimo em pedido ja em producao: Dá pra incluir 2 cocas?"))
+_FICHA_FECHA = dict(memoria_mod._empty(), modality="retirada", name="Balbino",
+                    items=[{"name": "Coxinha", "quantity": 50}])
+_salvar_original = memoria_mod.save
+memoria_mod.save = lambda phone, data: None
+memoria_mod.registrar_pedido_enviado("55", _FICHA_FECHA)
+memoria_mod.save = _salvar_original
+checa("fechar o pedido guarda a modalidade para o pos-pedido",
+      _FICHA_FECHA.get("ultimo_pedido_modalidade") == "retirada"
+      and not _FICHA_FECHA.get("items"))
+
+
 secao("--- 27/09: a coleta de entrega pode ter duas perguntas ---")
 # A excecao e do proprio prompt: definida a modalidade, bairro/rua/dia/horario/
 # pagamento vao numa mensagem so, em lista vertical. Se o modelo escrever essa

@@ -2520,6 +2520,71 @@ def _negativas_do_bloco_6(user: str, pedido_do_cliente: str, reply: str,
     return _conferir_fiado(user, pedido_do_cliente, reply, memoria)
 
 
+# ── Pos-pedido (BLOCO 0): aviso rapido e acrescimo de ultima hora ────────────
+# Amostra do balcao do dono (28/09): "saiu pra entrega?", "meu marido ja ta
+# indo buscar", "ja vou autorizar a portaria" sao respondidos com uma palavra.
+# A Sandrinha lia cada um como pedido novo e perguntava "e novo ou soma ao
+# anterior?" - ou dizia que o pedido "nao pode ser alterado".
+_RX_ACRESCIMO = _re_mod.compile(
+    r"\binclu[ií]\w*|\bacrescent\w*|\badicion\w*|\bfaltou\b"
+    r"|\besqueci\s+de\s+(?:pedir|colocar|por|p[oô]r)"
+    r"|\b(?:p[oô]e|coloca|bota|manda)\s+(?:mais|tamb[eé]m|junto)\b"
+    r"|\bd[aá]\s+pra\s+(?:por|p[oô]r|colocar|botar|mandar)\b"
+    r"|\bjunt[ao]\s+(?:com|no|ao)\s+(?:o\s+)?(?:meu\s+)?pedido",
+    _re_mod.IGNORECASE)
+_RX_STATUS_SAIU = _re_mod.compile(
+    r"\bsaiu\b|\ba\s+caminho\b|\bt[aá]\s+(?:vindo|chegando)\b|\best[aá]\s+vindo\b"
+    r"|\bvai\s+demorar\b|\bdemora\s+muito\b|\bquanto\s+tempo\b"
+    r"|\b(?:j[aá]\s+)?(?:t[aá]|est[aá]|ficou)\s+pronto\b",
+    _re_mod.IGNORECASE)
+_RX_STATUS_BUSCAR = _re_mod.compile(
+    r"\b(?:indo|vou|vai|vem|venho)\s+buscar\b|\b(?:t[oô]|estou|t[aá])\s+(?:indo|chegando)\b"
+    r"|\bj[aá]\s+(?:t[oô]|estou)\s+a[ií]\b|\bcheguei\b|\bchego\s+em\b",
+    _re_mod.IGNORECASE)
+_RX_STATUS_PORTARIA = _re_mod.compile(
+    r"\bportaria\b|\bporteiro\b|\binterfone\b|\bautoriz\w*|\bliber\w*\s+a\s+entrada",
+    _re_mod.IGNORECASE)
+
+# Mensagem longa quase sempre traz outra coisa junto; o aviso rapido e curto.
+_MAX_CARACTERES_AVISO = 140
+
+
+def resposta_pos_pedido(texto: str, memoria: dict) -> tuple[str, str]:
+    """(tipo, resposta) para aviso rapido ou acrescimo depois de um pedido.
+
+    tipo e "acrescimo", "status" ou "" (nao e o caso: segue o fluxo normal).
+    A resposta NAO afirma o que o sistema nao sabe: "saiu pra entrega?" nao
+    recebe "ja sim", porque a Sandrinha nao ve a expedicao.
+    """
+    texto = (texto or "").strip()
+    if not texto or len(texto) > _MAX_CARACTERES_AVISO:
+        return "", ""
+    if (_RX_ACRESCIMO.search(texto)
+            and conversation_memory.em_pos_pedido(memoria, aceita_itens=True)):
+        return "acrescimo", (
+            "Seu pedido já está em produção! Vou chamar nossa equipe pra ver "
+            "se ainda dá pra incluir, só um instante 💛")
+    if not conversation_memory.em_pos_pedido(memoria):
+        return "", ""
+    modalidade = (memoria.get("ultimo_pedido_modalidade") or "").lower()
+    if _RX_STATUS_PORTARIA.search(texto):
+        return "status", "Combinado, obrigada por avisar! 💛"
+    if _RX_STATUS_BUSCAR.search(texto):
+        if modalidade == "entrega":
+            return "status", "Combinado! 💛"
+        return "status", "Combinado! Seu pedido fica separado aqui no balcão 💛"
+    if _RX_STATUS_SAIU.search(texto):
+        if modalidade == "entrega":
+            return "status", ("Seu pedido já está com a nossa equipe e segue pra "
+                              "entrega no horário combinado! 🛵💛")
+        if modalidade == "retirada":
+            return "status", ("Seu pedido já está com a nossa equipe e fica pronto "
+                              "no horário combinado, no balcão da fábrica! 💛")
+        return "status", ("Seu pedido já está com a nossa equipe, no horário "
+                          "combinado! 💛")
+    return "", ""
+
+
 def _conferir_vazamento_tecnico(user: str, reply: str, memoria: dict) -> str:
     """Descarta a resposta em que a Sandrinha sai do papel de atendente.
 
@@ -3183,6 +3248,29 @@ def handle_flush(user: str, items: list[dict]) -> None:
                     conversation_memory.save(user, _memoria)
                     print(f"[memoria] {user}: cliente aceitou o dia oferecido "
                           f"-> {_memoria['data_agendada']}")
+
+        # ── Pos-pedido: aviso rapido e acrescimo (BLOCO 0) ───────────────────
+        # Antes do expediente: "vou autorizar a portaria" as 20h10, depois de
+        # um pedido das 19h, nao pode virar "nossa producao ja encerrou".
+        _tipo_pos, _resposta_pos = resposta_pos_pedido(text_only, _memoria)
+        if _tipo_pos == "acrescimo":
+            # O acrescimo nao vira pedido: quem decide se ainda da tempo e a
+            # equipe. Item que a extracao ja pos na ficha sai dela, senao a
+            # proxima mensagem montaria um segundo pedido com ele.
+            _memoria["items"] = []
+            _memoria["volume_pendente"] = 0
+            _memoria["pedido_por_volume"] = False
+            conversation_memory.save(user, _memoria)
+            print(f"[pos-pedido] user={user} acrescimo em pedido em andamento: "
+                  f"{text_only[:80]!r}")
+            _responder_direto(user, items, _resposta_pos, _chegada)
+            perform_transfer(user, reason=f"Acrescimo em pedido ja em producao: "
+                             f"{text_only[:120]}", send_message=False)
+            return
+        if _tipo_pos == "status":
+            print(f"[pos-pedido] user={user} aviso rapido: {text_only[:80]!r}")
+            _responder_direto(user, items, _resposta_pos, _chegada)
+            return
 
         # ── Expediente e agendamento (decididos em codigo) ───────────────────
         # Estas duas respostas saem sem passar pelo LLM porque sao regras de

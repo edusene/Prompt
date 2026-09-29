@@ -914,6 +914,92 @@ def preparo_dito(msg_lower: str) -> str:
     return "frito" if frito else "assado"
 
 
+# Volume que sera DIVIDIDO entre os sabores ditos logo depois: "1 cento pastel
+# e bolinha", "meio cento de coxinha e quibe", "100 salgados metade X metade Y".
+_RX_VOLUME_DIVIDIDO = re.compile(
+    r"\b(?:(?:uma?|1)\s+)?(?P<formato>por[cç][aã]o|meio\s+cento|cento\s+e\s+meio|"
+    r"(?:dois|duas|tr[eê]s|quatro|\d{1,2})\s+centos?|cento)\b"
+    r"|\b(?P<numero>\d{2,3})\s+(?:salgad\w*|unidades?)\b",
+    re.IGNORECASE)
+
+# Onde a lista de sabores acaba: logistica, outro numero ou fim de frase.
+_RX_FIM_DOS_SABORES = re.compile(
+    r"\bpra\b|\bpara\b|\bhoje\b|\bamanh[aã]\b|\bretir\w*|\bentreg\w*|\bbusc\w*"
+    r"|\b[aà]s\b|\d|[.;!?:\n]")
+
+# O que vem antes do sabor e nao e sabor: "sendo metade", "a outra metade de".
+_RX_ANTES_DO_SABOR = re.compile(
+    r"^(?:(?:sendo|de|dos|das|com|a|o|outra|outro|metade|meio)(?:\s+|$))+",
+    re.IGNORECASE)
+
+# Palavra de volume, nao de sabor: "cento de salgados fritos" nao diz o sabor.
+_RX_SO_GENERICO = re.compile(
+    r"^(?:salgad\w*|salgadinh\w*|frit\w*|assad\w*|sortid\w*|variad\w*|misturad\w*|\s)+$")
+
+
+def itens_divididos(msg_lower: str) -> list[dict]:
+    """Volume dividido por igual entre os sabores ditos. [] quando nao ha.
+
+    O balcao pede assim: "1 cento pastel e bolinha" e 50 de cada, "metade
+    croquete e metade pastel de carne" e um cento meio a meio. A extracao so
+    conhecia "cento de X": a ficha ficava com 100 pasteis e a bolinha sumia
+    (amostra do balcao do dono, 28/09). Dois centos iguais na mesma frase somam.
+
+    So divide quando TODOS os sabores do trecho sao conhecidos e a divisao
+    fecha em lotes de 25 - senao quem decide e o fluxo normal, que pergunta.
+    """
+    alvo = " ".join((msg_lower or "").lower().split())
+    trechos = []
+    marcas = list(_RX_VOLUME_DIVIDIDO.finditer(alvo))
+    for i, m in enumerate(marcas):
+        if m.group("formato"):
+            unidades = _unidades_do_formato(m.group("formato"))
+        else:
+            unidades = int(m.group("numero"))
+        fim = marcas[i + 1].start() if i + 1 < len(marcas) else len(alvo)
+        trechos.append((unidades, alvo[m.end():fim]))
+    # "Metade croquete e metade pastel de carne", sem volume nenhum: o balcao
+    # entende um cento.
+    if not marcas:
+        m = re.search(r"\bmetade\b.*\bmetade\b", alvo)
+        if m:
+            trechos.append((100, alvo[m.start():]))
+
+    somados: dict[str, int] = {}
+    for unidades, trecho in trechos:
+        corte = _RX_FIM_DOS_SABORES.search(trecho)
+        if corte:
+            trecho = trecho[:corte.start()]
+        partes = []
+        for parte in re.split(r"\s*(?:,|\be\b|\+|/|\bmetade\b)\s*", trecho):
+            parte = _RX_ANTES_DO_SABOR.sub("", parte.strip()).strip()
+            if parte and not _RX_SO_GENERICO.match(parte):
+                partes.append(parte)
+        if len(partes) < 2 or not unidades:
+            continue
+        sabores = [_produto_conhecido(p) for p in partes]
+        if not all(sabores) or len(set(sabores)) != len(sabores):
+            continue
+        cada = unidades // len(sabores)
+        if cada * len(sabores) != unidades or cada % 25:
+            continue
+        for nome in sabores:
+            somados[nome] = somados.get(nome, 0) + cada
+
+    achados = []
+    for nome, qtd in somados.items():
+        preco = 0.0
+        try:
+            import facts
+            oficial = facts.resolve_unit_price(nome, qtd)
+            if oficial:
+                preco = oficial["preco_unitario"]
+        except Exception:
+            pass
+        achados.append({"name": nome, "quantity": qtd, "price": preco})
+    return achados
+
+
 def _itens_por_extenso(msg_lower: str) -> list[dict]:
     """Itens pedidos por formato em vez de numero. [] quando nao ha nenhum."""
     achados = []
@@ -1123,6 +1209,14 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
                     "quantity": qty,
                     "price": unit_price,
                 })
+
+        # "1 cento pastel e bolinha", "metade X e metade Y": o volume dividido
+        # vale mais do que qualquer leitura parcial do mesmo sabor acima.
+        divididos = itens_divididos(msg_lower)
+        if divididos:
+            nomes = {i["name"] for i in divididos}
+            items_found = [i for i in items_found if i["name"] not in nomes] + divididos
+            extracted["pedido_por_volume"] = True
 
         # "meio cento de coxinha" nao tem numero e escapava do padrao acima.
         # So entra o produto que o padrao numerado nao pegou.
