@@ -22,6 +22,13 @@ from datetime import date, datetime  # noqa: E402
 
 import cardapio  # noqa: E402
 import cardapio_catalogo as catalogo  # noqa: E402
+import config_dono  # noqa: E402
+
+# A suite mede o PADRAO do codigo: o que o dono gravou no painel (no banco de
+# producao) nao pode mudar o resultado de teste nenhum. A secao de config_dono
+# simula cada gravacao explicitamente.
+_LER_JSON_REAL = config_dono._ler_json
+config_dono._ler_json = lambda chave: None
 import conversation_memory as memoria_mod  # noqa: E402
 import facts  # noqa: E402
 from agents.conversation import (  # noqa: E402
@@ -1343,6 +1350,82 @@ checa("a pergunta do codigo cobre a etapa",
 _F_TROCA = _merge_msg(dict(_F_COCA), "na verdade quero 50 coxinhas")
 checa("correcao dos salgados nao apaga a bebida",
       any(i["name"] == "Refrigerante Lata" for i in _F_TROCA["items"]), str(_F_TROCA["items"]))
+
+
+secao("--- 29/09: o que o dono ajusta pelo painel (config_dono) ---")
+import cardapio_catalogo as _cat  # noqa: E402
+import database  # noqa: E402
+
+_ler_original = _LER_JSON_REAL
+
+
+def _camada(ofertas=None, catalogo=None):
+    """Simula o que o dono gravou. Sem argumentos = nada gravado."""
+    config_dono._ler_json = lambda chave: {
+        config_dono.CHAVE_OFERTAS: ofertas, config_dono.CHAVE_CATALOGO: catalogo}.get(chave)
+    config_dono.invalidar()
+
+
+_camada()
+checa("sem nada gravado: sabores sao os padrao", _cat.sabores_efetivos() is _cat.SABORES)
+checa("sem nada gravado: mapa e o padrao", _cat.mapa_efetivo() is _cat.MAPA)
+checa("sem nada gravado: bloqueados sao os padrao", _cat.bloqueados_efetivos() is _cat.BLOQUEADOS)
+_ONZE = datetime(2026, 9, 29, 11, 0)
+checa("sem nada gravado: a oferta e a padrao da faixa",
+      memoria_mod.oferta_adicional(_ONZE) == memoria_mod._OFERTAS_POR_HORARIO[1][2])
+
+# JSON quebrado no banco: vale o padrao, nunca erro.
+config_dono._ler_json = _ler_original
+_get_setting_original = database.get_setting
+database.get_setting = lambda chave, padrao="": "{quebrado"
+config_dono.invalidar()
+checa("setting com JSON quebrado: ofertas voltam ao padrao",
+      config_dono.ofertas() == [""] * 4
+      and memoria_mod.oferta_adicional(_ONZE) == memoria_mod._OFERTAS_POR_HORARIO[1][2])
+checa("setting com JSON quebrado: catalogo vazio", config_dono.catalogo_extra() == [])
+database.get_setting = _get_setting_original
+config_dono._ler_json = lambda chave: None
+
+# Frase nova do dono, sem nenhuma das palavras fixas.
+_camada(ofertas=["", "Quer levar um suco natural hoje?", "", ""])
+checa("a frase do dono vale na faixa dela",
+      memoria_mod.oferta_adicional(_ONZE) == "Quer levar um suco natural hoje?")
+checa("as outras faixas continuam com o padrao",
+      memoria_mod.oferta_adicional(datetime(2026, 9, 29, 8, 0)) == memoria_mod._OFERTAS_POR_HORARIO[0][2])
+checa("frase do dono marca a oferta como feita (nao repete)",
+      app._ofereceu_acompanhamento("Quer levar um suco natural hoje? 🍹"))
+_F_UPSELL = dict(memoria_mod._empty(), items=[{"name": "Coxinha", "quantity": 50}])
+checa("frase do dono cobre a etapa da oferta",
+      memoria_mod.etapa_coberta(_F_UPSELL, "Quer levar um suco natural hoje? 🍹", _ONZE))
+checa("oferta: frase sem pergunta e recusada", config_dono.validar_oferta("Temos suco.") != "")
+checa("oferta: em branco e aceito (volta ao padrao)", config_dono.validar_oferta("") == "")
+
+# Croquete de carne liberado pelo dono.
+_CROQUETE = {"nome_planilha": "Croquete de carne", "tipo": "sabor", "familia": "Fritos",
+             "nome_cardapio": "croquete de carne", "apelidos": ["croquete", "coxinha"]}
+_camada(catalogo=[_CROQUETE])
+checa("liberado sai dos bloqueados", "Croquete de carne" not in _cat.bloqueados_efetivos())
+checa("os outros bloqueados continuam", "Refrigerante 2 Litros" in _cat.bloqueados_efetivos())
+_api, _bloq = _cat.traduzir([{"name": "Croquete de carne", "quantity": 50}])
+checa("liberado traduz para o sabor que o dono informou",
+      not _bloq and _api and _api[0].get("selected_flavors") == ["croquete de carne"], str((_api, _bloq)))
+checa("apelido do dono nao rouba nome ja conhecido ('coxinha' continua Coxinha)",
+      _produto_conhecido("coxinha") == "Coxinha")
+checa("entrada invalida e ignorada",
+      config_dono._entrada_valida({"nome_planilha": "X", "tipo": "sabor", "nome_cardapio": "x"}) is None)
+_TESTE_FORA = _cat.testar_entrada({"nome_planilha": "Produto Que Nao Existe", "tipo": "unidade",
+                                   "nome_cardapio": "qualquer"})
+checa("produto fora da planilha e recusado antes de tocar o cardapio",
+      not _TESTE_FORA["ok"] and "nao esta na planilha" in " ".join(_TESTE_FORA["motivos"]))
+_TESTE_TIPO = _cat.testar_entrada({"nome_planilha": "Quiche de Frango", "tipo": "sabor",
+                                   "familia": "Fritos", "nome_cardapio": "quiche"})
+checa("tipo errado (item com preco como sabor) e recusado",
+      not _TESTE_TIPO["ok"] and "por unidade" in " ".join(_TESTE_TIPO["motivos"]))
+
+_camada()
+checa("depois de remover tudo, volta ao padrao",
+      _cat.bloqueados_efetivos() is _cat.BLOQUEADOS
+      and "Croquete de carne" in _cat.bloqueados_efetivos())
 
 
 secao("--- 27/09: a coleta de entrega pode ter duas perguntas ---")

@@ -421,7 +421,9 @@ def main(corrigir: bool = False) -> int:
     # nao so no calculo do pedido.
     disponibilidade: list[tuple] = []
     if corrigir:
-        for nome, (categoria, _motivo) in cardapio_catalogo.BLOQUEADOS.items():
+        # Efetivos: item que o dono liberou pelo painel nao pode voltar a NAO
+        # na planilha so porque ainda esta na lista padrao de bloqueados.
+        for nome, (categoria, _motivo) in cardapio_catalogo.bloqueados_efetivos().items():
             disponibilidade.append((categoria, nome, False))
         for nome, destino in cardapio_catalogo.MAPA.items():
             if destino.get("categoria"):
@@ -457,10 +459,11 @@ def main(corrigir: bool = False) -> int:
         for linha in sabores:
             print(f"  ..  {linha}")
 
-    if cardapio_catalogo.BLOQUEADOS:
-        print(f"\n=== {len(cardapio_catalogo.BLOQUEADOS)} item(ns) BLOQUEADOS "
+    _bloqueados = cardapio_catalogo.bloqueados_efetivos()
+    if _bloqueados:
+        print(f"\n=== {len(_bloqueados)} item(ns) BLOQUEADOS "
               f"(o agente nao fecha pedido com eles) ===")
-        for chave, motivo in sorted(cardapio_catalogo.BLOQUEADOS.items()):
+        for chave, motivo in sorted(_bloqueados.items()):
             print(f"  --  {chave}")
             print(f"      {motivo}")
             for candidato in _sugerir(url, chave):
@@ -479,17 +482,17 @@ def main(corrigir: bool = False) -> int:
         print("NAO ligue o modo producao: ha itens divergentes ou sem tratamento.")
         return 1
     print("Todos os itens mapeados conferem com o cardapio digital.")
-    if cardapio_catalogo.BLOQUEADOS:
-        print(f"Os {len(cardapio_catalogo.BLOQUEADOS)} bloqueados acima dependem do "
+    if _bloqueados:
+        print(f"Os {len(_bloqueados)} bloqueados acima dependem do "
               f"dono cadastrar no cardapio digital.")
     return 0
 
 
 def _itens_sem_tratamento() -> list[str]:
     """Produtos da planilha sem mapa, sem bloqueio e sem pacote equivalente."""
-    conhecidos = {facts.normalize(k) for k in cardapio_catalogo.MAPA}
-    conhecidos |= {facts.normalize(k) for k in cardapio_catalogo.BLOQUEADOS}
-    for sabores in cardapio_catalogo.SABORES.values():
+    conhecidos = {facts.normalize(k) for k in cardapio_catalogo.mapa_efetivo()}
+    conhecidos |= {facts.normalize(k) for k in cardapio_catalogo.bloqueados_efetivos()}
+    for sabores in cardapio_catalogo.sabores_efetivos().values():
         conhecidos |= {facts.normalize(k) for k in sabores}
 
     faltando = []

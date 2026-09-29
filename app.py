@@ -36,6 +36,7 @@ import database
 import events
 import meta
 import cardapio
+import config_dono
 import horario
 import parse_knowledge
 import scheduler as crm_scheduler
@@ -1702,16 +1703,21 @@ _RX_DIZ_FRITO = _re_mod.compile(r"\bfrit[oa]s?\b", _re_mod.IGNORECASE)
 _RX_DIZ_ASSADO = _re_mod.compile(r"\bassad[oa]s?\b", _re_mod.IGNORECASE)
 
 _FAMILIA_POR_SABOR: dict | None = None
+_FAMILIA_POR_SABOR_VERSAO = -1
 
 
 def _familia_do_sabor(nome: str) -> str:
     """'Fritos' ou 'Assados' para um sabor de lote. '' quando nao e sabor."""
-    global _FAMILIA_POR_SABOR
+    global _FAMILIA_POR_SABOR, _FAMILIA_POR_SABOR_VERSAO
+    # Remonta quando o dono liga um sabor novo pelo painel.
+    if _FAMILIA_POR_SABOR is not None and _FAMILIA_POR_SABOR_VERSAO != config_dono.versao():
+        _FAMILIA_POR_SABOR = None
     if _FAMILIA_POR_SABOR is None:
         _FAMILIA_POR_SABOR = {}
+        _FAMILIA_POR_SABOR_VERSAO = config_dono.versao()
         try:
             import cardapio_catalogo
-            for familia, sabores in cardapio_catalogo.SABORES.items():
+            for familia, sabores in cardapio_catalogo.sabores_efetivos().items():
                 if familia == "Canudinhos":
                     continue      # repete os canudinhos de Assados
                 for sabor in sabores:
@@ -2434,8 +2440,15 @@ _RX_OFERECEU_ACOMPANHAMENTO = _re_mod.compile(
 
 
 def _ofereceu_acompanhamento(reply: str) -> bool:
-    """A resposta fez a oferta adicional (bebida, bolo ou doce)?"""
-    return bool(reply) and bool(_RX_OFERECEU_ACOMPANHAMENTO.search(reply))
+    """A resposta fez a oferta adicional (bebida, bolo ou doce)?
+
+    Vale tambem a frase que o dono gravou no painel, que pode nao ter nenhuma
+    das palavras acima.
+    """
+    if not reply:
+        return False
+    return (bool(_RX_OFERECEU_ACOMPANHAMENTO.search(reply))
+            or conversation_memory.e_a_oferta_configurada(reply))
 
 
 # Motivo de transferencia que o BLOCO 6 PROIBE. A hierarquia do dono e
@@ -5084,6 +5097,100 @@ def api_set_transfer_message():
         return jsonify({"error": "transfer_message não pode ser vazio"}), 400
     database.set_setting("transfer_message", msg)
     return jsonify({"ok": True, "transfer_message": msg})
+
+
+# ── O que o dono ajusta pelo painel (config_dono) ────────────────────────────
+# Frases da oferta de acompanhamento e produtos ligados ao cardapio digital.
+# O codigo continua sendo o padrao: apagar tudo aqui volta ao comportamento de
+# sempre.
+
+@app.get("/api/settings/ofertas")
+@login_required
+def api_get_ofertas():
+    do_dono = config_dono.ofertas()
+    faixas = []
+    for i, ((h1, m1), (h2, m2), padrao) in enumerate(conversation_memory._OFERTAS_POR_HORARIO):
+        faixas.append({
+            "rotulo": f"{h1:02d}h{m1:02d} às {h2:02d}h{m2:02d}",
+            "padrao": padrao,
+            "atual": do_dono[i] if i < len(do_dono) else "",
+        })
+    return jsonify({"faixas": faixas})
+
+
+@app.put("/api/settings/ofertas")
+@login_required
+def api_set_ofertas():
+    data = request.get_json(silent=True) or {}
+    frases = data.get("frases")
+    if not isinstance(frases, list):
+        return jsonify({"error": "envie a lista 'frases'"}), 400
+    for i, frase in enumerate(frases[:config_dono.FAIXAS_DE_OFERTA]):
+        motivo = config_dono.validar_oferta(frase if isinstance(frase, str) else "")
+        if motivo:
+            return jsonify({"error": f"Faixa {i + 1}: {motivo}"}), 400
+    config_dono.salvar_ofertas([f if isinstance(f, str) else "" for f in frases])
+    print(f"[config] frases da oferta atualizadas pelo painel")
+    return jsonify({"ok": True})
+
+
+@app.get("/api/catalogo/extra")
+@login_required
+def api_get_catalogo_extra():
+    import cardapio_catalogo
+    entradas = config_dono.catalogo_extra()
+    liberados = {cardapio_catalogo._norm(e["nome_planilha"]) for e in entradas}
+    bloqueados = [
+        {"nome": nome, "categoria": categoria, "motivo": motivo,
+         "liberado": cardapio_catalogo._norm(nome) in liberados}
+        for nome, (categoria, motivo) in sorted(cardapio_catalogo.BLOQUEADOS.items())
+    ]
+    return jsonify({"entradas": entradas, "bloqueados": bloqueados,
+                    "familias": list(config_dono.FAMILIAS)})
+
+
+@app.post("/api/catalogo/testar")
+@login_required
+def api_testar_catalogo():
+    import cardapio_catalogo
+    data = request.get_json(silent=True) or {}
+    return jsonify(cardapio_catalogo.testar_entrada(
+        data.get("entrada") or {}, config_dono.catalogo_extra()))
+
+
+@app.post("/api/catalogo/extra")
+@login_required
+def api_salvar_catalogo_extra():
+    """Grava um produto SO depois de ele passar no teste."""
+    import cardapio_catalogo
+    data = request.get_json(silent=True) or {}
+    entrada = data.get("entrada") or {}
+    atuais = config_dono.catalogo_extra()
+    resultado = cardapio_catalogo.testar_entrada(entrada, atuais)
+    if not resultado.get("ok"):
+        return jsonify({"error": "; ".join(resultado.get("motivos") or ["teste falhou"]),
+                        **resultado}), 400
+    nova = config_dono._entrada_valida(entrada)
+    novas = [e for e in atuais
+             if cardapio_catalogo._norm(e["nome_planilha"]) != cardapio_catalogo._norm(nova["nome_planilha"])]
+    config_dono.salvar_catalogo(novas + [nova])
+    print(f"[config] produto ligado ao cardapio pelo painel: {nova['nome_planilha']} "
+          f"-> {nova['nome_cardapio']}")
+    return jsonify({"ok": True, **resultado})
+
+
+@app.delete("/api/catalogo/extra/<path:nome>")
+@login_required
+def api_remover_catalogo_extra(nome):
+    import cardapio_catalogo
+    atuais = config_dono.catalogo_extra()
+    novas = [e for e in atuais
+             if cardapio_catalogo._norm(e["nome_planilha"]) != cardapio_catalogo._norm(nome)]
+    if len(novas) == len(atuais):
+        return jsonify({"error": "produto nao encontrado"}), 404
+    config_dono.salvar_catalogo(novas)
+    print(f"[config] produto removido do painel (volta ao padrao): {nome}")
+    return jsonify({"ok": True})
 
 
 @app.get("/api/settings/reset")

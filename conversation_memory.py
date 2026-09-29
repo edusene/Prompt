@@ -972,18 +972,45 @@ _OFERTAS_POR_HORARIO = (
 )
 
 
+def _frases_de_oferta() -> list[str]:
+    """Uma frase por faixa: a do dono (painel) onde houver, senao a padrao."""
+    try:
+        import config_dono
+        do_dono = config_dono.ofertas()
+    except Exception as e:
+        print(f"[oferta] frases do painel ignoradas: {e}")
+        do_dono = []
+    padrao = [frase for _ini, _fim, frase in _OFERTAS_POR_HORARIO]
+    return [(do_dono[i] if i < len(do_dono) and do_dono[i] else frase)
+            for i, frase in enumerate(padrao)]
+
+
 def oferta_adicional(agora=None) -> str:
     """A frase de upsell do BLOCO 2 para a hora em que estamos."""
+    frases = _frases_de_oferta()
     try:
         import horario
         agora = agora or horario.agora()
         minuto = agora.hour * 60 + agora.minute
     except Exception:
-        return _OFERTAS_POR_HORARIO[-1][2]
-    for (h1, m1), (h2, m2), frase in _OFERTAS_POR_HORARIO:
+        return frases[-1]
+    for i, ((h1, m1), (h2, m2), _padrao) in enumerate(_OFERTAS_POR_HORARIO):
         if h1 * 60 + m1 <= minuto <= h2 * 60 + m2:
-            return frase
-    return _OFERTAS_POR_HORARIO[-1][2]
+            return frases[i]
+    return frases[-1]
+
+
+def e_a_oferta_configurada(reply: str, agora=None) -> bool:
+    """A resposta traz a frase de oferta que vale agora (inclusive a do dono)?
+
+    As checagens de "ja ofereceu" procuram palavras fixas (refrigerante, bolo de
+    milho...). Uma frase nova do dono sem nenhuma delas nunca seria reconhecida
+    e a oferta se repetiria em toda mensagem. O inicio da frase basta: o modelo
+    as vezes troca o emoji ou a pontuacao do fim.
+    """
+    frase = _sem_acento(oferta_adicional(agora))
+    inicio = " ".join(frase.split()[:5])
+    return bool(inicio) and inicio in _sem_acento(reply or "")
 
 
 def upsell_pendente(memoria: dict, agora=None) -> str:
@@ -1450,7 +1477,7 @@ def etapa_coberta(memoria: dict, reply: str, agora=None) -> bool:
     if upsell_pendente(memoria, agora):
         ofereceu = any(m in texto for m in (
             "refrigerante", "refri", "bolo de milho", "tuchaua", "docinho",
-            "brigadeiro", "beijinho", "pra acompanhar"))
+            "brigadeiro", "beijinho", "pra acompanhar")) or e_a_oferta_configurada(reply, agora)
         # Pedido por volume: o valor tem de estar na mesma mensagem.
         if ofereceu and memoria.get("pedido_por_volume"):
             subtotal = subtotal_dos_salgados(memoria)

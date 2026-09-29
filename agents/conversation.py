@@ -769,19 +769,49 @@ def _forma_de_busca(nome: str) -> str:
 
 
 _INDICE_PRODUTOS: dict[str, str] | None = None
+_INDICE_VERSAO = -1
+
+
+def _extras_do_dono() -> list[dict]:
+    """Produtos que o dono ligou pelo painel (config_dono). [] se nenhum."""
+    try:
+        import config_dono
+        return config_dono.catalogo_extra()
+    except Exception as e:
+        print(f"[produtos] camada do dono ignorada: {e}")
+        return []
+
+
+def _versao_do_dono() -> int:
+    try:
+        import config_dono
+        return config_dono.versao()
+    except Exception:
+        return 0
 
 
 def _indice_de_produtos() -> dict:
-    """{forma de busca: nome canonico}, montado uma vez."""
-    global _INDICE_PRODUTOS
+    """{forma de busca: nome canonico}, montado uma vez (e de novo quando o dono grava)."""
+    global _INDICE_PRODUTOS, _INDICE_VERSAO
+    if _INDICE_PRODUTOS is not None and _INDICE_VERSAO != _versao_do_dono():
+        _INDICE_PRODUTOS = None
     if _INDICE_PRODUTOS is None:
         _INDICE_PRODUTOS = {}
+        _INDICE_VERSAO = _versao_do_dono()
         for chave, canonico in _TODOS_PRODUTOS.items():
             forma = _forma_de_busca(chave)
             atual = _INDICE_PRODUTOS.get(forma)
             if atual is None or (atual == _forma_de_busca(atual).title()
                                  and canonico != _forma_de_busca(canonico).title()):
                 _INDICE_PRODUTOS[forma] = canonico
+        # Nomes do dono so preenchem o que o codigo ainda nao conhece: um
+        # apelido "coxinha" apontando para outro produto nao pode tirar a
+        # coxinha de quem ja pede coxinha.
+        for e in _extras_do_dono():
+            for chave in [e["nome_planilha"]] + list(e.get("apelidos") or []):
+                forma = _forma_de_busca(chave)
+                if forma and forma not in _INDICE_PRODUTOS:
+                    _INDICE_PRODUTOS[forma] = e["nome_planilha"]
     return _INDICE_PRODUTOS
 
 
@@ -877,7 +907,8 @@ def sabores_possiveis(bruto: str, so_lote: bool = True) -> list[str]:
     if len(achados) < 2:
         return []
     if so_lote:
-        de_lote = [a for a in achados if a in _SABORES_DE_LOTE]
+        de_lote_do_dono = {e["nome_planilha"] for e in _extras_do_dono() if e["tipo"] == "sabor"}
+        de_lote = [a for a in achados if a in _SABORES_DE_LOTE or a in de_lote_do_dono]
         if de_lote:
             achados = de_lote
     # Esgotado nao entra na lista de opcoes: oferecer o que a fabrica nao tem e

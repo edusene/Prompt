@@ -119,6 +119,28 @@ Acesse `http://localhost:5000/panel` e faca login com as credenciais do `.env`.
 | **WhatsApp** | Status do numero, templates, business profile |
 | **SSE** | Atualizacao em tempo real via Server-Sent Events |
 
+### O que o dono ajusta sozinho (aba Cardapio)
+
+Dois cartoes no fim da aba **Cardapio**. O padrao do sistema continua valendo
+onde nada for salvo, e "Remover" / "Usar padrao" voltam ao comportamento de
+sempre. Tudo fica na tabela `settings` (`config_dono.py`).
+
+| O que | Onde | Observacao |
+|---|---|---|
+| Frase da oferta de acompanhamento | "Frases da oferta" | Uma por faixa de horario; precisa ser pergunta. Os horarios das faixas sao fixos |
+| Produto novo | "Produtos do cardapio digital" → Ligar produto | Cadastre antes na planilha e no cardapio digital |
+| Reativar item bloqueado (ex.: croquete de carne) | Mesmo cartao → Liberar | Idem: o item precisa existir no cardapio digital |
+
+**Salvar produto sempre testa antes.** O teste confere se o nome esta na
+planilha, se o tipo bate (sabor de lote nao tem preco proprio; item por unidade
+tem) e manda um `calculateOrder` — que so calcula, nao cria pedido — para ver se
+o cardapio digital aceita e entende o MESMO produto. Qualquer falha impede a
+gravacao e mostra o motivo.
+
+O que ainda nao e pelo painel: preco (vem do cardapio digital, e a planilha tem
+de acompanhar — `python verificar_catalogo.py` compara) e os horarios das faixas
+da oferta.
+
 ---
 
 ## 8. API do WhatsApp (rotas novas)

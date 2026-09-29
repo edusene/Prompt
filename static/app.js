@@ -166,6 +166,7 @@ function loadView(view) {
             break;
         case 'cardapio':
             loadCardapioSettings();
+            loadDonoAjustes();
             loadCardapioStats();
             loadCardapioOrders();
             pollTimers.push(setInterval(() => { loadCardapioOrders(); loadCardapioStats(); }, 30000));
@@ -3709,6 +3710,139 @@ async function loadCrmLogs() {
 /* ── Cardápio Digital ──────────────────────────────────────────────────────── */
 
 let _cardapioTestMode = true;
+
+/* ── Ajustes do dono: frases da oferta e produtos do cardápio digital ─────
+   O padrão do sistema continua valendo onde nada for salvo. */
+function toggleDonoCard(qual) {
+    const body = document.getElementById(`dono-${qual}-body`);
+    const arrow = document.getElementById(`dono-${qual}-arrow`);
+    if (!body) return;
+    const abrir = body.style.display === 'none';
+    body.style.display = abrir ? 'block' : 'none';
+    if (arrow) arrow.style.transform = abrir ? 'rotate(180deg)' : '';
+}
+
+async function loadDonoAjustes() {
+    const ofertas = await api('/api/settings/ofertas');
+    const lista = document.getElementById('dono-ofertas-lista');
+    if (ofertas && lista) {
+        lista.innerHTML = (ofertas.faixas || []).map((f, i) => `
+            <div style="margin-bottom:10px">
+                <div class="muted" style="font-size:12px;margin-bottom:4px">${esc(f.rotulo)} — padrão: “${esc(f.padrao)}”</div>
+                <div style="display:flex;gap:8px;align-items:flex-start">
+                    <textarea id="dono-oferta-${i}" class="wa-config-input" rows="2" style="flex:1;resize:vertical"
+                        placeholder="${esc(f.padrao)}">${esc(f.atual)}</textarea>
+                    <button type="button" class="btn-secondary btn-sm" onclick="document.getElementById('dono-oferta-${i}').value=''">Usar padrão</button>
+                </div>
+            </div>`).join('');
+    }
+    await loadDonoProdutos();
+    donoTipoMudou();
+}
+
+async function salvarOfertas(ev) {
+    const btn = ev && ev.currentTarget;
+    const frases = [0, 1, 2, 3].map(i => (document.getElementById(`dono-oferta-${i}`) || {}).value || '');
+    setBtnLoading(btn, true, 'Salvando...');
+    const res = await api('/api/settings/ofertas', { method: 'PUT', body: JSON.stringify({ frases }) });
+    setBtnLoading(btn, false);
+    if (res && res.ok) toast('Frases salvas. Onde ficou em branco vale a frase padrão.', 'success');
+    else toast((res && res.error) || 'Erro ao salvar as frases', 'error');
+}
+
+async function loadDonoProdutos() {
+    const data = await api('/api/catalogo/extra');
+    if (!data) return;
+    const ligados = document.getElementById('dono-produtos-ligados');
+    if (ligados) {
+        ligados.innerHTML = (data.entradas || []).length ? (data.entradas || []).map(e => `
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
+                <span><b>${esc(e.nome_planilha)}</b> → ${esc(e.nome_cardapio)}
+                    <span class="muted">(${e.tipo === 'sabor' ? 'sabor de ' + esc(e.familia) : 'por unidade'})</span>
+                    ${(e.apelidos || []).length ? `<span class="muted"> · cliente diz: ${esc(e.apelidos.join(', '))}</span>` : ''}</span>
+                <button type="button" class="btn-secondary btn-sm" data-nome="${esc(e.nome_planilha)}" onclick="removerProdutoDono(this.dataset.nome)">Remover</button>
+            </div>`).join('') : '<p class="muted">Nenhum ainda.</p>';
+    }
+    const bloq = document.getElementById('dono-produtos-bloqueados');
+    if (bloq) {
+        bloq.innerHTML = (data.bloqueados || []).map(b => `
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
+                <span><b>${esc(b.nome)}</b> <span class="muted">(${esc(b.categoria)}) — ${esc(b.motivo)}</span></span>
+                ${b.liberado ? '<span class="badge">liberado</span>'
+                    : `<button type="button" class="btn-secondary btn-sm" data-nome="${esc(b.nome)}" data-categoria="${esc(b.categoria)}" onclick="preencherProdutoDono(this.dataset.nome, this.dataset.categoria)">Liberar</button>`}
+            </div>`).join('');
+    }
+}
+
+function donoTipoMudou() {
+    const tipo = (document.getElementById('dono-p-tipo') || {}).value;
+    const wrap = document.getElementById('dono-p-familia-wrap');
+    if (wrap) wrap.style.display = tipo === 'sabor' ? '' : 'none';
+}
+
+function preencherProdutoDono(nome, categoria) {
+    document.getElementById('dono-p-nome').value = nome;
+    const lote = ['Fritos', 'Assados'].includes(categoria);
+    document.getElementById('dono-p-tipo').value = lote ? 'sabor' : 'unidade';
+    if (lote) document.getElementById('dono-p-familia').value = categoria;
+    donoTipoMudou();
+    document.getElementById('dono-p-destino').focus();
+    document.getElementById('dono-p-resultado').innerHTML =
+        '<p class="muted">Agora informe o nome exato do item no cardápio digital e clique em Testar.</p>';
+}
+
+function entradaProdutoDono() {
+    const tipo = document.getElementById('dono-p-tipo').value;
+    return {
+        nome_planilha: document.getElementById('dono-p-nome').value.trim(),
+        tipo,
+        familia: tipo === 'sabor' ? document.getElementById('dono-p-familia').value : '',
+        nome_cardapio: document.getElementById('dono-p-destino').value.trim(),
+        apelidos: document.getElementById('dono-p-apelidos').value,
+    };
+}
+
+function mostrarResultadoProduto(r) {
+    const box = document.getElementById('dono-p-resultado');
+    if (!box || !r) return;
+    const linhas = [];
+    (r.motivos || []).forEach(m => linhas.push(`<li style="color:#ef4444">${esc(m)}</li>`));
+    (r.avisos || []).forEach(m => linhas.push(`<li style="color:#f59e0b">${esc(m)}</li>`));
+    if (r.ok) linhas.unshift(`<li style="color:#22c55e">Cardápio digital aceitou${r.entendido_como ? ' como “' + esc(r.entendido_como) + '”' : ''}.</li>`);
+    box.innerHTML = `<ul style="margin:0;padding-left:18px">${linhas.join('')}</ul>`;
+}
+
+async function testarProdutoDono(ev) {
+    const btn = ev && ev.currentTarget;
+    setBtnLoading(btn, true, 'Testando...');
+    const r = await api('/api/catalogo/testar', { method: 'POST', body: JSON.stringify({ entrada: entradaProdutoDono() }) });
+    setBtnLoading(btn, false);
+    mostrarResultadoProduto(r);
+}
+
+async function salvarProdutoDono(ev) {
+    const btn = ev && ev.currentTarget;
+    setBtnLoading(btn, true, 'Testando...');
+    const r = await api('/api/catalogo/extra', { method: 'POST', body: JSON.stringify({ entrada: entradaProdutoDono() }) });
+    setBtnLoading(btn, false);
+    mostrarResultadoProduto(r);
+    if (r && r.ok) {
+        toast('Produto ligado. A Sandrinha já pode vendê-lo.', 'success');
+        loadDonoProdutos();
+    } else {
+        toast('Não foi salvo — veja o motivo abaixo do formulário.', 'error');
+    }
+}
+
+async function removerProdutoDono(nome) {
+    const res = await api(`/api/catalogo/extra/${encodeURIComponent(nome)}`, { method: 'DELETE' });
+    if (res && res.ok) {
+        toast(`${nome} voltou ao padrão do sistema.`, 'success');
+        loadDonoProdutos();
+    } else {
+        toast((res && res.error) || 'Erro ao remover', 'error');
+    }
+}
 
 async function loadCardapioSettings() {
     const data = await api('/api/cardapio/settings');

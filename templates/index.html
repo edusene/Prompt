@@ -658,6 +658,62 @@
                         <tbody id="cardapio-orders-body"></tbody>
                     </table>
                 </div>
+
+                <!-- Ajustes do dono: o padrao do sistema continua valendo onde nada for salvo -->
+                <div class="wa-card wa-config-card" style="margin-top:20px">
+                    <div class="wa-config-header" onclick="toggleDonoCard('ofertas')" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center">
+                        <div>
+                            <h3 style="margin:0">Frases da oferta de acompanhamento</h3>
+                            <p class="muted" style="font-size:12px;margin:4px 0 0 0">A pergunta que a Sandrinha faz depois dos salgados, uma por horário. Deixe em branco para usar a frase padrão.</p>
+                        </div>
+                        <svg id="dono-ofertas-arrow" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" style="transition:transform .2s;flex-shrink:0"><polyline points="6 9 12 15 18 9"/></svg>
+                    </div>
+                    <div id="dono-ofertas-body" style="display:none;overflow:hidden">
+                        <div id="dono-ofertas-lista" style="margin-top:12px"></div>
+                        <div class="wa-config-actions" style="margin-top:8px">
+                            <button type="button" class="btn-primary" onclick="salvarOfertas(event)">Salvar frases</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="wa-card wa-config-card" style="margin-top:12px">
+                    <div class="wa-config-header" onclick="toggleDonoCard('produtos')" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center">
+                        <div>
+                            <h3 style="margin:0">Produtos do cardápio digital</h3>
+                            <p class="muted" style="font-size:12px;margin:4px 0 0 0">Ligue à Sandrinha um produto novo ou um item bloqueado. Antes, cadastre-o no cardápio digital e na planilha — o teste confere os dois antes de salvar.</p>
+                        </div>
+                        <svg id="dono-produtos-arrow" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" style="transition:transform .2s;flex-shrink:0"><polyline points="6 9 12 15 18 9"/></svg>
+                    </div>
+                    <div id="dono-produtos-body" style="display:none;overflow:hidden">
+                        <h4 style="margin:14px 0 6px">Ligados por você</h4>
+                        <div id="dono-produtos-ligados"></div>
+                        <h4 style="margin:14px 0 6px">Bloqueados (o cardápio digital não tinha o item)</h4>
+                        <div id="dono-produtos-bloqueados"></div>
+                        <h4 style="margin:14px 0 6px">Ligar produto</h4>
+                        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px">
+                            <label class="muted">Nome na planilha (exato)
+                                <input id="dono-p-nome" class="wa-config-input" placeholder="ex.: Croquete de carne"></label>
+                            <label class="muted">Tipo
+                                <select id="dono-p-tipo" class="wa-config-input" onchange="donoTipoMudou()">
+                                    <option value="sabor">Sabor de lote (25 em 25)</option>
+                                    <option value="unidade">Por unidade (preço próprio)</option>
+                                </select></label>
+                            <label class="muted" id="dono-p-familia-wrap">Família do lote
+                                <select id="dono-p-familia" class="wa-config-input">
+                                    <option>Fritos</option><option>Assados</option><option>Canudinhos</option>
+                                </select></label>
+                            <label class="muted">Nome no cardápio digital (exato)
+                                <input id="dono-p-destino" class="wa-config-input" placeholder="ex.: croquete de carne"></label>
+                            <label class="muted">Como o cliente chama (separe por vírgula)
+                                <input id="dono-p-apelidos" class="wa-config-input" placeholder="ex.: croquete, croquete de carne"></label>
+                        </div>
+                        <div id="dono-p-resultado" style="margin-top:8px"></div>
+                        <div class="wa-config-actions" style="margin-top:8px;display:flex;gap:8px">
+                            <button type="button" class="btn-secondary" onclick="testarProdutoDono(event)">Testar</button>
+                            <button type="button" class="btn-primary" onclick="salvarProdutoDono(event)">Testar e salvar</button>
+                        </div>
+                    </div>
+                </div>
             </div>
         </main>
     </div>

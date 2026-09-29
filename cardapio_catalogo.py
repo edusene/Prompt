@@ -196,6 +196,58 @@ BLOQUEADOS = {
 }
 
 
+# ── Padrao + o que o dono ligou pelo painel ─────────────────────────────────
+# Os dicionarios acima sao o PADRAO e nao mudam. O dono acrescenta produto
+# novo ou libera um bloqueado pelo painel (config_dono.catalogo_extra); estas
+# tres funcoes devolvem o padrao com a camada dele por cima. Sem nada gravado,
+# devolvem exatamente SABORES, MAPA e BLOQUEADOS.
+
+def _extras(extras: list | None = None) -> list[dict]:
+    """A camada do dono. `extras` explicito e o teste do painel (entrada ainda
+    nao gravada) - passado por parametro, e nao por variavel global, para um
+    pedido real atendido ao mesmo tempo nunca enxergar o que nao foi salvo."""
+    if extras is not None:
+        return extras
+    try:
+        import config_dono
+        return config_dono.catalogo_extra()
+    except Exception as e:
+        print(f"[catalogo] camada do dono ignorada: {e}")
+        return []
+
+
+def sabores_efetivos(extras: list | None = None) -> dict:
+    extras = [e for e in _extras(extras) if e["tipo"] == "sabor"]
+    if not extras:
+        return SABORES
+    saida = {familia: dict(sabores) for familia, sabores in SABORES.items()}
+    for e in extras:
+        saida.setdefault(e["familia"], {})[e["nome_planilha"]] = e["nome_cardapio"]
+    return saida
+
+
+def mapa_efetivo(extras: list | None = None) -> dict:
+    extras = [e for e in _extras(extras) if e["tipo"] == "unidade"]
+    if not extras:
+        return MAPA
+    saida = dict(MAPA)
+    for e in extras:
+        saida[e["nome_planilha"]] = {
+            "categoria": e.get("categoria", ""), "nome_base44": e["nome_cardapio"],
+            "context": "unidade", "fator": e.get("fator", 1),
+            "quantidade_teste": 1, "preco_esperado": None,
+        }
+    return saida
+
+
+def bloqueados_efetivos(extras: list | None = None) -> dict:
+    """BLOQUEADOS menos o que o dono ligou ao cardapio digital."""
+    liberados = {_norm(e["nome_planilha"]) for e in _extras(extras)}
+    if not liberados:
+        return BLOQUEADOS
+    return {k: v for k, v in BLOQUEADOS.items() if _norm(k) not in liberados}
+
+
 def _norm(texto: str) -> str:
     return facts.normalize(texto or "")
 
@@ -218,9 +270,9 @@ def _linha_da_planilha(nome: str) -> dict | None:
     return None
 
 
-def _sabor_oficial(familia: str, nome: str) -> str | None:
+def _sabor_oficial(familia: str, nome: str, sabores: dict | None = None) -> str | None:
     """Nome do sabor como o cardapio digital o conhece."""
-    return _achar(SABORES.get(familia, {}), nome)
+    return _achar((sabores if sabores is not None else sabores_efetivos()).get(familia, {}), nome)
 
 
 def _escolher_pacote(familia: str, quantidade: int) -> dict | None:
@@ -350,7 +402,7 @@ def quebras_de_lote(items: list[dict]) -> list[dict]:
     return quebras
 
 
-def traduzir(items: list[dict]) -> tuple[list[dict], list[str]]:
+def traduzir(items: list[dict], extras: list | None = None) -> tuple[list[dict], list[str]]:
     """Converte itens internos para o formato do cardapio digital.
 
     Entrada: itens como o agente os guarda, com o sabor no `name`
@@ -362,6 +414,11 @@ def traduzir(items: list[dict]) -> tuple[list[dict], list[str]]:
     lotes: dict[str, list[tuple[str, int]]] = {}  # familia -> [(sabor_oficial, qtd)]
     avulsos: list[dict] = []
     bloqueados: list[str] = []
+    # Lidos uma vez por pedido: padrao + o que o dono ligou pelo painel.
+    # `extras` so e passado pelo teste do painel (entrada ainda nao gravada).
+    _bloqueados = bloqueados_efetivos(extras)
+    _mapa = mapa_efetivo(extras)
+    _sabores = sabores_efetivos(extras)
 
     for item in items or []:
         nome = str(item.get("name", "")).strip()
@@ -380,7 +437,7 @@ def traduzir(items: list[dict]) -> tuple[list[dict], list[str]]:
         # do humano, sem que faltasse nada no pedido alem do rotulo grudado.
         nome, qtd = _sem_rotulo(nome, qtd)
 
-        bloqueio = _achar(BLOQUEADOS, nome)
+        bloqueio = _achar(_bloqueados, nome)
         if bloqueio:
             bloqueados.append(f"{nome}: {bloqueio[1]}")
             continue
@@ -392,7 +449,7 @@ def traduzir(items: list[dict]) -> tuple[list[dict], list[str]]:
         # saida, 3 rissoles (R$ 9,00 cada, pedido legitimo) batiam na regra de
         # lote e nao havia como precificar o pedido: a trava mandava "ajuste
         # para 25", que no avulso seriam R$ 225,00 (teste do dono, 25/09).
-        _avulso = _achar(MAPA, nome)
+        _avulso = _achar(_mapa, nome)
         _pequeno = False
         if _avulso and linha is not None and linha["preco"] is None:
             try:
@@ -409,7 +466,7 @@ def traduzir(items: list[dict]) -> tuple[list[dict], list[str]]:
             if familia not in LOTES:
                 bloqueados.append(f"{nome}: categoria '{familia}' sem pacote equivalente")
                 continue
-            sabor = _sabor_oficial(familia, nome)
+            sabor = _sabor_oficial(familia, nome, _sabores)
             if not sabor:
                 bloqueados.append(
                     f"{nome}: nao esta na lista de sabores do cardapio digital"
@@ -419,7 +476,7 @@ def traduzir(items: list[dict]) -> tuple[list[dict], list[str]]:
             continue
 
         # Item por unidade
-        destino = _achar(MAPA, nome)
+        destino = _achar(_mapa, nome)
         if destino:
             avulsos.append({
                 "name": destino["nome_base44"],
@@ -486,3 +543,96 @@ def traduzir(items: list[dict]) -> tuple[list[dict], list[str]]:
 
     saida.extend(avulsos)
     return saida, bloqueados
+
+
+# ── Teste de um produto antes de o painel gravar ─────────────────────────────
+
+def _familia_na_planilha(familia: str) -> str:
+    """Categoria da planilha em que o sabor dessa familia mora."""
+    return "Assados" if familia == "Canudinhos" else familia
+
+
+def testar_entrada(entrada: dict, ja_gravadas: list | None = None) -> dict:
+    """Confere um produto do painel contra a planilha e o cardapio digital.
+
+    {"ok": bool, "motivos": [...], "avisos": [...], "entendido_como": str}
+    `motivos` impede a gravacao; `avisos` so informa. Nada e gravado aqui: o
+    calculateOrder so CALCULA, nao cria pedido.
+
+    O pedido de teste sai da mesma `traduzir` que o pedido real usa, com a
+    entrada nova por cima - senao o teste mede um caminho que o agente nunca
+    percorre.
+    """
+    import config_dono
+    e = config_dono._entrada_valida(entrada)
+    if not e:
+        return {"ok": False, "avisos": [], "entendido_como": "",
+                "motivos": ["preencha o nome na planilha, o tipo, a familia (para "
+                            "sabor) e o nome no cardapio digital"]}
+    motivos, avisos = [], []
+
+    linha = _linha_da_planilha(e["nome_planilha"])
+    if linha is None:
+        motivos.append(f"'{e['nome_planilha']}' nao esta na planilha - cadastre la "
+                       "primeiro, com o nome exato")
+    elif e["tipo"] == "sabor":
+        if linha["preco"] is not None:
+            motivos.append("na planilha esse item tem preco proprio: e 'por unidade', "
+                           "nao sabor de lote")
+        elif _norm(linha["categoria"]) != _norm(_familia_na_planilha(e["familia"])):
+            motivos.append(f"na planilha ele esta em '{linha['categoria']}', nao em "
+                           f"'{_familia_na_planilha(e['familia'])}'")
+    elif linha["preco"] is None:
+        motivos.append("na planilha esse item nao tem preco proprio: e sabor de lote, "
+                       "nao 'por unidade'")
+    if linha is not None and not linha.get("disponivel", True):
+        avisos.append("na planilha ele esta marcado NAO: continua esgotado ate voce "
+                      "marcar SIM la")
+    if motivos:
+        return {"ok": False, "motivos": motivos, "avisos": avisos, "entendido_como": ""}
+
+    if e["tipo"] == "sabor":
+        quantidade = LOTES[e["familia"]]["quantidade_teste"]
+    else:
+        quantidade = 1
+    outras = [x for x in (ja_gravadas or [])
+              if _norm(x.get("nome_planilha", "")) != _norm(e["nome_planilha"])]
+    itens_api, bloqueados = traduzir([{"name": linha["item"], "quantity": quantidade}],
+                                     extras=outras + [e])
+    if bloqueados or not itens_api:
+        return {"ok": False, "avisos": avisos, "entendido_como": "",
+                "motivos": bloqueados or ["a traducao nao gerou item nenhum"]}
+
+    try:
+        import httpx
+        import cardapio
+        base = cardapio._get_base_url()
+        if not base:
+            return {"ok": False, "avisos": avisos, "entendido_como": "",
+                    "motivos": ["endereco do cardapio digital nao configurado"]}
+        with httpx.Client(timeout=30) as client:
+            resp = client.post(f"{base}/functions/calculateOrder",
+                               json={"items": itens_api}, headers=cardapio._headers())
+            data = resp.json()
+    except Exception as ex:
+        return {"ok": False, "avisos": avisos, "entendido_como": "",
+                "motivos": [f"nao consegui falar com o cardapio digital: {ex}"]}
+
+    item = (data.get("items") or [{}])[0] if isinstance(data, dict) else {}
+    entendido = str(item.get("matchedName") or "")
+    if not item.get("valid"):
+        motivos.append(f"o cardapio digital recusou: {item.get('reason') or 'item nao aceito'}")
+    elif e["tipo"] == "unidade" and _norm(entendido) != _norm(e["nome_cardapio"]):
+        # E a armadilha registrada nos bloqueados: a busca do cardapio cai em
+        # outro produto parecido ("a busca cai na lata") e o total sai certo
+        # para o produto errado.
+        motivos.append(f"o cardapio digital entendeu '{entendido or '?'}', e nao "
+                       f"'{e['nome_cardapio']}' - confira o nome exato la")
+    elif e["tipo"] == "sabor":
+        opcoes = [str(o) for o in (item.get("flavorOptions") or [])]
+        if opcoes and not any(_norm(o) == _norm(e["nome_cardapio"]) for o in opcoes):
+            motivos.append(f"o sabor '{e['nome_cardapio']}' nao esta no pacote do cardapio "
+                           f"digital. Sabores de la: {', '.join(opcoes)}")
+    return {"ok": not motivos, "motivos": motivos, "avisos": avisos,
+            "entendido_como": entendido,
+            "subtotal_teste": float(data.get("subtotal") or 0) if isinstance(data, dict) else 0.0}
