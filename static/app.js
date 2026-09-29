@@ -3791,6 +3791,22 @@ function preencherProdutoDono(nome, categoria) {
         '<p class="muted">Agora informe o nome exato do item no cardápio digital e clique em Testar.</p>';
 }
 
+// Apaga o resultado do teste e esvazia o formulário. Não mexe no que já foi
+// salvo: para desfazer um produto ligado, use "Remover" na lista.
+function limparProdutoDono() {
+    ['dono-p-nome', 'dono-p-destino', 'dono-p-apelidos'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+    const tipo = document.getElementById('dono-p-tipo');
+    if (tipo) tipo.value = 'sabor';
+    const familia = document.getElementById('dono-p-familia');
+    if (familia) familia.value = 'Fritos';
+    donoTipoMudou();
+    const box = document.getElementById('dono-p-resultado');
+    if (box) box.innerHTML = '';
+}
+
 function entradaProdutoDono() {
     const tipo = document.getElementById('dono-p-tipo').value;
     return {
