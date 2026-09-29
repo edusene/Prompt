@@ -255,6 +255,16 @@ def merge(memoria: dict, extraido: dict, novo_da_mensagem: dict | None = None) -
     bebidas = fonte.get("bebidas") or (extraido or {}).get("bebidas") or []
     if bebidas:
         itens = list(memoria.get("items") or [])
+        # "pode ser o guarana" RESPONDE a pergunta do refrigerante: a bebida
+        # fecha a pendencia com a quantidade pedida. Somada como item novo e
+        # depois de novo pela escolha do sabor, saiam 2 Tuchauas no lugar de
+        # 1 e o cliente pagava R$ 12,00 a mais (teste do Eduardo, 28/09 21h39).
+        pendentes = list(memoria.get("sabores_pendentes") or [])
+        aberta = next((p for p in pendentes if p.get("termo") == "refrigerante"), None)
+        if aberta:
+            bebidas = [dict(bebidas[0], quantity=int(aberta.get("qtd") or 1))] + list(bebidas[1:])
+            memoria["sabores_pendentes"] = [p for p in pendentes if p is not aberta]
+            mudancas.append(f"refrigerante -> {bebidas[0]['name']}")
         for b in bebidas:
             if not any(isinstance(i, dict) and i.get("name") == b["name"] for i in itens):
                 itens.append(dict(b))
@@ -1397,6 +1407,17 @@ def etapa_coberta(memoria: dict, reply: str, agora=None) -> bool:
         if any(p.get("em_falta") for p in pendentes) and not (
                 "falta" in texto or "esgotad" in texto):
             return False
+        # E as opcoes oferecidas tem de ser as que existem: "Tuchaua ou
+        # Refrigerante 2 Litros (esgotado)" oferecia o esgotado e escondia a
+        # lata e o 600ml (teste do Eduardo, 28/09 21h38).
+        for p in pendentes:
+            if p.get("termo") != "refrigerante":
+                continue
+            from agents.conversation import PALAVRAS_DA_BEBIDA
+            for opcao in p.get("opcoes") or []:
+                palavras = PALAVRAS_DA_BEBIDA.get(opcao, ())
+                if palavras and not any(w in texto for w in palavras):
+                    return False
         return all(_sem_acento(str(p.get("termo"))) in texto for p in pendentes)
 
     fora = itens_indisponiveis(memoria)

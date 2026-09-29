@@ -1324,6 +1324,22 @@ memoria_mod.aplicar_escolha_de_sabor(_F_C5, "pode ser lata")
 checa("'lata' resolve a pergunta do refrigerante",
       ("Refrigerante Lata", 1) in [(i["name"], i["quantity"]) for i in _F_C5["items"]]
       and not _F_C5.get("sabores_pendentes"))
+_F_GUARANA = _merge_msg(memoria_mod._empty(), "Quero meio cento frito: 25 coxinhas e 25 "
+                        "bolinhas de queijo, e 1 Coca-Cola de 2 litros gelada.")
+_F_GUARANA = _merge_msg(_F_GUARANA, "Pode ser")
+_F_GUARANA = _merge_msg(_F_GUARANA, "pode ser o guaraná")
+memoria_mod.aplicar_escolha_de_sabor(_F_GUARANA, "pode ser o guaraná")   # ordem do app.py
+checa("'pode ser o guaraná' responde a pergunta com 1 Tuchaua, nao 2",
+      [(i["name"], i["quantity"]) for i in _F_GUARANA["items"]
+       if "Tuchaua" in i["name"]] == [("Guaraná Tuchaua 2 Litros", 1)]
+      and not _F_GUARANA.get("sabores_pendentes"), str(_F_GUARANA["items"]))
+_F_2L = _merge_msg(memoria_mod._empty(), "Quero meio cento frito: 25 coxinhas e 25 "
+                   "bolinhas de queijo, e 1 Coca-Cola de 2 litros gelada.")
+checa("pergunta que oferece o esgotado e esconde lata/600ml nao cobre a etapa",
+      not memoria_mod.etapa_coberta(_F_2L, "Qual sabor para o refrigerante de 2 litros: Guaraná "
+                                           "Tuchaua ou Refrigerante 2 Litros (esgotado)?"))
+checa("a pergunta do codigo cobre a etapa",
+      memoria_mod.etapa_coberta(_F_2L, memoria_mod.pergunta_bloqueante(_F_2L)))
 _F_TROCA = _merge_msg(dict(_F_COCA), "na verdade quero 50 coxinhas")
 checa("correcao dos salgados nao apaga a bebida",
       any(i["name"] == "Refrigerante Lata" for i in _F_TROCA["items"]), str(_F_TROCA["items"]))
