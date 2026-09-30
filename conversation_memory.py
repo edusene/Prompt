@@ -112,6 +112,9 @@ def _empty() -> dict:
         # isto, "Pode sim" depois de "Posso deixar para segunda-feira (21/09)?"
         # nao preenchia data nenhuma e a Sandrinha perguntava o dia de novo.
         "data_proposta": "",
+        # Horario que o AGENTE ofereceu ("adiantar para as 14h?"), para o
+        # "sim" seguinte gravar a hora junto com o dia.
+        "horario_proposto": "",
         "updated_at": "",
     }
 

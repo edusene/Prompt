@@ -1336,6 +1336,32 @@ _E_LOC = _extract_data_from_message(_LOC[0], ConversationState())
 checa("endereco do pino entra na ficha", "Jamari" in (_E_LOC.get("endereco") or ""), str(_E_LOC.get("endereco")))
 
 
+secao("--- 30/09 12h51: teste do Eduardo no intervalo de almoco ---")
+from agents.conversation import detectar_horario  # noqa: E402
+checa("'amanha as nove' (voz) vira 9h",
+      detectar_horario(numeros_por_extenso("pra entrega amanhã às nove.")) == "9h")
+checa("'amanha as 9' (texto) vira 9h", detectar_horario("amanhã às 9") == "9h")
+checa("'as 9 e meia' vira 9h30", horario.parse_horario("as 9 e meia") == (9, 30))
+checa("'as 2 da tarde' vira 14h", horario.parse_horario("pra entrega as 2 da tarde") == (14, 0))
+checa("'8 horas da noite' vira 20h", horario.parse_horario("as 8 horas da noite") == (20, 0))
+checa("'as 50 coxinhas' nao e horario", horario.parse_horario("quero as 50 coxinhas") is None)
+checa("numero de rua nao e horario", horario.parse_horario("Av. Calama, 3234") is None)
+_E_RUA = _extract_data_from_message("NA CALAMA 2025 APONIA PAGAMENTO NO CARTAO",
+                                    ConversationState(modality="entrega"))
+checa("'NA CALAMA 2025 APONIA...' guarda rua, bairro e pagamento",
+      _E_RUA.get("endereco") == "CALAMA 2025" and _E_RUA.get("bairro") == "Aponia"
+      and _E_RUA.get("payment_method") == "cartao", str(_E_RUA))
+checa("'QUERO 50 COXINHAS' com entrega nao vira rua",
+      not _extract_data_from_message("QUERO 50 COXINHAS",
+                                     ConversationState(modality="entrega")).get("endereco"))
+checa("sem entrega definida, 'NA CALAMA 2025' nao vira rua",
+      not _extract_data_from_message("NA CALAMA 2025", ConversationState()).get("endereco"))
+_APP_SRC = open("app.py", encoding="utf-8").read()
+checa("pedido para outro dia pula o aviso de fechado/intervalo", "_pedido_outro_dia" in _APP_SRC)
+checa("o 'sim' ao intervalo grava o horario oferecido",
+      '_memoria["horario_proposto"] = "14h"' in _APP_SRC and "horario_proposto" in memoria_mod._empty())
+
+
 secao("--- 28/09: aviso rapido e acrescimo depois do pedido ---")
 _AGORA_POS = datetime.now()
 _POS_ENTREGA = dict(memoria_mod._empty(), ultimo_pedido_modalidade="entrega",

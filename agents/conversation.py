@@ -712,6 +712,21 @@ _RUA_DEPOIS_DE_ENTREGA = re.compile(
     re.IGNORECASE)
 
 
+# Rua dita no COMECO da resposta, sem "Rua": "NA CALAMA 2025 APONIA ...". So
+# vale com a entrega definida (e ai o endereco e a proxima pergunta).
+_RUA_NO_INICIO = re.compile(
+    r"^\s*(?:(?:na|no|em)\s+)?"
+    r"(?P<nome>(?!(?:bairro|dia|data|hora|rua|avenida|av)\b)"
+    r"[A-Za-zÀ-ÿ]{3,}(?:\s+[A-Za-zÀ-ÿ]+){0,3}?)"
+    r"\s*,?\s*(?:n[º°o]?\s*)?(?P<numero>\d{1,6})\b",
+    re.IGNORECASE)
+
+# Palavra que nunca faz parte do nome de uma rua dita solta: "entregar no dia
+# 29" e data, "pra retirar as 10" e hora.
+_NAO_E_NOME_DE_RUA = re.compile(
+    r"\b(?:dia|data|hora|horas|entreg\w*|retir\w*|busc\w*|as|às|pra|para)\b")
+
+
 # Como o cliente pede sem dizer numero: "meio cento de coxinha", "um cento de
 # pastel", "uma porcao de quibe". E a forma mais natural de pedir salgado no
 # balcao, e a extracao ignorava as tres — a ficha ficava sem item e a Sandrinha
@@ -1205,11 +1220,42 @@ _RX_DEPOIS_DO_NUMERO = re.compile(
     r"|salgad|unidades?|un\b|porc|centos?|[a-zà-ÿ]+)", re.IGNORECASE)
 
 
+# Numero logo depois de "as"/"pras"/"para as" e hora, mesmo sem "horas" depois:
+# "pra entrega amanha as nove." perdia o horario inteiro, e sem horario o
+# aviso do intervalo oferecia "adiantar para as 14h" a quem pediu para amanha
+# (teste por voz, 30/09 12h51).
+_RX_HORA_ANTES_DO_NUMERO = re.compile(
+    r"(?:\b[aà]s|\bpras?\s+as|\bpras|\bpara\s+as|\bate\s+as|\bate\s+[aà]s)\s+$",
+    re.IGNORECASE)
+
+
+def _vira_hora(texto: str, inicio: int, valor: int) -> str:
+    """'9h' quando o numero e hora pelo contexto; '' quando nao e."""
+    if 1 <= valor <= 23 and _RX_HORA_ANTES_DO_NUMERO.search(texto[:inicio]):
+        return f"{valor}h"
+    return ""
+
+
 def numeros_por_extenso(texto: str) -> str:
     """'cinquenta coxinhas as oito horas' -> '50 coxinhas as 8 horas'."""
+    def _valor(m) -> int:
+        if m.group("sozinha"):
+            return _UNIDADES_EXTENSO[m.group("sozinha").lower()]
+        valor = _DEZENAS_EXTENSO[m.group("dezena").lower()]
+        if m.group("unidade"):
+            valor += _UNIDADES_EXTENSO[m.group("unidade").lower()]
+        return valor
+
     def _troca(m):
         resto = texto[m.end():]
         seguinte = _RX_DEPOIS_DO_NUMERO.match(resto)
+        if not seguinte or not re.match(
+                r"(?:(?:de|da|do)\s+)?(?:horas?|h\b|da\s+|salgad|unidade|un\b|porc|cento)",
+                seguinte.group(0).strip().lower()):
+            # "as nove." / "as nove e meia": hora pelo que vem ANTES.
+            hora = _vira_hora(texto, m.start(), _valor(m))
+            if hora:
+                return hora
         if not seguinte:
             return m.group(0)
         palavra = seguinte.group(0).strip().lower()
@@ -1303,6 +1349,17 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
             nome = " ".join(m.group("nome").split())
             if not _NAO_E_RUA.search(nome.lower()):
                 extracted["endereco"] = f"{nome} {m.group('numero')}"
+        elif ("entrega" in (state.modality, extracted.get("modality"))
+              and _RUA_NO_INICIO.match(message)
+              and not _NAO_E_RUA.search(_RUA_NO_INICIO.match(message).group("nome").lower())
+              and not _NAO_E_NOME_DE_RUA.search(_RUA_NO_INICIO.match(message).group("nome").lower())):
+            # Resposta direta a "qual a rua e o numero?" com o resto junto:
+            # "NA CALAMA 2025 APONIA PAGAMENTO NO CARTAO". O bairro e o
+            # pagamento entravam e a rua nao, e ela pedia "Endereco (rua e
+            # numero)" de novo (teste de 30/09 12h56). Guarda o trecho como o
+            # cliente escreveu ("SALGADO FILHO,2233").
+            m = _RUA_NO_INICIO.match(message)
+            extracted["endereco"] = message[m.start("nome"):m.end("numero")].strip()
         elif state.bairro and "entrega" in (state.modality,
                                             extracted.get("modality")):
             # Quem responde "qual e a rua e o numero?" responde so a rua:

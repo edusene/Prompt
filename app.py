@@ -3429,6 +3429,15 @@ def handle_flush(user: str, items: list[dict]) -> None:
                     conversation_memory.save(user, _memoria)
                     print(f"[memoria] {user}: cliente aceitou o dia oferecido "
                           f"-> {_memoria['data_agendada']}")
+        # O horario oferecido pelo aviso do intervalo, aceito com um "sim".
+        if (_memoria.get("horario_proposto") and not _memoria.get("horario")
+                and _e_concordancia(text_only)):
+            _memoria["horario"] = _memoria["horario_proposto"]
+            print(f"[memoria] {user}: cliente aceitou o horario oferecido "
+                  f"-> {_memoria['horario']}")
+        if _memoria.get("horario_proposto") and _memoria.get("horario"):
+            _memoria["horario_proposto"] = ""
+            conversation_memory.save(user, _memoria)
 
         # ── Midia que o modelo nao deve responder sozinho ────────────────────
         # Video: o modelo nao abre, e a tentativa dele de explicar isso
@@ -3514,7 +3523,26 @@ def handle_flush(user: str, items: list[dict]) -> None:
                       f"{_memoria.get('data_agendada')} {_memoria['horario']}; "
                       f"sem aviso generico")
 
+        # Pedido para OUTRO dia (amanha, sexta...): o intervalo ou o fechamento
+        # de AGORA nao tem nada a ver com ele. "Pra entrega amanha as nove" no
+        # almoco recebia "posso adiantar o seu pedido para as 14h?" - de hoje
+        # (teste de 30/09 12h51). O horario, se faltar, o funil pergunta.
+        _pedido_outro_dia = False
+        try:
+            _dia_ficha = date.fromisoformat(_memoria.get("data_iso") or "")
+            _pedido_outro_dia = (_dia_ficha > _agora.date()
+                                 and horario.eh_dia_util(_dia_ficha))
+        except (TypeError, ValueError):
+            _pedido_outro_dia = False
+        if (not _expediente["aberto"] and _pedido_outro_dia
+                and not _memoria.get("aviso_horario_dado")):
+            _memoria["aviso_horario_dado"] = True
+            conversation_memory.save(user, _memoria)
+            print(f"[expediente] user={user} fechado agora, mas o pedido e para "
+                  f"{_memoria.get('data_agendada')}; sem aviso generico")
+
         if (not _expediente["aberto"] and not _agendou_valido
+                and not _pedido_outro_dia
                 and not _memoria.get("aviso_horario_dado")):
             _memoria["aviso_horario_dado"] = True
             if not _expediente["aceita_hoje"] and _memoria.get("data_iso") == _agora.date().isoformat():
@@ -3539,6 +3567,11 @@ def handle_flush(user: str, items: list[dict]) -> None:
             # Guarda o dia oferecido na mensagem para o "pode sim" seguinte.
             if _expediente.get("sugestao_data") and not _memoria.get("data_iso"):
                 _memoria["data_proposta"] = _expediente["sugestao_data"].isoformat()
+            # E o horario, quando a oferta diz um ("adiantar para as 14h?"):
+            # o "sim" guardava so o dia, e o funil perguntava a hora que o
+            # cliente acabara de aceitar (teste de 30/09 12h56).
+            if _expediente.get("motivo") == "intervalo" and not _memoria.get("horario"):
+                _memoria["horario_proposto"] = "14h"
             conversation_memory.save(user, _memoria)
             _responder_direto(user, items, _resposta, _chegada)
             return

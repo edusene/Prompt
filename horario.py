@@ -282,6 +282,15 @@ _RX_HORA = re.compile(r"(?<!\d)(\d{1,2})\s*(?:h|:|horas?)\s*(\d{2})?\b")
 # valida e o horario da mensagem inteira se perdia.
 _RX_HORA_VIRGULA = re.compile(r"(?<!\d)(\d{1,2})\s*,\s*(\d{2})\b")
 
+# "amanha as 9", "pras 10", "as 9 e meia": sem "h" nem "horas", mas a
+# preposicao diz que e hora. Exige que depois do numero NAO venha palavra
+# qualquer - "as 50 coxinhas" nao e horario (teste de 30/09: "amanha as nove"
+# chegava sem horario e o funil pedia a hora de novo).
+_RX_HORA_POR_PREPOSICAO = re.compile(
+    r"(?:\bas|\bpras|\bpara as|\bate as)\s+(\d{1,2})(?:\s+e\s+(meia))?"
+    r"(?=\s*$|\s*[^\w\s]|\s+(?:da\b|de\s+manha|hoje|amanha|pra\b|para\b|no\b|na\b"
+    r"|pode\b|ta\b|esta\b|entao\b|por\s+favor|ok\b|beleza|obrigad))")
+
 
 def parse_horario(texto: str) -> tuple[int, int] | None:
     """'18h', '18:30', 'as 8h15', '18 horas', '19,50' -> (hora, minuto)."""
@@ -293,12 +302,24 @@ def parse_horario(texto: str) -> tuple[int, int] | None:
     # Percorre TODOS os candidatos em vez de desistir no primeiro: numa frase
     # como "45, amanha as 16h" o primeiro numero nao e hora, e o horario esta
     # mais adiante.
+    def _periodo(hora: int, fim: int) -> int:
+        # "as 2 da tarde" e 14h, "8 da noite" e 20h. Sem isto voltava 2h.
+        depois = t[fim:fim + 14]
+        if hora < 12 and re.match(r"\s*(?:horas?\s+)?da\s+(?:tarde|noite)", depois):
+            return hora + 12
+        return hora
+
     for molde in moldes:
         for m in molde.finditer(t):
             hora = int(m.group(1))
             minuto = int(m.group(2) or 0)
             if hora <= 23 and minuto <= 59:
-                return hora, minuto
+                return _periodo(hora, m.end()), minuto
+    # Por ultimo, e so se nada acima achou: a hora dita so pela preposicao.
+    for m in _RX_HORA_POR_PREPOSICAO.finditer(t):
+        hora = int(m.group(1))
+        if 1 <= hora <= 23:
+            return _periodo(hora, m.end()), 30 if m.group(2) else 0
     return None
 
 
