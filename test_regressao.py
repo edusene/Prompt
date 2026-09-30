@@ -1256,7 +1256,7 @@ checa("audio transcrito vira itens, entrega e horario",
       == [("Coxinha", 50), ("Bolinha de Queijo", 50), ("Churros", 50)]
       and _F_VOZ["modality"] == "entrega" and _F_VOZ["horario"] == "8h", str(_F_VOZ["items"]))
 checa("audio: handle_flush usa a transcricao na ficha",
-      'it.get("transcricao") or it.get("text"' in open("app.py", encoding="utf-8").read())
+      "_texto_da_midia(it) for it in items" in open("app.py", encoding="utf-8").read())
 # Croquete de carne: bloqueado no cardapio digital -> avisado logo, como esgotado.
 _F_CROQ = dict(memoria_mod._empty(), items=[{"name": "Croquete de Carne", "quantity": 10}])
 checa("item bloqueado e avisado ja na primeira resposta",
@@ -1309,6 +1309,31 @@ for _m in ("Quero 10 croquetes e uma coca cola", "Coca 2 litros"):
         _extract_data_from_message(_m, ConversationState()))[0]
 checa("'Coca 2 litros' com a pergunta aberta avisa a falta",
       memoria_mod.pergunta_bloqueante(_F_COCA2).startswith("O Refrigerante 2 Litros está em falta"))
+
+
+secao("--- 30/09: outras midias (imagem, video, localizacao, comprovante) ---")
+# Imagem: o texto lido alimenta a ficha, junto com a legenda.
+checa("ficha le legenda + texto da imagem",
+      app._texto_da_midia({"text": "[Imagem] pra amanha", "texto_imagem": "50 coxinhas"})
+      == "pra amanha\n50 coxinhas")
+checa("ficha le a transcricao do audio",
+      app._texto_da_midia({"text": "[Audio (mensagem de voz)]", "transcricao": "50 coxinhas"})
+      == "50 coxinhas")
+checa("texto comum passa como veio", app._texto_da_midia({"text": "oi"}) == "oi")
+checa("handle_flush le imagem antes da ficha",
+      '"[Audio", "[Imagem"' in open("app.py", encoding="utf-8").read())
+# A legenda da imagem chega ao modelo (antes era descartada por comecar com "[").
+checa("legenda da imagem nao e mais descartada",
+      'legenda = _re_mod.sub(r"^\\[[^\\]]*\\]\\s*", "", text or "")' in open("app.py", encoding="utf-8").read())
+# Localizacao: o endereco do pino vira texto.
+_LOC = app._extract_body_from_meta_message({"type": "location", "location": {
+    "latitude": -8.7, "longitude": -63.9, "name": "Casa", "address": "Rua Jamari, 2125 - Olaria"}})
+checa("pino com endereco vira texto", _LOC[0] == "[Localizacao] Casa, Rua Jamari, 2125 - Olaria", _LOC[0])
+checa("pino so com coordenada pede o endereco por escrito",
+      "peca bairro" in app._extract_body_from_meta_message(
+          {"type": "location", "location": {"latitude": -8.7, "longitude": -63.9}})[0])
+_E_LOC = _extract_data_from_message(_LOC[0], ConversationState())
+checa("endereco do pino entra na ficha", "Jamari" in (_E_LOC.get("endereco") or ""), str(_E_LOC.get("endereco")))
 
 
 secao("--- 28/09: aviso rapido e acrescimo depois do pedido ---")

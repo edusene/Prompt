@@ -881,6 +881,63 @@ def _vocabulario_do_audio() -> str:
             + ", ".join(bairros))[:700]
 
 
+def _texto_da_midia(item: dict) -> str:
+    """O que a ficha deve ler de um item: transcricao do audio, ou legenda +
+    texto lido da imagem, ou o texto como veio."""
+    if item.get("transcricao"):
+        return item["transcricao"]
+    texto = str(item.get("text", "") or "")
+    lido = item.get("texto_imagem")
+    if lido:
+        legenda = _re_mod.sub(r"^\[[^\]]*\]\s*", "", texto).strip()
+        return f"{legenda}\n{lido}".strip()
+    return texto
+
+
+# Resposta do leitor de imagem quando ela e comprovante, e nao pedido.
+_IMAGEM_COMPROVANTE = "[comprovante de pagamento]"
+
+
+def ler_texto_da_imagem(b64_data: str, mime: str) -> str:
+    """O pedido escrito numa imagem (print, foto de papel), em texto. '' se nao houver.
+
+    Mesmo defeito do audio: a imagem so chegava ao modelo, e a ficha - itens,
+    data, travas de lote e de tamanho - ficava vazia. Um print com "50 coxinhas
+    e 50 bolinhas" recebia "grande ou mini?" (pergunta que nao existe acima de
+    25) e, fora do horario, um aviso que nem citava o pedido (teste de 30/09).
+
+    Comprovante de pagamento NAO vira texto de pedido: os valores e numeros
+    dele seriam lidos como quantidade. Volta um marcador so.
+    """
+    try:
+        from llm import _client as _oai, OPENAI_MODEL
+        resp = _oai.chat.completions.create(
+            model=OPENAI_MODEL,
+            temperature=0,
+            max_tokens=300,
+            messages=[{"role": "user", "content": [
+                {"type": "text", "text": (
+                    "Esta imagem foi enviada por um cliente de uma fabrica de salgados. "
+                    "Se for um comprovante de pagamento (Pix, transferencia, recibo), "
+                    "responda apenas: COMPROVANTE. Se tiver um pedido ou dados de "
+                    "entrega escritos (itens, quantidades, data, horario, endereco, "
+                    "pagamento), transcreva esse texto literalmente, sem comentar. "
+                    "Se nao tiver nada disso, responda apenas: VAZIO.")},
+                {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64_data}"}},
+            ]}],
+        )
+        texto = (resp.choices[0].message.content or "").strip()
+    except Exception as e:
+        print(f"[imagem] ERRO ao ler: {e}")
+        return ""
+    if texto.upper().startswith("COMPROVANTE"):
+        return _IMAGEM_COMPROVANTE
+    if not texto or texto.upper().startswith("VAZIO"):
+        return ""
+    print(f"[imagem] texto lido: {texto[:100]!r}")
+    return texto
+
+
 def transcribe_audio(b64_data: str, mime: str) -> str:
     """Transcreve áudio via OpenAI Whisper. Retorna texto transcrito ou vazio."""
     try:
@@ -968,15 +1025,23 @@ def _build_user_parts(items: list[dict]) -> list[dict]:
 
                 media_desc = {
                     "image": "O cliente enviou uma imagem.",
-                    "video": "O cliente enviou um video.",
+                    # O modelo nao abre video: sem dizer isso, ele respondia
+                    # com a lista fria de dados do funil (teste de 30/09).
+                    "video": ("O cliente enviou um video, e voce NAO consegue assistir "
+                              "videos. Diga isso com gentileza e peca que ele escreva "
+                              "ou mande um audio com o pedido."),
                     "audio": "O cliente enviou um audio.",
                     "ptt": "O cliente enviou um audio (mensagem de voz).",
                     "sticker": "O cliente enviou uma figurinha.",
                     "document": "O cliente enviou um documento.",
                 }.get(msg_type, f"O cliente enviou midia ({msg_type}).")
 
-                if text and not text.startswith("["):
-                    media_desc += f" Legenda: {text}"
+                # A legenda vem colada no marcador ("[Imagem] 50 coxinhas"). O
+                # teste antigo exigia texto que NAO comecasse com "[" - e todo
+                # texto de midia comeca -, entao a legenda nunca chegava ao modelo.
+                legenda = _re_mod.sub(r"^\[[^\]]*\]\s*", "", text or "").strip()
+                if legenda:
+                    media_desc += f" Legenda: {legenda}"
 
                 if mime and b64 and msg_type in ("audio", "ptt") and _normalize_mime(mime) in _OPENAI_SUPPORTED_AUDIO:
                     # Transcreve uma vez por item: handle_flush chama esta
@@ -991,6 +1056,10 @@ def _build_user_parts(items: list[dict]) -> list[dict]:
                     else:
                         parts.append({"text": media_desc})
                 elif mime and b64 and _normalize_mime(mime) in _OPENAI_SUPPORTED_IMAGES:
+                    # Lida uma vez por item, como o audio: handle_flush usa o
+                    # texto na ficha; aqui a imagem segue inteira para o modelo.
+                    if item.get("texto_imagem") is None:
+                        item["texto_imagem"] = ler_texto_da_imagem(b64, _normalize_mime(mime))
                     parts.append({"text": media_desc})
                     parts.append({
                         "inline_data": {
@@ -3305,11 +3374,12 @@ def handle_flush(user: str, items: list[dict]) -> None:
         # 50 coxinhas, 50 bolinhas e 50 churros por voz e a ficha ficou vazia:
         # ela pediu "itens do pedido" tres vezes (teste de 29/09 20h04).
         # Transcrito aqui, uma vez; _build_user_parts reaproveita depois.
-        if any(str(it.get("text", "")).startswith("[Audio") for it in items):
+        # Imagem, pelo mesmo motivo: o print com o pedido so chegava ao modelo
+        # (teste de 30/09). O texto lido entra junto com a legenda.
+        if any(str(it.get("text", "")).startswith(("[Audio", "[Imagem")) for it in items):
             _build_user_parts(items)
-            text_only = "\n".join(
-                (it.get("transcricao") or it.get("text", "")) for it in items)
-            print(f"[audio] user={user} transcricao usada na ficha: {text_only[:120]!r}")
+            text_only = "\n".join(_texto_da_midia(it) for it in items)
+            print(f"[midia] user={user} texto usado na ficha: {text_only[:120]!r}")
 
         _memoria = conversation_memory.load(user)
         if contact and contact.get("name") and not _memoria.get("name"):
@@ -3359,6 +3429,38 @@ def handle_flush(user: str, items: list[dict]) -> None:
                     conversation_memory.save(user, _memoria)
                     print(f"[memoria] {user}: cliente aceitou o dia oferecido "
                           f"-> {_memoria['data_agendada']}")
+
+        # ── Midia que o modelo nao deve responder sozinho ────────────────────
+        # Video: o modelo nao abre, e a tentativa dele de explicar isso
+        # ("me manda o pedido com seu nome") caia na trava de recoleta e virava
+        # a lista fria "Para seguir, me confirma" - sem dizer por que (30/09).
+        # Comprovante: visto so pelo modelo, virou "seu pedido ja entrou em
+        # producao" e transferencia, com o pedido ainda aberto (30/09).
+        _resposta_midia = ""
+        _textos = [str(it.get("text", "")).strip() for it in items]
+        if _textos and all(t.startswith("[Video") for t in _textos):
+            _resposta_midia = ("Não consigo abrir vídeos por aqui 😅 Pode me escrever "
+                               "ou mandar um áudio com o seu pedido?")
+        elif text_only.strip() == _IMAGEM_COMPROVANTE:
+            if _memoria.get("items"):
+                if not _memoria.get("payment_method"):
+                    _memoria["payment_method"] = "pix"
+                    conversation_memory.save(user, _memoria)
+                _resposta_midia = ("Recebi o comprovante! 💛 Só falta terminar o seu "
+                                   "pedido:\n\n" + _proxima_pergunta_do_funil(_memoria))
+            else:
+                _resposta_midia = ("Comprovante recebido! 💛 Nossa equipe confere e "
+                                   "libera a produção do seu pedido.")
+        if _resposta_midia:
+            if not _memoria.get("saudacao_feita"):
+                _nome = f", {_memoria['name']}" if _memoria.get("name") else ""
+                _resposta_midia = (f"{horario.saudacao(horario.agora())}{_nome}! Aqui é a "
+                                   f"Sandrinha da BALBS.\n\n{_resposta_midia}")
+                _memoria["saudacao_feita"] = True
+                conversation_memory.save(user, _memoria)
+            print(f"[midia] user={user} resposta em codigo: {_resposta_midia[:60]!r}")
+            _responder_direto(user, items, _resposta_midia, _chegada)
+            return
 
         # ── Pos-pedido: aviso rapido e acrescimo (BLOCO 0) ───────────────────
         # Antes do expediente: "vou autorizar a portaria" as 20h10, depois de
@@ -4524,7 +4626,15 @@ _MEDIA_PLACEHOLDERS = {
     "audio": lambda m: "[Audio]" if not m.get("audio", {}).get("voice") else "[Audio (mensagem de voz)]",
     "document": lambda m: f"[Documento: {m.get('document', {}).get('filename', '')}]",
     "sticker": lambda m: "[Figurinha]",
-    "location": lambda m: "[Localizacao]",
+    # O pino do mapa trazia nome e endereco e tudo era descartado: ela pedia
+    # bairro e rua de novo como se nada tivesse chegado (teste de 30/09). Com
+    # endereco, ele vira texto e a ficha o le; so com coordenada, fica o aviso.
+    "location": lambda m: (
+        "[Localizacao] " + ", ".join(p for p in (
+            (m.get("location") or {}).get("name", ""),
+            (m.get("location") or {}).get("address", "")) if p)
+        if ((m.get("location") or {}).get("name") or (m.get("location") or {}).get("address"))
+        else "[Localizacao sem endereco: peca bairro, rua e numero por escrito]"),
     "contacts": lambda m: "[Contato]",
 }
 
