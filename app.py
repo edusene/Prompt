@@ -2809,6 +2809,19 @@ def _conferir_etapa_travada(user: str, reply: str, memoria: dict) -> str:
     if not cortadas and ja_cobriu:
         return reply                        # ja estava certa
 
+    # Sabor em falta que a resposta nao avisou direito: o que ela disse sobre
+    # esse produto sai inteiro, e fica so a frase do codigo. Mantido, o
+    # "o Croquete de Carne esta disponivel, mas o de Macaxeira que voce pediu
+    # nao" ia para o cliente junto com o aviso certo (medido em 30/09).
+    _fora = conversation_memory.itens_indisponiveis(memoria)
+    if _fora and not ja_cobriu:
+        _palavras = {facts.normalize(n).split()[0] for n in _fora} | {"macaxeira"}
+        _antes = len(mantidas)
+        mantidas = [f for f in mantidas
+                    if not any(p in facts.normalize(f) for p in _palavras)]
+        if len(mantidas) != _antes:
+            corpo = " ".join(mantidas).strip()
+
     if len([c for c in corpo if c.isalpha()]) < 12:
         novo = travada
     elif ja_cobriu:
@@ -2969,6 +2982,49 @@ def _conferir_enrolacao(user: str, reply: str, nome: str = "") -> str:
     print(f"[formato] user={user} abertura vazia removida: "
           f"{reply[:len(reply) - len(limpo) + 10]!r}")
     return limpo
+
+
+# As frases dos avisos de horario (horario.status). Usadas para tirar o aviso
+# repetido pelo modelo quando ele ja nao tem o que avisar.
+_RX_AVISO_DE_HORARIO = _re_mod.compile(
+    r"intervalo de almo[cç]o at[eé]|adiantar o seu pedido para as 14h"
+    r"|produ[cç][aã]o j[aá] encerrou por hoje|aos domingos a gente n[aã]o abre"
+    r"|a gente come[cç]a a atender [aà]s 07h40",
+    _re_mod.IGNORECASE)
+
+
+def _conferir_aviso_repetido(user: str, reply: str, memoria: dict) -> str:
+    """Tira o aviso de fechado/intervalo que o modelo repete sem motivo.
+
+    O codigo da o aviso uma vez. Com o pedido ja agendado num horario valido,
+    repeti-lo e desfazer a conversa: em 3 de 6 rodadas o "Hj nao" da oferta
+    recebeu "Estamos no intervalo... adiantar para as 14h?" num pedido para
+    amanha as 9h (medido em 30/09). A trava do prompt reduz; esta garante.
+    """
+    if not reply or not memoria.get("aviso_horario_dado"):
+        return reply
+    if not _RX_AVISO_DE_HORARIO.search(reply):
+        return reply
+    try:
+        ok, _m, _s, _c = horario.validar_agendamento(
+            date.fromisoformat(memoria.get("data_iso") or ""),
+            memoria.get("horario") or "", horario.agora())
+    except (TypeError, ValueError):
+        ok = False
+    if not ok:
+        return reply          # ainda sem dia/hora valido: o aviso tem razao de ser
+    frases = [f for f in _RX_FIM_DE_FRASE.split(reply) if f.strip()]
+    mantidas = [f for f in frases if not _RX_AVISO_DE_HORARIO.search(f)]
+    novo = " ".join(f.strip() for f in mantidas).strip()
+    # "Posso ja adiantar ... para as 14h?" e a pergunta do aviso: sai junto, e
+    # a mensagem que sobrar sem pergunta ganha o proximo passo do funil.
+    if len([c for c in novo if c.isalpha()]) < 12 or "?" not in novo:
+        seguinte = _proxima_pergunta_do_funil(memoria)
+        novo = f"{novo}\n\n{seguinte}".strip() if len(
+            [c for c in novo if c.isalpha()]) >= 12 else seguinte
+    print(f"[expediente] user={user} aviso de horario repetido pelo modelo; "
+          f"removido (pedido ja agendado para {memoria.get('data_iso')} {memoria.get('horario')})")
+    return novo
 
 
 def _conferir_uma_pergunta(user: str, reply: str, memoria: dict | None = None) -> str:
@@ -3757,7 +3813,8 @@ def handle_flush(user: str, items: list[dict]) -> None:
         # semana e "estamos abertos?" sao conta, nao interpretacao de texto.
         dynamic_prompt += (
             "\n\n=== CALENDARIO E EXPEDIENTE (FATOS, NAO INTERPRETE) ===\n"
-            + horario.contexto_para_prompt(_agora)
+            + horario.contexto_para_prompt(
+                _agora, aviso_ja_dado=bool(_memoria.get("aviso_horario_dado")))
             + f"\nO telefone (numero WhatsApp) do cliente e: {user} "
             f"(use em send_order_to_cardapio)."
         )
@@ -4510,6 +4567,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
             # E, depois de todas as trocas, a mensagem termina com UMA pergunta
             # objetiva. O dono cobrou isso na dupla pergunta do fechamento
             # (26/09 19h27).
+            reply = _conferir_aviso_repetido(user, reply, _memoria)
             reply = _conferir_enrolacao(user, reply, _memoria.get("name") or "")
             reply = _conferir_uma_pergunta(user, reply, _memoria)
 

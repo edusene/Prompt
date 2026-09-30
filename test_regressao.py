@@ -1303,7 +1303,9 @@ checa("'rua Salgado Filho 21, 52' nao vira 21h52",
 checa("'19,50' sozinho continua sendo horario", horario.parse_horario("19,50") == (19, 50))
 # Refrigerante esgotado dito depois da pergunta ja aberta.
 _F_COCA2 = memoria_mod._empty()
-for _m in ("Quero 10 croquetes e uma coca cola", "Coca 2 litros"):
+# 50 coxinhas, e nao croquete: desde 30/09 o sabor em falta vem antes do
+# refrigerante, e o que este teste mede e o aviso da Coca 2L.
+for _m in ("Quero 50 coxinhas e uma coca cola", "Coca 2 litros"):
     _F_COCA2 = memoria_mod.merge(_F_COCA2, _extract_data_from_message(
         _m, ConversationState(items=_F_COCA2.get("items") or [])),
         _extract_data_from_message(_m, ConversationState()))[0]
@@ -1360,6 +1362,48 @@ _APP_SRC = open("app.py", encoding="utf-8").read()
 checa("pedido para outro dia pula o aviso de fechado/intervalo", "_pedido_outro_dia" in _APP_SRC)
 checa("o 'sim' ao intervalo grava o horario oferecido",
       '_memoria["horario_proposto"] = "14h"' in _APP_SRC and "horario_proposto" in memoria_mod._empty())
+
+
+secao("--- 30/09: travas das oscilacoes medidas (medir_oscilacao 6x) ---")
+# 1) Aviso de intervalo repetido pelo modelo num pedido ja agendado (3 de 6).
+checa("prompt sem 'Aviso obrigatorio' depois do aviso dado",
+      "Aviso obrigatorio" not in horario.contexto_para_prompt(
+          datetime(2026, 9, 30, 12, 51), aviso_ja_dado=True)
+      and "JA FOI DADO" in horario.contexto_para_prompt(
+          datetime(2026, 9, 30, 12, 51), aviso_ja_dado=True))
+checa("prompt com 'Aviso obrigatorio' antes do aviso",
+      "Aviso obrigatorio" in horario.contexto_para_prompt(datetime(2026, 9, 30, 12, 51)))
+_agora_original = horario.agora
+horario.agora = lambda: datetime(2026, 9, 30, 12, 51)
+_F_AGENDADO = dict(memoria_mod._empty(), aviso_horario_dado=True, data_iso="2026-10-01",
+                   horario="9h", modality="entrega", upsell_feito=True,
+                   items=[{"name": "Coxinha", "quantity": 50}])
+_SEM_AVISO = app._conferir_aviso_repetido(
+    "55", "Estamos no intervalo de almoço até às 14h00! Posso já adiantar o seu pedido "
+          "para as 14h? 😊", _F_AGENDADO)
+checa("aviso repetido num pedido ja agendado sai",
+      "intervalo" not in _SEM_AVISO and _SEM_AVISO.strip() != "", _SEM_AVISO[:60])
+checa("sem dia/hora valido o aviso fica",
+      "intervalo" in app._conferir_aviso_repetido(
+          "55", "Estamos no intervalo de almoço até às 14h00! Posso já adiantar o seu pedido "
+                "para as 14h? 😊", dict(_F_AGENDADO, horario="")))
+horario.agora = _agora_original
+# 2) Croquete bloqueado + refrigerante: a resposta que inventa "disponivel"
+#    / "macaxeira" (1 de 6) nao passa.
+_F_CROQ2 = memoria_mod._empty()
+for _m in ("Olá boa tarde Quero  10 croquetes e uma coca cola",):
+    _F_CROQ2 = memoria_mod.merge(_F_CROQ2, _extract_data_from_message(_m, ConversationState()),
+                                 _extract_data_from_message(_m, ConversationState()))[0]
+checa("sabor em falta vem antes da pergunta do refrigerante",
+      memoria_mod.pergunta_bloqueante(_F_CROQ2).startswith("O sabor Croquete de carne está em falta"))
+_RUIM = app._conferir_etapa_travada(
+    "55", 'O sabor "Croquete de Carne" está disponível, mas o "Croquete de Macaxeira" que '
+          'você pediu não está listado. Qual refrigerante prefere: lata, 600ml ou Tuchaua?', _F_CROQ2)
+checa("'croquete disponivel / macaxeira' inventado sai da resposta",
+      "macaxeira" not in _RUIM.lower() and "está em falta" in _RUIM, _RUIM[:80])
+checa("resposta certa do croquete passa",
+      memoria_mod.etapa_coberta(_F_CROQ2, 'O sabor "Croquete de carne" está em falta hoje. '
+                                          'Qual refrigerante: lata, 600ml ou Tuchaua?'))
 
 
 secao("--- 28/09: aviso rapido e acrescimo depois do pedido ---")

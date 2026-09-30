@@ -1454,6 +1454,16 @@ def etapa_coberta(memoria: dict, reply: str, agora=None) -> bool:
             return False
         return all(_sem_acento(a["sabor"]).split()[0] in texto for a in detalhe)
 
+    # Mesma ordem de pergunta_bloqueante: o sabor em falta antes do resto.
+    # "Disponivel" junto do nome do item e o contrario do aviso: nao cobre.
+    fora = itens_indisponiveis(memoria)
+    if fora:
+        if not ("esgotad" in texto or "em falta" in texto or "indisponivel" in texto):
+            return False
+        if "macaxeira" in texto and not any("macaxeira" in _sem_acento(n) for n in fora):
+            return False
+        return all(_sem_acento(n).split()[0] in texto for n in fora)
+
     pendentes = memoria.get("sabores_pendentes") or []
     if pendentes:
         # Bebida esgotada: perguntar "qual sabor na Coca 2L?" sem dizer que o
@@ -1473,12 +1483,6 @@ def etapa_coberta(memoria: dict, reply: str, agora=None) -> bool:
                 if palavras and not any(w in texto for w in palavras):
                     return False
         return all(_sem_acento(str(p.get("termo"))) in texto for p in pendentes)
-
-    fora = itens_indisponiveis(memoria)
-    if fora:
-        if not ("esgotad" in texto or "em falta" in texto or "indisponivel" in texto):
-            return False
-        return all(_sem_acento(n).split()[0] in texto for n in fora)
 
     try:
         import cardapio
@@ -1529,6 +1533,15 @@ def pergunta_bloqueante(memoria: dict, agora=None) -> str:
         return (f"Esses {lista} seriam tamanho grande (lanche) ou "
                 f"mini (festa)? 😊")
 
+    # O sabor em falta vem ANTES da pergunta do refrigerante: com as duas
+    # abertas, a do refrigerante cobria a etapa e o que o modelo dissesse do
+    # salgado passava - numa rodada ele inventou "o Croquete de Carne esta
+    # disponivel, mas o de Macaxeira que voce pediu nao" (medido em 30/09).
+    fora = itens_indisponiveis(memoria)
+    if fora:
+        return (f"O sabor {', '.join(fora)} está em falta hoje! "
+                f"Por qual sabor você quer trocar? 😊")
+
     pendentes = memoria.get("sabores_pendentes") or []
     refri = next((p for p in pendentes if p.get("termo") == "refrigerante"), None)
     if refri and len(pendentes) == 1:
@@ -1549,11 +1562,6 @@ def pergunta_bloqueante(memoria: dict, agora=None) -> str:
             partes.append(f"{p.get('qtd')} de {p.get('termo')} ({texto})")
         # "dos", nao "de os": a frase sai para o cliente.
         return f"Me confirma o sabor dos {'; '.join(partes)}? 😊"
-
-    fora = itens_indisponiveis(memoria)
-    if fora:
-        return (f"O sabor {', '.join(fora)} está em falta hoje! "
-                f"Por qual sabor você quer trocar? 😊")
 
     frase = _frase_de_lote(memoria)
     if frase:

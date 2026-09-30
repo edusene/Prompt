@@ -400,8 +400,15 @@ def validar_agendamento(
     return True, "", None, ""
 
 
-def contexto_para_prompt(now: datetime | None = None) -> str:
-    """Bloco de fatos de calendario injetado no system prompt dos agentes."""
+def contexto_para_prompt(now: datetime | None = None, aviso_ja_dado: bool = False) -> str:
+    """Bloco de fatos de calendario injetado no system prompt dos agentes.
+
+    `aviso_ja_dado`: o aviso de fechado/intervalo ja saiu nesta conversa (ou o
+    pedido ja esta agendado num horario valido). Com "Aviso obrigatorio" no
+    prompt a cada mensagem, o modelo o repetia - em 3 de 6 rodadas ele
+    respondeu o "Hj nao" da oferta com "Estamos no intervalo... adiantar para
+    as 14h?" num pedido para amanha as 9h (medido em 30/09).
+    """
     now = now or agora()
     st = status(now)
     linhas = [
@@ -412,7 +419,11 @@ def contexto_para_prompt(now: datetime | None = None) -> str:
         "Expediente: segunda a sabado, 07h40 as 20h00 (intervalo 12h01-13h59)",
         f"Situacao agora: {'ABERTO' if st['aberto'] else 'FECHADO (' + st['motivo'] + ')'}",
     ]
-    if not st["aberto"]:
+    if not st["aberto"] and aviso_ja_dado:
+        linhas.append(
+            "O aviso de horario JA FOI DADO nesta conversa (ou o pedido ja esta "
+            "agendado para um horario valido). E PROIBIDO repeti-lo: siga o pedido.")
+    elif not st["aberto"]:
         linhas.append(f"Aviso obrigatorio ao cliente: {st['mensagem']}")
     if not st["aceita_hoje"]:
         linhas.append(

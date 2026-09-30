@@ -160,6 +160,10 @@ def conversa(msgs: list) -> list:
 # ── cenarios: os do chat do dono, mais os que oscilaram no roteiro ─────────
 SABADO_19H20 = datetime(2026, 9, 26, 19, 20, 0)
 SEGUNDA_10H = datetime(2026, 9, 28, 10, 0, 0)
+SEGUNDA_20H01 = datetime(2026, 9, 28, 20, 1, 0)
+TERCA_15H13 = datetime(2026, 9, 29, 15, 13, 0)
+QUARTA_12H51 = datetime(2026, 9, 30, 12, 51, 0)
+QUARTA_16H = datetime(2026, 9, 30, 16, 0, 0)
 
 CENARIOS = [
     ("cento 30/30/40 + bairro", SABADO_19H20, [
@@ -203,11 +207,48 @@ CENARIOS = [
         'bairro Olaria, Rua Jamari 2125. Pago no cartão.',
         'Não, obrigado',
         'Vocês abrem domingo?']),
+    # ── 28/09 a 30/09: os testes do dono e do Eduardo depois das correcoes ──
+    # O audio entra pela transcricao real do arquivo (estavel em 3 de 3): o
+    # caminho do audio ate virar texto e codigo; aqui se mede o modelo.
+    ("voz: amanha as nove, no almoco (30/09)", QUARTA_12H51, [
+        'Eu quero cinquenta coxinhas e cinquenta bolinhas pra entregar amanhã, às nove.',
+        'Hj não',
+        'Bairro Olaria, rua Jamari 2125, pagamento no pix']),
+    ("100/40/50 no almoco + 'sim' as 14h (30/09)", QUARTA_12H51, [
+        'Quero 100 coxinhas, 40 quibes e 50 salsichas pra entrega.',
+        'sim', 'Sim', 'hj nao',
+        'NA CALAMA 2025 APONIA PAGAMENTO NO CARTAO']),
+    ("croquete bloqueado + coca (29/09)", TERCA_15H13, [
+        'Olá boa tarde Quero  10 croquetes e uma coca cola',
+        'Coca 2 litros', 'Quero um lata']),
+    ("40 quibe + bolo + data passada (29/09)", TERCA_15H13, [
+        'Qiero 100 coxinhas 40 quibe 50 salsicha para entrega rua Calama 1234 pagamento cartão',
+        'Pode ser', 'Um bolo', 'Bairro Aponia \n25/09\n16 horas']),
+    ("Calama sem 'Rua' + churros, fechado (28/09)", SEGUNDA_20H01, [
+        'QUERO 50 COXINHAS E 50 RISSOLES 20 CHURROS PARA ENTREGA NA CALAMA 2025 '
+        'APONIA PAGAMENTO NO CARTAO',
+        'SERA PARA AMANHA AS 8 HORAS', 'PODE SER', 'NAO OBRIGADO']),
+    ("coca 2L esgotada -> guarana (28/09)", SEGUNDA_20H01, [
+        'Boa noite! Quero meio cento frito: 25 coxinhas e 25 bolinhas de queijo, e 1 '
+        'Coca-Cola de 2 litros gelada. Pra entregar AMANHA  às 20h na Rua Duque de '
+        'Caxias, 1200, Bairro São Cristóvão. Pago no cartão na entrega.',
+        'Pode ser', 'pode ser o guaraná']),
+    ("metade/metade com valor na hora", QUARTA_16H, [
+        'Metade coxinha e metade pastel de carne']),
+    ("dois centos pastel e bolinha", QUARTA_16H, [
+        '1 cento pastel e bolinha e 1 cento pastel e bolinha pra retirada']),
 ]
 
 _so = next((a for a in sys.argv[1:] if a.startswith("--so=")), "")
 if _so:
     CENARIOS = CENARIOS[: int(_so.split("=")[1])]
+# "--parte=2/3": roda so um terco dos cenarios. A varredura inteira passa de
+# 10 minutos, e rodando em segundo plano ela ja foi interrompida por falta de
+# memoria na maquina; em partes, cada uma cabe numa execucao normal.
+_parte = next((a for a in sys.argv[1:] if a.startswith("--parte=")), "")
+if _parte:
+    _k, _n = (int(x) for x in _parte.split("=")[1].split("/"))
+    CENARIOS = [c for i, c in enumerate(CENARIOS) if i % _n == _k - 1]
 
 print("=" * 78)
 print(f"OSCILACAO — {len(CENARIOS)} cenarios x {RODADAS} rodadas")
