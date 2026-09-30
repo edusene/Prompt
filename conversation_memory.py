@@ -274,10 +274,18 @@ def merge(memoria: dict, extraido: dict, novo_da_mensagem: dict | None = None) -
     if sem_tamanho and not any(_e_bebida(i.get("name")) for i in memoria.get("items") or []
                                if isinstance(i, dict)):
         pendentes = list(memoria.get("sabores_pendentes") or [])
-        if not any(p.get("termo") == "refrigerante" for p in pendentes):
+        aberta = next((p for p in pendentes if p.get("termo") == "refrigerante"), None)
+        if not aberta:
             pendentes += sem_tamanho
             memoria["sabores_pendentes"] = pendentes
             mudancas.append("bebida sem tamanho -> pergunta")
+        elif sem_tamanho[0].get("em_falta") and not aberta.get("em_falta"):
+            # Pergunta ja aberta ("qual refrigerante?") e o cliente responde com
+            # o esgotado ("Coca 2 litros"): a pergunta volta, agora dizendo que
+            # esse acabou - sem isso ela so repetia as opcoes (29/09 15h14).
+            aberta["em_falta"] = sem_tamanho[0]["em_falta"]
+            memoria["sabores_pendentes"] = pendentes
+            mudancas.append(f"refrigerante em falta: {aberta['em_falta']}")
 
     sabores_novos = (novo_da_mensagem or {}).get("sabores_pendentes")
     if sabores_novos and sabores_novos != memoria.get("sabores_pendentes"):
@@ -934,7 +942,16 @@ def itens_indisponiveis(memoria: dict) -> list[str]:
             exatos = [l for l in linhas if _sem_acento(l.get("item", "")) == alvo]
             if not exatos:
                 continue
-            if any(l.get("disponivel", True) for l in exatos):
+            # Item que o cardapio digital nao tem (bloqueado e nao liberado
+            # pelo dono) tambem nao pode ser vendido: avisado AGORA, como um
+            # esgotado. Descoberto so no envio, ele fazia o cliente passar
+            # endereco e pagamento para no fim ir para a fila do humano - e
+            # no caminho travava o ajuste de lote num laco (teste do dono,
+            # 29/09 15h14, croquete de carne).
+            import cardapio_catalogo
+            bloqueado = any(_sem_acento(k) == alvo
+                            for k in cardapio_catalogo.bloqueados_efetivos())
+            if not bloqueado and any(l.get("disponivel", True) for l in exatos):
                 continue
             oficial = exatos[0].get("item") or nome
         except Exception:

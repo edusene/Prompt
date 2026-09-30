@@ -144,8 +144,13 @@ checa("dia 16 vira 16/10 (o de setembro ja passou)",
       detectar_data("DIA 16 AS 15 HORAS", AGORA) == date(2026, 10, 16))
 checa("dia 30 fica em setembro", detectar_data("dia 30", AGORA) == date(2026, 9, 30))
 checa("'meu dia foi bom' nao e data", detectar_data("meu dia foi bom", AGORA) is None)
-checa("data com mes que ja passou vai para o ano seguinte",
-      detectar_data("16/09", AGORA) == date(2027, 9, 16))
+# Mudou em 29/09: "25/09" dito em 29/09 virava 25/09/2027 e o espelho saia para
+# daqui a um ano. Passada ha poucos dias e engano: fica no passado e a
+# validacao pergunta o dia de novo. So passada ha muito vai para o ano que vem.
+checa("data passada ha poucos dias fica no passado (nao vira o ano seguinte)",
+      detectar_data("16/09", AGORA) == date(2026, 9, 16))
+checa("data passada ha meses vai para o ano seguinte",
+      detectar_data("16/03", AGORA) == date(2027, 3, 16))
 
 # ── Quantidade de lote ─────────────────────────────────────────────────────
 secao("--- lote: passo por sabor, minimo por familia ---")
@@ -1229,6 +1234,81 @@ checa("'ate 2 sabores (25 de cada)' sai quando o pedido ja esta certo",
 checa("sem itens na ficha, 'escolher ate 4 sabores' fica",
       app._conferir_aula_de_lote("55", "Você pode escolher até 4 sabores (25 de cada)! Quais?",
                                  dict(memoria_mod._empty(), volume_pendente=100)).startswith("Você pode"))
+
+
+secao("--- 29/09 noite: testes do dono (texto e voz) ---")
+from agents.conversation import numeros_por_extenso, bebidas_citadas  # noqa: E402
+# Voz: o Whisper escreve os numeros por extenso.
+checa("'cinquenta coxinha' vira 50",
+      numeros_por_extenso("Quero cinquenta coxinha, cinquenta bolinha") == "Quero 50 coxinha, 50 bolinha")
+checa("'oito horas' vira 8 horas", "8 horas" in numeros_por_extenso("às oito horas da manhã"))
+checa("'vinte e cinco quibes' vira 25", numeros_por_extenso("vinte e cinco quibes") == "25 quibes")
+checa("'Rua Sete de Setembro' fica intacta",
+      numeros_por_extenso("Rua Sete de Setembro, 45") == "Rua Sete de Setembro, 45")
+_F_VOZ = memoria_mod._empty()
+for _m in ("Quero cinquenta coxinha, cinquenta bolinha, cinquenta churros. É pra entrega.",
+           "Quero pra amanhã, às oito horas da manhã."):
+    _F_VOZ = memoria_mod.merge(_F_VOZ, _extract_data_from_message(
+        _m, ConversationState(items=_F_VOZ.get("items") or [])),
+        _extract_data_from_message(_m, ConversationState()))[0]
+checa("audio transcrito vira itens, entrega e horario",
+      [(i["name"], i["quantity"]) for i in _F_VOZ["items"]]
+      == [("Coxinha", 50), ("Bolinha de Queijo", 50), ("Churros", 50)]
+      and _F_VOZ["modality"] == "entrega" and _F_VOZ["horario"] == "8h", str(_F_VOZ["items"]))
+checa("audio: handle_flush usa a transcricao na ficha",
+      'it.get("transcricao") or it.get("text"' in open("app.py", encoding="utf-8").read())
+# Croquete de carne: bloqueado no cardapio digital -> avisado logo, como esgotado.
+_F_CROQ = dict(memoria_mod._empty(), items=[{"name": "Croquete de Carne", "quantity": 10}])
+checa("item bloqueado e avisado ja na primeira resposta",
+      memoria_mod.pergunta_bloqueante(_F_CROQ).startswith("O sabor Croquete de carne está em falta"))
+checa("item liberado nao e bloqueado", memoria_mod.itens_indisponiveis(
+    dict(memoria_mod._empty(), items=[{"name": "Coxinha", "quantity": 50}])) == [])
+# 40 quibes nao podem virar 50 pelo "50" da salsicha.
+_F_QUIBE = dict(memoria_mod._empty(), items=[{"name": "Coxinha", "quantity": 100},
+                                             {"name": "Quibe", "quantity": 40},
+                                             {"name": "Enroladinho de Salsicha", "quantity": 50}])
+checa("o 50 de outro produto nao aceita o ajuste",
+      not app._aceitou_a_quantidade("Qiero 100 coxinhas 40 quibe 50 salsicha para entrega", _F_QUIBE))
+checa("'pode ser 50 entao' aceita", app._aceitou_a_quantidade("Pode ser 50 entao", _F_QUIBE))
+checa("'50 quibes' aceita", app._aceitou_a_quantidade("Isso, 50 quibes", _F_QUIBE))
+# Data sem ano que passou ha poucos dias e data passada, nao o ano que vem.
+checa("'25/09' dito em 29/09 nao vira 2027",
+      horario.resolver_data("25/09", datetime(2026, 9, 29, 15, 0)) == date(2026, 9, 25))
+checa("'10/01' dito em dezembro e o ano que vem",
+      horario.resolver_data("10/01", datetime(2026, 12, 20, 15, 0)) == date(2027, 1, 10))
+# Bolo aceito na oferta entra no pedido.
+_F_BOLO = memoria_mod.merge(dict(memoria_mod._empty(), items=[{"name": "Coxinha", "quantity": 100}]),
+                            _extract_data_from_message("Um bolo", ConversationState(
+                                items=[{"name": "Coxinha", "quantity": 100}])),
+                            _extract_data_from_message("Um bolo", ConversationState()))[0]
+checa("'Um bolo' na oferta soma o Bolo de Milho",
+      ("Bolo de Milho", 1) in [(i["name"], i["quantity"]) for i in _F_BOLO["items"]])
+checa("'sem bolo' nao vira pedido", not bebidas_citadas("sem bolo hoje")[0])
+# Lista cortada nao deixa o cabecalho sozinho.
+_F_LISTA = dict(memoria_mod._empty(), items=[{"name": "Croquete de Carne", "quantity": 10}])
+_SEM_CABECALHO = app._conferir_etapa_travada(
+    "55", "Por favor, envie numa lista vertical:\n- Bairro\n- Data (dia/mês)", _F_LISTA)
+checa("cabecalho 'lista vertical' sai junto com a lista cortada",
+      "lista vertical" not in _SEM_CABECALHO, _SEM_CABECALHO[:60])
+# "Perfeito, Balbino! Seu pedido..." nao deixa "Balbino!" solto.
+checa("sem a abertura, o nome solto no comeco sai",
+      app._conferir_enrolacao("55", "Perfeito, Balbino! Seu pedido ficou para amanhã às 8h.",
+                              "Balbino") == "Seu pedido ficou para amanhã às 8h.")
+checa("nome no meio da frase fica",
+      "Balbino" in app._conferir_enrolacao("55", "Perfeito! Anotei, Balbino, para amanhã às 8h.",
+                                           "Balbino"))
+# Numero da casa com virgula (Whisper) nao e horario.
+checa("'rua Salgado Filho 21, 52' nao vira 21h52",
+      horario.parse_horario("É rua Salgado Filho 21, 52, bairro Olaria") is None)
+checa("'19,50' sozinho continua sendo horario", horario.parse_horario("19,50") == (19, 50))
+# Refrigerante esgotado dito depois da pergunta ja aberta.
+_F_COCA2 = memoria_mod._empty()
+for _m in ("Quero 10 croquetes e uma coca cola", "Coca 2 litros"):
+    _F_COCA2 = memoria_mod.merge(_F_COCA2, _extract_data_from_message(
+        _m, ConversationState(items=_F_COCA2.get("items") or [])),
+        _extract_data_from_message(_m, ConversationState()))[0]
+checa("'Coca 2 litros' com a pergunta aberta avisa a falta",
+      memoria_mod.pergunta_bloqueante(_F_COCA2).startswith("O Refrigerante 2 Litros está em falta"))
 
 
 secao("--- 28/09: aviso rapido e acrescimo depois do pedido ---")

@@ -1060,6 +1060,11 @@ BEBIDA_600 = "Refrigerante 600ml"
 BEBIDA_2L = "Refrigerante 2 Litros"
 BEBIDA_TUCHAUA = "Guaraná Tuchaua 2 Litros"
 
+BOLO = "Bolo de Milho"
+_RX_BOLO = re.compile(
+    r"(?:\b(?P<qtd>\d{1,2}|uma?|dois|duas|tr[eê]s)\s+)?\bbolos?\b(?:\s+de\s+milho)?",
+    re.IGNORECASE)
+
 # Palavra que basta para escolher o tamanho quando ela pergunta ("lata").
 PALAVRAS_DA_BEBIDA = {
     BEBIDA_LATA: ("lata", "latinha"),
@@ -1113,6 +1118,25 @@ def bebidas_citadas(msg_lower: str) -> tuple[list[dict], list[dict]]:
                               "opcoes": _opcoes_de_refrigerante(), "em_falta": nome})
             continue
         itens.append({"name": nome, "quantity": qtd, "price": oficial["preco_unitario"]})
+
+    # O bolo da oferta ("vai um Bolo de Milho?" -> "Um bolo") tambem sumia do
+    # espelho: nao estava no indice de produtos (teste do dono, 29/09 15h24).
+    # Entra pelo mesmo caminho da bebida, que SOMA ao pedido.
+    for m in _RX_BOLO.finditer(msg_lower or ""):
+        if re.search(r"\b(?:sem|n[aã]o|nada\s+de|nem)\b[^,.;!?\n]{0,18}$",
+                     (msg_lower or "")[:m.start()]):
+            continue
+        bruto_qtd = (m.group("qtd") or "").lower()
+        qtd = int(bruto_qtd) if bruto_qtd.isdigit() else _QTD_POR_EXTENSO.get(bruto_qtd, 1)
+        if not 0 < qtd <= 10 or any(i["name"] == BOLO for i in itens):
+            continue
+        try:
+            import facts
+            oficial = facts.resolve_unit_price(BOLO, qtd)
+        except Exception:
+            oficial = None
+        if oficial:
+            itens.append({"name": BOLO, "quantity": qtd, "price": oficial["preco_unitario"]})
     return itens, pendentes[:1]
 
 
@@ -1152,11 +1176,63 @@ def _itens_por_extenso(msg_lower: str) -> list[dict]:
     return achados
 
 
+# Numero dito por extenso. Chega assim pelo audio - o Whisper escreveu
+# "Quero cinquenta coxinha, cinquenta bolinha, cinquenta churros" e a extracao,
+# que so le digitos, nao achou item nenhum (teste do dono por voz, 29/09 20h04).
+_UNIDADES_EXTENSO = {
+    "dois": 2, "duas": 2, "tres": 3, "três": 3, "quatro": 4, "cinco": 5,
+    "seis": 6, "sete": 7, "oito": 8, "nove": 9, "dez": 10, "onze": 11,
+    "doze": 12, "treze": 13, "quatorze": 14, "catorze": 14, "quinze": 15,
+    "dezesseis": 16, "dezessete": 17, "dezoito": 18, "dezenove": 19,
+}
+_DEZENAS_EXTENSO = {
+    "vinte": 20, "trinta": 30, "quarenta": 40, "cinquenta": 50, "cinqüenta": 50,
+    "sessenta": 60, "setenta": 70, "oitenta": 80, "noventa": 90,
+    "cem": 100, "duzentos": 200, "duzentas": 200, "trezentos": 300,
+    "trezentas": 300, "quatrocentos": 400, "quatrocentas": 400,
+    "quinhentos": 500, "quinhentas": 500,
+}
+_RX_NUMERO_EXTENSO = re.compile(
+    r"\b(?P<dezena>" + "|".join(sorted(_DEZENAS_EXTENSO, key=len, reverse=True)) + r")"
+    r"(?:\s+e\s+(?P<unidade>" + "|".join(sorted(_UNIDADES_EXTENSO, key=len, reverse=True)) + r"))?\b"
+    r"|\b(?P<sozinha>" + "|".join(sorted(_UNIDADES_EXTENSO, key=len, reverse=True)) + r")\b",
+    re.IGNORECASE)
+
+# O numero so vira digito antes de produto, volume ou hora: "Rua Sete de
+# Setembro" e "Avenida Sete" continuam como estao.
+_RX_DEPOIS_DO_NUMERO = re.compile(
+    r"^\s+(?:(?:de|da|do)\s+)?(?:horas?|h\b|da\s+manh|da\s+tarde|da\s+noite"
+    r"|salgad|unidades?|un\b|porc|centos?|[a-zà-ÿ]+)", re.IGNORECASE)
+
+
+def numeros_por_extenso(texto: str) -> str:
+    """'cinquenta coxinhas as oito horas' -> '50 coxinhas as 8 horas'."""
+    def _troca(m):
+        resto = texto[m.end():]
+        seguinte = _RX_DEPOIS_DO_NUMERO.match(resto)
+        if not seguinte:
+            return m.group(0)
+        palavra = seguinte.group(0).strip().lower()
+        if not re.match(r"(?:(?:de|da|do)\s+)?(?:horas?|h\b|da\s+|salgad|unidade|un\b|porc|cento)", palavra):
+            # Palavra comum: so troca se for um produto conhecido.
+            candidato = re.sub(r"^(?:de|da|do)\s+", "", palavra)
+            if not _produto_conhecido(candidato):
+                return m.group(0)
+        if m.group("sozinha"):
+            return str(_UNIDADES_EXTENSO[m.group("sozinha").lower()])
+        valor = _DEZENAS_EXTENSO[m.group("dezena").lower()]
+        if m.group("unidade"):
+            valor += _UNIDADES_EXTENSO[m.group("unidade").lower()]
+        return str(valor)
+    return _RX_NUMERO_EXTENSO.sub(_troca, texto or "")
+
+
 def _extract_data_from_message(message: str, state: "ConversationState") -> dict:
     """Extrai dados estruturados da mensagem do cliente (nome, itens, modalidade, endereco, horario, pagamento).
 
     Retorna dict com os dados extraidos que devem ser aplicados ao state.
     """
+    message = numeros_por_extenso(message or "")
     msg_lower = message.lower().strip()
     extracted = {}
 

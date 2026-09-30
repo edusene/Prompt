@@ -180,6 +180,11 @@ def status(now: datetime | None = None) -> dict:
     }
 
 
+# Ate quantos dias atras uma data sem ano e lida como engano (data passada), e
+# nao como o mesmo dia do ano que vem.
+DIAS_DE_DATA_PASSADA = 60
+
+
 def resolver_data(texto: str, now: datetime | None = None) -> date | None:
     """Converte o que o cliente escreveu em uma data absoluta.
 
@@ -214,8 +219,13 @@ def resolver_data(texto: str, now: datetime | None = None) -> date | None:
             resolvida = date(ano, mes, dia)
         except ValueError:
             return None
-        # Data sem ano que ja passou e quase sempre o ano que vem.
-        if not m.group(3) and resolvida < hoje:
+        # Data sem ano que ja passou e o ano que vem so quando passou HA MUITO:
+        # "10/01" dito em dezembro. Passada ha poucos dias e engano do cliente -
+        # "25/09" dito em 29/09 virou 25/09/2027 e o espelho saiu para daqui a um
+        # ano (teste do dono, 29/09 15h25). Devolvida como esta, a validacao
+        # responde "essa data ja passou" e pergunta o dia de novo.
+        if (not m.group(3) and resolvida < hoje
+                and (hoje - resolvida).days > DIAS_DE_DATA_PASSADA):
             try:
                 resolvida = date(ano + 1, mes, dia)
             except ValueError:
@@ -253,6 +263,13 @@ def resolver_data(texto: str, now: datetime | None = None) -> date | None:
 # Onde ha dinheiro na frase, virgula e centavo - nao minuto.
 _RX_DINHEIRO = re.compile(r"r\$|reais|troco|pagar")
 
+# Onde ha endereco na frase, virgula e parte do numero da casa. O Whisper
+# transcreveu "rua Salgado Filho, 2152" como "rua Salgado Filho 21, 52", e o
+# "21,52" virou 21h52 por cima das 8h que o cliente ja tinha dado (teste do
+# dono por voz, 29/09 20h06).
+_RX_ENDERECO_NA_FRASE = re.compile(
+    r"\b(?:rua|avenida|av|travessa|alameda|estrada|rodovia|bairro|numero|n[oº°])\b")
+
 # "(?<!\d)" em vez de "\b": o cliente cola a hora na palavra anterior
 # ("PODE SER PARA AS19:50") e "\b" nao ve fronteira entre "s" e "1", entao o
 # horario nao existia para o parser e a pergunta era repetida (teste do dono,
@@ -270,7 +287,7 @@ def parse_horario(texto: str) -> tuple[int, int] | None:
     """'18h', '18:30', 'as 8h15', '18 horas', '19,50' -> (hora, minuto)."""
     t = _norm(texto)
     moldes = [_RX_HORA]
-    if not _RX_DINHEIRO.search(t):
+    if not _RX_DINHEIRO.search(t) and not _RX_ENDERECO_NA_FRASE.search(t):
         moldes.append(_RX_HORA_VIRGULA)
 
     # Percorre TODOS os candidatos em vez de desistir no primeiro: numa frase

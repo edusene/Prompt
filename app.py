@@ -863,6 +863,24 @@ def _parse_data_uri(data_uri: str) -> tuple[str, str]:
     return "", data_uri
 
 
+def _vocabulario_do_audio() -> str:
+    """Palavras da fabrica que o Whisper deve reconhecer.
+
+    Sem contexto ele escreveu "Bahia Puniã" onde o dono disse "bairro Aponiã"
+    (teste por voz, 29/09 20h05), e o bairro nunca chegava a ficha. O `prompt`
+    do Whisper e so vocabulario: nao muda o que foi dito, desempata o que soa
+    parecido. Tem limite (~224 tokens), entao vai curto.
+    """
+    try:
+        bairros = [b["nome"] for b in facts.get()["bairros"]][:40]
+    except Exception:
+        bairros = []
+    return ("Pedido de salgados na BALBS, Porto Velho: coxinha, bolinha de queijo, "
+            "quibe, rissole, churros, enroladinho de salsicha, pastel, croquete, "
+            "esfirra, empadinha, cento, meio cento, Pix, cartao. Bairros: "
+            + ", ".join(bairros))[:700]
+
+
 def transcribe_audio(b64_data: str, mime: str) -> str:
     """Transcreve áudio via OpenAI Whisper. Retorna texto transcrito ou vazio."""
     try:
@@ -885,6 +903,7 @@ def transcribe_audio(b64_data: str, mime: str) -> str:
             model="whisper-1",
             file=(f"audio.{ext}", raw, mime.split(";")[0]),
             language="pt",
+            prompt=_vocabulario_do_audio(),
         )
         text = (resp.text or "").strip()
         print(f"[transcribe] len={len(text)} preview={text[:80]}")
@@ -960,7 +979,13 @@ def _build_user_parts(items: list[dict]) -> list[dict]:
                     media_desc += f" Legenda: {text}"
 
                 if mime and b64 and msg_type in ("audio", "ptt") and _normalize_mime(mime) in _OPENAI_SUPPORTED_AUDIO:
-                    transcription = transcribe_audio(b64, mime)
+                    # Transcreve uma vez por item: handle_flush chama esta
+                    # funcao cedo (para a ficha ouvir o audio) e de novo ao
+                    # montar o prompt - a segunda vez usa o que ja veio.
+                    transcription = item.get("transcricao")
+                    if transcription is None:
+                        transcription = transcribe_audio(b64, mime)
+                        item["transcricao"] = transcription
                     if transcription:
                         parts.append({"text": f"O cliente enviou uma mensagem de voz. Transcrição: {transcription}"})
                     else:
@@ -2055,7 +2080,27 @@ def _aceitou_a_quantidade(texto: str, memoria: dict) -> bool:
         quebras = cardapio_catalogo.quebras_de_lote([dict(i) for i in base])
     except Exception:
         return False
-    return any(str(q["sugerida"]) in numeros for q in quebras)
+    # O numero tem de ser do sabor quebrado, nao de outro item da mesma frase:
+    # "100 coxinhas 40 quibe 50 salsicha" tinha o 50 da salsicha, e os 40
+    # quibes viraram 50 sem pergunta nenhuma - o cliente so viu no espelho
+    # (teste do dono, 29/09 15h24).
+    from agents.conversation import _produto_conhecido
+    norm_texto = facts.normalize(texto)
+    for q in quebras:
+        sabor = facts.normalize(str(q["sabor"])).split()[0] if q.get("sabor") else ""
+        for m in _re_mod.finditer(r"\b" + str(q["sugerida"]) + r"\b\s*(?:un\w*\s+)?(?:de\s+)?([a-z]+(?:\s+[a-z]+)?)?",
+                                  norm_texto):
+            seguinte = (m.group(1) or "").strip()
+            # A palavra seguinte sozinha ("salsicha") ou com a proxima
+            # ("bolinha queijo"): "salsicha para" nao casa com produto nenhum.
+            outro = None
+            if seguinte:
+                outro = (_produto_conhecido(seguinte.split()[0])
+                         or _produto_conhecido(seguinte))
+            if outro and sabor and not facts.normalize(outro).startswith(sabor):
+                continue          # e a quantidade de OUTRO produto
+            return True
+    return False
 
 
 def _mensagem_de_fechamento(pagamento: str, total: float = 0.0) -> str:
@@ -2680,6 +2725,16 @@ def _conferir_etapa_travada(user: str, reply: str, memoria: dict) -> str:
             continue
         mantidas.append(limpo)
 
+    # Cortada a lista, o cabecalho dela nao pode ficar: "Por favor, envie numa
+    # lista vertical:" saia sozinho, sem lista nenhuma, tres vezes na mesma
+    # conversa (teste do dono, 29/09 15h17).
+    if cortadas:
+        orfaos = [f for f in mantidas if f.rstrip().endswith(":")
+                  or _RX_CABECALHO_DE_COLETA.search(facts.normalize(f))]
+        if orfaos:
+            mantidas = [f for f in mantidas if f not in orfaos]
+            cortadas += orfaos
+
     corpo = " ".join(mantidas).strip()
     ja_cobriu = conversation_memory.etapa_coberta(memoria, corpo)
     if not cortadas and ja_cobriu:
@@ -2694,6 +2749,11 @@ def _conferir_etapa_travada(user: str, reply: str, memoria: dict) -> str:
     print(f"[funil] user={user} etapa travada ({travada[:40]!r}): "
           f"cobriu={ja_cobriu} cortado={' | '.join(cortadas)[:100]!r}")
     return novo.strip()
+
+
+# Frase que so anuncia uma lista de dados a mandar. Sem a lista, nao diz nada.
+_RX_CABECALHO_DE_COLETA = _re_mod.compile(
+    r"lista vertical|seguintes dados|os dados abaixo|me passe os dados|envie esses dados")
 
 
 def _campos_pedidos_na_resposta(reply: str, campos: list) -> set:
@@ -2801,7 +2861,7 @@ _RX_ENROLACAO_DE_ABERTURA = _re_mod.compile(
     _re_mod.IGNORECASE)
 
 
-def _conferir_enrolacao(user: str, reply: str) -> str:
+def _conferir_enrolacao(user: str, reply: str, nome: str = "") -> str:
     """Tira a abertura vazia da mensagem, mantendo o resto intacto.
 
     Só a PRIMEIRA palavra da mensagem: "Perfeito! Qual e o numero da casa?"
@@ -2825,6 +2885,15 @@ def _conferir_enrolacao(user: str, reply: str) -> str:
     # sozinho, e ele saia como uma mensagem so com "😊" (teste do dono, 27/09
     # 20h36). So a LINHA sem letra vai junto: "📦 Resumo" na mesma linha fica.
     limpo = _re_mod.sub(r"^[^\w\n]*\n+", "", limpo)
+    # "Perfeito, Balbino! Seu pedido..." perdia so o "Perfeito," e saia
+    # "Balbino! Seu pedido..." - o nome solto no comeco (teste do dono, 29/09
+    # 21h24). Sem a abertura, o vocativo vai junto.
+    primeiro = (nome or "").strip().split(" ")[0]
+    if primeiro:
+        sem_nome = _re_mod.sub(r"^" + _re_mod.escape(primeiro) + r"(?:\s+\S+)?\s*[!,.]\s*",
+                               "", limpo, count=1, flags=_re_mod.IGNORECASE)
+        if sem_nome != limpo and len([c for c in sem_nome if c.isalpha()]) >= 12:
+            limpo = sem_nome
     # A frase seguinte comeca em maiuscula, como se fosse o inicio da mensagem.
     if limpo[:1].islower():
         limpo = limpo[:1].upper() + limpo[1:]
@@ -3230,6 +3299,18 @@ def handle_flush(user: str, items: list[dict]) -> None:
         # preenche lacunas) e outra sem estado (detecta correcao do cliente).
         text_only = "\n".join(it.get("text", "") for it in items)
 
+        # Audio: a transcricao era feita so ao montar o prompt, depois de
+        # toda a camada de codigo - a extracao, a ficha, o aviso de fora do
+        # horario e as travas liam "[Audio (mensagem de voz)]". O dono pediu
+        # 50 coxinhas, 50 bolinhas e 50 churros por voz e a ficha ficou vazia:
+        # ela pediu "itens do pedido" tres vezes (teste de 29/09 20h04).
+        # Transcrito aqui, uma vez; _build_user_parts reaproveita depois.
+        if any(str(it.get("text", "")).startswith("[Audio") for it in items):
+            _build_user_parts(items)
+            text_only = "\n".join(
+                (it.get("transcricao") or it.get("text", "")) for it in items)
+            print(f"[audio] user={user} transcricao usada na ficha: {text_only[:120]!r}")
+
         _memoria = conversation_memory.load(user)
         if contact and contact.get("name") and not _memoria.get("name"):
             _memoria["name"] = contact["name"]
@@ -3453,7 +3534,13 @@ def handle_flush(user: str, items: list[dict]) -> None:
         # anterior. Medido em 8 rodadas do mesmo cenario: em 2 delas o modelo
         # tinha perguntado o nome no lugar de oferecer o ajuste, o gatilho por
         # frase nao viu nada, e o "Isso, 25 de cada" do cliente caiu no vazio.
-        if (conversation_memory.pendencia_de_lote(_memoria)
+        # A frase de lote que o codigo manda sai de _frase_de_lote; o aceite
+        # tem de enxergar a mesma quebra. Olhando so pendencia_de_lote (que
+        # passa pela traducao do cardapio digital e ignora item bloqueado), a
+        # pergunta saia, o "pode ser" nunca era aplicado e ela repetia "Ajusto
+        # para 25 Croquete de carne?" quatro vezes (teste do dono, 29/09 15h16).
+        if ((conversation_memory.pendencia_de_lote(_memoria)
+                or conversation_memory._frase_de_lote(_memoria))
                 and ((_ofereceu_ajuste_de_lote(last_assistant_text)
                       and _e_concordancia(text_only))
                      or _aceitou_a_quantidade(text_only, _memoria))):
@@ -4288,7 +4375,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
             # E, depois de todas as trocas, a mensagem termina com UMA pergunta
             # objetiva. O dono cobrou isso na dupla pergunta do fechamento
             # (26/09 19h27).
-            reply = _conferir_enrolacao(user, reply)
+            reply = _conferir_enrolacao(user, reply, _memoria.get("name") or "")
             reply = _conferir_uma_pergunta(user, reply, _memoria)
 
         # A oferta adicional saiu? Entao ela nao volta na proxima mensagem.

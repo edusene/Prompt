@@ -179,9 +179,13 @@ def nao_renomeia_croquete(r: list) -> str:
             return f"msg {i + 1} trocou o croquete do cliente por macaxeira"
     # Segue a planilha: o dono reativou o croquete em 28/09. Esgotado, ela tem
     # de avisar; disponivel, avisar seria inventar falta de estoque.
+    # Vendivel = com preco na planilha E nao bloqueado no cardapio digital
+    # (desde 29/09 o bloqueado tambem e avisado como falta, logo de inicio).
     import facts
+    import cardapio_catalogo
     avisou = any("esgotad" in norm(m) or "em falta" in norm(m) for m in r)
-    if facts.resolve_unit_price("Croquete de Carne", 50):
+    bloqueado = any(norm(k) == "croquete de carne" for k in cardapio_catalogo.bloqueados_efetivos())
+    if facts.resolve_unit_price("Croquete de Carne", 50) and not bloqueado:
         return "disse que o croquete esta em falta, e ele esta disponivel" if avisou else ""
     if not avisou:
         return "nao avisou que o sabor esta em falta"
