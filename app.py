@@ -66,7 +66,11 @@ def _get_conversation_manager():
 # Era 8s e sozinha ja comia quase metade do tempo de resposta — com o modelo e
 # as tools, a Sandrinha levava ~21s para responder. O alvo do dono e a primeira
 # mensagem chegar entre 5 e 10 segundos.
-BUFFER_SECONDS = float(os.getenv("BUFFER_SECONDS", "3"))
+# Reuniao com o dono, 01/10: "tirar o buffer, resposta imediata", meta de 5s.
+# Fixo em codigo, e nao lido do .env: o .env e o painel do Render tinham 3s, e
+# so mudar o padrao deixaria a espera la. Mensagens que chegam enquanto a
+# anterior e respondida nao se perdem: o buffer.py as enfileira por cliente.
+BUFFER_SECONDS = 0.0
 PORT = int(os.getenv("PORT", "5000"))
 SECRET_KEY = os.getenv("SECRET_KEY", "troque_esta_chave_secreta_aleatoria")
 DATAFY_WEBHOOK_SECRET = os.getenv("DATAFY_WEBHOOK_SECRET", "")
@@ -2178,6 +2182,10 @@ def _aceitou_a_quantidade(texto: str, memoria: dict) -> bool:
     return False
 
 
+# A mensagem depois do pedido enviado (dinheiro, cartao e retirada).
+FECHAMENTO_CURTO = "Pedido finalizado com sucesso! 💛"
+
+
 def _mensagem_de_fechamento(pagamento: str, total: float = 0.0) -> str:
     """Avisa que o pedido entrou, quando o modelo escreveu outra coisa.
 
@@ -2199,10 +2207,7 @@ def _mensagem_de_fechamento(pagamento: str, total: float = 0.0) -> str:
             f"Pedido registrado!{quanto} 💛 Assim que você enviar o comprovante "
             f"do Pix por aqui, nossa equipe confere e libera a produção."
         )
-    return (
-        f"Pedido confirmado!{quanto} 💛 Já está com a nossa equipe. "
-        f"Muito obrigado por escolher a BALBS!"
-    )
+    return FECHAMENTO_CURTO
 
 
 # Como ela ja recusa um troco insuficiente. Serve para nao reescrever a
@@ -2762,6 +2767,49 @@ _RX_COBRA_LOGISTICA = _re_mod.compile(
     _re_mod.IGNORECASE)
 
 
+def _conferir_formato_da_coleta(user: str, reply: str, memoria: dict) -> str:
+    """O pedido de dados sai sempre no formato curto do dono.
+
+    Reuniao de 01/10: no lugar de "Por favor, informe numa unica mensagem os
+    seguintes dados para entrega: - Bairro - Rua com numero ... - Forma de
+    pagamento (Pix antecipado, Cartao ou Dinheiro na entrega)", o dono quer
+    "Informe: - Bairro - Rua - Numero ..." (ou "Faltam essas informacoes:"
+    quando parte ja veio). A redacao era do modelo e mudava a cada vez; aqui
+    o que a resposta COBRA vira o texto do codigo, e o que ela INFORMA fica.
+    """
+    if not reply or _RX_LINHA_DE_RESUMO.search(reply):
+        return reply
+    if conversation_memory.pergunta_bloqueante(memoria):
+        return reply          # etapa travada vem antes; outra guarda trata
+    pendentes = conversation_memory.faltando(memoria)
+    if not pendentes:
+        return reply
+    # "Bom dia" nao e pedido de data: sem isto a saudacao virava "dia".
+    sem_saudacao = _re_mod.sub(r"\bbom\s+dia\b", " ", reply, flags=_re_mod.IGNORECASE)
+    pedidos = _campos_pedidos_na_resposta(sem_saudacao, pendentes)
+    if not pedidos:
+        return reply
+    padrao = conversation_memory.pedido_de_dados(memoria, pendentes)
+    if facts.normalize(reply).endswith(facts.normalize(padrao)):
+        return reply          # ja esta no formato
+    mantidas = []
+    for frase in _re_mod.split(r"(?<=[.!?])\s+|\n+", reply):
+        limpo = frase.strip(" -•*")
+        if not limpo:
+            continue
+        norm = _re_mod.sub(r"\bbom dia\b", " ", facts.normalize(limpo))
+        if ("?" in limpo or limpo.endswith(":") or _RX_COBRA_LOGISTICA.search(norm)
+                or _RX_CABECALHO_DE_COLETA.search(norm)
+                or any(p in norm for c in pendentes
+                       for p in {**_PEDIDO_DE_DADO, **_PEDIDO_DE_DADO_EXTRA}.get(c, ()))):
+            continue
+        mantidas.append(limpo)
+    corpo = " ".join(mantidas).strip()
+    novo = f"{corpo}\n\n{padrao}" if len([c for c in corpo if c.isalpha()]) >= 12 else padrao
+    print(f"[coleta] user={user} pedido de dados reescrito no formato curto")
+    return novo.strip()
+
+
 def _conferir_etapa_travada(user: str, reply: str, memoria: dict) -> str:
     """Poe de volta a etapa do funil que a resposta pulou.
 
@@ -3149,11 +3197,9 @@ def _proxima_pergunta_do_funil(memoria: dict) -> str:
         if resumo:
             return resumo
         return "Confirmando o seu pedido! Pode confirmar para eu fechar? 💛"
-    rotulos = [conversation_memory._ROTULOS.get(c, c) for c in pendentes]
-    if len(rotulos) == 1:
-        return f"Para seguir, me confirma: {rotulos[0].lower()}? 😊"
-    lista = "\n".join(f"• {r}" for r in rotulos)
-    return f"Para seguir, me confirma:\n{lista}"
+    # Formato curto do dono (01/10): "Informe:" / "Faltam essas informacoes:"
+    # com a lista, ou uma pergunta curta quando falta um dado so.
+    return conversation_memory.pedido_de_dados(memoria, pendentes)
 
 
 def _auditar_valores(user: str, reply: str, consultados: list) -> None:
@@ -3195,16 +3241,17 @@ def _auditar_valores(user: str, reply: str, consultados: list) -> None:
 # cliente ja tinha esperado o debounce e o modelo, e ainda levava mais ~2s para
 # ver a primeira linha. Agora a primeira sai quase imediata e so as seguintes
 # tem a pausa curta que imita digitacao.
-PAUSA_PRIMEIRA = float(os.getenv("PAUSA_PRIMEIRA_SEG", "0.4"))
-PAUSA_MIN = float(os.getenv("PAUSA_MIN_SEG", "0.8"))
-PAUSA_MAX = float(os.getenv("PAUSA_MAX_SEG", "2.0"))
+# Ritmo entre as bolhas de uma resposta. Curto desde 01/10 (meta de 5s do dono):
+# a primeira sai sem pausa nenhuma.
+PAUSA_PRIMEIRA = float(os.getenv("PAUSA_PRIMEIRA_SEG", "0"))
+PAUSA_MIN = float(os.getenv("PAUSA_MIN_SEG", "0.3"))
+PAUSA_MAX = float(os.getenv("PAUSA_MAX_SEG", "0.8"))
 
-# Piso do tempo de resposta pedido pelo dono: a Sandrinha responde entre 5 e 10
-# segundos. O teto sai do debounce curto e do ritmo acima; o piso existe porque
-# resposta pronta e curta saia em ~4s, e resposta instantanea entrega que do
-# outro lado nao tem ninguem digitando. Conta do ponto de vista do cliente,
-# entao o debounce ja consumido entra na conta.
-RESPOSTA_MIN_SEG = float(os.getenv("RESPOSTA_MIN_SEG", "5.0"))
+# Piso do tempo de resposta. Existia porque o dono pediu, em 25/09, resposta
+# "entre 5 e 10 segundos" e a curta saia em ~4s. Em 01/10 ele pediu o
+# contrario: resposta imediata, meta de 5s. Com o piso de 5s nenhuma resposta
+# conseguia ficar abaixo da meta. Fixo em zero, como o buffer.
+RESPOSTA_MIN_SEG = 0.0
 
 
 # Concordancia curta com o que a Sandrinha acabou de oferecer. Deliberadamente
@@ -3696,15 +3743,25 @@ def handle_flush(user: str, items: list[dict]) -> None:
                                  and horario.eh_dia_util(_dia_ficha))
         except (TypeError, ValueError):
             _pedido_outro_dia = False
-        if (not _expediente["aberto"] and _pedido_outro_dia
+        # O cliente JA disse um horario ("as 15h"): o aviso de AGORA nao se
+        # aplica ao pedido dele. Reuniao de 01/10: as 12h51 ele pediu para as
+        # 15h e ouviu "estamos no intervalo... adiantar para as 14h?" - as 15h
+        # a fabrica ja esta aberta. Segue o funil normal: falta o dia, ele
+        # pergunta o dia; horario que nao cabe, a validacao de agendamento
+        # responde com o motivo certo. Vale para intervalo, antes da abertura,
+        # depois do fechamento e domingo.
+        _horario_dado = bool(_memoria.get("horario"))
+        if (not _expediente["aberto"] and (_pedido_outro_dia or _horario_dado)
                 and not _memoria.get("aviso_horario_dado")):
             _memoria["aviso_horario_dado"] = True
             conversation_memory.save(user, _memoria)
-            print(f"[expediente] user={user} fechado agora, mas o pedido e para "
-                  f"{_memoria.get('data_agendada')}; sem aviso generico")
+            print(f"[expediente] user={user} fechado agora, mas o pedido ja tem "
+                  f"{'dia ' + str(_memoria.get('data_agendada')) if _pedido_outro_dia else ''}"
+                  f"{' horario ' + str(_memoria.get('horario')) if _horario_dado else ''}; "
+                  f"sem aviso generico")
 
         if (not _expediente["aberto"] and not _agendou_valido
-                and not _pedido_outro_dia
+                and not _pedido_outro_dia and not _horario_dado
                 and not _memoria.get("aviso_horario_dado")):
             _memoria["aviso_horario_dado"] = True
             if not _expediente["aceita_hoje"] and _memoria.get("data_iso") == _agora.date().isoformat():
@@ -4063,6 +4120,14 @@ def handle_flush(user: str, items: list[dict]) -> None:
             "\'Claro!\', \'Perfeito!\', \'Com certeza!\' e parentes. Comece pela "
             "resposta. Isso nao vale para o espelho do pedido nem para as frases "
             "prontas dos BLOCOS 0 e 6, que sao texto do dono."
+            # Reuniao com o dono, 01/10: "verificar a possibilidade de nunca
+            # utilizar muito texto". Os exemplos sao dele.
+            "\n9.6 TEXTO CURTO (pedido do dono): uma frase quando der, sem explicar o "
+            "processo. Para pedir dados use so 'Informe:' ou 'Faltam essas "
+            "informacoes:' seguido da lista - NUNCA 'Por favor, informe numa unica "
+            "mensagem os seguintes dados para entrega'. Formas de pagamento: 'Pix, "
+            "Cartao ou Dinheiro' - sem 'antecipado' nem 'na entrega'. Nada de "
+            "agradecimento longo nem 'ja esta sendo preparado com muito carinho'."
             "\n10. SEMPRE responda primeiro a pergunta que o cliente fez (preco, frete, "
             "horario, endereco, forma de pagamento, se tem determinado produto) e so "
             "depois puxe o proximo dado do funil, na mesma mensagem. Isso vale tambem no "
@@ -4102,6 +4167,9 @@ def handle_flush(user: str, items: list[dict]) -> None:
         # fechamento sem ter chamado a tool - foi o que aconteceu no segundo
         # teste do dono: ele leu "Pedido agendado!" e nada foi registrado.
         _pedido_saiu = False
+        # Forma de pagamento ANTES do envio: registrar_pedido_enviado limpa a
+        # ficha, e a mensagem de fechamento depende de saber se foi Pix.
+        _pagamento_do_pedido = (_memoria.get("payment_method") or "").strip().lower()
 
         # True quando calculate_order rodou neste turno. Quando ela rodou, o
         # dinheiro da resposta ja veio de codigo e nao ha o que conferir: a
@@ -4553,6 +4621,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
             # resposta e apagada duas linhas depois.
             reply = _conferir_etapa_travada(user, reply, _memoria)
             reply = _conferir_coleta_picada(user, reply, _memoria)
+            reply = _conferir_formato_da_coleta(user, reply, _memoria)
             reply = _conferir_fiado(user, text_only, reply, _memoria)
             reply = _conferir_desconto(user, text_only, reply)
 
@@ -4672,6 +4741,15 @@ def handle_flush(user: str, items: list[dict]) -> None:
                       f"ficha incompleta (falta={_falta_na_ficha}); "
                       f"seguindo o funil")
                 reply = _proxima_pergunta_do_funil(_memoria)
+
+        # Fechamento curto, pedido do dono na reuniao de 01/10: no lugar de
+        # "Pedido finalizado com sucesso! Ja esta sendo preparado com muito
+        # carinho. Muito obrigado por escolher a BALBS!", so "Pedido finalizado
+        # com sucesso! 💛". Vale para dinheiro, cartao e retirada. O Pix fica
+        # com o texto do prompt: e nele que vai a chave Pix para o cliente pagar.
+        if _pedido_saiu and not _pagamento_do_pedido.startswith("pix"):
+            reply = FECHAMENTO_CURTO
+            print(f"[flush] user={user} pedido enviado; fechamento curto")
 
         # Pedido recusado pelo cardapio: o que o modelo escreveu e descartado.
         # Ele ja respondeu "Pedido agendado!" por cima de um 401 — nao ha
@@ -6902,7 +6980,6 @@ _ENV_KEYS = [
     ("OPENAI_API_KEY", "OpenAI API Key", True),
     ("OPENAI_MODEL", "Modelo OpenAI", False),
     ("OPENAI_TEMPERATURE", "Temperatura (0.0 a 2.0)", False),
-    ("BUFFER_SECONDS", "Buffer (segundos)", False),
     ("MAX_HISTORY", "Max Historico", False),
     ("SYSTEM_PROMPT", "System Prompt", False),
 ]

@@ -996,6 +996,10 @@ _RX_SO_GENERICO = re.compile(
 
 _RX_ANTES_DO_SABOR_CITADO = re.compile(
     r"^(?:(?:eu|quero|queria|gostaria|pode|podes|coloca|colocar|poe|bota|mais|so|"
+    # "Acrescenta bolinha", "aumenta a coxinha": resposta a pergunta do dono
+    # sobre o cento com 3 sabores (reuniao de 01/10).
+    r"acrescenta|acrescentar|acrescente|adiciona|adicionar|aumenta|aumentar|"
+    r"aumente|inclui|incluir|outro|outra|porcao|porção|de mais|"
     r"somente|apenas|tambem|os|as|o|a|de|dos|das|com|sabor|sabores|esses|um|uma|"
     r"sendo|ser|e)(?:\s+|$))+",
     re.IGNORECASE)

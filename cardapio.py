@@ -5,7 +5,14 @@ Gerencia envio de pedidos (createOrderFromAgent) e validacao (calculateOrder).
 
 import os
 import json
+import time
 import httpx
+
+# Resultado do calculateOrder reaproveitado dentro da mesma resposta (ver
+# calcular_pedido). Curto de proposito: preco mudado no cardapio digital vale
+# na proxima conversa, nao fica preso aqui.
+_CACHE_CALCULO: dict[str, tuple[float, dict]] = {}
+_CACHE_CALCULO_SEG = 30.0
 
 
 # URL do cardapio digital. Fica aqui como ultimo recurso de proposito: o nome
@@ -598,14 +605,17 @@ def calcular_taxa_retorno(modalidade: str, pagamento: str) -> float:
 
 ENDERECO_FABRICA = "Av. Calama, 5892 - Igarapé"
 
+# Como o resumo do cliente mostra a forma de pagamento. Curto desde a reuniao
+# de 01/10: o dono pediu "Cartao", e nao "Cartao na entrega", e texto curto em
+# tudo. So o resumo usa isto; a comanda sai de montar_notes.
 _PAGAMENTO_ROTULO = {
-    "pix": "Pix antecipado",
-    "dinheiro": "Dinheiro na entrega",
-    "cartao_debito": "Cartão de débito na entrega",
-    "cartao_credito": "Cartão de crédito na entrega",
-    "cartao": "Cartão na entrega",
+    "pix": "Pix",
+    "dinheiro": "Dinheiro",
+    "cartao_debito": "Cartão de débito",
+    "cartao_credito": "Cartão de crédito",
+    "cartao": "Cartão",
     # Ficha antiga: hoje "cartao" solto ja e completo, sem perguntar o tipo.
-    "cartao_a_definir": "Cartão na entrega",
+    "cartao_a_definir": "Cartão",
 }
 
 
@@ -949,12 +959,30 @@ def calcular_pedido(items: list[dict], bairro: str = "", modalidade: str = "",
         payload["bairro"] = bairro_oficial
 
     try:
-        with httpx.Client(timeout=30) as client:
-            resp = client.post(url, json=payload, headers=_headers())
-            data = resp.json()
-            print(f"[cardápio] calculateOrder status={resp.status_code} response={json.dumps(data, ensure_ascii=False)[:300]}")
-            if resp.status_code != 200 or not isinstance(data, dict):
-                return {"success": False, "error": f"HTTP {resp.status_code}"}
+        # Mesmo pedido calculado duas vezes na mesma resposta: pela tool do
+        # modelo e de novo pela conferencia do espelho em codigo. Eram 2
+        # chamadas de ~0,9s cada para o mesmo resultado (medido em 01/10, meta
+        # de 5s do dono). A chave e o que vai para a API - itens e bairro -,
+        # e o resultado vale por poucos segundos: so dentro da mesma conversa.
+        _chave = f"{url}|{json.dumps(payload, sort_keys=True, ensure_ascii=False)}"
+        _guardado = _CACHE_CALCULO.get(_chave)
+        if _guardado and time.monotonic() - _guardado[0] < _CACHE_CALCULO_SEG:
+            data = _guardado[1]
+            print("[cardápio] calculateOrder reaproveitado (mesmo pedido, segundos atras)")
+        else:
+            with httpx.Client(timeout=30) as client:
+                resp = client.post(url, json=payload, headers=_headers())
+                data = resp.json()
+                print(f"[cardápio] calculateOrder status={resp.status_code} response={json.dumps(data, ensure_ascii=False)[:300]}")
+                if resp.status_code != 200 or not isinstance(data, dict):
+                    return {"success": False, "error": f"HTTP {resp.status_code}"}
+            _CACHE_CALCULO[_chave] = (time.monotonic(), data)
+            if len(_CACHE_CALCULO) > 200:
+                _CACHE_CALCULO.clear()
+        # Bloco mantido com a indentacao de quando ficava dentro do "with" da
+        # chamada HTTP: o tratamento abaixo vale tanto para a resposta nova
+        # quanto para a reaproveitada.
+        if True:
 
             # A resposta do cardapio digital nao tem campo "success" e usa
             # deliveryFee em camelCase. Sem traduzir, todo pedido em producao

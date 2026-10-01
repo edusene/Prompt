@@ -703,6 +703,62 @@ def faltando(memoria: dict) -> list[str]:
     return pendentes
 
 
+# Pedido de dados no formato do dono (reuniao de 01/10): lista curta, sem
+# "Por favor, informe numa unica mensagem os seguintes dados", sem
+# "antecipado"/"na entrega" nas formas de pagamento.
+_ITEM_DA_LISTA = {
+    "name": "Nome",
+    "items": "Itens do pedido",
+    "modality": "Entrega ou retirada",
+    "bairro": "Bairro",
+    "endereco_numero": "Número da casa",
+    "endereco_referencia": "Ponto de referência (a casa não tem número)",
+    "referencia": "Ponto de referência",
+    "data_agendada": "Data do pedido",
+    "horario": "Horário desejado",
+    "payment_method": "Forma de pagamento (Pix, Cartão ou Dinheiro)",
+}
+
+# Um dado so: pergunta curta, e nao a lista.
+_PERGUNTA_CURTA = {
+    "name": "Qual o seu nome? 😊",
+    "items": "Qual o seu pedido? 😊",
+    "modality": "Será entrega ou retirada? 😊",
+    "bairro": "Qual o bairro? 😊",
+    "endereco": "Qual a rua e o número? 😊",
+    "endereco_numero": "Qual é o número da casa? 🛵",
+    "endereco_referencia": "Qual o ponto de referência da casa? 😊",
+    "data_agendada": "Para qual dia? 😊",
+    "horario": "Qual horário? 😊",
+    "payment_method": "Qual a forma de pagamento (Pix, Cartão ou Dinheiro)? 😊",
+}
+
+_DADOS_DE_LOGISTICA = ("bairro", "endereco", "data_agendada", "horario", "payment_method")
+
+
+def pedido_de_dados(memoria: dict, pendentes: list[str] | None = None) -> str:
+    """O texto que pede o que falta, no formato curto do dono.
+
+    Nada de logistica informado ainda -> "Informe:" com Rua e Numero em linhas
+    separadas; parte ja informada -> "Faltam essas informacoes:" com "Rua e
+    numero"; um dado so -> pergunta curta. '' quando nao falta nada.
+    """
+    pendentes = faltando(memoria) if pendentes is None else list(pendentes)
+    if not pendentes:
+        return ""
+    if len(pendentes) == 1:
+        return _PERGUNTA_CURTA.get(pendentes[0], f"Qual {pendentes[0]}? 😊")
+    nada_ainda = not any(memoria.get(c) for c in _DADOS_DE_LOGISTICA)
+    linhas = []
+    for campo in pendentes:
+        if campo == "endereco":
+            linhas += ["Rua", "Número"] if nada_ainda else ["Rua e número"]
+        else:
+            linhas.append(_ITEM_DA_LISTA.get(campo, _ROTULOS.get(campo, campo)))
+    cabecalho = "Informe:" if nada_ainda else "Faltam essas informações:"
+    return cabecalho + "\n" + "\n".join(f"- {l}" for l in linhas)
+
+
 def _itens_ambiguos(memoria: dict) -> list[str]:
     """Itens cujo nome serve para o sabor de pacote E para o salgado grande.
 
@@ -883,6 +939,18 @@ def aplicar_divisao_do_volume(memoria: dict, texto: str) -> list[str]:
     if pendente:
         sabores = pendente.get("sabores") or []
         volume = int(pendente.get("volume") or 0)
+        # "Acrescentar um sabor": sabor novo entra na divisao. Se a conta
+        # fecha com ele (100 em 4 sabores), os itens saem; se nao, a pergunta
+        # continua com a lista nova.
+        novos = [s for s in citados if s not in sabores]
+        if novos:
+            lista = sabores + novos
+            if (volume // 25) % len(lista) == 0:
+                memoria["items"] = _itens_da_divisao(volume, lista)
+                memoria["divisao_pendente"] = {}
+                return [f"divisao com sabor novo: {', '.join(f'{i['quantity']} {i['name']}' for i in memoria['items'])}"]
+            memoria["divisao_pendente"] = {"volume": volume, "sabores": lista}
+            return [f"divisao pendente com sabor novo: {lista}"]
         escolhido = next((s for s in citados if s in sabores), "")
         so_esses = bool(_re.search(r"\b" + str((volume // 25 // len(sabores)) * 25 * len(sabores)) + r"\b",
                                    texto or "")) if sabores else False
@@ -912,16 +980,9 @@ def pendencia_de_divisao(memoria: dict) -> str:
     sabores = pendente.get("sabores") or []
     if not sabores:
         return ""
-    volume = int(pendente.get("volume") or 0)
-    lotes = volume // 25
-    base, sobra = divmod(lotes, len(sabores))
-    fecha = base * 25 * len(sabores)
-    nomes = [s.lower() for s in sabores]
-    lista = ", ".join(nomes[:-1]) + " ou " + nomes[-1]
-    porcoes = "uma porção" if sobra == 1 else f"{sobra} porções"
-    return (f"Com {len(sabores)} sabores, {base * 25} de cada dá {fecha}. "
-            f"Para completar {'o cento' if volume == 100 else f'as {volume}'}, "
-            f"{porcoes} de 25 a mais fica com qual sabor: {lista}? 😊")
+    # Texto do dono (reuniao de 01/10), curto: sem a conta escrita por extenso.
+    return (f"Você quer acrescentar um sabor ou aumentar uma porção dos "
+            f"{len(sabores)} sabores? 😊")
 
 
 def aplicar_escolha_de_sabor(memoria: dict, texto: str) -> list[str]:
@@ -1547,10 +1608,10 @@ def etapa_coberta(memoria: dict, reply: str, agora=None) -> bool:
             return False
         return all(_sem_acento(n).split()[0] in texto for n in fora)
 
-    # Divisao do volume: a pergunta tem de citar cada sabor e ser pergunta.
+    # Divisao do volume: a pergunta oferece as duas saidas do dono.
     divisao = (memoria.get("divisao_pendente") or {}).get("sabores") or []
     if divisao:
-        return "?" in reply and all(_sem_acento(s).split()[0] in texto for s in divisao)
+        return "?" in reply and "acrescentar" in texto and "aumentar" in texto
 
     pendentes = memoria.get("sabores_pendentes") or []
     if pendentes:
@@ -1756,20 +1817,23 @@ def render_ficha(memoria: dict) -> str:
     if _volume and not memoria.get("items"):
         _quantos = max(1, _volume // 25)
         _preparo = (memoria.get("preparo_pendente") or "").strip()
+        # Frase curta e fixa (reuniao de 01/10: "nunca utilizar muito texto").
+        # O modelo escrevia "Para 100 salgados sao 4 porcoes de 25 unidades
+        # cada! Voce pode escolher ate 4 sabores diferentes e o preparo...".
+        _plural = "sabor" if _quantos == 1 else "sabores"
         if _preparo:
-            _pergunta = (
-                f"pergunte QUAIS sabores {_preparo}s ele quer. O cliente JA "
-                f"disse que e {_preparo}: e PROIBIDO perguntar o preparo "
-                f"('frito ou assado') de novo."
-            )
+            _frase = (f"Escolha até {_quantos} {_plural} {_preparo}s (25 de cada). "
+                      f"Quais você quer? 😊")
+            _extra = (f" O cliente JA disse que e {_preparo}: e PROIBIDO perguntar o "
+                      f"preparo de novo.")
         else:
-            _pergunta = "pergunte QUAIS sabores e o PREPARO (frito ou assado)."
+            _frase = (f"Escolha até {_quantos} {_plural} (25 de cada). Quais sabores, "
+                      f"e é frito ou assado? 😊")
+            _extra = ""
         bloco.append(
             f"VOLUME SEM SABOR: o cliente pediu {_volume} unidades e nao disse "
-            f"os sabores. Diga que ele pode escolher ate {_quantos} "
-            f"{'sabor' if _quantos == 1 else 'sabores'} (25 por opcao) e "
-            f"{_pergunta} Nao "
-            f"pergunte so 'qual sabor?': ele nao sabe que pode dividir."
+            f"os sabores. Responda SO com esta frase, exatamente assim: \"{_frase}\""
+            f"{_extra} Nao explique porcoes nem a regra dos 25."
         )
 
     if memoria.get("items"):

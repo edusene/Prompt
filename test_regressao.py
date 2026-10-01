@@ -1163,7 +1163,7 @@ checa("instrucao nao manda perguntar o preparo ja dito",
       "(frito ou assado)." not in _CTX_FRITO and "JA disse que e frito" in _CTX_FRITO)
 _CTX_SEM = memoria_mod.render_ficha(
     dict(memoria_mod._empty(), volume_pendente=100))
-checa("sem preparo dito, ainda pergunta", "PREPARO (frito ou assado)" in _CTX_SEM)
+checa("sem preparo dito, ainda pergunta", "frito ou assado" in _CTX_SEM)
 
 
 secao("--- 28/09: girias do balcao viram lotes de 25 ---")
@@ -1443,8 +1443,10 @@ checa("'Esses sabores' / 'Fritos' nao sao sabor",
       sabores_citados("Esses sabores") == [] and sabores_citados("Fritos") == [])
 _F_DIV = dict(memoria_mod._empty(), volume_pendente=100)
 memoria_mod.aplicar_divisao_do_volume(_F_DIV, "Quero coxinha ,pastel e churros")
-checa("3 sabores num cento: pergunta da porcao a mais",
-      "fica com qual sabor: coxinha, pastel ou churros?" in memoria_mod.pergunta_bloqueante(_F_DIV),
+# Texto do dono, reuniao de 01/10.
+checa("3 sabores num cento: pergunta do dono",
+      memoria_mod.pergunta_bloqueante(_F_DIV)
+      == "Você quer acrescentar um sabor ou aumentar uma porção dos 3 sabores? 😊",
       memoria_mod.pergunta_bloqueante(_F_DIV)[:70])
 memoria_mod.aplicar_divisao_do_volume(_F_DIV, "Pode colocar mais pastéis")
 checa("'mais pasteis' fecha 25 + 50 + 25",
@@ -1479,6 +1481,63 @@ checa("a segunda mensagem e atendida depois da primeira",
       _linha_do_tempo[2][1] == ["Será para retirar as 19:00"] if len(_linha_do_tempo) > 2 else False)
 checa("resposta velha (pergunta) nao sai quando chegou mensagem nova",
       "buffer.tem_mensagem_nova(user)" in _SRC)
+
+
+secao("--- 01/10: reuniao com o dono (texto curto, tempo, divisao, horario) ---")
+# Pedido de dados no formato do dono.
+_F_ENT = dict(memoria_mod._empty(), name="Balbino", modality="entrega", upsell_feito=True,
+              items=[{"name": "Coxinha", "quantity": 50}])
+checa("nada informado: 'Informe:' com Rua e Numero separados",
+      memoria_mod.pedido_de_dados(_F_ENT) == "Informe:\n- Bairro\n- Rua\n- Número\n"
+      "- Data do pedido\n- Horário desejado\n- Forma de pagamento (Pix, Cartão ou Dinheiro)",
+      memoria_mod.pedido_de_dados(_F_ENT))
+checa("parte informada: 'Faltam essas informacoes:' com 'Rua e numero'",
+      memoria_mod.pedido_de_dados(dict(_F_ENT, bairro="Olaria")) == "Faltam essas informações:\n"
+      "- Rua e número\n- Data do pedido\n- Horário desejado\n- Forma de pagamento (Pix, Cartão ou Dinheiro)")
+checa("um dado so: pergunta curta",
+      memoria_mod.pedido_de_dados(dict(_F_ENT, bairro="Olaria", endereco="Rua X 10",
+                                       data_agendada="hoje", data_iso="2026-10-01",
+                                       payment_method="cartao")) == "Qual horário? 😊")
+_LONGA = ("Por favor, informe numa única mensagem os seguintes dados para entrega:\n- Bairro\n"
+          "- Rua com número\n- Data do pedido\n- Horário desejado\n"
+          "- Forma de pagamento (Pix antecipado, Cartão ou Dinheiro na entrega)")
+checa("lista longa do modelo vira o formato curto",
+      app._conferir_formato_da_coleta("55", _LONGA, _F_ENT) == memoria_mod.pedido_de_dados(_F_ENT),
+      app._conferir_formato_da_coleta("55", _LONGA, _F_ENT)[:60])
+_INFORMA = "A taxa de entrega no Olaria é R$ 12,00. " + _LONGA
+checa("o que a resposta informa fica",
+      app._conferir_formato_da_coleta("55", _INFORMA, dict(_F_ENT, bairro="Olaria"))
+      .startswith("A taxa de entrega no Olaria é R$ 12,00."))
+checa("'Bom dia' nao e pedido de data",
+      app._conferir_formato_da_coleta("55", "Bom dia, Balbino! Tudo certo por aí.", _F_ENT)
+      == "Bom dia, Balbino! Tudo certo por aí.")
+# Resumo: "Cartao", e nao "Cartao na entrega".
+checa("resumo mostra so 'Cartao'", cardapio._rotulo_pagamento("cartao") == "Cartão")
+checa("resumo mostra so 'Pix'", cardapio._rotulo_pagamento("pix") == "Pix")
+checa("dinheiro curto, com o troco",
+      cardapio._rotulo_pagamento("dinheiro", "150", 114.0)
+      == "Dinheiro (troco para R$ 150,00 - levar R$ 36,00)")
+# Finalizacao curta (fora do Pix, que leva a chave).
+checa("fechamento curto", app.FECHAMENTO_CURTO == "Pedido finalizado com sucesso! 💛"
+      and app._mensagem_de_fechamento("cartao", 94.0) == app.FECHAMENTO_CURTO)
+checa("fechamento curto aplicado quando o pedido sai (exceto Pix)",
+      'if _pedido_saiu and not _pagamento_do_pedido.startswith("pix"):' in _APP_SRC
+      or 'if _pedido_saiu and not _pagamento_do_pedido.startswith("pix"):'
+      in open("app.py", encoding="utf-8").read())
+# Tempo: sem buffer e sem piso.
+checa("sem buffer", app.BUFFER_SECONDS == 0.0)
+checa("sem piso de 5s", app.RESPOSTA_MIN_SEG == 0.0 and app.PAUSA_PRIMEIRA == 0.0)
+# Cento com 3 sabores: acrescentar um sabor fecha 25 x 4.
+_F_ACR = dict(memoria_mod._empty(), volume_pendente=100)
+memoria_mod.aplicar_divisao_do_volume(_F_ACR, "Quero coxinha ,pastel e churros")
+memoria_mod.aplicar_divisao_do_volume(_F_ACR, "acrescenta bolinha")
+checa("'acrescentar um sabor' fecha 25 de cada",
+      [(i["name"], i["quantity"]) for i in _F_ACR["items"]]
+      == [("Coxinha", 25), ("Pastel", 25), ("Churros", 25), ("Bolinha de Queijo", 25)],
+      str(_F_ACR.get("items")))
+# Horario: com horario dito, o aviso de intervalo/fechado nao sai.
+checa("horario dito pula o aviso de fechado/intervalo",
+      "_horario_dado = bool(_memoria.get(\"horario\"))" in open("app.py", encoding="utf-8").read())
 
 
 secao("--- 28/09: aviso rapido e acrescimo depois do pedido ---")
