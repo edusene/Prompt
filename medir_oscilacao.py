@@ -237,6 +237,9 @@ CENARIOS = [
         'Metade coxinha e metade pastel de carne']),
     ("dois centos pastel e bolinha", QUARTA_16H, [
         '1 cento pastel e bolinha e 1 cento pastel e bolinha pra retirada']),
+    ("cento + 3 sabores + 'mais pasteis' (30/09)", QUARTA_16H, [
+        'Gostaria de fazer um pedido de 1 cento de salgado', 'Fritos',
+        'Quero coxinha ,pastel e churros', 'Pode colocar mais pastéis']),
 ]
 
 _so = next((a for a in sys.argv[1:] if a.startswith("--so=")), "")

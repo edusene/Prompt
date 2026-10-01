@@ -21,7 +21,7 @@ class MessageBuffer:
             recebido_em: float = 0.0) -> None:
         with self._lock:
             if user not in self._state:
-                self._state[user] = {"items": [], "timer": None}
+                self._state[user] = {"items": [], "timer": None, "ocupado": False}
 
             # recebido_em e o relogio do CLIENTE, nao o do servidor: quem mede
             # a espera dele e o instante em que a mensagem entrou no webhook,
@@ -47,11 +47,32 @@ class MessageBuffer:
         with self._lock:
             if user not in self._state:
                 return
-            items = self._state[user]["items"]
+            estado = self._state[user]
+            # Um cliente por vez. A mensagem que chega enquanto a anterior
+            # ainda esta sendo respondida esperava so o debounce e rodava EM
+            # PARALELO: os dois atendimentos liam e gravavam a mesma ficha, e
+            # a resposta a "Somente" ("entrega ou retirada?") saia depois de o
+            # cliente ja ter dito "retirar as 19:00" (teste do dono, 30/09).
+            if estado.get("ocupado"):
+                novo = threading.Timer(self._wait, self._flush, args=[user])
+                estado["timer"] = novo
+                novo.start()
+                return
+            items = estado["items"]
             if not items:
                 return
             # Limpa estado antes de chamar o callback (evita race condition)
-            self._state[user] = {"items": [], "timer": None}
+            self._state[user] = {"items": [], "timer": None, "ocupado": True}
 
         print(f"[buffer] flush user={user} msgs={len(items)}")
-        self._on_flush(user, items)
+        try:
+            self._on_flush(user, items)
+        finally:
+            with self._lock:
+                if user in self._state:
+                    self._state[user]["ocupado"] = False
+
+    def tem_mensagem_nova(self, user: str) -> bool:
+        """Chegou mensagem do cliente enquanto a anterior era respondida?"""
+        with self._lock:
+            return bool((self._state.get(user) or {}).get("items"))

@@ -115,6 +115,10 @@ def _empty() -> dict:
         # Horario que o AGENTE ofereceu ("adiantar para as 14h?"), para o
         # "sim" seguinte gravar a hora junto com o dia.
         "horario_proposto": "",
+        # Volume com sabores que nao dividem em lotes de 25 ("1 cento" +
+        # "coxinha, pastel e churros"): {"volume": 100, "sabores": [...]}.
+        # Enquanto existir, a pergunta e "a porcao a mais fica com qual sabor?".
+        "divisao_pendente": {},
         "updated_at": "",
     }
 
@@ -841,6 +845,85 @@ def pendencia_de_sabor(memoria: dict) -> str:
     )
 
 
+def _itens_da_divisao(volume: int, sabores: list[str], extra_para: str = "",
+                      so_o_que_fecha: bool = False) -> list[dict]:
+    """Os itens do volume dividido em lotes de 25 pelos sabores."""
+    lotes = volume // 25
+    base, sobra = divmod(lotes, len(sabores))
+    itens = []
+    for nome in sabores:
+        blocos = base + (sobra if (nome == extra_para and not so_o_que_fecha) else 0)
+        if blocos <= 0:
+            continue
+        qtd = blocos * 25
+        preco = 0.0
+        try:
+            import facts
+            oficial = facts.resolve_unit_price(nome, qtd)
+            if oficial:
+                preco = oficial["preco_unitario"]
+        except Exception:
+            pass
+        itens.append({"name": nome, "quantity": qtd, "price": preco})
+    return itens
+
+
+def aplicar_divisao_do_volume(memoria: dict, texto: str) -> list[str]:
+    """Volume dito antes ("1 cento") + sabores ditos depois -> itens na ficha.
+
+    Divide por igual quando fecha em lotes de 25. Quando nao fecha (100 em 3
+    sabores), guarda a divisao e pergunta para qual sabor vai a porcao a
+    mais; a resposta com um sabor ("pode colocar mais pasteis") fecha a
+    conta. Era o modelo quem fazia isso, e ele repetia a mesma pergunta depois
+    de o cliente responder (teste do dono, 30/09 15h50).
+    """
+    from agents.conversation import sabores_citados
+    pendente = memoria.get("divisao_pendente") or {}
+    citados = sabores_citados(texto)
+    if pendente:
+        sabores = pendente.get("sabores") or []
+        volume = int(pendente.get("volume") or 0)
+        escolhido = next((s for s in citados if s in sabores), "")
+        so_esses = bool(_re.search(r"\b" + str((volume // 25 // len(sabores)) * 25 * len(sabores)) + r"\b",
+                                   texto or "")) if sabores else False
+        if not (escolhido or so_esses) or not sabores:
+            return []
+        memoria["items"] = _itens_da_divisao(volume, sabores, escolhido, so_o_que_fecha=not escolhido)
+        memoria["divisao_pendente"] = {}
+        return [f"divisao: {', '.join(f'{i['quantity']} {i['name']}' for i in memoria['items'])}"]
+
+    try:
+        volume = int(memoria.get("volume_pendente") or 0)
+    except (TypeError, ValueError):
+        volume = 0
+    if not volume or memoria.get("items") or len(citados) < 2 or volume % 25:
+        return []
+    memoria["volume_pendente"] = 0
+    if (volume // 25) % len(citados) == 0:
+        memoria["items"] = _itens_da_divisao(volume, citados)
+        return [f"volume dividido: {', '.join(f'{i['quantity']} {i['name']}' for i in memoria['items'])}"]
+    memoria["divisao_pendente"] = {"volume": volume, "sabores": citados}
+    return [f"divisao pendente: {volume} em {citados}"]
+
+
+def pendencia_de_divisao(memoria: dict) -> str:
+    """A pergunta da porcao a mais, quando o volume nao divide pelos sabores."""
+    pendente = memoria.get("divisao_pendente") or {}
+    sabores = pendente.get("sabores") or []
+    if not sabores:
+        return ""
+    volume = int(pendente.get("volume") or 0)
+    lotes = volume // 25
+    base, sobra = divmod(lotes, len(sabores))
+    fecha = base * 25 * len(sabores)
+    nomes = [s.lower() for s in sabores]
+    lista = ", ".join(nomes[:-1]) + " ou " + nomes[-1]
+    porcoes = "uma porção" if sobra == 1 else f"{sobra} porções"
+    return (f"Com {len(sabores)} sabores, {base * 25} de cada dá {fecha}. "
+            f"Para completar {'o cento' if volume == 100 else f'as {volume}'}, "
+            f"{porcoes} de 25 a mais fica com qual sabor: {lista}? 😊")
+
+
 def aplicar_escolha_de_sabor(memoria: dict, texto: str) -> list[str]:
     """O cliente respondeu qual sabor era. Vira item na ficha.
 
@@ -1464,6 +1547,11 @@ def etapa_coberta(memoria: dict, reply: str, agora=None) -> bool:
             return False
         return all(_sem_acento(n).split()[0] in texto for n in fora)
 
+    # Divisao do volume: a pergunta tem de citar cada sabor e ser pergunta.
+    divisao = (memoria.get("divisao_pendente") or {}).get("sabores") or []
+    if divisao:
+        return "?" in reply and all(_sem_acento(s).split()[0] in texto for s in divisao)
+
     pendentes = memoria.get("sabores_pendentes") or []
     if pendentes:
         # Bebida esgotada: perguntar "qual sabor na Coca 2L?" sem dizer que o
@@ -1541,6 +1629,10 @@ def pergunta_bloqueante(memoria: dict, agora=None) -> str:
     if fora:
         return (f"O sabor {', '.join(fora)} está em falta hoje! "
                 f"Por qual sabor você quer trocar? 😊")
+
+    divisao = pendencia_de_divisao(memoria)
+    if divisao:
+        return divisao
 
     pendentes = memoria.get("sabores_pendentes") or []
     refri = next((p for p in pendentes if p.get("termo") == "refrigerante"), None)
@@ -1655,6 +1747,12 @@ def render_ficha(memoria: dict) -> str:
         _volume = int(memoria.get("volume_pendente") or 0)
     except (TypeError, ValueError):
         _volume = 0
+    _divisao = pendencia_de_divisao(memoria)
+    if _divisao:
+        bloco.append(
+            f"DIVISAO DO VOLUME PENDENTE: os sabores ja foram ditos e nao fecham "
+            f"em lotes de 25. Pergunte SO isso, exatamente assim: \"{_divisao}\" "
+            f"E PROIBIDO pedir os sabores de novo ou oferecer outro sabor.")
     if _volume and not memoria.get("items"):
         _quantos = max(1, _volume // 25)
         _preparo = (memoria.get("preparo_pendente") or "").strip()

@@ -993,11 +993,17 @@ def _build_user_parts(items: list[dict]) -> list[dict]:
                             url = info["data"].get("url", "")
                             mime_from_api = info["data"].get("mime_type", "application/octet-stream")
                             if url:
-                                import requests as _req
-                                resp = _req.get(url, timeout=30)
-                                if resp.status_code == 200:
+                                # Com o token: o link da Meta exige Bearer. O
+                                # requests.get cru daqui voltava 401 sempre, e
+                                # o audio que o download em segundo plano nao
+                                # tinha terminado chegava ao modelo so como
+                                # "[Audio]" - "envie o pedido digitado" (teste
+                                # do dono, 30/09 14h34: ele disse "Pode fechar
+                                # o pedido").
+                                conteudo = download_media_bytes(url)
+                                if conteudo:
                                     import base64 as _b64
-                                    b64_data = _b64.b64encode(resp.content).decode()
+                                    b64_data = _b64.b64encode(conteudo).decode()
                                     media_url = f"data:{mime_from_api};base64,{b64_data}"
                                     database.update_message_media(msg["id"], media_url)
                                     print(f"[flush] on-demand download ok msg={msg['id']} mime={mime_from_api}")
@@ -2676,6 +2682,12 @@ _RX_STATUS_PORTARIA = _re_mod.compile(
     r"\bportaria\b|\bporteiro\b|\binterfone\b|\bautoriz\w*|\bliber\w*\s+a\s+entrada",
     _re_mod.IGNORECASE)
 
+_RX_AVISO_DE_PAGAMENTO = _re_mod.compile(
+    r"\bj[aá]\s+(?:fiz|paguei|transferi|mandei|enviei)\b|\bfiz\s+o\s+pix\b|\bpix\s+feito\b"
+    r"|\bt[aá]\s+pago\b|\bpagamento\s+feito\b|\bsegue\s+o\s+comprovante\b"
+    r"|\b(?:mandei|enviei)\s+o\s+(?:comprovante|pix)\b",
+    _re_mod.IGNORECASE)
+
 # Mensagem longa quase sempre traz outra coisa junto; o aviso rapido e curto.
 _MAX_CARACTERES_AVISO = 140
 
@@ -2690,6 +2702,11 @@ def resposta_pos_pedido(texto: str, memoria: dict) -> tuple[str, str]:
     texto = (texto or "").strip()
     if not texto or len(texto) > _MAX_CARACTERES_AVISO:
         return "", ""
+    # "Ja fiz o pix", "mandei o comprovante" depois do pedido: regra do dono -
+    # silencio e conferencia humana.
+    if (_RX_AVISO_DE_PAGAMENTO.search(texto)
+            and conversation_memory.em_pos_pedido(memoria, aceita_itens=True)):
+        return "pagamento", ""
     if (_RX_ACRESCIMO.search(texto)
             and conversation_memory.em_pos_pedido(memoria, aceita_itens=True)):
         return "acrescimo", (
@@ -2938,7 +2955,8 @@ _RX_FRASE_COM_PERGUNTA = _re_mod.compile(r"[^.!?\n]*\?")
 # absolutamente nada sobre o pedido.
 _RX_ENROLACAO_DE_ABERTURA = _re_mod.compile(
     r"^\s*(?:claro|perfeito|com certeza|certamente|sem problemas?|"
-    r"com muito prazer)"
+    # "Otima escolha! 🥤" saiu sozinha numa bolha (teste do dono, 30/09 15h51).
+    r"com muito prazer|(?:[oó]tima|excelente|boa) escolha)"
     r"\s*[!,.\u2026]*\s*",
     _re_mod.IGNORECASE)
 
@@ -3025,6 +3043,50 @@ def _conferir_aviso_repetido(user: str, reply: str, memoria: dict) -> str:
     print(f"[expediente] user={user} aviso de horario repetido pelo modelo; "
           f"removido (pedido ja agendado para {memoria.get('data_iso')} {memoria.get('horario')})")
     return novo
+
+
+_RX_PEDE_TEXTO = _re_mod.compile(
+    r"digitad|por escrito|em texto|mensagem de texto|escrev(?:a|er) o (?:seu )?pedido",
+    _re_mod.IGNORECASE)
+
+
+def _conferir_pede_texto(user: str, reply: str, memoria: dict) -> str:
+    """Tira o "envie digitado" de uma resposta a audio que FOI transcrito.
+
+    O prompt do dono manda pedir texto em audio; a transcricao ja vem na
+    mensagem, e o cliente que disse "Pode fechar o pedido" ouviu "envie seu
+    pedido digitado em texto" (teste do dono, 30/09 14h34).
+    """
+    if not reply or not _RX_PEDE_TEXTO.search(reply):
+        return reply
+    frases = [f for f in _RX_FIM_DE_FRASE.split(reply) if f.strip()]
+    mantidas = [f.strip() for f in frases if not _RX_PEDE_TEXTO.search(f)]
+    novo = " ".join(mantidas).strip()
+    if len([c for c in novo if c.isalpha()]) < 12 or "?" not in novo:
+        seguinte = _proxima_pergunta_do_funil(memoria)
+        novo = seguinte if len([c for c in novo if c.isalpha()]) < 12 else f"{novo}\n\n{seguinte}"
+    print(f"[audio] user={user} resposta pedia texto a um audio transcrito; trocada")
+    return novo.strip()
+
+
+def _conferir_saudacao(reply: str, agora, nome: str = "") -> str:
+    """A primeira resposta da conversa comeca com a saudacao do horario.
+
+    A instrucao ia no prompt e nada conferia. O modelo abriu com "Perfeito,
+    Balbino! 😊", a trava de enrolacao tirou o "Perfeito" e o nome, e o cliente
+    recebeu "😊 Pro lanche da tarde..." - sem saudacao e com o emoji solto no
+    comeco (teste do dono, 30/09 14h19).
+    """
+    if not reply or _RX_LINHA_DE_RESUMO.search(reply):
+        return reply
+    saudacao = horario.saudacao(agora)
+    if facts.normalize(reply).startswith(facts.normalize(saudacao)):
+        return reply
+    corpo = _re_mod.sub(r"^[^\w]+", "", reply).strip()   # emoji/pontuacao soltos
+    primeiro = (nome or "").strip().split(" ")[0]
+    abertura = f"{saudacao}, {primeiro}!" if primeiro else f"{saudacao}!"
+    print(f"[formato] primeira resposta sem saudacao; '{abertura}' colocado")
+    return f"{abertura} Aqui é a Sandrinha da BALBS 💛\n\n{corpo}"
 
 
 def _conferir_uma_pergunta(user: str, reply: str, memoria: dict | None = None) -> str:
@@ -3362,6 +3424,18 @@ def _responder_direto(user: str, items: list[dict], texto: str,
     enviar_em_blocos(user, texto, chegada)
 
 
+def _responder_em_silencio(user: str, items: list[dict], motivo: str) -> None:
+    """Nao responde nada e passa a conversa para a equipe, sem aviso ao cliente.
+
+    E a regra do dono para pagamento depois do pedido fechado: "ao receber
+    print, PDF, comprovante ou texto de pagamento, NAO tente ler nem responda
+    nada; silencie imediatamente para conferencia humana". A mensagem do
+    cliente fica no historico para quem assumir.
+    """
+    memory.append_multimodal(user, "user", _build_user_parts(items))
+    perform_transfer(user, reason=motivo, send_message=False)
+
+
 def handle_flush(user: str, items: list[dict]) -> None:
     _inicio = time.monotonic()
     # Quando o cliente mandou a mensagem. E o unico relogio que interessa para
@@ -3433,6 +3507,14 @@ def handle_flush(user: str, items: list[dict]) -> None:
         # Imagem, pelo mesmo motivo: o print com o pedido so chegava ao modelo
         # (teste de 30/09). O texto lido entra junto com a legenda.
         if any(str(it.get("text", "")).startswith(("[Audio", "[Imagem")) for it in items):
+            # O download da midia comeca em segundo plano quando a mensagem
+            # chega e pode nao ter terminado quando o debounce acaba. A mesma
+            # funcao, chamada aqui, espera pelo lock (se ja esta baixando) ou
+            # baixa agora com o token - e nunca baixa duas vezes.
+            for it in items:
+                if (str(it.get("text", "")).startswith(("[Audio", "[Imagem"))
+                        and it.get("msg_id") and it.get("wa_media_id")):
+                    _download_media_async(it["msg_id"], it["wa_media_id"])
             _build_user_parts(items)
             text_only = "\n".join(_texto_da_midia(it) for it in items)
             print(f"[midia] user={user} texto usado na ficha: {text_only[:120]!r}")
@@ -3506,16 +3588,34 @@ def handle_flush(user: str, items: list[dict]) -> None:
         if _textos and all(t.startswith("[Video") for t in _textos):
             _resposta_midia = ("Não consigo abrir vídeos por aqui 😅 Pode me escrever "
                                "ou mandar um áudio com o seu pedido?")
+        elif (_textos and all(t.startswith("[Audio") for t in _textos)
+              and not any(it.get("transcricao") for it in items)):
+            # Audio que nao deu para ouvir (download ou transcricao falhou).
+            # Sem transcricao o modelo pedia "o pedido digitado em texto", como
+            # se o cliente tivesse feito algo errado.
+            _resposta_midia = ("Não consegui ouvir o seu áudio agora 😅 Pode mandar "
+                               "de novo ou me escrever?")
         elif text_only.strip() == _IMAGEM_COMPROVANTE:
+            # Regras do dono (prompt, MIDIA E ARQUIVOS): depois do pedido
+            # fechado, comprovante NAO se le nem se responde - silencio e
+            # conferencia humana; no inicio da conversa, registra o pedido e
+            # avisa que a equipe valida o valor ao fechar.
+            if conversation_memory.em_pos_pedido(_memoria) or _memoria.get("pedido_enviado"):
+                print(f"[midia] user={user} comprovante depois do pedido: silencio e "
+                      f"conferencia humana (regra do dono)")
+                _responder_em_silencio(user, items, "Comprovante de pagamento recebido "
+                                       "depois do pedido: conferir o valor")
+                return
             if _memoria.get("items"):
                 if not _memoria.get("payment_method"):
                     _memoria["payment_method"] = "pix"
                     conversation_memory.save(user, _memoria)
-                _resposta_midia = ("Recebi o comprovante! 💛 Só falta terminar o seu "
-                                   "pedido:\n\n" + _proxima_pergunta_do_funil(_memoria))
+                _resposta_midia = ("Recebi o comprovante! 💛 A equipe valida o valor "
+                                   "quando o pedido fechar. Para terminar o seu pedido:\n\n"
+                                   + _proxima_pergunta_do_funil(_memoria))
             else:
-                _resposta_midia = ("Comprovante recebido! 💛 Nossa equipe confere e "
-                                   "libera a produção do seu pedido.")
+                _resposta_midia = ("Recebi o comprovante! 💛 A equipe valida o valor "
+                                   "quando o pedido fechar. Qual delícia você quer pedir?")
         if _resposta_midia:
             if not _memoria.get("saudacao_feita"):
                 _nome = f", {_memoria['name']}" if _memoria.get("name") else ""
@@ -3531,6 +3631,12 @@ def handle_flush(user: str, items: list[dict]) -> None:
         # Antes do expediente: "vou autorizar a portaria" as 20h10, depois de
         # um pedido das 19h, nao pode virar "nossa producao ja encerrou".
         _tipo_pos, _resposta_pos = resposta_pos_pedido(text_only, _memoria)
+        if _tipo_pos == "pagamento":
+            print(f"[pos-pedido] user={user} aviso de pagamento depois do pedido: "
+                  f"silencio e conferencia humana (regra do dono)")
+            _responder_em_silencio(user, items, f"Cliente avisou pagamento depois do "
+                                   f"pedido: {text_only[:100]}")
+            return
         if _tipo_pos == "acrescimo":
             # O acrescimo nao vira pedido: quem decide se ainda da tempo e a
             # equipe. Item que a extracao ja pos na ficha sai dela, senao a
@@ -3671,6 +3777,18 @@ def handle_flush(user: str, items: list[dict]) -> None:
                 last_assistant_text = (m.get("parts", [{}])[0].get("text", "") or "")
                 break
 
+        # A oferta adicional que JA SAIU conta como feita, qualquer que seja a
+        # resposta. A marca so era posta no caminho normal do modelo: com a
+        # OpenAI sem credito, o caminho de emergencia mandava a oferta, nao
+        # marcava, e a proxima pergunta do funil era a oferta de novo - quatro
+        # vezes, com o dono respondendo "NAO QUERO PODE CONTINUAR COM PEDIDO"
+        # (30/09 19h43). Aqui nenhum caminho consegue repeti-la.
+        if (not _memoria.get("upsell_feito") and _memoria.get("items")
+                and _ofereceu_acompanhamento(last_assistant_text)):
+            _memoria["upsell_feito"] = True
+            conversation_memory.save(user, _memoria)
+            print(f"[upsell] user={user} oferta ja feita na mensagem anterior; marcada")
+
         # Resposta seca a pergunta anterior ("Eduardo", "Olaria"): a extracao
         # por palavra-chave nao pega, e sem isto o agente perguntava, o cliente
         # respondia, e ele perguntava de novo.
@@ -3745,6 +3863,14 @@ def handle_flush(user: str, items: list[dict]) -> None:
         # virar item na FICHA: enquanto ficava so no texto, a pergunta do sabor
         # voltava a cada mensagem e o pedido nao andava - o mesmo defeito que o
         # aceite de lote ja tinha tido.
+        # "1 cento de salgado" e depois "coxinha, pastel e churros": o volume
+        # vira itens em codigo; se nao fecha em lotes de 25, fica a pergunta
+        # da porcao a mais, que a resposta com um sabor fecha.
+        _divisao = conversation_memory.aplicar_divisao_do_volume(_memoria, text_only)
+        if _divisao:
+            conversation_memory.save(user, _memoria)
+            print(f"[memoria] {user}: {'; '.join(_divisao)}")
+
         if _memoria.get("sabores_pendentes"):
             _escolha_sabor = conversation_memory.aplicar_escolha_de_sabor(
                 _memoria, text_only
@@ -3824,6 +3950,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
         # em que ela era pulada. A diretiva e montada aqui mas so entra no
         # prompt DEPOIS da ficha: a ficha termina com "pergunte SO isso", e o
         # modelo lia isso como proibicao de cumprimentar.
+        _primeira_resposta = not _memoria.get("saudacao_feita")
         if not _memoria.get("saudacao_feita"):
             _nome_saud = f", {_memoria['name']}" if _memoria.get("name") else ""
             _diretiva_saudacao = (
@@ -3921,6 +4048,15 @@ def handle_flush(user: str, items: list[dict]) -> None:
             "Ignorar em silencio nao e opcao."
             "\n9.4 UMA PERGUNTA: fora da lista vertical de coleta e do espelho, a "
             "mensagem termina com UMA pergunta objetiva - nunca duas."
+            # O prompt do dono ainda diz "Audio durante o pedido: solicite envio
+            # digitado em texto" - regra de antes de a Sandrinha ouvir audio. Com
+            # a transcricao na mensagem, ela pedia "envie seu pedido digitado"
+            # ao cliente que tinha dito "Pode fechar o pedido" (30/09 14h34).
+            "\n9.4b AUDIO: o sistema JA TRANSCREVE as mensagens de voz - a "
+            "transcricao vem escrita na mensagem do cliente. Responda ao que foi "
+            "dito, como se fosse texto. E PROIBIDO pedir para o cliente digitar "
+            "ou mandar por escrito quando houver transcricao; isso vale sobre "
+            "qualquer instrucao anterior sobre audio."
             "\n9.5 CONCISAO: uma mensagem direta por vez, no maximo 2 a 3 linhas de "
             "texto corrido, com listas verticais quando houver mais de um dado. E "
             "PROIBIDO abrir a mensagem com enrolacao que nao informa nada - "
@@ -4288,6 +4424,20 @@ def handle_flush(user: str, items: list[dict]) -> None:
             # falta, e o resumo sai de calculate_order. Quando nem isso da,
             # pedir para repetir e honesto e deixa o cliente agir.
             _saida = ""
+            # O cliente confirmou o resumo, mas quem envia o pedido a fabrica e
+            # a tool do modelo - fora do ar, o codigo so repetiria o espelho a
+            # cada "SIM". Enviar o pedido daqui, sem a camada que confere tudo,
+            # seria arriscado: a equipe finaliza, e o cliente sabe disso.
+            if _aceitou_o_resumo:
+                _saida = ("Pedido confirmado! 💛 Nossa equipe vai finalizar o seu "
+                          "pedido e já te retorna por aqui.")
+                memory.append(user, "assistant", _saida)
+                enviar_em_blocos(user, _saida, _chegada)
+                perform_transfer(user, reason="Modelo indisponivel: o cliente confirmou o "
+                                 "resumo - finalizar o pedido manualmente", send_message=False)
+                print(f"[flush] user={user} modelo indisponivel e resumo confirmado; "
+                      f"transferido para a equipe finalizar")
+                return
             try:
                 # _proxima_pergunta_do_funil ja decide tudo: etapa travada
                 # primeiro, depois o que falta, e o espelho so quando nao falta
@@ -4311,6 +4461,17 @@ def handle_flush(user: str, items: list[dict]) -> None:
             # oscilacao do modelo.
             _saida = _conferir_fiado(user, text_only, _saida, _memoria)
             _saida = _conferir_desconto(user, text_only, _saida)
+            # A oferta mandada por aqui tambem conta como feita (a marca so
+            # existia no caminho do modelo, e a oferta virava um laco).
+            if not _memoria.get("upsell_feito") and _ofereceu_acompanhamento(_saida):
+                _memoria["upsell_feito"] = True
+                conversation_memory.save(user, _memoria)
+            # Sem credito na OpenAI o modelo nao volta sozinho: o log precisa
+            # gritar, porque o cliente so ve o codigo respondendo o funil.
+            if any(s in str(e).lower() for s in ("insufficient_quota", "exceeded your current quota",
+                                                  "no credits", "billing")):
+                print(f"[flush] ALERTA user={user} OPENAI SEM CREDITO - o atendimento "
+                      f"esta sendo feito so pelo codigo ate a conta ser recarregada")
             print(f"[flush] user={user} modelo indisponivel; "
                   f"resposta escrita pelo codigo")
             memory.append(user, "assistant", _saida)
@@ -4568,8 +4729,25 @@ def handle_flush(user: str, items: list[dict]) -> None:
             # objetiva. O dono cobrou isso na dupla pergunta do fechamento
             # (26/09 19h27).
             reply = _conferir_aviso_repetido(user, reply, _memoria)
+            if any(it.get("transcricao") for it in items):
+                reply = _conferir_pede_texto(user, reply, _memoria)
             reply = _conferir_enrolacao(user, reply, _memoria.get("name") or "")
             reply = _conferir_uma_pergunta(user, reply, _memoria)
+            if _primeira_resposta:
+                reply = _conferir_saudacao(reply, _agora, _memoria.get("name") or "")
+
+        # Resposta velha: o cliente mandou outra mensagem enquanto esta era
+        # escrita. Uma PERGUNTA respondida por ele no meio do caminho so
+        # confunde ("entrega ou retirada?" depois de "retirar as 19:00"), e a
+        # proxima vez ja responde sabendo de tudo. Espelho, pedido enviado e
+        # transferencia sempre saem. Fica ANTES da marca da oferta: oferta
+        # descartada nao pode contar como feita.
+        if (reply and not _pedido_saiu and not _transfer_done
+                and not _RX_LINHA_DE_RESUMO.search(reply)
+                and buffer.tem_mensagem_nova(user)):
+            print(f"[flush] user={user} cliente mandou mensagem nova durante a "
+                  f"resposta; esta nao sai: {reply[:60]!r}")
+            return
 
         # A oferta adicional saiu? Entao ela nao volta na proxima mensagem.
         if reply and not _memoria.get("upsell_feito") and _ofereceu_acompanhamento(reply):

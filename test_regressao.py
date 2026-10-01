@@ -1406,6 +1406,81 @@ checa("resposta certa do croquete passa",
                                           'Qual refrigerante: lata, 600ml ou Tuchaua?'))
 
 
+secao("--- 30/09 tarde: testes do dono (audio, saudacao, divisao, fila) ---")
+_SRC = open("app.py", encoding="utf-8").read()
+# Audio: o download sob demanda ia sem o token da Meta (401) e o audio chegava
+# ao modelo so como "[Audio]". Agora usa download_media_bytes, e o flush
+# garante o download (mesmo lock do segundo plano) antes de transcrever.
+checa("download sob demanda usa o token (download_media_bytes)",
+      "conteudo = download_media_bytes(url)" in _SRC and "resp = _req.get(url, timeout=30)" not in _SRC)
+checa("flush garante o download da midia antes de transcrever",
+      '_download_media_async(it["msg_id"], it["wa_media_id"])' in _SRC)
+checa("audio sem transcricao recebe resposta clara, nao 'envie digitado'",
+      "Não consegui ouvir o seu áudio agora" in _SRC)
+# O prompt do dono manda pedir texto em audio; com transcricao, nao pode.
+checa("regra de execucao sobre audio transcrito", "9.4b AUDIO" in _SRC)
+_F_RET = dict(memoria_mod._empty(), modality="retirada", upsell_feito=True,
+              items=[{"name": "Coxinha", "quantity": 50}])
+_PEDE = app._conferir_pede_texto(
+    "55", "Por favor, envie seu pedido digitado em texto para que eu possa ajudar. "
+          "Qual data você deseja para a retirada?", _F_RET)
+checa("'envie digitado' sai da resposta a um audio transcrito",
+      "digitad" not in _PEDE and "data" in _PEDE.lower(), _PEDE[:60])
+# Saudacao na primeira resposta.
+_SAUD = app._conferir_saudacao("😊 Pro lanche da tarde, vai um Bolo?", datetime(2026, 9, 30, 14, 19), "Balbino")
+checa("primeira resposta sem saudacao ganha a saudacao",
+      _SAUD.startswith("Boa tarde, Balbino!") and "\n\nPro lanche" in _SAUD, _SAUD[:50])
+checa("primeira resposta com saudacao fica como esta",
+      app._conferir_saudacao("Boa tarde, Balbino! Pro lanche?", datetime(2026, 9, 30, 14, 19), "Balbino")
+      == "Boa tarde, Balbino! Pro lanche?")
+checa("'Otima escolha!' e enrolacao",
+      app._conferir_enrolacao("55", "Ótima escolha! Fica R$ 80,00 nos salgados!") == "Fica R$ 80,00 nos salgados!")
+# Divisao do volume: 1 cento + 3 sabores.
+from agents.conversation import sabores_citados  # noqa: E402
+checa("sabores citados sem numero",
+      sabores_citados("Quero coxinha ,pastel e churros") == ["Coxinha", "Pastel", "Churros"])
+checa("'Esses sabores' / 'Fritos' nao sao sabor",
+      sabores_citados("Esses sabores") == [] and sabores_citados("Fritos") == [])
+_F_DIV = dict(memoria_mod._empty(), volume_pendente=100)
+memoria_mod.aplicar_divisao_do_volume(_F_DIV, "Quero coxinha ,pastel e churros")
+checa("3 sabores num cento: pergunta da porcao a mais",
+      "fica com qual sabor: coxinha, pastel ou churros?" in memoria_mod.pergunta_bloqueante(_F_DIV),
+      memoria_mod.pergunta_bloqueante(_F_DIV)[:70])
+memoria_mod.aplicar_divisao_do_volume(_F_DIV, "Pode colocar mais pastéis")
+checa("'mais pasteis' fecha 25 + 50 + 25",
+      [(i["name"], i["quantity"]) for i in _F_DIV["items"]]
+      == [("Coxinha", 25), ("Pastel", 50), ("Churros", 25)] and not _F_DIV["divisao_pendente"])
+_F_DIV2 = dict(memoria_mod._empty(), volume_pendente=100)
+memoria_mod.aplicar_divisao_do_volume(_F_DIV2, "coxinha e bolinha")
+checa("2 sabores num cento: 50 + 50 direto",
+      [(i["name"], i["quantity"]) for i in _F_DIV2["items"]] == [("Coxinha", 50), ("Bolinha de Queijo", 50)])
+# Fila por cliente: a segunda mensagem espera a primeira terminar.
+import threading as _th  # noqa: E402
+import time as _time  # noqa: E402
+from buffer import MessageBuffer  # noqa: E402
+_linha_do_tempo = []
+
+
+def _lento(user, itens):
+    _linha_do_tempo.append(("inicio", [i["text"] for i in itens]))
+    _time.sleep(0.6)
+    _linha_do_tempo.append(("fim", [i["text"] for i in itens]))
+
+
+_BUF = MessageBuffer(wait_seconds=0.1, on_flush=_lento)
+_BUF.add("55", "Somente")
+_time.sleep(0.25)                         # primeiro atendimento ja comecou
+_BUF.add("55", "Será para retirar as 19:00")
+checa("mensagem nova durante o atendimento e percebida", _BUF.tem_mensagem_nova("55"))
+_time.sleep(1.8)
+checa("atendimentos do mesmo cliente nunca se sobrepoem",
+      [e for e, _ in _linha_do_tempo] == ["inicio", "fim", "inicio", "fim"], str(_linha_do_tempo))
+checa("a segunda mensagem e atendida depois da primeira",
+      _linha_do_tempo[2][1] == ["Será para retirar as 19:00"] if len(_linha_do_tempo) > 2 else False)
+checa("resposta velha (pergunta) nao sai quando chegou mensagem nova",
+      "buffer.tem_mensagem_nova(user)" in _SRC)
+
+
 secao("--- 28/09: aviso rapido e acrescimo depois do pedido ---")
 _AGORA_POS = datetime.now()
 _POS_ENTREGA = dict(memoria_mod._empty(), ultimo_pedido_modalidade="entrega",
@@ -1888,6 +1963,81 @@ for caminho in glob.glob("*.py") + glob.glob("agents/*.py"):
         except tokenize.TokenError:
             pass
 checa("nenhum literal virando byte de controle", not escondidos, str(escondidos[:6]))
+
+
+secao("--- 30/09 19h43: OpenAI sem credito - o laco da oferta (fluxo real, modelo fora) ---")
+# Fica no FIM: instala os stubs do test_agente (nada sai, nada grava) e troca
+# o modelo por um que falha com o erro de credito. Nao gasta nada.
+import contextlib as _ctx  # noqa: E402
+import io as _io2  # noqa: E402
+import test_agente as _t_ag  # noqa: E402
+import memory as _memory  # noqa: E402
+_t_ag._instalar_stubs()
+database.get_contact = lambda p: {"phone": p, "name": "Balbino", "auto_mode": 1}
+
+
+def _sem_credito(*a, **k):
+    raise RuntimeError("Error code: 429 - {'error': {'code': 'insufficient_quota', "
+                       "'message': 'You exceeded your current quota'}}")
+
+
+app.llm.generate_reply = _sem_credito
+horario.agora = lambda: datetime(2026, 9, 30, 19, 43)
+_t_ag._ficha.clear()
+_memory._store.pop(_t_ag.TELEFONE, None)
+_respostas = []
+for _m in ("QUERO C50 COXINHAS E 50 SALSICHA", "NAO", "NAO QUERO",
+           "RETIRADA", "AMANHA AS 10 HORAS", "SIM"):
+    with _ctx.redirect_stdout(_io2.StringIO()):
+        _respostas.append(_t_ag.enviar(_m))
+_ofertas = [r for r in _respostas if app._ofereceu_acompanhamento(r)]
+checa("sem modelo, a oferta sai UMA vez (nao entra em laco)", len(_ofertas) == 1,
+      str([r[:30] for r in _respostas]))
+checa("sem modelo, o codigo leva o pedido ate o resumo",
+      bool(app._RX_LINHA_DE_RESUMO.search(_respostas[4])), _respostas[4][:40])
+checa("sem modelo, 'SIM' ao resumo confirma e passa para a equipe (sem repetir o resumo)",
+      _respostas[5].startswith("Pedido confirmado!"), _respostas[5][:50])
+
+
+secao("--- 01/10: comprovante e 'ja fiz o pix' seguem as regras do dono ---")
+# Prompt do dono, MIDIA E ARQUIVOS: depois do pedido fechado, comprovante ou
+# aviso de pagamento -> nao responde, silencio e conferencia humana.
+_transferidos = []
+app.perform_transfer = lambda phone, reason="", send_message=True: (
+    _transferidos.append((reason, send_message)), True)[1]
+app.ler_texto_da_imagem = lambda b64, mime: app._IMAGEM_COMPROVANTE
+_PNG_FALSO = "data:image/png;base64,iVBORw0KGgo="
+database.get_message = lambda mid: {"id": mid, "msg_type": "image", "media_url": _PNG_FALSO}
+_pos = dict(memoria_mod._empty(), name="Balbino",
+            ultimo_pedido_em=datetime.now().isoformat(timespec="seconds"),
+            ultimo_pedido_modalidade="retirada", saudacao_feita=True)
+
+
+def _manda(itens, ficha):
+    _t_ag._ficha.clear()
+    _t_ag._ficha.update(ficha)
+    _t_ag._enviadas.clear()
+    _transferidos.clear()
+    with _ctx.redirect_stdout(_io2.StringIO()):
+        app.handle_flush(_t_ag.TELEFONE, itens)
+    return "\n".join(_t_ag._enviadas)
+
+
+_r = _manda([{"text": "[Imagem]", "msg_id": 7, "wa_media_id": "", "wa_message_id": ""}], _pos)
+checa("comprovante depois do pedido: nao responde nada", _r == "", _r[:40])
+checa("comprovante depois do pedido: vai para a equipe, sem aviso ao cliente",
+      len(_transferidos) == 1 and _transferidos[0][1] is False, str(_transferidos))
+_r = _manda([{"text": "ja fiz o pix", "wa_message_id": ""}], _pos)
+checa("'ja fiz o pix' depois do pedido: silencio e equipe",
+      _r == "" and len(_transferidos) == 1, f"{_r[:40]} {_transferidos}")
+_r = _manda([{"text": "[Imagem]", "msg_id": 8, "wa_media_id": "", "wa_message_id": ""}],
+            dict(memoria_mod._empty(), name="Balbino", saudacao_feita=True,
+                 items=[{"name": "Coxinha", "quantity": 50}]))
+checa("comprovante no meio do pedido: avisa que a equipe valida e segue",
+      "A equipe valida o valor quando o pedido fechar" in _r and not _transferidos, _r[:60])
+checa("o prompt nao manda mais pedir texto em audio",
+      "solicite envio digitado" not in (database.get_knowledge_document(
+          "PROMPTS ATUALIZADO PARA ENVIAR EDUARDO 18.09.26.docx") or ""))
 
 print()
 print("=" * 78)

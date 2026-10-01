@@ -994,6 +994,35 @@ _RX_SO_GENERICO = re.compile(
     r"^(?:salgad\w*|salgadinh\w*|frit\w*|assad\w*|sortid\w*|variad\w*|misturad\w*|\s)+$")
 
 
+_RX_ANTES_DO_SABOR_CITADO = re.compile(
+    r"^(?:(?:eu|quero|queria|gostaria|pode|podes|coloca|colocar|poe|bota|mais|so|"
+    r"somente|apenas|tambem|os|as|o|a|de|dos|das|com|sabor|sabores|esses|um|uma|"
+    r"sendo|ser|e)(?:\s+|$))+",
+    re.IGNORECASE)
+
+
+def sabores_citados(texto: str) -> list[str]:
+    """Sabores de LOTE nomeados na frase, sem quantidade. [] se nenhum.
+
+    "Quero coxinha, pastel e churros" depois de "1 cento de salgado": os
+    sabores vinham sem numero, nada entrava na ficha e a divisao do cento
+    ficava com o modelo, que se perdeu (teste do dono, 30/09 15h49).
+    """
+    alvo = " ".join((texto or "").lower().split())
+    if re.search(r"\d", alvo):
+        return []            # com numero, quem trata e a extracao normal
+    achados = []
+    for parte in re.split(r"\s*(?:,|;|/|\+|\be\b|\bou\b)\s*", alvo):
+        parte = _RX_ANTES_DO_SABOR_CITADO.sub("", parte.strip()).strip(" .!?")
+        if len(parte) < 3:
+            continue
+        nome = _produto_conhecido(parte)
+        de_lote_do_dono = {e["nome_planilha"] for e in _extras_do_dono() if e["tipo"] == "sabor"}
+        if nome and (nome in _SABORES_DE_LOTE or nome in de_lote_do_dono) and nome not in achados:
+            achados.append(nome)
+    return achados
+
+
 def itens_divididos(msg_lower: str) -> list[dict]:
     """Volume dividido por igual entre os sabores ditos. [] quando nao ha.
 
