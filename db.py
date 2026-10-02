@@ -284,3 +284,43 @@ def table_columns(table_name: str) -> set[str]:
     else:
         rows = fetch_all(f"PRAGMA table_info({table_name})")
         return {r["name"] for r in rows}
+
+
+# ── Medicao por atendimento ─────────────────────────────────────────────────
+# Quanto do tempo de uma resposta vai no banco. O teste de 01/10 levou de 8 a
+# 26 segundos por resposta no WhatsApp contra 1 a 5 segundos rodando local, e
+# o CPU por mensagem e de 0,05s: a diferenca e rede. Cada thread (um cliente
+# sendo atendido) acumula as proprias consultas; handle_flush zera no comeco e
+# imprime na linha [tempo-fim].
+import threading as _threading
+import time as _time
+
+_medida = _threading.local()
+
+
+def zerar_medida() -> None:
+    _medida.consultas = 0
+    _medida.segundos = 0.0
+
+
+def medida() -> tuple[int, float]:
+    return getattr(_medida, "consultas", 0), getattr(_medida, "segundos", 0.0)
+
+
+def _medindo(func):
+    def _w(*a, **k):
+        t0 = _time.monotonic()
+        try:
+            return func(*a, **k)
+        finally:
+            _medida.consultas = getattr(_medida, "consultas", 0) + 1
+            _medida.segundos = getattr(_medida, "segundos", 0.0) + (_time.monotonic() - t0)
+    _w.__name__ = func.__name__
+    _w.__doc__ = func.__doc__
+    return _w
+
+
+execute = _medindo(execute)
+fetch_one = _medindo(fetch_one)
+fetch_all = _medindo(fetch_all)
+execute_returning = _medindo(execute_returning)

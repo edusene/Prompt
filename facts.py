@@ -206,6 +206,24 @@ def lookup_frete(bairro: str) -> dict | None:
             if candidato.startswith(alvo) or alvo.startswith(candidato):
                 return {"bairro": b["nome"], "taxa": b["taxa"], "match": "parcial"}
 
+    # Nome encurtado: "Sao Bosco" para "Sao Joao Bosco" (teste do dono, 01/10
+    # 20h31 - pediu o bairro duas vezes). Todas as palavras ditas, na ordem,
+    # dentro de UM bairro so; com dois candidatos nao se escolhe.
+    palavras = alvo.split()
+    if len(palavras) >= 2:
+        def _em_ordem(nome: str) -> bool:
+            resto = normalize(nome).split()
+            for p in palavras:
+                if p not in resto:
+                    return False
+                resto = resto[resto.index(p) + 1:]
+            return True
+        achados = [b for b in bairros
+                   if any(_em_ordem(c) for c in [b["nome"]] + b["aliases"])]
+        if len(achados) == 1:
+            return {"bairro": achados[0]["nome"], "taxa": achados[0]["taxa"],
+                    "match": "palavras"}
+
     melhor, score = None, 0.0
     for b in bairros:
         for candidato in [b["nome"]] + b["aliases"]:

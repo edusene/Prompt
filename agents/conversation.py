@@ -259,7 +259,11 @@ _PRODUTOS_FRI_COCOQ = {
     "risole": "Rissole de Carne",
     "rissole de carne": "Rissole de Carne",
     "churros": "Churros",
-    "croquete": "Croquete de Carne",
+    # "croquete" sozinho e como "coxinha": serve para o grande (Croquete de
+    # Macaxeira, R$ 9,00) e para o sabor de lote. Abaixo de 25 a triagem
+    # pergunta o tamanho; de 25 para cima a tabela resolve o lote. Ia direto
+    # para Croquete de Carne e "10 croquetes" virava "fazemos de 25 em 25".
+    "croquete": "Croquete",
     "croquete de carne": "Croquete de Carne",
     "misto": "Misto",
     "esfiha": "Esfirra de Carne",
@@ -312,6 +316,7 @@ _PRECO_UNITARIO = {
     "Rissole de Carne": 0.80,
     "Churros": 0.80,
     "Croquete de Carne": 0.80,
+    "Croquete": 0.80,
     "Misto": 0.80,
     # Produtos Assados: R$ 30,00 / 25 un = R$ 1,20/un
     "Esfirra de Carne": 1.20,
@@ -363,7 +368,8 @@ _ENTREGA_EXPLICITA = re.compile(
 # preco ("taxa de entrega", "valor da entrega"), que e pergunta, nao escolha.
 _ENTREGA_SUBSTANTIVO = re.compile(
     r"(?<!taxa de )(?<!valor da )(?<!preco da )(?<!custo da )"
-    r"\bentrega\s+(?:hoje|amanha|depois|pra|para|em|na|no|as|ate|neste|nesse)\b"
+    r"\bentrega\s+(?:hoje|amanha|depois|pra|para|em|na|no|as|ate|neste|nesse"
+    r"|rua|r|av|avenida|travessa|bairro|agora)\b"
 )
 
 # Intencao de retirar, dita com verbo: vale mesmo numa frase com pergunta.
@@ -477,7 +483,54 @@ def detectar_bairro(message: str) -> str:
                 continue
             if re.search(rf"\b{re.escape(chave)}\b", alvo) and len(chave) > len(facts.normalize(achado)):
                 achado = bairro["nome"]
+    if not achado:
+        # "BAIRRO SAO BOSCO": o nome dito depois da palavra "bairro", mesmo
+        # encurtado, passa pela busca da tabela de frete (Sao Joao Bosco).
+        m = re.search(r"\bbairro\s+([a-z][a-z ]{2,40}?)(?=\s+(?:as|hoje|amanha|rua|av|avenida"
+                      r"|numero|n|pagamento|pago|pix|cartao|dinheiro|para|pra|dia|data)\b|\s*\d|$)",
+                      alvo)
+        if m:
+            achado_tabela = facts.lookup_frete(m.group(1))
+            if achado_tabela:
+                achado = achado_tabela["bairro"]
     return achado
+
+
+# Erro de digitacao das duas palavras que decidem o funil. No teste de 01/10 a
+# cliente escreveu "entrga" e "enytrega": a modalidade nao entrou na ficha e a
+# Sandrinha respondeu com a lista "Informe: - Entrega ou retirada", pedindo
+# justamente o que acabara de ser dito. Uma letra a mais, a menos ou trocada
+# (distancia 1) em palavra de 6+ letras; "entrada" (distancia 2) nao conta.
+_PALAVRAS_DO_FUNIL = ("entrega", "entregar", "retirada", "retirar")
+
+
+def _distancia_ate_1(a: str, b: str) -> bool:
+    if a == b:
+        return True
+    if abs(len(a) - len(b)) > 1:
+        return False
+    if len(a) == len(b):
+        dif = [i for i in range(len(a)) if a[i] != b[i]]
+        return len(dif) == 1 or (
+            len(dif) == 2 and dif[1] == dif[0] + 1
+            and a[dif[0]] == b[dif[1]] and a[dif[1]] == b[dif[0]])
+    curta, longa = (a, b) if len(a) < len(b) else (b, a)
+    for i in range(len(longa)):
+        if longa[:i] + longa[i + 1:] == curta:
+            return True
+    return False
+
+
+def corrigir_digitacao_do_funil(texto_normalizado: str) -> str:
+    def _troca(m):
+        palavra = m.group(0)
+        if len(palavra) < 6 or palavra in _PALAVRAS_DO_FUNIL:
+            return palavra
+        for certa in _PALAVRAS_DO_FUNIL:
+            if palavra[0] == certa[0] and _distancia_ate_1(palavra, certa):
+                return certa
+        return palavra
+    return re.sub(r"[a-z]+", _troca, texto_normalizado or "")
 
 
 def detectar_modalidade(message: str) -> str:
@@ -490,7 +543,7 @@ def detectar_modalidade(message: str) -> str:
     """
     import horario as _horario
 
-    t = _horario._norm(message)
+    t = corrigir_digitacao_do_funil(_horario._norm(message))
     if not t:
         return ""
 
@@ -635,7 +688,27 @@ def detectar_horario(message: str) -> str:
     if _DURACAO.search(t):
         return ""
     hm = _horario.parse_horario(t)
-    return _horario.formatar_horario(*hm) if hm else ""
+    if hm:
+        return _horario.formatar_horario(*hm)
+    # "pra agora", "agora mesmo", ou "agora" sozinho como resposta a "qual
+    # horario?": o prompt manda registrar a hora atual. No teste de 01/10 a
+    # cliente respondeu "agora", "agora mesmo" e "pra agora" e a Sandrinha
+    # perguntou "Qual horário?" tres vezes seguidas.
+    if detectar_imediato(t):
+        return _horario.HORARIO_IMEDIATO
+    return ""
+
+
+_IMEDIATO = re.compile(
+    r"\b(?:pra|para|e)\s+agora\b|\bagora\s+mesmo\b|\bimediat[oa]\b"
+    r"|\bo\s+(?:quanto\s+antes|mais\s+rapido(?:\s+possivel)?)\b"
+    r"|^\s*(?:agora|ja|ja\s+ja|agorinha)\s*(?:pf|por\s+favor|pfv)?\s*[.!]*\s*$"
+)
+
+
+def detectar_imediato(message: str) -> bool:
+    import horario as _horario
+    return bool(_IMEDIATO.search(_horario._norm(message)))
 
 
 # Referencia anunciada por ROTULO: o rotulo some, fica so o valor.
@@ -680,7 +753,10 @@ _FIM_DA_RUA = re.compile(
     r"\s+(?:bairro|pagamento|pago|vou\s+pagar|pix|cart[aã]o|dinheiro|troco|"
     r"[aà]s\s|\d{1,2}\s*h(?:oras)?\b|hoje|amanh[aã]|depois\s+de\s+amanh[aã]|"
     r"data|hor[aá]rio|ponto\s+de\s+refer|refer[eê]ncia|entrega|retirada|"
-    r"para\s+(?:hoje|amanh|as|às)|segunda|ter[cç]a|quarta|quinta|sexta|"
+    # "rua julia 6559 igarape pra agora" foi impresso assim no espelho (teste
+    # de 01/10): o "pra agora" e horario, e o "pra" de "pra hoje" sobrava.
+    r"p(?:a)?ra\s+(?:hoje|amanh|agora|as|às)|agora\b|"
+    r"segunda|ter[cç]a|quarta|quinta|sexta|"
     r"s[aá]bado|domingo)",
     re.IGNORECASE)
 
@@ -948,9 +1024,25 @@ def volume_sem_sabor(msg_lower: str) -> int:
     """
     for _um, formato, produto in _PACOTE_POR_EXTENSO.findall(msg_lower):
         unidades = _unidades_do_formato(formato)
+        # "meio cento de brigadeiro" e doce, com formato proprio - nao e volume
+        # de salgado esperando sabor.
+        if _RX_DOCE.search(produto or ""):
+            continue
         if unidades and not _produto_conhecido(produto):
             return unidades
+    # "500 salgados", "200 salgadinhos": o total em numero. No teste de 01/10
+    # nao era lido como volume e o modelo inventou a conta ("10 sabores fritos
+    # e 10 assados" para 20 porcoes). Acima de 1.000 quem atende e a equipe
+    # comercial, e quantidade fora do multiplo de 25 tem outra regra.
+    m = _RX_TOTAL_DE_SALGADOS.search(msg_lower or "")
+    if m:
+        unidades = int(m.group(1))
+        if 25 <= unidades < 1000 and unidades % 25 == 0:
+            return unidades
     return 0
+
+
+_RX_TOTAL_DE_SALGADOS = re.compile(r"(?<![\d,.])(\d{2,3})\s+(?:mini\s*)?salgad\w*\b(?!\s+filho)")
 
 
 _RX_FRITO = re.compile(r"\bfrit[oa]s?\b")
@@ -986,7 +1078,8 @@ _RX_FIM_DOS_SABORES = re.compile(
 
 # O que vem antes do sabor e nao e sabor: "sendo metade", "a outra metade de".
 _RX_ANTES_DO_SABOR = re.compile(
-    r"^(?:(?:sendo|de|dos|das|com|a|o|outra|outro|metade|meio)(?:\s+|$))+",
+    r"^(?:(?:sendo|de|dos|das|com|a|o|outra|outro|metade|meio|variad[oa]s?"
+    r"|sortid[oa]s?|misturad[oa]s?|mist[oa]s)(?:\s+|$))+",
     re.IGNORECASE)
 
 # Palavra de volume, nao de sabor: "cento de salgados fritos" nao diz o sabor.
@@ -1015,19 +1108,121 @@ def sabores_citados(texto: str) -> list[str]:
     alvo = " ".join((texto or "").lower().split())
     if re.search(r"\d", alvo):
         return []            # com numero, quem trata e a extracao normal
+    de_lote_do_dono = {e["nome_planilha"] for e in _extras_do_dono() if e["tipo"] == "sabor"}
+
+    def _de_lote(nome):
+        return bool(nome) and (nome in _SABORES_DE_LOTE or nome in de_lote_do_dono)
+
     achados = []
     for parte in re.split(r"\s*(?:,|;|/|\+|\be\b|\bou\b)\s*", alvo):
         parte = _RX_ANTES_DO_SABOR_CITADO.sub("", parte.strip()).strip(" .!?")
         if len(parte) < 3:
             continue
-        nome = _produto_conhecido(parte)
-        de_lote_do_dono = {e["nome_planilha"] for e in _extras_do_dono() if e["tipo"] == "sabor"}
-        if nome and (nome in _SABORES_DE_LOTE or nome in de_lote_do_dono) and nome not in achados:
-            achados.append(nome)
+        for pedaco in _separar_sabores_sem_virgula(parte, _de_lote):
+            nome = _produto_conhecido(pedaco)
+            if _de_lote(nome) and nome not in achados:
+                achados.append(nome)
     return achados
 
 
-def itens_divididos(msg_lower: str) -> list[dict]:
+_LIGA_SABOR = {"de", "da", "do", "com", "e"}
+
+
+# "quiche de frango 2 unidades": a quantidade DEPOIS do produto.
+_RX_QTD_NO_FIM = re.compile(
+    r"^\s*(?P<prod>[a-zà-ÿ][a-zà-ÿ\s]{2,60}?)\s+(?P<qtd>\d{1,3})\s*(?:unidades?|un|unid|uni)?\s*[.!]*\s*$")
+_RX_SO_PORCOES = re.compile(
+    r"^\s*(?:quero\s+|pode ser\s+|manda\s+|vou querer\s+)?(?P<n>\d{1,2}|uma|duas|tres|três|quatro)"
+    r"\s+por[cç](?:ao|ão|oes|ões)\s*[.!]*\s*$")
+# "de frango 2 unidades", "2 de frango": so o complemento do produto.
+_RX_SO_COMPLEMENTO = re.compile(
+    r"^\s*(?:(?P<qtd1>\d{1,3})\s+)?(?:o\s+|a\s+)?(?P<comp>d[eoa]s?\s+[a-zà-ÿ][a-zà-ÿ\s]{2,40}?)"
+    r"(?:\s+(?P<qtd2>\d{1,3})\s*(?:unidades?|un|unid|uni)?)?\s*[.!]*\s*$")
+
+
+def completar_pelo_contexto(texto: str, ultima_do_agente: str) -> str:
+    """Reescreve, SO para a extracao, o pedido que depende da mensagem anterior.
+
+    Teste de 01/10: a Sandrinha disse "temos Quiche de Frango e Quiche de Carne
+    de Sol", a cliente respondeu "de frango 2 unidades" e nada entrou na ficha
+    - mais adiante ela recebeu "Itens do pedido" na lista do que faltava. O
+    complemento ("de frango") vale para o produto que a mensagem anterior
+    nomeou e que termina nele, quando ha um so. A quantidade no fim ("quiche de
+    frango 2 unidades") vai para a frente, onde a extracao a procura.
+    """
+    import facts
+    t = " ".join((texto or "").lower().split())
+    if not t or len(t) > 80:
+        return texto
+    m = _RX_SO_COMPLEMENTO.match(t)
+    if m and ultima_do_agente and (m.group("qtd1") or m.group("qtd2")):
+        comp = facts.normalize(m.group("comp"))
+        anterior = facts.normalize(ultima_do_agente)
+        try:
+            nomes = {p["item"] for p in facts.get().get("produtos", [])}
+        except Exception:
+            nomes = set()
+        candidatos = [n for n in nomes
+                      if facts.normalize(n) in anterior and facts.normalize(n).endswith(comp)]
+        if len(candidatos) == 1:
+            return f"{m.group('qtd1') or m.group('qtd2')} {candidatos[0]}"
+    # "quero 2 porcoes" depois de "a porcao de 25 de Esfirra de Carne custa R$
+    # 30,00": porcao de 25 do produto que acabou de ser citado, se for um so.
+    m = _RX_SO_PORCOES.match(t)
+    if m and ultima_do_agente:
+        bruto = m.group("n")
+        n = int(bruto) if bruto.isdigit() else _QTD_POR_EXTENSO.get(bruto, 0)
+        anterior = facts.normalize(ultima_do_agente)
+        try:
+            nomes = {p["item"] for p in facts.get().get("produtos", []) if p.get("preco") is None}
+        except Exception:
+            nomes = set()
+        citados = [x for x in nomes if facts.normalize(x) in anterior]
+        if 0 < n <= 40 and len(citados) == 1:
+            return f"{n * 25} {citados[0]}"
+    m = _RX_QTD_NO_FIM.match(t)
+    if m and not re.search(r"\b(?:rua|av|avenida|numero|n)\b", m.group("prod")):
+        return f"{m.group('qtd')} {m.group('prod').strip()}"
+    return texto
+
+
+def _separar_sabores_sem_virgula(parte: str, de_lote) -> list[str]:
+    """'pastel coxinha bolinha' -> ['pastel', 'coxinha', 'bolinha'].
+
+    No teste de 01/10 a cliente escreveu os sabores so com espaco ("pastel
+    coxinha bolinha e churros"): o trecho inteiro casava com um sabor so e o
+    cento virou 50 coxinha + 50 churros, sem o pastel e a bolinha. Corta antes
+    de cada palavra que sozinha ja e um sabor de lote, menos depois de "de"
+    ("pastel de carne" continua um sabor). So vale se achar 2 sabores ou mais;
+    senao o trecho segue inteiro, como antes.
+    """
+    palavras = parte.split()
+    if len(palavras) < 2:
+        return [parte]
+    grupos: list[list[str]] = []
+    for i, w in enumerate(palavras):
+        inicio = (i == 0 or (palavras[i - 1] not in _LIGA_SABOR
+                             and len(w) > 3 and de_lote(_produto_conhecido(w))))
+        if inicio or not grupos:
+            grupos.append([w])
+        else:
+            grupos[-1].append(w)
+    pedacos = [" ".join(g) for g in grupos]
+    sabores = {_produto_conhecido(p) for p in pedacos}
+    if len(pedacos) >= 2 and all(de_lote(_produto_conhecido(p)) for p in pedacos) \
+            and len(sabores) == len(pedacos):
+        return pedacos
+    return [parte]
+
+
+def sabores_do_volume(msg_lower: str) -> list[str]:
+    """Os sabores de um volume que nao fecha ("cento de X, Y e Z")."""
+    quebrados: list = []
+    itens_divididos(msg_lower, quebrados)
+    return list(quebrados[0][1]) if len(quebrados) == 1 else []
+
+
+def itens_divididos(msg_lower: str, quebrados: list | None = None) -> list[dict]:
     """Volume dividido por igual entre os sabores ditos. [] quando nao ha.
 
     O balcao pede assim: "1 cento pastel e bolinha" e 50 de cada, "metade
@@ -1072,6 +1267,13 @@ def itens_divididos(msg_lower: str) -> list[dict]:
             continue
         cada = unidades // len(sabores)
         if cada * len(sabores) != unidades or cada % 25:
+            # "1 cento de coxinha, churros e bolinha": 100 nao fecha em 3
+            # sabores. Quem chama recebe o volume e os sabores para perguntar
+            # (acrescentar um sabor ou aumentar uma porcao) em vez de ler
+            # "cento de coxinha" e jogar fora os outros dois (teste do dono,
+            # 01/10 20h36: o espelho saiu com 100 coxinhas).
+            if quebrados is not None and unidades % 25 == 0:
+                quebrados.append((unidades, sabores))
             continue
         for nome in sabores:
             somados[nome] = somados.get(nome, 0) + cada
@@ -1112,6 +1314,19 @@ BOLO = "Bolo de Milho"
 _RX_BOLO = re.compile(
     r"(?:\b(?P<qtd>\d{1,2}|uma?|dois|duas|tr[eê]s)\s+)?\bbolos?\b(?:\s+de\s+milho)?",
     re.IGNORECASE)
+
+# O unico bolo da fabrica e o de milho. "Bolo" sozinho ("um bolo", resposta a
+# oferta) e ele; "bolo" com outro complemento ("pra aniversario", "de
+# chocolate", "confeitado") e um bolo que nao existe no cardapio.
+_RX_OUTRO_BOLO = re.compile(
+    r"\bbolos?\s+(?!de\s+milho\b)(?:de|da|do|pra|para|p/|confeit|personaliz|decorad"
+    r"|recheado|tematic|aniversari|festa|casamento|chocolate|cenoura|fuba)")
+
+
+def bolo_fora_do_cardapio(texto: str) -> bool:
+    import horario as _horario
+    return bool(_RX_OUTRO_BOLO.search(_horario._norm(texto or "")))
+
 
 # Palavra que basta para escolher o tamanho quando ela pergunta ("lata").
 PALAVRAS_DA_BEBIDA = {
@@ -1174,6 +1389,10 @@ def bebidas_citadas(msg_lower: str) -> tuple[list[dict], list[dict]]:
         if re.search(r"\b(?:sem|n[aã]o|nada\s+de|nem)\b[^,.;!?\n]{0,18}$",
                      (msg_lower or "")[:m.start()]):
             continue
+        # "bolo pra aniversario", "bolo de chocolate": outro bolo, que a
+        # fabrica nao faz. Virava Bolo de Milho no espelho (teste de 01/10).
+        if bolo_fora_do_cardapio(m.group(0) + (msg_lower or "")[m.end():]):
+            continue
         bruto_qtd = (m.group("qtd") or "").lower()
         qtd = int(bruto_qtd) if bruto_qtd.isdigit() else _QTD_POR_EXTENSO.get(bruto_qtd, 1)
         if not 0 < qtd <= 10 or any(i["name"] == BOLO for i in itens):
@@ -1186,6 +1405,81 @@ def bebidas_citadas(msg_lower: str) -> tuple[list[dict], list[dict]]:
         if oficial:
             itens.append({"name": BOLO, "quantity": qtd, "price": oficial["preco_unitario"]})
     return itens, pendentes[:1]
+
+
+# Doces: so existem tres formatos de brigadeiro na planilha. Ate 02/10 nada
+# disso era extraido - o pedido de doce ficava so na conversa, o modelo
+# inventava formato ("1 porcao de 25 brigadeiros") e o espelho do codigo saia
+# sem o doce (teste do dono, 01/10 20h02: "PODE SER" e o brigadeiro sumiu).
+DOCE_BANDEJA = "Bandeja de Brigadeiros (16 un)"
+DOCE_MEIO_CENTO = "Meio Cento de Brigadeiros (50 un)"
+DOCE_CENTO = "Cento de Brigadeiros (100 un)"
+_RX_DOCE = re.compile(r"\b(?:brigadeir\w*|docinh\w*|beijinh\w*|doces)\b")
+_RX_DOCE_FORA = re.compile(r"\b(?:beijinh\w*|mist[oa]s?)\b")
+
+
+def _qtd_antes(texto: str, fim: int) -> int:
+    m = re.search(r"(\d{1,2}|uma?|duas|dois|tr[eê]s)\s+$", texto[:fim])
+    if not m:
+        return 1
+    bruto = m.group(1)
+    return int(bruto) if bruto.isdigit() else _QTD_POR_EXTENSO.get(bruto, 1)
+
+
+def formato_do_doce(texto: str) -> tuple[str, int]:
+    """(formato, quantidade) dito para o brigadeiro. ('', 0) sem formato."""
+    t = " ".join((texto or "").lower().split())
+    m = re.search(r"\bbandejas?\b|\b16\b", t)
+    if m:
+        return DOCE_BANDEJA, _qtd_antes(t, m.start())
+    m = re.search(r"\bmeio\s+cento\b|\b50\b|\bmeio\b", t)
+    if m:
+        return DOCE_MEIO_CENTO, _qtd_antes(t, m.start())
+    m = re.search(r"\b(?:centos?|100)\b", t)
+    if m and not re.search(r"\bcento\s+e\s+meio\b", t):
+        return DOCE_CENTO, _qtd_antes(t, m.start())
+    return "", 0
+
+
+def opcoes_de_doce() -> list[str]:
+    """Formatos de brigadeiro disponiveis hoje na planilha."""
+    try:
+        import facts
+        saida = []
+        for nome in (DOCE_BANDEJA, DOCE_MEIO_CENTO, DOCE_CENTO):
+            if facts.resolve_unit_price(nome, 1):
+                saida.append(nome)
+        return saida
+    except Exception:
+        return [DOCE_BANDEJA, DOCE_MEIO_CENTO, DOCE_CENTO]
+
+
+def doces_citados(msg_lower: str) -> tuple[list[dict], list[dict]]:
+    """(itens, pendentes) de brigadeiro na mensagem."""
+    t = " ".join((msg_lower or "").lower().split())
+    m = _RX_DOCE.search(t)
+    if not m or re.search(r"\bdoce\s+de\s+leite\b", t[m.start():m.end() + 12]):
+        return [], []
+    if re.search(r"\b(?:sem|n[aã]o|nada\s+de|nem)\b[^,.;!?\n]{0,18}$", t[:m.start()]):
+        return [], []
+    fora = bool(_RX_DOCE_FORA.search(t)) and not re.search(r"\bbrigadeir", t)
+    # O formato e o do trecho em que o doce aparece: em "cento e meio de
+    # coxinha e brigadeiro" o "meio" e da coxinha.
+    trecho = next((s for s in re.split(r",|;|\s+e\s+", t) if _RX_DOCE.search(s)), t)
+    formato, qtd = formato_do_doce(trecho)
+    if formato and not fora:
+        try:
+            import facts
+            oficial = facts.resolve_unit_price(formato, qtd)
+        except Exception:
+            oficial = None
+        if oficial:
+            return [{"name": formato, "quantity": qtd,
+                     "price": oficial["preco_unitario"]}], []
+    pendente = {"qtd": max(qtd, 1), "termo": "docinho", "opcoes": opcoes_de_doce()}
+    if fora:
+        pendente["em_falta"] = "Beijinho"
+    return [], [pendente]
 
 
 def _opcoes_de_refrigerante() -> list[str]:
@@ -1348,6 +1642,11 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
             except Exception:
                 _now = None
         data = detectar_data(message, _now)
+        # "Pra agora" e pedido de hoje (BLOCO 0: "agora/ja" registra a data de
+        # hoje e o horario atual) - sem isto a cliente dizia "pra agora" e
+        # ainda recebia "Data do pedido" na lista do que faltava.
+        if not data and extracted.get("horario") == _horario.HORARIO_IMEDIATO:
+            data = (_now or _horario.agora()).date()
         if data:
             extracted["data_iso"] = data.isoformat()
             extracted["data_agendada"] = _horario.formatar_data(data, _now)
@@ -1516,15 +1815,28 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
 
         # "1 cento pastel e bolinha", "metade X e metade Y": o volume dividido
         # vale mais do que qualquer leitura parcial do mesmo sabor acima.
-        divididos = itens_divididos(msg_lower)
+        _quebrados: list = []
+        divididos = itens_divididos(msg_lower, _quebrados)
         if divididos:
             nomes = {i["name"] for i in divididos}
             items_found = [i for i in items_found if i["name"] not in nomes] + divididos
             extracted["pedido_por_volume"] = True
+        elif _quebrados and len(_quebrados) == 1:
+            # Volume que nao fecha nos sabores ditos: nenhum item ainda. A
+            # ficha guarda o volume, e aplicar_divisao_do_volume faz a
+            # pergunta do dono com os sabores desta mesma mensagem.
+            _vol, _sab = _quebrados[0]
+            nomes = set(_sab)
+            items_found = [i for i in items_found if i["name"] not in nomes]
+            if not items_found:
+                extracted["volume_pendente"] = _vol
+                extracted["pedido_por_volume"] = True
 
         # "meio cento de coxinha" nao tem numero e escapava do padrao acima.
         # So entra o produto que o padrao numerado nao pegou.
         ja_vistos = {i["name"] for i in items_found}
+        if extracted.get("volume_pendente"):
+            ja_vistos |= {_produto_conhecido(p) for p in sabores_do_volume(msg_lower)}
         for extra in _itens_por_extenso(msg_lower):
             if extra["name"] not in ja_vistos:
                 items_found.append(extra)
@@ -1550,12 +1862,22 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
         extracted["bebidas"] = bebidas
     if bebida_sem_tamanho:
         extracted["bebidas_pendentes"] = bebida_sem_tamanho
+    doces, doce_sem_formato = doces_citados(msg_lower)
+    if doces:
+        extracted["doces"] = doces
+    if doce_sem_formato:
+        extracted["doces_pendentes"] = doce_sem_formato
 
     # Preparo dito em qualquer mensagem: o "frito" pode vir junto com o cento
     # ou na resposta a pergunta dos sabores.
     preparo = preparo_dito(msg_lower)
     if preparo:
         extracted["preparo_pendente"] = preparo
+    elif _RX_FRITO.search(msg_lower) and _RX_ASSADO.search(msg_lower):
+        # "500 salgados fritos e assados": os dois preparos, divididos entre
+        # os sabores. Perguntar "e frito ou assado?" seria repetir o que ele
+        # disse.
+        extracted["preparo_pendente"] = "misto"
 
     # ── Referencia ──────────────────────────────────────────────────────────
     if not state.referencia:

@@ -390,7 +390,7 @@ Meu nome é Eduardo. Quero 5 coxinhas para retirar amanhã às 15h
 
 | | |
 |---|---|
-| ✅ Esperado | **"Essas 5 Coxinha seriam tamanho grande (lanche) ou mini (festa)? 😊"** |
+| ✅ Esperado | **"Essas 5 coxinhas são grande (lanche) ou mini (festa)? 😊"** |
 | 🚩 Alerta | citar nome de catálogo ("Coxinha de Frango com Catupiry") · explicar a regra dos 25 nessa hora · perguntar sobre outros itens junto |
 
 ### 2.2 LANCHE aceita a quantidade pedida

@@ -275,7 +275,10 @@ _RX_ENDERECO_NA_FRASE = re.compile(
 # horario nao existia para o parser e a pergunta era repetida (teste do dono,
 # 25/09). As duas metades da concatenacao sao raw de proposito: "\\b" num
 # literal sem o r vira byte de backspace e o regex nunca casa.
-_RX_HORA = re.compile(r"(?<!\d)(\d{1,2})\s*(?:h|:|horas?)\s*(\d{2})?\b")
+# "13 hors", "13 hrs", "13 hr": digitado as pressas no celular (teste de
+# 01/10: "as 13 hors retirada" ficou sem horario e a Sandrinha perguntou a hora
+# que o cliente tinha acabado de dar). As formas longas vem antes do "h" solto.
+_RX_HORA = re.compile(r"(?<!\d)(\d{1,2})\s*(?:horas?|hors?|hrs?|h|:)\s*(\d{2})?\b")
 
 # A virgula e como se escreve hora aqui ("19,50"), mas EXIGE os dois digitos de
 # minuto: sem isso "45, amanha as 16h" casava "45," como hora, 45 nao e hora
@@ -323,6 +326,15 @@ def parse_horario(texto: str) -> tuple[int, int] | None:
     return None
 
 
+# Valor gravado na ficha quando o cliente pede "pra agora". E o texto que o
+# espelho do BLOCO 5 mostra ('Horário: [Horário solicitado ou "Imediato"]').
+HORARIO_IMEDIATO = "Imediato"
+
+
+def eh_imediato(horario_texto: str) -> bool:
+    return _norm(horario_texto or "") == "imediato"
+
+
 def formatar_horario(hora: int, minuto: int) -> str:
     return f"{hora:02d}h{minuto:02d}" if minuto else f"{hora}h"
 
@@ -352,6 +364,18 @@ def validar_agendamento(
 
     if data_pedido is None:
         return False, "Falta a data do pedido.", None, "data"
+
+    # "Pra agora": a regra do dono e registrar a hora atual (o espelho diz
+    # "Imediato"). Nao passa pela checagem de "horario que ja passou" - agora
+    # nunca passou -, so pelo expediente de AGORA: no almoco ou depois das 20h
+    # o cliente recebe o mesmo aviso de quem pede pronta-entrega.
+    if eh_imediato(horario_texto):
+        if data_pedido != now.date():
+            return False, "Falta o horario do pedido.", None, "horario"
+        st = status(now)
+        if st["aberto"]:
+            return True, "", None, ""
+        return False, st["mensagem"], st.get("sugestao_data"), "horario"
 
     if data_pedido < now.date():
         return False, "Essa data já passou. Para qual dia você quer o pedido? 😊", None, "data"

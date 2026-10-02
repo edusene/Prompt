@@ -692,7 +692,8 @@ def _rotulo_pagamento(pagamento: str, troco_para: str = "", total: float = 0.0) 
     if (pagamento or "").strip().lower() != "dinheiro" or not troco_para:
         return rotulo
     if troco_para == "nao":
-        return f"{rotulo} (cliente tem o valor trocado)"
+        # Texto do dono (01/10): "Dinheiro (sem troco)".
+        return f"{rotulo} (sem troco)"
     if troco_para == "nao_informado":
         return rotulo
     try:
@@ -743,6 +744,8 @@ def montar_resumo(items: list[dict], subtotal: float, delivery_fee: float,
     linhas.append("Itens:")
     for item in items or []:
         nome = item.get("name", "")
+        if str(item.get("sabor") or "").strip():
+            nome = f"{nome} ({item['sabor']})"
         qtd = item.get("quantity", 0)
         preco = float(item.get("price", 0) or 0)
         if preco <= 0:
@@ -766,7 +769,10 @@ def montar_resumo(items: list[dict], subtotal: float, delivery_fee: float,
 
     # A confirmacao cita dia e hora juntos: ultima chance de o cliente corrigir
     # o dia antes de o pedido entrar na producao.
-    if dia and horario:
+    if dia and (horario or "").strip().lower() == "imediato":
+        # "Pra agora": sem "às Imediato" (teste de 01/10).
+        linhas.append(f"Posso confirmar o seu pedido para {dia}, agora? 💛")
+    elif dia and horario:
         linhas.append(f"Posso confirmar o seu pedido para {dia} às {horario}? 💛")
     else:
         linhas.append("Posso confirmar o seu pedido? 💛")
@@ -1045,6 +1051,42 @@ def calcular_pedido(items: list[dict], bairro: str = "", modalidade: str = "",
     except Exception as e:
         print(f"[cardápio] calculateOrder ERRO: {e}")
         return {"success": False, "error": str(e)}
+
+# Opcoes de sabor de um produto do cardapio digital ("Refrigerante Lata" ->
+# Coca, Coca zero, Guarana antartica...). O dono reclamou em 01/10 que a
+# Sandrinha "nao consegue abrir as opcoes que tem no cardapio e so puxa o item
+# que esta na frente": ela oferecia lata, 600ml ou 2L, e o sabor nunca era
+# perguntado. As opcoes vem da propria API (o dono muda la e vale aqui), com
+# cache para nao pagar uma chamada por mensagem.
+_CACHE_OPCOES: dict[str, tuple[float, list[str]]] = {}
+_CACHE_OPCOES_SEG = 1800.0
+
+
+def opcoes_de_sabor(nome_base44: str) -> list[str]:
+    nome_base44 = (nome_base44 or "").strip()
+    if not nome_base44:
+        return []
+    guardado = _CACHE_OPCOES.get(nome_base44)
+    if guardado and time.monotonic() - guardado[0] < _CACHE_OPCOES_SEG:
+        return guardado[1]
+    base_url = _get_base_url()
+    if not base_url:
+        return []
+    try:
+        with httpx.Client(timeout=10) as client:
+            resp = client.post(f"{base_url}/functions/calculateOrder",
+                               json={"items": [{"name": nome_base44, "quantity": 1,
+                                                "context": "unidade"}]},
+                               headers=_headers())
+            data = resp.json()
+        item = ((data or {}).get("items") or [{}])[0]
+        opcoes = [str(o).strip() for o in (item.get("flavorOptions") or []) if str(o).strip()]
+    except Exception as e:
+        print(f"[cardápio] WARN opcoes de sabor de {nome_base44!r}: {e}")
+        return guardado[1] if guardado else []
+    _CACHE_OPCOES[nome_base44] = (time.monotonic(), opcoes)
+    return opcoes
+
 
 def criar_pedido(
     customer_name: str,

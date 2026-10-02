@@ -86,6 +86,10 @@ SABORES = {
         # frito; a planilha chama de Croquete de Macaxeira e poe em Salgados
         # Grandes. Como sabor de lote, funciona.
         "Croquete de Macaxeira": "croquete macaxeira",
+        # O dono cadastrou o croquete no cardapio digital como "CROQUETE
+        # MACAXEIRA E CARNE" (01/10): e o mesmo sabor de lote, e o de carne
+        # deixa de ser bloqueado.
+        "Croquete de carne": "croquete macaxeira",
     },
     "Assados": {
         "Esfirra de Carne": "Esfirra (carne)",
@@ -152,15 +156,18 @@ MAPA = {
     },
     "Bandeja de Brigadeiros (16 un)": {
         "categoria": "Bolos e Doces", "nome_base44": "Bandeja com 16 Docinhos", "context": "unidade",
+        "sabor_fixo": "Brigadeiro",
         "quantidade_teste": 1, "preco_esperado": 20.80,
     },
     # O cardapio digital nao tem cento de brigadeiro: 1 cento = 2 meios centos.
     "Cento de Brigadeiros (100 un)": {
         "categoria": "Bolos e Doces", "nome_base44": "Meio Cento de brigadeiro", "context": "unidade",
+        "sabor_fixo": "Brigadeiro",
         "fator": 2, "quantidade_teste": 2, "preco_esperado": 130.00,
     },
     "Meio Cento de Brigadeiros (50 un)": {
         "categoria": "Bolos e Doces", "nome_base44": "Meio Cento de brigadeiro", "context": "unidade",
+        "sabor_fixo": "Brigadeiro",
         "quantidade_teste": 1, "preco_esperado": 65.00,
     },
     "Refrigerante Lata": {
@@ -186,7 +193,6 @@ BLOQUEADOS = {
     "Panqueca de Frango": ("Salgados Grandes", "nao existe no cardapio digital"),
     "Saltenha Frita": ("Salgados Grandes", "o cardapio so tem 'Mini Saltenha Frita' (R$ 2,00, minimo 10), que e outro produto"),
     "Pastel queijo": ("Fritos", "nao esta na lista de sabores de fritos do cardapio digital"),
-    "Croquete de carne": ("Fritos", "o cardapio digital so tem croquete de MACAXEIRA como sabor de lote"),
     "Cento de Beijinhos (100 un)": ("Bolos e Doces", "o cardapio digital nao tem beijinho; a busca cai em brigadeiro"),
     "Meio Cento de Beijinhos (50 un)": ("Bolos e Doces", "o cardapio digital nao tem beijinho; a busca cai na bandeja de 16 docinhos"),
     "Cento Misto Brigadeiro e Beijinho (100 un)": ("Bolos e Doces", "o cardapio digital nao tem misto; a busca cai em brigadeiro"),
@@ -250,6 +256,19 @@ def bloqueados_efetivos(extras: list | None = None) -> dict:
 
 def _norm(texto: str) -> str:
     return facts.normalize(texto or "")
+
+
+def opcoes_do_item(nome: str) -> list[str]:
+    """Sabores que o cardapio digital oferece para a bebida ("Refrigerante
+    Lata" -> Coca, Coca zero, ...). [] quando nao ha escolha a fazer."""
+    destino = _achar(mapa_efetivo(), nome)
+    if not destino or destino.get("categoria") != "Bebidas":
+        return []
+    try:
+        import cardapio
+        return cardapio.opcoes_de_sabor(destino["nome_base44"])
+    except Exception:
+        return []
 
 
 def _achar(mapa: dict, nome: str):
@@ -478,11 +497,21 @@ def traduzir(items: list[dict], extras: list | None = None) -> tuple[list[dict],
         # Item por unidade
         destino = _achar(_mapa, nome)
         if destino:
-            avulsos.append({
+            api_item = {
                 "name": destino["nome_base44"],
                 "quantity": qtd * int(destino.get("fator", 1)),
                 "context": destino.get("context", "unidade"),
-            })
+            }
+            # Sabor escolhido entre as opcoes do proprio cardapio digital
+            # ("Coca" no Refrigerante Lata). Sem ele a comanda saia sem dizer
+            # qual refrigerante mandar.
+            if str(item.get("sabor") or "").strip():
+                api_item["selected_flavors"] = [str(item["sabor"]).strip()]
+            elif destino.get("sabor_fixo"):
+                # A bandeja e o meio cento pedem o sabor no cardapio digital
+                # (Brigadeiro, Beijinho, Mista); a planilha so vende brigadeiro.
+                api_item["selected_flavors"] = [destino["sabor_fixo"]]
+            avulsos.append(api_item)
             continue
 
         bloqueados.append(f"{nome}: sem equivalente conferido no cardapio digital")

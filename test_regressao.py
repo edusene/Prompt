@@ -973,7 +973,7 @@ checa("e proibe uma pergunta por item",
       "uma pergunta de tamanho por item" in _dir_dois)
 _frase_dois = memoria_mod.pergunta_bloqueante(_FICHA_DOIS_TAMANHOS)
 checa("a pergunta cita os dois itens de uma vez",
-      "Coxinha" in _frase_dois and "Rissole" in _frase_dois, _frase_dois)
+      "coxinhas" in _frase_dois and "rissoles" in _frase_dois, _frase_dois)
 checa("e continua sendo uma pergunta so", _frase_dois.count("?") == 1)
 
 
@@ -1182,10 +1182,10 @@ checa("dois centos de pastel e bolinha somam 100 + 100",
       str(_div("1 cento pastel e bolinha e 1 cento pastel e bolinha pra retirada")))
 checa("metade/metade sem volume e um cento",
       _div("Metade croquete e metade pastel de carne")
-      == [("Croquete de Carne", 50), ("Pastel Carne", 50)])
+      == [("Croquete", 50), ("Pastel Carne", 50)])
 checa("'sendo metade X e a outra metade Y' divide",
       _div("quero um cento sendo metade croquete e a outra metade pastel de "
-           "carne massa leve. pra retirar segunda") == [("Croquete de Carne", 50),
+           "carne massa leve. pra retirar segunda") == [("Croquete", 50),
                                                          ("Pastel Carne", 50)])
 checa("'100 salgados metade X metade Y' divide",
       _div("100 salgados metade coxinha metade kibe") == [("Coxinha", 50), ("Quibe", 50)])
@@ -1388,22 +1388,26 @@ checa("sem dia/hora valido o aviso fica",
           "55", "Estamos no intervalo de almoço até às 14h00! Posso já adiantar o seu pedido "
                 "para as 14h? 😊", dict(_F_AGENDADO, horario="")))
 horario.agora = _agora_original
-# 2) Croquete bloqueado + refrigerante: a resposta que inventa "disponivel"
-#    / "macaxeira" (1 de 6) nao passa.
+# 2) Croquete + refrigerante. Ate 01/10 o croquete era bloqueado; o dono
+#    cadastrou "croquete macaxeira e carne" e ele foi liberado. "10 croquetes"
+#    agora e triagem de tamanho, e ela vem antes da pergunta do refrigerante.
 _F_CROQ2 = memoria_mod._empty()
-for _m in ("Olá boa tarde Quero  10 croquetes e uma coca cola",):
+for _m in ("Olá boa tarde Quero  10 coxinhas e uma coca cola",):
     _F_CROQ2 = memoria_mod.merge(_F_CROQ2, _extract_data_from_message(_m, ConversationState()),
                                  _extract_data_from_message(_m, ConversationState()))[0]
-checa("sabor em falta vem antes da pergunta do refrigerante",
-      memoria_mod.pergunta_bloqueante(_F_CROQ2).startswith("O sabor Croquete de carne está em falta"))
+checa("tamanho vem antes da pergunta do refrigerante",
+      memoria_mod.pergunta_bloqueante(_F_CROQ2).startswith("Essas 10 coxinhas são grande"),
+      memoria_mod.pergunta_bloqueante(_F_CROQ2))
 _RUIM = app._conferir_etapa_travada(
     "55", 'O sabor "Croquete de Carne" está disponível, mas o "Croquete de Macaxeira" que '
           'você pediu não está listado. Qual refrigerante prefere: lata, 600ml ou Tuchaua?', _F_CROQ2)
-checa("'croquete disponivel / macaxeira' inventado sai da resposta",
-      "macaxeira" not in _RUIM.lower() and "está em falta" in _RUIM, _RUIM[:80])
-checa("resposta certa do croquete passa",
-      memoria_mod.etapa_coberta(_F_CROQ2, 'O sabor "Croquete de carne" está em falta hoje. '
-                                          'Qual refrigerante: lata, 600ml ou Tuchaua?'))
+checa("resposta sem a pergunta de tamanho recebe a do codigo",
+      "Essas 10 coxinhas são grande (lanche) ou mini (festa)?" in _RUIM, _RUIM[:120])
+_DUAS = app._conferir_uma_pergunta(
+    "55", "Essas 10 coxinhas são grande (lanche) ou mini (festa)? E qual refrigerante "
+          "você prefere: lata, 600ml ou Tuchaua?", _F_CROQ2)
+checa("com duas perguntas, fica a da etapa travada (tamanho)",
+      "grande (lanche)" in _DUAS and "refrigerante" not in _DUAS, _DUAS)
 
 
 secao("--- 30/09 tarde: testes do dono (audio, saudacao, divisao, fila) ---")
@@ -1537,7 +1541,212 @@ checa("'acrescentar um sabor' fecha 25 de cada",
       str(_F_ACR.get("items")))
 # Horario: com horario dito, o aviso de intervalo/fechado nao sai.
 checa("horario dito pula o aviso de fechado/intervalo",
-      "_horario_dado = bool(_memoria.get(\"horario\"))" in open("app.py", encoding="utf-8").read())
+      "_horario_dado = (bool(_memoria.get(\"horario\"))" in open("app.py", encoding="utf-8").read())
+
+
+secao("--- 01/10 (tarde): teste da Camyli ---")
+import horario as _hr_0110  # noqa: E402
+from agents import conversation as _cv_0110  # noqa: E402
+from datetime import date as _date_0110  # noqa: E402
+for _txt, _esp in (("entrga", "entrega"), ("enytrega", "entrega"), ("retirda", "retirada"),
+                   ("entrga rua julia 6559 igarape pra agora", "entrega"),
+                   ("entrada", ""), ("quanto fica a entrga?", "")):
+    checa(f"modalidade com erro de digitacao: {_txt!r}",
+          _cv_0110.detectar_modalidade(_txt) == _esp, _cv_0110.detectar_modalidade(_txt))
+for _txt, _esp in (("as 13 hors retirada", "13h"), ("19 hrs", "19h"), ("agora", "Imediato"),
+                   ("agora mesmo", "Imediato"), ("pra hoje pra agora", "Imediato"),
+                   ("agora quero 2 coxinhas", "")):
+    checa(f"horario: {_txt!r}", _cv_0110.detectar_horario(_txt) == _esp,
+          _cv_0110.detectar_horario(_txt))
+_qui = datetime(2026, 10, 1, 16, 50)
+checa("'Imediato' no expediente vale",
+      _hr_0110.validar_agendamento(_qui.date(), "Imediato", _qui)[0])
+_alm = datetime(2026, 10, 1, 12, 30)
+_ok_alm, _msg_alm, _s, _c = _hr_0110.validar_agendamento(_alm.date(), "Imediato", _alm)
+checa("'Imediato' no almoco recebe o aviso do intervalo",
+      not _ok_alm and "intervalo" in _msg_alm and _c == "horario", _msg_alm)
+checa("domingo trava sem esperar o horario",
+      _hr_0110.validar_agendamento(_date_0110(2026, 10, 4), "", _qui)[1].startswith("Aos domingos"))
+checa("'pastel coxinha bolinha e churros' sem virgula sao 4 sabores",
+      _cv_0110.sabores_citados("pastel coxinha bolinha e churros")
+      == ["Pastel", "Coxinha", "Bolinha de Queijo", "Churros"],
+      str(_cv_0110.sabores_citados("pastel coxinha bolinha e churros")))
+checa("'pastel de carne' continua um sabor so",
+      _cv_0110.sabores_citados("pastel de carne e bolinha de queijo")
+      == ["Pastel Carne", "Bolinha de Queijo"])
+checa("bolo pra aniversario nao vira Bolo de Milho",
+      _cv_0110.bebidas_citadas("quero encomedar um bolo pra aniversario")[0] == [])
+checa("'um bolo' (resposta a oferta) continua Bolo de Milho",
+      [i["name"] for i in _cv_0110.bebidas_citadas("sim, um bolo")[0]] == ["Bolo de Milho"])
+_r_bolo = app._conferir_bolo_fora_do_cardapio(
+    "t", "quero um bolo pra aniversario", "Para quando seria?", memoria_mod._empty())
+checa("bolo fora do cardapio tem resposta fixa",
+      "não faz" in _r_bolo and "Bolo de Milho" in _r_bolo, _r_bolo)
+checa("'500 salgados' e volume", _cv_0110.volume_sem_sabor("quero 500 salgados fritos e assados") == 500)
+_F_500 = dict(memoria_mod._empty(), volume_pendente=500, preparo_pendente="misto")
+_p_500 = memoria_mod.pergunta_bloqueante(_F_500)
+checa("500 fritos e assados: ate 20 sabores, sem perguntar o preparo",
+      "até 20 sabores" in _p_500 and "fritos e assados" in _p_500 and "frito ou assado" not in _p_500,
+      _p_500)
+checa("a frase do volume cobre a propria etapa", memoria_mod.etapa_coberta(_F_500, _p_500))
+checa("sem itens, a pergunta e o pedido (nao a lista)",
+      memoria_mod.pedido_de_dados(memoria_mod._empty()) == "Qual o seu pedido? 😊")
+_F_MOD = dict(memoria_mod._empty(), items=[{"name": "Coxinha", "quantity": 25}])
+checa("sem modalidade, a pergunta e a modalidade",
+      memoria_mod.pedido_de_dados(_F_MOD, ["modality", "data_agendada", "horario"])
+      == "Será para entrega ou retirada na loja? 😊")
+_F_PROP = dict(_F_MOD, modality="retirada", horario="14h", data_proposta="2026-10-05")
+checa("dia ja oferecido: repete a oferta",
+      memoria_mod.pedido_de_dados(_F_PROP, ["data_agendada"]).startswith("Posso deixar para segunda-feira (05/10)"),
+      memoria_mod.pedido_de_dados(_F_PROP, ["data_agendada"]))
+checa("'sm' e sim", app._concorda("sm"))
+_res_im = app.cardapio.montar_resumo([], 20, 0, 0, 20, modalidade="retirada",
+                                     dia="hoje, quinta-feira (01/10)", horario="Imediato")
+checa("espelho 'Imediato' sem 'as Imediato'",
+      "às Imediato" not in _res_im and "Horário: Imediato" in _res_im)
+_ANT_QUICHE = "Sim, temos Quiche de Frango e Quiche de Carne de Sol disponíveis."
+checa("'de frango 2 unidades' depois do quiche vira 2 Quiche de Frango",
+      _cv_0110.completar_pelo_contexto("de frango 2 unidades", _ANT_QUICHE) == "2 Quiche de Frango")
+checa("'quiche de frango 2 unidades': quantidade vai para a frente",
+      _cv_0110.completar_pelo_contexto("quiche de frango 2 unidades", "") == "2 quiche de frango")
+checa("endereco nao e reescrito",
+      _cv_0110.completar_pelo_contexto("rua julia 6559", _ANT_QUICHE) == "rua julia 6559")
+checa("'pra agora' nao entra no endereco",
+      "agora" not in _cv_0110._FIM_DA_RUA.split("rua julia 6559 igarape pra agora", maxsplit=1)[0])
+
+
+secao("--- 01/10 (noite): relatorio do dono ---")
+import cardapio_catalogo as _cat  # noqa: E402
+checa("tamanho: 'Essas 10 coxinhas sao grande (lanche) ou mini (festa)?'",
+      memoria_mod.pergunta_de_tamanho([{"qtd": 10, "sabor": "Coxinha"}])
+      == "Essas 10 coxinhas são grande (lanche) ou mini (festa)? 😊")
+checa("tamanho: plural de pastel e masculino",
+      memoria_mod.pergunta_de_tamanho([{"qtd": 5, "sabor": "Pastel"}]).startswith("Esses 5 pastéis são"))
+_F_TAM = dict(memoria_mod._empty(), items=[{"name": "Coxinha", "quantity": 10}])
+checa("'seriam tamanho grande' nao cobre mais a etapa",
+      not memoria_mod.etapa_coberta(
+          _F_TAM, "Essas 10 Coxinha seriam tamanho grande (lanche) ou mini (festa)? 😊"))
+checa("a frase nova cobre",
+      memoria_mod.etapa_coberta(_F_TAM, memoria_mod.pergunta_bloqueante(_F_TAM)))
+checa("oferta das 14h01 sem 'geladinho'",
+      memoria_mod.oferta_adicional(datetime(2026, 10, 1, 15, 0))
+      == "Pro lanche da tarde, vai um Bolo de Milho ou um Guaraná Tuchaua 2L? 🥤",
+      memoria_mod.oferta_adicional(datetime(2026, 10, 1, 15, 0)))
+_F_DIN = dict(memoria_mod._empty(), name="Ana", items=[{"name": "Coxinha", "quantity": 25}],
+              modality="entrega", bairro="Aponia", endereco="Rua A, 1",
+              data_agendada="hoje", data_iso="2026-10-01", horario="18h",
+              payment_method="dinheiro")
+checa("dinheiro sem troco: o troco falta antes do espelho",
+      memoria_mod.faltando(_F_DIN) == ["troco_para"], str(memoria_mod.faltando(_F_DIN)))
+checa("a pergunta do troco e a do BLOCO 3",
+      memoria_mod.pedido_de_dados(_F_DIN) == "Precisa de troco para quanto? 💵")
+_F_DIN2 = dict(_F_DIN, bairro="", horario="")
+checa("troco nao entra na lista com outros dados",
+      "roco" not in memoria_mod.pedido_de_dados(_F_DIN2), memoria_mod.pedido_de_dados(_F_DIN2))
+checa("'sem troco' completa a ficha", not memoria_mod.faltando(dict(_F_DIN, troco_para="nao")))
+_F_DIN3 = dict(_F_DIN)
+checa("troco nao entendido nao vira 'nao_informado'",
+      memoria_mod.capturar_troco(_F_DIN3, "Precisa de troco para quanto? 💵", "sim preciso") == ""
+      and not _F_DIN3.get("troco_para"))
+checa("espelho: 'Dinheiro (sem troco)'",
+      app.cardapio._rotulo_pagamento("dinheiro", "nao", 50) == "Dinheiro (sem troco)")
+checa("espelho: 'Dinheiro (troco para R$ 100,00 - levar R$ 50,00)'",
+      app.cardapio._rotulo_pagamento("dinheiro", "100.00", 50)
+      == "Dinheiro (troco para R$ 100,00 - levar R$ 50,00)")
+_PIX = app._fechamento_pix(28)
+checa("fechamento do Pix com a chave e a frase nova",
+      "84749274000178" in _PIX and _PIX.endswith("Favor Enviar Comprovante de pgto para liberação do pedido 💛")
+      and "Assim que realizar" not in _PIX, _PIX)
+_OPC_LATA = ["Coca", "Coca zero", "Guaraná antártica", "Fanta laranja", "Pepsi"]
+for _txt, _esp in (("coca", "Coca"), ("coca zero", "Coca zero"), ("uma fanta", "Fanta laranja"),
+                   ("guarana", "Guaraná antártica"), ("pepsi", "Pepsi"), ("tanto faz", "")):
+    checa(f"sabor do refrigerante: {_txt!r}", memoria_mod.casar_sabor(_txt, _OPC_LATA) == _esp)
+checa("'coca' no 600ml e a Coca cola (nao a zero)",
+      memoria_mod.casar_sabor("coca", ["Guaraná antártica", "Coca cola zero", "Coca cola"]) == "Coca cola")
+_api_sab, _ = _cat.traduzir([{"name": "Refrigerante Lata", "quantity": 1, "sabor": "Coca"}])
+checa("o sabor vai para o cardapio digital", _api_sab[0].get("selected_flavors") == ["Coca"], str(_api_sab))
+checa("croquete de carne liberado (cardapio: 'croquete macaxeira e carne')",
+      "Croquete de carne" not in _cat.BLOQUEADOS
+      and _cat.SABORES["Fritos"].get("Croquete de carne") == "croquete macaxeira")
+_F_SAB = dict(memoria_mod._empty(), items=[{"name": "Refrigerante Lata", "quantity": 1, "sabor": "Fanta laranja"}])
+checa("itens do modelo recebem o sabor da ficha",
+      app._com_sabor_da_ficha([{"name": "Refrigerante Lata", "quantity": 1}], _F_SAB)[0].get("sabor")
+      == "Fanta laranja")
+secao("--- 02/10: testes do dono de 01/10 a noite ---")
+for _txt in ("quero um cento variado coxinha,churros e bolinha",
+             "QUERO UM CENTO VARIADO COXINHA E CHURROS E BOLINHAS  PARA AMANHA AS 9 HORAS"):
+    _e3 = _cv_0110._extract_data_from_message(_txt, _cv_0110.ConversationState())
+    checa(f"cento em 3 sabores nao vira 100 coxinhas: {_txt[:30]!r}",
+          not _e3.get("items") and _e3.get("volume_pendente") == 100, str(_e3))
+    _F3 = dict(memoria_mod._empty(), volume_pendente=100)
+    memoria_mod.aplicar_divisao_do_volume(_F3, _txt)
+    checa("e sai a pergunta do dono (acrescentar ou aumentar)",
+          memoria_mod.pergunta_bloqueante(_F3)
+          == "Você quer acrescentar um sabor ou aumentar uma porção dos 3 sabores? 😊",
+          memoria_mod.pergunta_bloqueante(_F3))
+checa("cento em 2 sabores continua dividido",
+      [(i["name"], i["quantity"]) for i in _cv_0110._extract_data_from_message(
+          "1 cento coxinha e churros", _cv_0110.ConversationState())["items"]]
+      == [("Coxinha", 50), ("Churros", 50)])
+for _txt in ("ola estou com uma festa pata 100 pessoas quantos salgadinho preciso ?",
+             "QUERO ORÇAMENTO PARA COOFFE BREAK VOCE TRABALHA ?"):
+    checa(f"consultoria de evento vai para a equipe: {_txt[:30]!r}", bool(app._pede_consultoria_de_evento(_txt)))
+for _txt in ("quero 100 coxinhas", "quanto custa o cento?", "quantos salgados vem no cento?"):
+    checa(f"pedido comum nao transfere: {_txt!r}", not app._pede_consultoria_de_evento(_txt))
+for _txt, _esp in (("QUERO MIL SALGADOS PARA AMAHA AS  21 HORAS RETIRADA", True),
+                   ("quero 1.000 salgados", True), ("2 mil salgados", True),
+                   ("quero 500 salgados", False), ("rua 1200 salgado filho", False),
+                   ("RUA SALGADO FILHO 2125", False)):
+    checa(f"1.000 unidades -> equipe comercial: {_txt!r}", app._pedido_de_mil(_txt) == _esp)
+checa("pergunta de frete sempre leva o valor da tabela",
+      "R$ 15,00" in app._conferir_frete_perguntado("t", "Quanto é a entrega no Pedrinhas?",
+                                                   "Qual o seu pedido? 😊"))
+checa("'quanto custa o cento de coxinha?' leva R$ 80,00",
+      "R$ 80,00" in app._conferir_preco_perguntado("t", "Quanto custa o cento de coxinha?", "Qual o seu pedido? 😊"))
+checa("'porcao de esfirra' leva R$ 30,00 (assado)",
+      "R$ 30,00" in app._conferir_preco_perguntado("t", "Qual o valor da porção de esfirra?", "Qual o seu pedido? 😊"))
+checa("pergunta de preco nao vira pedido",
+      "_RX_PERGUNTA_DE_PRECO.search(facts.normalize(text_only))" in open("app.py", encoding="utf-8").read())
+checa("pedido comum nao ganha frase de frete",
+      app._conferir_frete_perguntado("t", "quero 50 coxinhas", "Qual o seu pedido? 😊")
+      == "Qual o seu pedido? 😊")
+checa("aviso de transferencia ja dado nao repete",
+      bool(app._RX_JA_AVISOU_TRANSFERENCIA.search(app.facts.normalize(
+          "Vou te transferir agora para a nossa equipe comercial te atender! Um instante. 💛"))))
+checa("mensagem padrao de transferencia sem 'atendente humano'",
+      "humano" not in app._DEFAULT_TRANSFER_MESSAGE.lower() or "TRANSFER_MESSAGE" in os.environ)
+checa("'BAIRRO SAO BOSCO' e o Sao Joao Bosco da tabela",
+      _cv_0110.detectar_bairro("RUA LEONILDO DE SA 2125 BAIRRO SAO BOSCO") == "São Joao Bosco",
+      _cv_0110.detectar_bairro("RUA LEONILDO DE SA 2125 BAIRRO SAO BOSCO"))
+checa("cabecalho 'Faltam essas informacoes:' vai junto da lista",
+      app.split_reply("Faltam essas informações:\n\n- Bairro\n- Forma de pagamento")
+      == ["Faltam essas informações:\n- Bairro\n- Forma de pagamento"])
+checa("'2 bandejas de brigadeiro' vira item",
+      _cv_0110.doces_citados("quero 2 bandejas de brigadeiro")[0][0]["name"] == "Bandeja de Brigadeiros (16 un)"
+      and _cv_0110.doces_citados("quero 2 bandejas de brigadeiro")[0][0]["quantity"] == 2)
+checa("'meio cento de brigadeiro' nao e volume de salgado",
+      not _cv_0110.volume_sem_sabor("meio cento de brigadeiro"))
+checa("'cento e meio de coxinha e brigadeiro': o meio e da coxinha",
+      _cv_0110.doces_citados("cento e meio de coxinha e brigadeiro")[0] == [])
+_F_DOCE = dict(memoria_mod._empty(), items=[{"name": "Churros", "quantity": 50}],
+               sabores_pendentes=_cv_0110.doces_citados("opa quero beijinho")[1])
+_P_DOCE = memoria_mod.pergunta_bloqueante(_F_DOCE)
+checa("beijinho: avisa a falta e oferece os formatos de brigadeiro",
+      _P_DOCE.startswith("O Beijinho está em falta hoje! Qual docinho você prefere:")
+      and "Meio Cento de Brigadeiros (50 un)" in _P_DOCE, _P_DOCE)
+memoria_mod.aplicar_escolha_de_sabor(_F_DOCE, "meio cento")
+checa("'meio cento' responde a pergunta do doce",
+      any(i["name"] == "Meio Cento de Brigadeiros (50 un)" for i in _F_DOCE["items"]), str(_F_DOCE["items"]))
+_api_doce, _ = _cat.traduzir([{"name": "Bandeja de Brigadeiros (16 un)", "quantity": 1}])
+checa("a bandeja vai com o sabor Brigadeiro", _api_doce[0].get("selected_flavors") == ["Brigadeiro"])
+_F_RET = dict(memoria_mod._empty(), items=[{"name": "Coxinha", "quantity": 25}], modality="retirada",
+              horario="15h", data_proposta="2026-10-05")
+_R_RET = app._conferir_pagamento_na_retirada(
+    "55", "Confirmando a retirada. Agora, informe a forma de pagamento: Pix, Cartão ou Dinheiro?", _F_RET)
+checa("retirada nao pede forma de pagamento", "pagamento" not in _R_RET.lower(), _R_RET)
+checa("espelho mostra o sabor",
+      "Refrigerante Lata (Fanta laranja)" in app.cardapio.montar_resumo(
+          _F_SAB["items"], 7, 0, 0, 7, modalidade="retirada"))
 
 
 secao("--- 28/09: aviso rapido e acrescimo depois do pedido ---")
@@ -1747,7 +1956,7 @@ checa("tipo errado (item com preco como sabor) e recusado",
 _camada()
 checa("depois de remover tudo, volta ao padrao",
       _cat.bloqueados_efetivos() is _cat.BLOQUEADOS
-      and "Croquete de carne" in _cat.bloqueados_efetivos())
+      and "Panqueca de Carne" in _cat.bloqueados_efetivos())
 
 
 secao("--- 27/09: a coleta de entrega pode ter duas perguntas ---")

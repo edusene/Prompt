@@ -85,7 +85,8 @@ ETAPAS = [
     ("LOTE", lambda n, cru: bool(re.search(
         r"25 em 25|porcoes fechadas|multiplos de 25|porcao de 25|ajusto para", n))),
     ("SABOR-ESGOTADO", lambda n, cru: bool(re.search(
-        r"esgotad|em falta|indisponivel", n))),
+        # "\b": "mensagem faltam" contem "em falta" e virava esgotado.
+        r"esgotad|\bem falta\b|indisponivel", n))),
     ("SABOR-QUAL", lambda n, cru: bool(re.search(
         r"qual sabor|quais sabores|sabor de|me confirma o sabor|preparo", n))),
     ("UPSELL", lambda n, cru: app._ofereceu_acompanhamento(cru)),
