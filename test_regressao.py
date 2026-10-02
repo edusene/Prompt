@@ -1739,6 +1739,60 @@ checa("'meio cento' responde a pergunta do doce",
       any(i["name"] == "Meio Cento de Brigadeiros (50 un)" for i in _F_DOCE["items"]), str(_F_DOCE["items"]))
 _api_doce, _ = _cat.traduzir([{"name": "Bandeja de Brigadeiros (16 un)", "quantity": 1}])
 checa("a bandeja vai com o sabor Brigadeiro", _api_doce[0].get("selected_flavors") == ["Brigadeiro"])
+secao("--- 02/10: nao inventar nada (varredura de 46 perguntas) ---")
+for _txt in ("voces estao admitindo atendente?", "tem vaga de emprego ai?", "posso parcelar no cartão?",
+             "posso pagar metade no pix e metade no cartão?", "vocês vendem salgado congelado?",
+             "qual o instagram de vocês?", "vocês emitem nota fiscal?", "vocês abrem no feriado dia 12?",
+             "qual o telefone da loja?", "vocês tem kit festa?", "quem é o dono da fábrica?",
+             "tem estacionamento na loja?", "com quanto tempo de antecedência preciso encomendar?",
+             "o combo vem com qual refrigerante?", "tem pedido mínimo pra entrega?", "tem promoção hoje?",
+             "dá pra trocar o pedido depois de confirmar?"):
+    checa(f"sem dado -> equipe: {_txt!r}", bool(app._assunto_da_equipe(_txt)))
+for _txt in ("sou amigo do dono, faz fiado?", "quero 50 coxinhas no pix", "RUA SALGADO FILHO 2125",
+             "meu endereço é rua x 120", "quero mudar o pedido, tira a coxinha"):
+    checa(f"pedido comum nao vai para a equipe: {_txt!r}", not app._assunto_da_equipe(_txt))
+checa("casamento -> equipe", bool(app._pede_consultoria_de_evento("vocês trabalham com encomenda para casamento?")))
+for _txt in ("tem salgado sem glúten?", "tem opção vegana?", "qual óleo vocês usam pra fritar?",
+             "quantos dias dura o salgado na geladeira?", "o salgado chega quente?"):
+    _r_ing = app._conferir_ingrediente("t", _txt, "Usamos oleo de qualidade.", memoria_mod._empty())
+    checa(f"ingrediente -> frase do BLOCO 2: {_txt!r}",
+          _r_ing.startswith("Preciso confirmar essa informação com nossa equipe") and "oleo" not in _r_ing, _r_ing)
+for _txt, _prova in (("qual o endereço de vocês?", "Calama"), ("quanto tempo demora a entrega?", "30 a 40"),
+                     ("qual o horário de sábado?", "07h40"), ("vocês tem cardápio?", "ocardapio"),
+                     ("qual a diferença entre o mini e o grande?", "por unidade")):
+    _r_f = app._conferir_fato_do_dono("t", _txt, "Resposta inventada.", memoria_mod._empty())
+    checa(f"fato do dono com o texto dele: {_txt!r}", _prova in _r_f and "inventada" not in _r_f, _r_f)
+checa("antecedencia nao vira prazo de entrega",
+      "30 a 40" not in app._conferir_fato_do_dono(
+          "t", "com quanto tempo de antecedência preciso encomendar?", "X", memoria_mod._empty()))
+checa("fora da tabela: texto do BLOCO 3",
+      app._conferir_frete_perguntado("t", "vocês entregam em Candeias do Jamari?", "X") == app.FORA_DA_AREA)
+checa("'entrega na rua guapore' nao e bairro fora da tabela",
+      app._conferir_frete_perguntado("t", "entrega na rua guapore", "X") == "X")
+checa("'entregam no Nova Porto Velho?' leva a taxa",
+      "R$ 12,00" in app._conferir_frete_perguntado("t", "vocês entregam no Nova Porto Velho?", "X"))
+checa("'Av.' nao corta a frase",
+      len(app._RX_FIM_DE_FRASE.split("Gostaria de retirar na Av. Calama, 5892 - Igarapé?")) == 1)
+checa("pergunta sobre refrigerante nao abre pedido",
+      not _cv_0110._extract_data_from_message("tem refrigerante de 1 litro?",
+                                             _cv_0110.ConversationState()).get("bebidas_pendentes"))
+checa("pedido de refrigerante continua abrindo",
+      bool(_cv_0110._extract_data_from_message("quero um refri",
+                                              _cv_0110.ConversationState()).get("bebidas_pendentes")))
+checa("saudacao do modelo no meio sai",
+      app._conferir_saudacao("A bandeja custa R$ 20,80. Boa tarde! Qual o seu pedido?",
+                             datetime(2026, 10, 2, 15, 0)).count("Boa tarde") == 1)
+checa("refri de 1 litro: nao temos + opcoes da planilha",
+      app._conferir_refri_perguntado("t", "tem refrigerante de 1 litro?", "X").startswith(
+          "Não temos refrigerante de 1 litro. Temos Refrigerante Lata"))
+checa("coca 2 litros: em falta",
+      "em falta" in app._conferir_refri_perguntado("t", "tem coca de 2 litros?", "X"))
+checa("'nao temos X, mas temos Y' perde a sugestao",
+      app._RX_NAO_TEMOS_MAS.sub(lambda m: m.group(1).rstrip() + ".",
+                                "Não temos salgado de chocolate no cardápio, mas temos churros.")
+      == "Não temos salgado de chocolate no cardápio.")
+checa("regra 9.7 (nao invente nada) no prompt de execucao",
+      "9.7 NAO INVENTE NADA" in open("app.py", encoding="utf-8").read())
 _F_RET = dict(memoria_mod._empty(), items=[{"name": "Coxinha", "quantity": 25}], modality="retirada",
               horario="15h", data_proposta="2026-10-05")
 _R_RET = app._conferir_pagamento_na_retirada(

@@ -504,7 +504,9 @@ _RX_CONSULTORIA_DE_EVENTO = _re_mod.compile(
     r"|\b(?:para|pra|p/)\s+\d{1,4}\s+(?:pessoas|convidados|pessoa)\b"
     r"|\bquantas\s+pessoas\b|\bc[o0]+f+e+\s*-?\s*break|\bcafe\s+da\s+manha\s+corporativ"
     r"|\bbuffet\b|\borcamento\s+(?:para|pra|de)\s+(?:um\s+|uma\s+|o\s+|a\s+)?"
-    r"(?:evento|festa|casamento|aniversario|confraterniza|formatura|empresa|coffee|cofee)")
+    r"(?:evento|festa|casamento|aniversario|confraterniza|formatura|empresa|coffee|cofee)"
+    r"|\b(?:trabalham|fazem|atendem|aceitam)\s+(?:com\s+)?(?:encomendas?\s+)?(?:para|pra|de)\s+"
+    r"(?:casamentos?|formaturas?|eventos?|empresas?|confraterniza\w*|buffet)")
 
 
 MENSAGEM_EQUIPE_COMERCIAL = (
@@ -529,6 +531,162 @@ def _pedido_de_mil(texto: str) -> bool:
         except ValueError:
             return False
     return True
+
+
+# ── O que a Sandrinha NAO sabe ────────────────────────────────────────────
+# Varredura de 02/10, 26 perguntas fora do roteiro x 3 rodadas: ela inventou
+# Instagram ("@balbssalgados"), nota fiscal ("emitimos para todos os
+# pedidos"), feriado ("abrimos normalmente no dia 12"), telefone (deu o numero
+# da propria cliente), o nome do dono ("Eduardo"), o oleo, salgado congelado e
+# "kit festa" - e a cada rodada uma versao. Nada disso esta no prompt nem na
+# planilha. O dono: "o agente nao deve inventar NADA". Assunto sem dado vai
+# para a equipe; pergunta de ingrediente recebe a frase do proprio prompt.
+_RX_ASSUNTO_DA_EQUIPE = _re_mod.compile(
+    r"\b(?:vagas?|emprego|curriculo|contratando|admitindo|admissao|trabalhar\s+(?:ai|ai\s+com|com\s+voces|na\s+balbs))\b"
+    r"|\b(?:instagram|insta|facebook|tiktok|redes?\s+socia\w*|site)\b"
+    r"|\b(?:telefone|numero\s+(?:da\s+loja|de\s+voces|fixo|da\s+fabrica)|whats(?:app)?\s+(?:da\s+loja|de\s+voces|da\s+fabrica))\b"
+    r"|\b(?:nota\s+fiscal|cupom\s+fiscal|nf\b|nfe\b|cnpj\s+(?:para|pra)\s+nota)"
+    r"|\bferiado\b|\bquem\s+(?:e|sao)\s+os?\s+donos?\b|\bnome\s+do\s+dono\b|\bproprietari\w*"
+    r"|\b(?:vendem|vende|tem|fazem)\s+(?:salgad\w*\s+)?congelad\w*"
+    r"|\bkit\s+festa\b|\bestacionamento\b|\bparcel\w*"
+    r"|\bmetade\s+(?:no|em|pelo)\s+(?:pix|cartao|dinheiro)\b|\bduas\s+formas\s+de\s+pagamento\b"
+    r"|\bdividir\s+o\s+pagamento\b|\bfornecedor\w*|\bparceria\b|\brevend\w*|\bfranquia\b"
+    # Segunda varredura (02/10): antecedencia virava "30 a 40 minutos", o
+    # combo "so tem Tuchaua", e pedido minimo e promocao ficavam sem resposta.
+    r"|\bantecedencia\b|\bcom\s+quanto\s+tempo\s+antes\b"
+    r"|\bcombo\b.{0,30}\b(?:refri\w*|sabor\w*|vem\s+com)\b"
+    r"|\b(?:pedido|valor|compra)\s+minim[oa]\b|\bminimo\s+(?:pra|para)\s+entrega\b"
+    r"|\bpromoc\w*|\bpromo\b|\bcupom\b"
+    r"|\b(?:trocar|alterar|mudar|mexer\s+n)\w*\s+(?:o\s+|no\s+)?pedido\s+depois"
+    r"|\bdepois\s+de\s+(?:confirmar|confirmado|fechar|fechado)\b")
+
+_RX_INGREDIENTE = _re_mod.compile(
+    r"\b(?:gluten|vegan\w*|vegetarian\w*|lactose|alergi\w*|alergic\w*|ingredientes?|oleo"
+    r"|calorias?|nutricion\w*|validade|quantos\s+dias\s+dura|dura\s+quantos\s+dias|geladeira"
+    r"|congelar|quantas\s+gramas|gramas|tamanho\s+do\s+(?:mini|salgado|salgadinho)"
+    r"|feito\s+com|recheio\s+de\s+que|chega\s+quente|vem\s+quente|esquent\w*|microondas|air\s*fryer)\b")
+
+TEXTO_CONFIRMAR_COM_EQUIPE = (
+    "Preciso confirmar essa informação com nossa equipe antes de te passar certinho! 😊")
+
+
+def _assunto_da_equipe(texto: str) -> str | None:
+    achado = _RX_ASSUNTO_DA_EQUIPE.search(facts.normalize(texto or ""))
+    return f"assunto sem informacao para a Sandrinha: {achado.group(0)}" if achado else None
+
+
+def _conferir_ingrediente(user: str, pergunta: str, reply: str, memoria: dict) -> str:
+    """Ingrediente, validade, tamanho, temperatura: frase do BLOCO 2."""
+    if not pergunta or not _RX_INGREDIENTE.search(facts.normalize(pergunta)):
+        return reply
+    seguinte = _proxima_pergunta_do_funil(memoria) if memoria.get("items") else ""
+    print(f"[sem-dado] user={user} pergunta de ingrediente/produto; frase do BLOCO 2")
+    return (f"{TEXTO_CONFIRMAR_COM_EQUIPE}\n\n{seguinte}" if seguinte
+            else f"{TEXTO_CONFIRMAR_COM_EQUIPE} Enquanto isso, bora montar o seu pedido?")
+
+
+# Fatos que o dono deu no prompt: se a pergunta e sobre eles, a resposta tem
+# de trazer o fato - com o texto do dono quando o modelo nao o escreveu.
+_FATOS_DO_DONO = (
+    (_re_mod.compile(r"\b(?:qual|onde|me\s+(?:passa|manda|envia))\b.{0,25}\b(?:endereco|localizacao|loja|fabrica)\b"
+                     r"|\bonde\s+(?:fica|ficam|voces\s+ficam|e\s+a\s+loja|retiro|busco)\b"
+                     r"|\b(?:qual|de\s+que|em\s+que)\s+cidade\b|\bde\s+onde\s+(?:voces\s+)?sao\b"),
+     "calama", f"Nossa loja fica na {cardapio.ENDERECO_FABRICA}! 😊"),
+    (_re_mod.compile(r"^(?!.*\bantecedencia\b).*\b(?:quanto\s+tempo|demora|prazo|tempo\s+de\s+entrega"
+                     r"|em\s+quanto\s+tempo)\b"),
+     "30 a 40", "A estimativa média é de 30 a 40 minutos, podendo variar conforme o "
+                "movimento e a rota da entrega! 😊"),
+    (_re_mod.compile(r"\b(?:que\s+horas|qual\s+(?:e\s+)?o\s+horario|horario\s+de|ate\s+que\s+horas"
+                     r"|abrem?\s+(?:que\s+horas|sabado|domingo)|fecham?\b|funcionam?\b|madrugada)\b"),
+     "07h40", "Atendemos de segunda a sábado, das 07h40 às 12h00 e das 14h00 às 20h00. "
+              "Aos domingos a fábrica não abre."),
+    # BLOCO 2 (triagem de tamanho e linha mini festa). Em 1 de 3 rodadas a
+    # explicacao do modelo era apagada pela trava de "aula de lote".
+    (_re_mod.compile(r"\bdiferenca\b.{0,40}\b(?:mini|grande|lanche|festa)\b"
+                     r"|\b(?:mini|festa)\b.{0,20}\bou\b.{0,20}\b(?:grande|lanche)\b.{0,30}\bqual\b"),
+     "por unidade", "O mini é o salgado de festa, vendido em porções de 25 unidades por "
+                    "sabor. O grande é o salgado de lanche, vendido por unidade. 😊"),
+    # Formas de pagamento, como o BLOCO 6 diz ("Aceitamos Pix, cartao ou
+    # dinheiro"). Vale refeicao, boleto, cheque: a resposta e esta mesma.
+    (_re_mod.compile(r"^(?!.*\bpix\b.*\bentrega\b)(?!.*\bentrega\b.*\bpix\b).*(?:\baceitam?\b|\bformas?\s+de\s+pagamento\b|\bquais\s+(?:as\s+)?formas\b)"),
+     "pix cartao ou dinheiro", "Aceitamos Pix, cartão ou dinheiro. 😊"),
+    # O link do BLOCO 1. "Voces tem cardapio?" ficava so com "Qual o seu pedido?".
+    (_re_mod.compile(r"\b(?:tem|tens|manda|mande|envia|envie|qual|cade|passa|mostra|ver)\b.{0,15}\bcardapio\b|^\s*cardapio\s*$"),
+     "ocardapio", "Dá uma olhada no nosso cardápio completo: "
+                  "https://balbssalgados.ocardapio.net/ 😊"),
+)
+
+
+_RX_TAMANHO_DE_REFRI = _re_mod.compile(
+    r"\b(\d(?:[.,]\d)?)\s*(?:l|litros?|lts?)\b|\b(\d{3})\s*ml\b|\b(latas?|latinhas?)\b")
+
+
+def _conferir_refri_perguntado(user: str, pergunta: str, reply: str) -> str:
+    """"Tem refrigerante de 1 litro?": a resposta sai da planilha.
+
+    Na varredura de 02/10 cada rodada listou outras opcoes, e uma ofereceu
+    "2 litros" generico - que esta esgotado.
+    """
+    from agents import conversation as _cv
+    t = " ".join(facts.normalize(pergunta or "").split())
+    if not t or not _cv.e_pergunta_sem_pedido((pergunta or "").lower()):
+        return reply
+    if not _re_mod.search(r"\b(?:refri\w*|coca|guarana|tuchaua|fanta|pepsi)\b", t):
+        return reply
+    m = _RX_TAMANHO_DE_REFRI.search(t)
+    if not m:
+        return reply
+    opcoes = _cv._opcoes_de_refrigerante()
+    lista = (", ".join(opcoes[:-1]) + " ou " + opcoes[-1]) if len(opcoes) > 1 else "".join(opcoes)
+    if m.group(3):
+        nome = _cv.BEBIDA_LATA
+    elif m.group(2):
+        nome = _cv.BEBIDA_600 if m.group(2) == "600" else ""
+    else:
+        litros = m.group(1).replace(",", ".")
+        if litros == "2":
+            nome = (_cv.BEBIDA_TUCHAUA if _re_mod.search(r"\b(?:guarana|tuchaua)\b", t)
+                    else _cv.BEBIDA_2L)
+        else:
+            nome = ""
+    if nome and nome in opcoes:
+        oficial = facts.resolve_unit_price(nome, 1)
+        valor = f" ({cardapio._brl(oficial['preco_unitario'])})" if oficial else ""
+        texto = f"Temos sim! {nome}{valor}. 🥤"
+    elif nome:
+        texto = f"O {nome} está em falta hoje! Temos {lista}. 🥤"
+    else:
+        tamanho = m.group(0).strip()
+        texto = f"Não temos refrigerante de {tamanho}. Temos {lista}. 🥤"
+    print(f"[bebida] user={user} pergunta de tamanho de refrigerante; resposta da planilha")
+    return texto
+
+
+# "Nao temos X no cardapio, mas temos Y": a sugestao variava a cada rodada
+# (churros para "salgado de chocolate", pao pizza para "mini pizza"). O fato e
+# o "nao temos"; o resto sai.
+_RX_NAO_TEMOS_MAS = _re_mod.compile(
+    r"(N[aã]o (?:temos|trabalhamos com|fazemos) [^.!?\n]*?)\s*,\s*mas\b[^.!?\n]*([.!]?)")
+
+
+def _conferir_fato_do_dono(user: str, pergunta: str, reply: str,
+                           memoria: dict | None = None) -> str:
+    if not pergunta or "?" not in pergunta and not _re_mod.search(
+            r"\b(?:qual|onde|quanto|que horas|ate que)\b", facts.normalize(pergunta)):
+        return reply
+    norm_p = facts.normalize(pergunta)
+    for rx, prova, frase in _FATOS_DO_DONO:
+        if not rx.search(norm_p):
+            continue
+        # Sempre o texto do dono: o modelo acertava o fato, mas a cada rodada
+        # com outra redacao e outro acrescimo ("aos domingos nao abre para
+        # entregas imediatas" numa sexta-feira). Espelho nao se toca.
+        if _RX_LINHA_DE_RESUMO.search(reply or ""):
+            return reply if prova in facts.normalize(reply or "") else _juntar_antes(frase, reply)
+        seguinte = _proxima_pergunta_do_funil(memoria) if memoria is not None else ""
+        print(f"[fato] user={user} pergunta sobre fato do prompt; texto do dono")
+        return f"{frase}\n\n{seguinte}".strip() if seguinte else frase
+    return reply
 
 
 def _pede_consultoria_de_evento(texto: str) -> str | None:
@@ -1589,7 +1747,9 @@ _RX_PERGUNTA_TAMANHO = _re_mod.compile(
 # pergunta legitima, entao cortar a mensagem inteira perderia a parte boa.
 # A quebra de linha corta sempre, com ou sem espaco depois: sem isso o
 # espelho do pedido inteiro virava uma "frase" so.
-_RX_FIM_DE_FRASE = _re_mod.compile(r"\n+|(?<=[?!.])\s+")
+# "Av." e "R." nao terminam frase: "retirar aqui na loja na Av. Calama, 5892"
+# era cortado em "na Av." (varredura de 02/10).
+_RX_FIM_DE_FRASE = _re_mod.compile(r"\n+|(?<!Av\.)(?<!av\.)(?<!\bR\.)(?<=[?!.])\s+")
 
 # O espelho do pedido, que o filtro nao pode tocar.
 _RX_LINHA_DE_RESUMO = _re_mod.compile(
@@ -2963,16 +3123,28 @@ def _conferir_formato_da_coleta(user: str, reply: str, memoria: dict) -> str:
         # unica mensagem."), que a lista ja e.
         if _re_mod.search(r"\binform[ea]\b|\bunica mensagem\b|faltam? essas? informac", norm):
             continue
-        if ("?" in limpo or limpo.endswith(":") or _RX_COBRA_LOGISTICA.search(norm)
-                or _RX_CABECALHO_DE_COLETA.search(norm)
-                or any(p in norm for c in pendentes
-                       for p in {**_PEDIDO_DE_DADO, **_PEDIDO_DE_DADO_EXTRA}.get(c, ()))):
+        if "?" in limpo or limpo.endswith(":") or _RX_CABECALHO_DE_COLETA.search(norm):
+            continue
+        # Sem "?", so sai o que PEDE dado ("Me passe o bairro e a rua."). Frase
+        # que INFORMA fica, mesmo citando entrega ou bairro: "A estimativa
+        # media e de 30 a 40 minutos... rota da entrega" era cortada e o
+        # cliente que perguntou o prazo recebia so "Qual o seu pedido?"
+        # (varredura de 02/10 - o mesmo com o endereco da loja).
+        _pede = _RX_PEDE_DADO.search(norm) or frase.lstrip().startswith(("-", "•", "*"))
+        if _pede and (_RX_COBRA_LOGISTICA.search(norm)
+                      or any(p in norm for c in pendentes
+                             for p in {**_PEDIDO_DE_DADO, **_PEDIDO_DE_DADO_EXTRA}.get(c, ()))):
             continue
         mantidas.append(limpo)
     corpo = " ".join(mantidas).strip()
     novo = f"{corpo}\n\n{padrao}" if len([c for c in corpo if c.isalpha()]) >= 12 else padrao
     print(f"[coleta] user={user} pedido de dados reescrito no formato curto")
     return novo.strip()
+
+
+_RX_PEDE_DADO = _re_mod.compile(
+    r"\b(?:informe|informar|envie|enviar|mande|mandar|me passe|me passa|passe|passa|"
+    r"diga|me diga|me fala|preciso d[oae]s?|preciso que|precisamos d[oae]s?|qual|quais)\b")
 
 
 _RX_JA_AVISOU_TRANSFERENCIA = _re_mod.compile(
@@ -2990,6 +3162,15 @@ _RX_PERGUNTA_DE_FRETE = _re_mod.compile(
     r"|\b(?:entrega|frete|taxa)\b.{0,30}\b(?:quanto|qual o valor)\b")
 
 
+FORA_DA_AREA = (f"Não entregamos no seu bairro no momento. Gostaria de retirar aqui na "
+               f"loja na {cardapio.ENDERECO_FABRICA}? 💛")
+_RX_ENTREGA_EM_LUGAR = _re_mod.compile(
+    r"\bentrega\w*\s+(?:em|no|na|pro|pra|para\s+o|para\s+a|ate\s+o|ate\s+a)\s+([a-z ]{3,40}?)\s*$")
+_RX_NAO_E_LUGAR = _re_mod.compile(
+    r"^(?:hoje|amanha|agora|domingo|sabado|segunda|terca|quarta|quinta|sexta|feriado"
+    r"|madrugada|casa|minha casa|meu bairro|seu bairro|todo|toda|qualquer|rua|r|av|avenida|travessa|alameda|estrada|rodovia|condominio|residencial)\b")
+
+
 def _conferir_frete_perguntado(user: str, pergunta: str, reply: str) -> str:
     """"Quanto e a entrega no Pedrinhas?" tem resposta na tabela de frete.
 
@@ -2997,9 +3178,29 @@ def _conferir_frete_perguntado(user: str, pergunta: str, reply: str) -> str:
     conferencias de coleta e o cliente recebia so "Qual o seu pedido?" (1 de 2
     rodadas do roteiro, 02/10). O valor sai da tabela, nao do modelo.
     """
-    if not pergunta or not _RX_PERGUNTA_DE_FRETE.search(facts.normalize(pergunta)):
-        return reply
     from agents.conversation import detectar_bairro
+    norm_p = facts.normalize(pergunta or "")
+    # "Voces entregam em Candeias do Jamari?": fora da tabela, o texto do
+    # BLOCO 3. Era o modelo quem respondia, e numa rodada a oferta da retirada
+    # saiu cortada.
+    lugar = _RX_ENTREGA_EM_LUGAR.search(norm_p)
+    if lugar and not detectar_bairro(pergunta):
+        nome_lugar = lugar.group(1).strip()
+        if (len(nome_lugar) >= 4 and not _RX_NAO_E_LUGAR.match(nome_lugar)
+                and not facts.lookup_frete(nome_lugar)):
+            print(f"[frete] user={user} '{nome_lugar}' fora da tabela; texto do BLOCO 3")
+            return FORA_DA_AREA
+    if lugar and detectar_bairro(pergunta) and "?" in (pergunta or ""):
+        _frete = facts.lookup_frete(detectar_bairro(pergunta))
+        if _frete:
+            _valor = cardapio._brl(float(_frete["taxa"]))
+            if _valor not in (reply or ""):
+                print(f"[frete] user={user} 'entregam no {_frete['bairro']}?' sem a taxa; posta")
+                return _juntar_antes(f"Entregamos sim! A taxa de entrega para "
+                                     f"{_frete['bairro']} é {_valor}.", reply)
+            return reply
+    if not pergunta or not _RX_PERGUNTA_DE_FRETE.search(norm_p):
+        return reply
     bairro = detectar_bairro(pergunta)
     if not bairro:
         return reply
@@ -3013,7 +3214,8 @@ def _conferir_frete_perguntado(user: str, pergunta: str, reply: str) -> str:
     return _juntar_antes(f"A taxa de entrega para {frete['bairro']} é {valor}.", reply)
 
 
-def _conferir_preco_perguntado(user: str, pergunta: str, reply: str) -> str:
+def _conferir_preco_perguntado(user: str, pergunta: str, reply: str,
+                              memoria: dict | None = None) -> str:
     """"Quanto custa o cento de coxinha?" -> o valor da tabela na resposta.
 
     Pergunta de preco deixou de virar pedido na ficha (02/10), e com isso o
@@ -3040,12 +3242,17 @@ def _conferir_preco_perguntado(user: str, pergunta: str, reply: str) -> str:
     if not oficial or oficial.get("ambiguo") and unidades < facts.QTD_MINIMA_FESTA:
         return reply
     valor = cardapio._brl(round(float(oficial["preco_unitario"]) * unidades, 2))
-    if valor in (reply or ""):
-        return reply
     rotulo = " ".join(formato.split()).lower()
-    print(f"[preco] user={user} pergunta de preco sem o valor; {valor} posto")
-    return _juntar_antes(f"{'A' if rotulo.startswith('por') else 'O'} {rotulo} de "
-                         f"{oficial.get('item_oficial') or nome} sai {valor}.", reply)
+    frase = (f"{'A' if rotulo.startswith('por') else 'O'} {rotulo} de "
+             f"{oficial.get('item_oficial') or nome} sai {valor}.")
+    if _RX_LINHA_DE_RESUMO.search(reply or ""):
+        return reply if valor in reply else _juntar_antes(frase, reply)
+    # Sempre a frase do codigo: o modelo dava o valor certo, mas com outra
+    # redacao a cada rodada ("sabor incluso no pacote dos assados..."), e a
+    # medicao de oscilacao de 02/10 acusou isso na porcao de esfirra.
+    seguinte = _proxima_pergunta_do_funil(memoria) if memoria is not None else ""
+    print(f"[preco] user={user} pergunta de preco; frase do codigo com {valor}")
+    return f"{frase}\n\n{seguinte}".strip() if seguinte else frase
 
 
 _RX_PEDE_PAGAMENTO = _re_mod.compile(
@@ -3120,7 +3327,12 @@ def _conferir_etapa_travada(user: str, reply: str, memoria: dict) -> str:
         limpo = frase.strip()
         if not limpo:
             continue
-        if _RX_COBRA_LOGISTICA.search(facts.normalize(limpo)):
+        _n = facts.normalize(limpo)
+        # So o que PEDE dado de logistica sai; o que informa ("Nosso horario
+        # e das 07h40 as 20h00") e resposta ao cliente e fica.
+        if _RX_COBRA_LOGISTICA.search(_n) and ("?" in limpo or _RX_PEDE_DADO.search(_n)
+                                                or limpo.rstrip().endswith(":")
+                                                or limpo.lstrip().startswith(("-", "•", "*"))):
             cortadas.append(limpo)
             continue
         mantidas.append(limpo)
@@ -3273,7 +3485,7 @@ def _conferir_troco_no_espelho(user: str, reply: str, memoria: dict) -> str:
 
 
 # Onde termina uma pergunta. Serve para contar quantas a mensagem faz.
-_RX_FRASE_COM_PERGUNTA = _re_mod.compile(r"[^.!?\n]*\?")
+_RX_FRASE_COM_PERGUNTA = _re_mod.compile(r"(?:[Aa]v\.|[^.!?\n])*\?")
 
 
 # Abertura que nao informa nada. A regra e do dono, escrita no documento dele:
@@ -3402,6 +3614,11 @@ def _conferir_pede_texto(user: str, reply: str, memoria: dict) -> str:
     return novo.strip()
 
 
+_RX_SAUDACAO_SOLTA = _re_mod.compile(
+    r"(?:(?:Bom dia|Boa tarde|Boa noite|Ol[áa]|Oi)(?:,\s*[A-ZÀ-Ú][\wÀ-ÿ]*(?:\s+[A-ZÀ-Ú][\wÀ-ÿ]*)?)?\s*!"
+    r"|(?:Eu sou|Aqui é) a Sandrinha da BALBS\s*💛?|Seja muito bem-vindo\(a\)!)\s*")
+
+
 def _conferir_saudacao(reply: str, agora, nome: str = "") -> str:
     """A primeira resposta da conversa comeca com a saudacao do horario.
 
@@ -3416,6 +3633,12 @@ def _conferir_saudacao(reply: str, agora, nome: str = "") -> str:
     if facts.normalize(reply).startswith(facts.normalize(saudacao)):
         return reply
     corpo = _re_mod.sub(r"^[^\w]+", "", reply).strip()   # emoji/pontuacao soltos
+    # A saudacao do modelo que sobrou no meio ("...R$ 20,80. Boa tarde!",
+    # "Eu sou a Sandrinha da BALBS 💛 Seja muito bem-vindo(a)!") sai: a
+    # abertura e esta, uma vez so (varredura de 02/10).
+    corpo = _RX_SAUDACAO_SOLTA.sub(" ", corpo)
+    corpo = _re_mod.sub(r"[ \t]{2,}", " ", corpo)
+    corpo = _re_mod.sub(r"\n{3,}", "\n\n", corpo).strip()
     primeiro = (nome or "").strip().split(" ")[0]
     abertura = f"{saudacao}, {primeiro}!" if primeiro else f"{saudacao}!"
     print(f"[formato] primeira resposta sem saudacao; '{abertura}' colocado")
@@ -3895,6 +4118,9 @@ def _handle_flush(user: str, items: list[dict]) -> None:
         matched_kw = _check_transfer_keywords(items)
         if not matched_kw:
             matched_kw = _pede_consultoria_de_evento(" ".join(
+                str(it.get("text", "")) for it in items))
+        if not matched_kw:
+            matched_kw = _assunto_da_equipe(" ".join(
                 str(it.get("text", "")) for it in items))
         if matched_kw:
             print(f"[flush] user={user} keyword de transferência detectada: '{matched_kw}'")
@@ -4588,6 +4814,15 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             "mensagem os seguintes dados para entrega'. Formas de pagamento: 'Pix, "
             "Cartao ou Dinheiro' - sem 'antecipado' nem 'na entrega'. Nada de "
             "agradecimento longo nem 'ja esta sendo preparado com muito carinho'."
+            "\n9.7 NAO INVENTE NADA: so afirme o que esta neste prompt, na planilha ou "
+            "no retorno de uma tool. Instagram, site, telefone, nota fiscal, feriado, "
+            "nome do dono, ingredientes, oleo, validade, gramas, congelado, kit, "
+            "parcelamento, vagas de emprego e qualquer outro dado que nao esteja aqui: "
+            "responda 'Preciso confirmar essa informacao com nossa equipe antes de te "
+            "passar certinho! 😊' e nada mais sobre o assunto. NUNCA deduza, estime nem "
+            "'normalmente indicamos'. Pergunta que voce nao entendeu nao e 'sim'. "
+            "Produto que nao esta no cardapio NAO e duvida: diga que nao temos (o que "
+            "nao consta no cardapio esta indisponivel)."
             "\n10. SEMPRE responda primeiro a pergunta que o cliente fez (preco, frete, "
             "horario, endereco, forma de pagamento, se tem determinado produto) e so "
             "depois puxe o proximo dado do funil, na mesma mensagem. Isso vale tambem no "
@@ -5317,7 +5552,14 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             reply = _re_mod.sub(r"^\s*😊\s+(?=\w)", "", reply or "")
             if not _RX_LINHA_DE_RESUMO.search(reply or ""):
                 reply = _conferir_frete_perguntado(user, text_only, reply)
-                reply = _conferir_preco_perguntado(user, text_only, reply)
+                reply = _conferir_preco_perguntado(user, text_only, reply, _memoria)
+                reply = _conferir_ingrediente(user, text_only, reply, _memoria)
+                reply = _conferir_fato_do_dono(user, text_only, reply, _memoria)
+                _refri = _conferir_refri_perguntado(user, text_only, reply)
+                if _refri != reply:
+                    _seguinte = _proxima_pergunta_do_funil(_memoria)
+                    reply = f"{_refri}\n\n{_seguinte}".strip() if _seguinte else _refri
+                reply = _RX_NAO_TEMOS_MAS.sub(lambda m: m.group(1).rstrip() + ".", reply)
             if _primeira_resposta:
                 reply = _conferir_saudacao(reply, _agora, _memoria.get("name") or "")
 

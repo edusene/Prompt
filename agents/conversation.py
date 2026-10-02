@@ -1482,6 +1482,19 @@ def doces_citados(msg_lower: str) -> tuple[list[dict], list[dict]]:
     return [], [pendente]
 
 
+_RX_INTENCAO_DE_PEDIDO = re.compile(
+    r"\b(?:quero|queria|quer[oi]a|manda|mande|vou querer|vou levar|pode ser|coloca|coloque"
+    r"|adiciona|acrescenta|inclui|me ve|me v[eê]|traz|pode mandar|bota|poe|sim|aceito)\b")
+
+
+def e_pergunta_sem_pedido(msg_lower: str) -> bool:
+    """Pergunta sobre produto, sem nenhuma palavra de pedido."""
+    t = " ".join((msg_lower or "").lower().split())
+    if "?" not in t:
+        return False
+    return not _RX_INTENCAO_DE_PEDIDO.search(t)
+
+
 def _opcoes_de_refrigerante() -> list[str]:
     """Tamanhos que a fabrica tem HOJE (esgotado nao entra na pergunta)."""
     opcoes = []
@@ -1858,11 +1871,16 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
     # em campo proprio porque SOMA aos itens - como "items" ela trocaria o
     # pedido inteiro pela bebida.
     bebidas, bebida_sem_tamanho = bebidas_citadas(msg_lower)
+    doces, doce_sem_formato = doces_citados(msg_lower)
+    # Pergunta sobre o produto nao e pedido: "tem refrigerante de 1 litro?" e
+    # "o combo vem com qual refrigerante?" abriam "Qual refrigerante voce
+    # prefere?" como se a cliente tivesse pedido um (varredura de 02/10).
+    if e_pergunta_sem_pedido(msg_lower):
+        bebidas, bebida_sem_tamanho, doces, doce_sem_formato = [], [], [], []
     if bebidas:
         extracted["bebidas"] = bebidas
     if bebida_sem_tamanho:
         extracted["bebidas_pendentes"] = bebida_sem_tamanho
-    doces, doce_sem_formato = doces_citados(msg_lower)
     if doces:
         extracted["doces"] = doces
     if doce_sem_formato:
