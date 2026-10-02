@@ -31,11 +31,13 @@ _LER_JSON_REAL = config_dono._ler_json
 config_dono._ler_json = lambda chave: None
 import conversation_memory as memoria_mod  # noqa: E402
 import facts  # noqa: E402
-# Os casos daqui foram escritos com os dados da planilha: a fonte fica fixa nela,
-# seja qual for o FONTE_DADOS do banco/ambiente. A fonte cardapio tem a secao
-# propria no fim, com um retrato do cardapio salvo em fixtures/.
-_FONTE_ATIVA_REAL = facts.fonte_ativa
-facts.fonte_ativa = lambda: "planilha"
+# Dados fixos: o retrato do cardapio digital salvo em fixtures/ (a planilha saiu
+# do sistema em 02/10/2026). Assim o teste nao muda quando o dono edita o
+# cardapio, e nao depende de rede.
+import json as _json_fx  # noqa: E402
+import cardapio_fonte as _cf_fx  # noqa: E402
+_RETRATO_FX = _json_fx.load(open("fixtures/cardapio_snapshot_2026-10-02.json", encoding="utf-8"))
+_cf_fx.bruto = lambda forcar=False: _RETRATO_FX
 from agents.conversation import (  # noqa: E402
     ConversationState,
     _extract_data_from_message,
@@ -174,7 +176,7 @@ checa("25 fritos ja fecham", _sugestoes([{"name": "Coxinha frango", "quantity": 
 checa("avulso abaixo de 21 nao entra na regra de lote",
       _sugestoes([{"name": "Rissole de Carne", "quantity": 3}]) == [])
 checa("sabor que so existe em pacote ainda sobe para 25",
-      _sugestoes([{"name": "Quibe", "quantity": 5}]) == [25])
+      _sugestoes([{"name": "Bolinha de Queijo", "quantity": 5}]) == [25])
 
 # ── Envio: o nome e a quantidade que chegam ao cardapio digital ────────────
 secao("--- caminho do envio ---")
@@ -195,7 +197,7 @@ checa("pedido pequeno de nome ambiguo sai como avulso",
 checa("o mesmo nome em quantidade de festa continua sendo pacote",
       _envio_aceita([{"name": "Rissole de Carne", "quantity": 25}]))
 checa("sabor sem versao avulsa continua exigindo o lote",
-      not _envio_aceita([{"name": "Quibe", "quantity": 5}]))
+      not _envio_aceita([{"name": "Bolinha de Queijo", "quantity": 5}]))
 
 # ── Dinheiro ───────────────────────────────────────────────────────────────
 secao("--- dinheiro ---")
@@ -699,9 +701,10 @@ checa("o sabor ambiguo nao vira item errado",
 checa("o sabor ambiguo tampouco desaparece: fica pendente",
       any(sp["termo"] == "carne"
           for sp in _pedido_carne.get("sabores_pendentes", [])))
-checa("'30 de queijo' num pedido de fritos resolve sozinho",
-      any(i["name"] == "Bolinha de Queijo" and i["quantity"] == 30
-          for i in _pedido_carne.get("items", [])))
+# No cardapio "queijo" e a bolinha E o misto de queijo e presunto: fica pendente.
+checa("'30 de queijo' com dois sabores de queijo fica pendente",
+      any(sp["termo"] == "queijo" for sp in _pedido_carne.get("sabores_pendentes", [])),
+      str(_pedido_carne.get("sabores_pendentes")))
 
 _ficha_sabor = dict(memoria_mod._empty())
 _ficha_sabor.update(_pedido_carne)
@@ -711,8 +714,8 @@ checa("e a pergunta bloqueante cita as opcoes",
       "carne" in memoria_mod.pergunta_bloqueante(_ficha_sabor))
 _aplicou = memoria_mod.aplicar_escolha_de_sabor(_ficha_sabor, "pode ser pastel carne")
 checa("a escolha do sabor vira item na ficha", bool(_aplicou), str(_aplicou))
-checa("e a pendencia de sabor sai da ficha",
-      not _ficha_sabor.get("sabores_pendentes"))
+checa("e a pendencia desse sabor sai da ficha",
+      not any(sp["termo"] == "carne" for sp in _ficha_sabor.get("sabores_pendentes") or []))
 
 
 secao("--- 26/09: lote quebrado nao trava mais o funil? trava ---")
@@ -1307,6 +1310,12 @@ checa("'rua Salgado Filho 21, 52' nao vira 21h52",
       horario.parse_horario("É rua Salgado Filho 21, 52, bairro Olaria") is None)
 checa("'19,50' sozinho continua sendo horario", horario.parse_horario("19,50") == (19, 50))
 # Refrigerante esgotado dito depois da pergunta ja aberta.
+import copy as _copy_fx  # noqa: E402
+_RETRATO_2L_ESGOTADO = _copy_fx.deepcopy(_RETRATO_FX)
+for _it in _RETRATO_2L_ESGOTADO["InternalMenuItem"]:
+    if _it["name"] == "Refrigerante 2 L":
+        _it["available"] = False
+_cf_fx.bruto = lambda forcar=False: _RETRATO_2L_ESGOTADO
 _F_COCA2 = memoria_mod._empty()
 # 50 coxinhas, e nao croquete: desde 30/09 o sabor em falta vem antes do
 # refrigerante, e o que este teste mede e o aviso da Coca 2L.
@@ -1316,6 +1325,7 @@ for _m in ("Quero 50 coxinhas e uma coca cola", "Coca 2 litros"):
         _extract_data_from_message(_m, ConversationState()))[0]
 checa("'Coca 2 litros' com a pergunta aberta avisa a falta",
       memoria_mod.pergunta_bloqueante(_F_COCA2).startswith("O Refrigerante 2 Litros está em falta"))
+_cf_fx.bruto = lambda forcar=False: _RETRATO_FX
 
 
 secao("--- 30/09: outras midias (imagem, video, localizacao, comprovante) ---")
@@ -1356,7 +1366,7 @@ checa("numero de rua nao e horario", horario.parse_horario("Av. Calama, 3234") i
 _E_RUA = _extract_data_from_message("NA CALAMA 2025 APONIA PAGAMENTO NO CARTAO",
                                     ConversationState(modality="entrega"))
 checa("'NA CALAMA 2025 APONIA...' guarda rua, bairro e pagamento",
-      _E_RUA.get("endereco") == "CALAMA 2025" and _E_RUA.get("bairro") == "Aponia"
+      _E_RUA.get("endereco") == "CALAMA 2025" and _E_RUA.get("bairro") == "Aponiã"
       and _E_RUA.get("payment_method") == "cartao", str(_E_RUA))
 checa("'QUERO 50 COXINHAS' com entrega nao vira rua",
       not _extract_data_from_message("QUERO 50 COXINHAS",
@@ -1721,7 +1731,7 @@ checa("aviso de transferencia ja dado nao repete",
 checa("mensagem padrao de transferencia sem 'atendente humano'",
       "humano" not in app._DEFAULT_TRANSFER_MESSAGE.lower() or "TRANSFER_MESSAGE" in os.environ)
 checa("'BAIRRO SAO BOSCO' e o Sao Joao Bosco da tabela",
-      _cv_0110.detectar_bairro("RUA LEONILDO DE SA 2125 BAIRRO SAO BOSCO") == "São Joao Bosco",
+      _cv_0110.detectar_bairro("RUA LEONILDO DE SA 2125 BAIRRO SAO BOSCO") == "São João Bosco",
       _cv_0110.detectar_bairro("RUA LEONILDO DE SA 2125 BAIRRO SAO BOSCO"))
 checa("cabecalho 'Faltam essas informacoes:' vai junto da lista",
       app.split_reply("Faltam essas informações:\n\n- Bairro\n- Forma de pagamento")
@@ -1763,7 +1773,7 @@ for _txt in ("tem salgado sem glúten?", "tem opção vegana?", "qual óleo voc�
     checa(f"ingrediente -> frase do BLOCO 2: {_txt!r}",
           _r_ing.startswith("Preciso confirmar essa informação com nossa equipe") and "oleo" not in _r_ing, _r_ing)
 for _txt, _prova in (("qual o endereço de vocês?", "Calama"), ("quanto tempo demora a entrega?", "30 a 40"),
-                     ("qual o horário de sábado?", "07h40"), ("vocês tem cardápio?", "ocardapio"),
+                     ("qual o horário de sábado?", "08h00"), ("vocês tem cardápio?", "ocardapio"),
                      ("qual a diferença entre o mini e o grande?", "por unidade")):
     _r_f = app._conferir_fato_do_dono("t", _txt, "Resposta inventada.", memoria_mod._empty())
     checa(f"fato do dono com o texto dele: {_txt!r}", _prova in _r_f and "inventada" not in _r_f, _r_f)
@@ -1906,6 +1916,7 @@ _F_COCA = _merge_msg(dict(memoria_mod._empty(), items=[
 checa("aceitar a oferta com 'coca lata' SOMA ao pedido",
       [(i["name"], i["quantity"]) for i in _F_COCA["items"]]
       == [("Coxinha de Frango com Catupiry", 10), ("Rissole de Carne", 10), ("Refrigerante Lata", 1)])
+_cf_fx.bruto = lambda forcar=False: _RETRATO_2L_ESGOTADO
 _F_C5 = _merge_msg(memoria_mod._empty(), "Quero meio cento frito: 25 coxinhas e 25 bolinhas "
                    "de queijo, e 1 Coca-Cola de 2 litros gelada. Pra entregar AMANHA às 20h")
 checa("Coca 2L (esgotada) vira pergunta com o aviso",
@@ -1924,6 +1935,7 @@ memoria_mod.aplicar_escolha_de_sabor(_F_C5, "pode ser lata")
 checa("'lata' resolve a pergunta do refrigerante",
       ("Refrigerante Lata", 1) in [(i["name"], i["quantity"]) for i in _F_C5["items"]]
       and not _F_C5.get("sabores_pendentes"))
+_cf_fx.bruto = lambda forcar=False: _RETRATO_FX
 _F_GUARANA = _merge_msg(memoria_mod._empty(), "Quero meio cento frito: 25 coxinhas e 25 "
                         "bolinhas de queijo, e 1 Coca-Cola de 2 litros gelada.")
 _F_GUARANA = _merge_msg(_F_GUARANA, "Pode ser")
@@ -2408,21 +2420,62 @@ with facts.com_fonte("cardapio"):
           not _bloq_cz and _api_cz[0]["selected_flavors"] == ["Calzone de frango"], str((_api_cz, _bloq_cz)))
     checa("cardapio: rotulo de formato sozinho continua bloqueado",
           bool(catalogo.traduzir([{"name": "Cento (100 un)", "quantity": 1}])[1]))
-_cf.bruto = _bruto_real
-facts._cache_cardapio = None
-_FONTE_SOMBRA = []
-facts.fonte_ativa = lambda: "sombra"
-_print_real = print
-import builtins as _bt  # noqa: E402
-_bt.print = lambda *a, **k: _FONTE_SOMBRA.append(" ".join(str(x) for x in a))
-_cf.bruto = lambda forcar=False: _RETRATO
-_r_sombra = facts.lookup_frete("eldorado")
-_bt.print = _print_real
-_cf.bruto = _bruto_real
-facts.fonte_ativa = lambda: "planilha"
-checa("sombra: atende pela planilha e registra a diferenca do cardapio",
-      _r_sombra["taxa"] == 10.0 and any("[fonte] frete" in l and "15.0" in l for l in _FONTE_SOMBRA),
-      str(_FONTE_SOMBRA[-1:]))
+secao("--- 02/10: o dono edita o cardapio e a Sandrinha acompanha ---")
+_EDITADO = _copy_fx.deepcopy(_RETRATO_FX)
+for _t in _EDITADO["InternalDeliveryFee"]:
+    if _t["bairro"] == "Eldorado":
+        _t["valor"] = 18.0
+_EDITADO["InternalDeliveryFee"].append({"bairro": "Bairro Novo do Teste", "valor": 11.0, "available": True})
+_EDITADO["InternalMenuItem"].append({"name": "Coxinha de Costela", "category": "lanches", "price": 11.0,
+                                     "available": True, "sales_mode": "unit"})
+for _it in _EDITADO["InternalMenuItem"]:
+    if _it["name"].strip() == "Bolo de Milho":
+        _it["available"] = False
+for _h in _EDITADO["BusinessHours"]:
+    if _h.get("is_open"):
+        _h["open_time"] = "07:30"
+_cf_fx.bruto = lambda forcar=False: _EDITADO
+checa("taxa alterada no cardapio vale na hora", facts.lookup_frete("eldorado")["taxa"] == 18.0)
+checa("bairro novo no cardapio passa a ser atendido", facts.lookup_frete("bairro novo do teste")["taxa"] == 11.0)
+checa("produto novo no cardapio ja tem preco", (facts.resolve_unit_price("Coxinha de Costela", 1) or {}).get("preco_unitario") == 11.0)
+checa("produto marcado indisponivel no cardapio sai", facts.resolve_unit_price("Bolo de Milho", 1) is None)
+checa("horario alterado no cardapio muda a abertura", horario._turno(date(2026, 10, 5))[0] == (7, 30))
+_cf_fx.bruto = lambda forcar=False: _RETRATO_FX
+checa("e volta quando o cardapio volta", facts.lookup_frete("eldorado")["taxa"] == 15.0)
+
+secao("--- 02/10: tempo - caches do banco ---")
+import db as _db_fx  # noqa: E402
+import importlib.util as _ilu  # noqa: E402
+# Copia propria do database.py: o de cima tem get_setting & cia simulados.
+_spec_db = _ilu.spec_from_file_location("database_real_fx", "database.py")
+database_real = _ilu.module_from_spec(_spec_db)
+_spec_db.loader.exec_module(database_real)
+_consultas_fx = []
+_fetch_real, _exec_real = _db_fx.fetch_one, _db_fx.execute
+_db_fx.fetch_one = lambda q, p=None: (_consultas_fx.append(q), {"value": "1"} if "settings" in q else None)[1]
+_db_fx.execute = lambda q, p=None, **k: _consultas_fx.append(q)
+database_real._settings_cache.clear()
+database_real.get_setting("chave_teste_cache"); database_real.get_setting("chave_teste_cache"); database_real.get_setting("chave_teste_cache")
+checa("configuracao repetida le o banco uma vez so", len(_consultas_fx) == 1, str(_consultas_fx))
+database_real.set_setting("chave_teste_cache", "2")
+checa("set_setting atualiza o cache na hora", database_real.get_setting("chave_teste_cache") == "2")
+_consultas_fx.clear()
+database_real._state_cache.pop("5500000000000", None)
+database_real.save_conversation_state("5500000000000", {"a": 1})
+database_real.save_conversation_state("5500000000000", {"a": 1})
+checa("ficha identica nao e regravada (uma consulta, upsert)", len(_consultas_fx) == 1, str(_consultas_fx))
+_consultas_fx.clear()
+checa("ficha lida da memoria, sem banco",
+      database_real.get_conversation_state("5500000000000") == {"a": 1} and not _consultas_fx)
+database_real.delete_conversation_state("5500000000000")
+_db_fx.fetch_one, _db_fx.execute = _fetch_real, _exec_real
+checa("espelho do painel vai para a fila (nao segura o cliente)",
+      "_no_painel(send_msg_out_to_panel, user, chunk)" in open("app.py", encoding="utf-8").read())
+checa("item novo logo depois de fechar: pergunta fixa 'somar ou novo'",
+      "_responder_direto(user, items, PERGUNTA_SOMAR_OU_NOVO, _chegada)" in open("app.py", encoding="utf-8").read()
+      and "Como seu pedido já entrou em linha de produção" in app.ALTERACAO_EM_PRODUCAO)
+checa("'pode' depois de 'so comeca as 08h00' guarda a hora oferecida",
+      'if "só começa" in _motivo:' in open("app.py", encoding="utf-8").read())
 
 print()
 print("=" * 78)

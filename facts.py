@@ -1,6 +1,6 @@
 """
-facts.py — Fatos estruturados extraidos da planilha oficial (cardapio, bairros,
-horarios, pagamento, regras).
+facts.py — Fatos estruturados do cardapio digital (produtos, precos, sabores,
+bairros e taxas, horario e regras).
 
 Motivacao: precos e taxas de frete NUNCA devem depender de o modelo "ler certo"
 um trecho de texto recuperado. Aqui os dados viram tabelas em memoria com busca
@@ -8,6 +8,10 @@ exata (normalizacao + apelidos + similaridade), usadas por:
   - tools consultar_frete / consultar_preco (o agente consulta, nao inventa);
   - cardapio.calcular_pedido (calculo do pedido);
   - blocos compactos injetados no system prompt.
+
+Ate 02/10/2026 a fonte era a planilha do knowledge. Desde entao e o cardapio
+digital (cardapio_fonte.py), o mesmo que calcula e cobra o pedido. A planilha
+saiu do knowledge e do painel depois de o usuario aprovar a virada.
 """
 
 import re
@@ -17,9 +21,9 @@ import unicodedata
 from contextlib import contextmanager
 from difflib import SequenceMatcher
 
+# Nome do arquivo da planilha antiga. So serve para nao deixar um resto dela,
+# se alguem o subir de novo no knowledge, entrar no prompt ou na busca.
 DADOS_FILENAME = "PLANILHA CARDAPIO E BAIRROS EDUARDO.xlsx"
-
-_cache: dict | None = None
 
 
 # ── Normalizacao ─────────────────────────────────────────────────────────────
@@ -45,165 +49,21 @@ def _to_float(value) -> float | None:
     return float(match.group(0)) if match else None
 
 
-# ── Leitura da planilha ──────────────────────────────────────────────────────
-
-def _load_raw() -> str:
-    try:
-        import knowledge_rag
-        return knowledge_rag.get_file_content(DADOS_FILENAME)
-    except Exception as e:
-        print(f"[facts] WARN nao foi possivel ler {DADOS_FILENAME}: {e}")
-        return ""
-
-
-def _split_sections(text: str) -> dict:
-    """Divide o texto em {nome_da_aba: [linhas]}."""
-    sections: dict[str, list[str]] = {}
-    current = ""
-    for line in (text or "").splitlines():
-        stripped = line.strip()
-        if stripped.startswith("===") and stripped.endswith("==="):
-            current = stripped.strip("= ").strip()
-            sections[current] = []
-        elif current and stripped:
-            sections[current].append(stripped)
-    return sections
-
-
-def _find_section(sections: dict, *keywords: str) -> list[str]:
-    for name, lines in sections.items():
-        norm = normalize(name)
-        if any(normalize(kw) in norm for kw in keywords):
-            return lines
-    return []
-
-
-def _cells(line: str) -> list[str]:
-    """Quebra uma linha de registro em celulas (formato 'a | b | c')."""
-    if "|" in line:
-        return [c.strip() for c in line.split("|")]
-    if "\t" in line:
-        return [c.strip() for c in line.split("\t")]
-    return [line.strip()]
-
-
-def _build() -> dict:
-    raw = _load_raw()
-    sections = _split_sections(raw)
-
-    # ── Bairros / frete ──────────────────────────────────────────────────
-    bairros = []
-    for line in _find_section(sections, "bairro", "taxa", "frete"):
-        cells = _cells(line)
-        if len(cells) < 2:
-            continue
-        nome = cells[0].strip(" ,;.")
-        taxa = _to_float(cells[1])
-        if not nome or taxa is None:
-            continue
-        if normalize(nome) in ("taxas dos bairros", "bairro", "bairros"):
-            continue
-        aliases = []
-        for extra in cells[2:]:
-            aliases.extend(a.strip() for a in extra.split(",") if a.strip())
-        bairros.append({"nome": nome, "taxa": taxa, "aliases": aliases})
-
-    # ── Cardapio / precos ────────────────────────────────────────────────
-    produtos = []
-    for line in _find_section(sections, "cardapio", "produto", "preco"):
-        cells = _cells(line)
-        if len(cells) < 3:
-            continue
-        categoria, item, formato = cells[0], cells[1], cells[2]
-        preco = _to_float(cells[3]) if len(cells) > 3 else None
-        preco_texto = cells[3] if len(cells) > 3 else ""
-        disponivel = (cells[4].strip().upper() != "NAO") if len(cells) > 4 else True
-        if normalize(categoria) in ("categoria", "") or not item:
-            continue
-        produtos.append({
-            "categoria": categoria,
-            "item": item,
-            "formato": formato,
-            "preco": preco,
-            "preco_texto": preco_texto,
-            "disponivel": disponivel,
-        })
-
-    # ── Demais abas: registros chave/valor ───────────────────────────────
-    def _key_values(*keywords) -> list[dict]:
-        out = []
-        lines = _find_section(sections, *keywords)
-        header = None
-        for line in lines:
-            cells = _cells(line)
-            if header is None:
-                header = cells
-                continue
-            if len(cells) < 2:
-                continue
-            out.append({
-                "chave": cells[0],
-                "valor": cells[1],
-                "obs": cells[2] if len(cells) > 2 else "",
-            })
-        return out
-
-    return {
-        "bairros": bairros,
-        "produtos": produtos,
-        "horarios": _key_values("horario"),
-        "pagamento": _key_values("pix", "pagamento"),
-        "regras": _key_values("regras"),
-        "politicas": _key_values("politica"),
-    }
-
-
-# ── De onde vem os dados ─────────────────────────────────────────────────────
-# FONTE_DADOS (painel/banco, ou variavel de ambiente):
-#   planilha - como sempre foi (padrao enquanto a troca e validada);
-#   sombra   - atende pela planilha e refaz as consultas pelo cardapio digital,
-#              registrando no log cada diferenca ([fonte] ...), sem mudar nada
-#              para o cliente;
-#   cardapio - os dados vem do cardapio digital (cardapio_fonte.py). Se ele e o
-#              snapshot salvo estiverem indisponiveis, volta para a planilha.
-FONTES = ("planilha", "sombra", "cardapio")
-_fonte_cache = ("", 0.0)
+# ── De onde vem os dados: o cardapio digital ─────────────────────────────────
+# Ordem de reserva (cardapio_fonte.bruto): leitura ao vivo -> cache de 5 min ->
+# ultima leitura boa salva no banco -> retrato salvo no repositorio (fixtures/).
+# O atendimento nunca fica sem cardapio.
 _local = threading.local()
 _cache_cardapio: dict | None = None
 _bruto_cardapio = None
-_avisou_queda = False
+_VAZIO = {"bairros": [], "produtos": [], "horarios": [], "pagamento": [],
+          "regras": [], "politicas": [], "fonte": "vazio"}
 
 
 def fonte_ativa() -> str:
-    global _fonte_cache
-    valor, lido_em = _fonte_cache
-    if valor and time.monotonic() - lido_em < 30:
-        return valor
-    valor = ""
-    try:
-        import database
-        valor = (database.get_setting("FONTE_DADOS", "") or "").strip().lower()
-    except Exception:
-        valor = ""
-    if not valor:
-        import os
-        valor = (os.getenv("FONTE_DADOS", "") or "").strip().lower()
-    if valor not in FONTES:
-        valor = "planilha"
-    _fonte_cache = (valor, time.monotonic())
-    return valor
-
-
-def _dados_planilha() -> dict:
-    global _cache
-    if _cache is None:
-        _cache = _build()
-        print(
-            f"[facts] carregado: {len(_cache['bairros'])} bairros, "
-            f"{len(_cache['produtos'])} produtos, "
-            f"{len(_cache['horarios'])} regras de horario"
-        )
-    return _cache
+    """Sempre "cardapio". Mantida porque horario, cardapio e knowledge_rag a
+    consultam (e os testes a substituem)."""
+    return "cardapio"
 
 
 def _dados_cardapio() -> dict | None:
@@ -229,58 +89,23 @@ def _dados_cardapio() -> dict | None:
 
 
 def get() -> dict:
-    global _avisou_queda
-    forcada = getattr(_local, "fonte", None)
-    fonte = forcada or fonte_ativa()
-    if fonte == "cardapio":
-        dados = _dados_cardapio()
-        if dados:
-            return dados
-        if not _avisou_queda:
-            print("[facts] WARN FONTE_DADOS=cardapio, mas o cardapio e o snapshot "
-                  "estao indisponiveis; usando a planilha")
-            _avisou_queda = True
-    return _dados_planilha()
+    dados = _dados_cardapio()
+    if dados:
+        return dados
+    print("[facts] ERRO cardapio digital, snapshot e retrato indisponiveis")
+    return _VAZIO
 
 
 @contextmanager
 def com_fonte(nome: str):
-    """Forca a fonte nesta thread (comparacao de sombra, testes)."""
-    anterior = getattr(_local, "fonte", None)
-    _local.fonte = nome
-    try:
-        yield
-    finally:
-        _local.fonte = anterior
-
-
-def _resumo(valor):
-    if isinstance(valor, dict):
-        return {k: valor.get(k) for k in ("bairro", "taxa", "preco_unitario", "item_oficial")
-                if k in valor}
-    return valor
-
-
-def _sombra(rotulo: str, consulta, *args, **kwargs):
-    """Executa pela fonte ativa; no modo sombra, compara com o cardapio."""
-    resultado = consulta(*args, **kwargs)
-    if getattr(_local, "fonte", None) is None and fonte_ativa() == "sombra":
-        try:
-            with com_fonte("cardapio"):
-                outro = consulta(*args, **kwargs)
-            if _resumo(outro) != _resumo(resultado):
-                print(f"[fonte] {rotulo}{args!r}: planilha={_resumo(resultado)} "
-                      f"cardapio={_resumo(outro)}")
-        except Exception as e:
-            print(f"[fonte] WARN comparacao de {rotulo} falhou: {e}")
-    return resultado
+    """Compatibilidade com scripts antigos: so existe a fonte cardapio."""
+    yield
 
 
 def invalidate() -> None:
-    """Chamado sempre que o knowledge muda."""
-    global _cache, _fonte_cache
-    _cache = None
-    _fonte_cache = ("", 0.0)
+    """Chamado sempre que o knowledge muda. Os dados do pedido nao dependem
+    mais dele; o cardapio se renova sozinho a cada 5 minutos."""
+    return None
 
 
 def is_loaded() -> bool:
@@ -291,10 +116,6 @@ def is_loaded() -> bool:
 # ── Consultas ────────────────────────────────────────────────────────────────
 
 def lookup_frete(bairro: str) -> dict | None:
-    return _sombra("frete", _lookup_frete, bairro)
-
-
-def _lookup_frete(bairro: str) -> dict | None:
     """Taxa de entrega de um bairro. None quando o bairro nao esta na tabela.
 
     Casa por nome exato, apelido cadastrado, prefixo e, por ultimo,
@@ -467,10 +288,6 @@ QTD_MINIMA_FESTA = 25
 
 
 def resolve_unit_price(nome: str, quantity: int = 1) -> dict | None:
-    return _sombra("preco", _resolve_unit_price, nome, quantity)
-
-
-def _resolve_unit_price(nome: str, quantity: int = 1) -> dict | None:
     """Preco unitario oficial de um item do pedido.
 
     Existe porque o modelo manda (ou omite) o preco na tool calculate_order — e

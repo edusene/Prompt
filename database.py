@@ -6,6 +6,8 @@ O agente Gemini continua usando memory.py (in-memory) para seu histórico.
 
 import db
 import json
+import threading
+import time
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -166,9 +168,28 @@ def init_db() -> None:
 
 # ═══ Settings (key-value global) ═════════════════════════════════════════════
 
+# Configuracoes em memoria por 30 s. Medido em 02/10 no Render: o fechamento
+# de um pedido fez 31 consultas ao banco (8,4 s de 15 s de espera do cliente),
+# a maior parte lendo sempre as mesmas chaves - cada chamada ao cardapio digital
+# lia URL, chave e modo teste sob tres nomes cada, nove consultas. O valor muda
+# quando o painel salva, e set_setting atualiza o cache na hora; outro processo
+# que grave direto no banco aparece aqui em ate 30 s.
+_SETTINGS_TTL = 30.0
+_settings_cache: dict[str, tuple[float, str | None]] = {}
+_settings_lock = threading.Lock()
+
+
 def get_setting(key: str, default: str = "") -> str:
+    agora = time.monotonic()
+    with _settings_lock:
+        guardado = _settings_cache.get(key)
+    if guardado and agora - guardado[0] < _SETTINGS_TTL:
+        return guardado[1] if guardado[1] is not None else default
     row = db.fetch_one("SELECT value FROM settings WHERE key=?", (key,))
-    return row["value"] if row else default
+    valor = row["value"] if row else None
+    with _settings_lock:
+        _settings_cache[key] = (agora, valor)
+    return valor if valor is not None else default
 
 
 def set_setting(key: str, value: str) -> None:
@@ -178,6 +199,8 @@ def set_setting(key: str, value: str) -> None:
         "ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value, updated_at=EXCLUDED.updated_at",
         (key, value, now),
     )
+    with _settings_lock:
+        _settings_cache[key] = (time.monotonic(), value)
 
 
 def _ensure_indexes() -> None:
@@ -479,6 +502,17 @@ def upsert_contact(phone: str, name: str = "", **extra: Any) -> dict:
         vals.append(now)
         vals.append(phone)
         db.execute(f"UPDATE contacts SET {','.join(fields)} WHERE phone=?", tuple(vals))
+        # O contato atualizado sai do que ja foi lido mais o que acabou de ser
+        # gravado: a releitura era a terceira consulta ao banco de cada
+        # mensagem recebida, antes de o atendimento comecar (02/10).
+        atualizado = dict(existing)
+        for k, v in extra.items():
+            if k in ("name", "email", "company", "notes", "avatar_url", "avatar_color", "assigned_to", "auto_mode"):
+                atualizado[k] = v
+        if name:
+            atualizado["name"] = name
+        atualizado["updated_at"] = now
+        return atualizado
     else:
         default_auto = int(get_setting("agent_mode", "1"))
         db.execute(
@@ -544,6 +578,15 @@ def delete_contact(contact_id: int) -> None:
 
 def get_or_create_conversation(phone: str) -> dict:
     """Retorna conversa aberta (new|open|waiting) ou cria uma nova."""
+    # Caso comum (a conversa ja existe) numa consulta so. Eram duas, e esta
+    # funcao roda no webhook, no atendimento e no espelho do painel.
+    conv = db.fetch_one(
+        "SELECT c.* FROM conversations c JOIN contacts ct ON ct.id = c.contact_id "
+        "WHERE ct.phone=? ORDER BY c.id DESC LIMIT 1",
+        (phone,),
+    )
+    if conv:
+        return conv
     contact = db.fetch_one("SELECT id FROM contacts WHERE phone=?", (phone,))
     if not contact:
         now = datetime.utcnow().isoformat()
@@ -756,29 +799,46 @@ def agora_utc() -> str:
     return datetime.utcnow().isoformat(timespec="seconds")
 
 
+# Ficha do atendimento em memoria. A ficha era lida do banco no comeco de
+# cada mensagem e gravada a cada mudanca (ate 25 pontos no atendimento), com
+# duas consultas por gravacao. O atendimento roda num processo so (o buffer e o
+# historico ja sao em memoria), entao o que este processo gravou e o que esta no
+# banco: a leitura sai daqui, e a gravacao identica a anterior nao vai ao banco.
+_state_cache: dict[str, str] = {}
+_state_lock = threading.Lock()
+
+
 def save_conversation_state(phone: str, state: dict) -> None:
-    """Salva estado da conversa (sub-agentes) pelo phone."""
+    """Salva estado da conversa pelo phone (uma consulta: upsert)."""
     now = datetime.utcnow().isoformat()
     state_json = json.dumps(state, ensure_ascii=False, default=str)
-    existing = db.fetch_one("SELECT phone FROM conversation_states WHERE phone=?", (phone,))
-    if existing:
-        db.execute(
-            "UPDATE conversation_states SET state=?, updated_at=? WHERE phone=?",
-            (state_json, now, phone),
-        )
-    else:
-        db.execute(
-            "INSERT INTO conversation_states (phone, state, updated_at) VALUES (?,?,?)",
-            (phone, state_json, now),
-        )
+    with _state_lock:
+        if _state_cache.get(phone) == state_json:
+            return
+    db.execute(
+        "INSERT INTO conversation_states (phone, state, updated_at) VALUES (?,?,?) "
+        "ON CONFLICT(phone) DO UPDATE SET state=EXCLUDED.state, updated_at=EXCLUDED.updated_at",
+        (phone, state_json, now),
+    )
+    with _state_lock:
+        _state_cache[phone] = state_json
 
 
 def get_conversation_state(phone: str) -> dict | None:
-    """Carrega estado da conversa (sub-agentes) pelo phone."""
+    """Carrega estado da conversa pelo phone."""
+    with _state_lock:
+        guardado = _state_cache.get(phone)
+    if guardado is not None:
+        try:
+            return json.loads(guardado)
+        except Exception:
+            pass
     row = db.fetch_one("SELECT state FROM conversation_states WHERE phone=?", (phone,))
     if row:
         raw = row["state"] if isinstance(row, dict) else row[0]
         if isinstance(raw, str):
+            with _state_lock:
+                _state_cache[phone] = raw
             try:
                 return json.loads(raw)
             except Exception:
@@ -790,6 +850,8 @@ def get_conversation_state(phone: str) -> dict | None:
 def delete_conversation_state(phone: str) -> None:
     """Deleta estado da conversa pelo phone."""
     db.execute("DELETE FROM conversation_states WHERE phone=?", (phone,))
+    with _state_lock:
+        _state_cache.pop(phone, None)
 
 
 # ── Messages ──────────────────────────────────────────────────────────────────

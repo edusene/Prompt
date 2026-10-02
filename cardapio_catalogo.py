@@ -298,7 +298,7 @@ def _sabor_oficial(familia: str, nome: str, sabores: dict | None = None) -> str 
     achado = _achar((sabores if sabores is not None else sabores_efetivos()).get(familia, {}), nome)
     if achado:
         return achado
-    # Com os dados vindos do cardapio digital (facts FONTE_DADOS=cardapio), a
+    # Com os dados vindos do cardapio digital (facts), a
     # linha do sabor ja traz o nome da opcao la ("Calzone de frango").
     linha = _linha_da_planilha(nome)
     if linha and linha.get("origem") and linha.get("preco") is None:

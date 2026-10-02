@@ -601,7 +601,7 @@ def calcular_taxa_retorno(modalidade: str, pagamento: str) -> float:
     pagamento = (pagamento or "").strip().lower()
     if pagamento not in _PAGAMENTOS_COM_RETORNO:
         return 0.0
-    # Com FONTE_DADOS=cardapio vale a regra taxa_retorno_maquina do cardapio
+    # Vale a regra taxa_retorno_maquina do cardapio
     # digital. Hoje ela diz "R$ 2,00 SOMENTE em pagamento com cartao": o
     # dinheiro deixa de pagar retorno. Sem a regra, vale o BLOCO 3 do prompt.
     regra = _regra_do_cardapio("taxa_retorno_maquina")
@@ -614,7 +614,7 @@ ENDERECO_FABRICA = "Av. Calama, 5892 - Igarapé"
 
 
 def _regra_do_cardapio(chave: str) -> str:
-    """Regra do cardapio digital (InternalBusinessRule), so com FONTE_DADOS=cardapio."""
+    """Regra do cardapio digital (InternalBusinessRule)."""
     try:
         import facts
         if facts.fonte_ativa() != "cardapio":
@@ -1086,7 +1086,7 @@ def calcular_pedido(items: list[dict], bairro: str = "", modalidade: str = "",
 # perguntado. As opcoes vem da propria API (o dono muda la e vale aqui), com
 # cache para nao pagar uma chamada por mensagem.
 _CACHE_OPCOES: dict[str, tuple[float, list[str]]] = {}
-_CACHE_OPCOES_SEG = 1800.0
+_CACHE_OPCOES_SEG = 300.0      # o mesmo prazo de cardapio_fonte (5 min)
 
 
 def opcoes_de_sabor(nome_base44: str) -> list[str]:

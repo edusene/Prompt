@@ -1961,10 +1961,6 @@ function closeChatMobile() {
 
 document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-        if (_xlsxFullscreen) {
-            toggleXlsxFullscreen();
-            return;
-        }
         closeSidebar();
         closeChatMobile();
     }
@@ -1983,27 +1979,6 @@ async function selectKnowledgeFile(filename) {
     document.getElementById('knowledge-description').value = '';
     document.getElementById('knowledge-actions').style.display = 'flex';
 
-    // Verifica se é um arquivo xlsx
-    const isXlsx = filename.toLowerCase().endsWith('.xlsx');
-    
-    // Se for xlsx, busca dados estruturados
-    if (isXlsx) {
-        const xlsxData = await api(`/api/knowledge/${encodeURIComponent(filename)}/xlsx-data`);
-        const regularData = await api(`/api/knowledge/${encodeURIComponent(filename)}`);
-        
-        if (!regularData || regularData.error) {
-            document.getElementById('knowledge-editor').value = '';
-            toast(regularData?.error || 'Erro ao carregar', 'error');
-            return;
-        }
-        
-        document.getElementById('knowledge-description').value = regularData.description || '';
-        
-        // Renderiza visualização xlsx
-        renderXlsxPreview(filename, xlsxData);
-        return;
-    }
-
     const data = await api(`/api/knowledge/${encodeURIComponent(filename)}`);
     if (!data || data.error) {
         document.getElementById('knowledge-editor').value = '';
@@ -2013,335 +1988,8 @@ async function selectKnowledgeFile(filename) {
     document.getElementById('knowledge-editor').value = data.content;
     document.getElementById('knowledge-description').value = data.description || '';
     
-    // Remove preview xlsx se existir
-    const existingPreview = document.querySelector('.knowledge-xlsx-preview');
-    if (existingPreview) existingPreview.remove();
-    
     // Mostra editor de texto
     document.getElementById('knowledge-editor').style.display = 'block';
-}
-
-// Estado de paginação do xlsx
-let _xlsxPageState = {};
-let _xlsxFullscreen = false;
-
-// Renderiza visualização de planilha xlsx
-function renderXlsxPreview(filename, xlsxData) {
-    // Remove preview anterior
-    const existingPreview = document.querySelector('.knowledge-xlsx-preview');
-    if (existingPreview) existingPreview.remove();
-    
-    // Esconde editor de texto
-    document.getElementById('knowledge-editor').style.display = 'none';
-    
-    const editorPanel = document.querySelector('.knowledge-editor-panel');
-    if (!editorPanel) return;
-    
-    if (!xlsxData || !xlsxData.sheets || xlsxData.sheets.length === 0) {
-        const preview = document.createElement('div');
-        preview.className = 'knowledge-xlsx-preview';
-        preview.innerHTML = `
-            <div class="knowledge-xlsx-header">
-                <h4>Visualizacao da Planilha</h4>
-            </div>
-            <div class="knowledge-xlsx-empty">
-                Nao foi possivel carregar a visualizacao da planilha.
-                <br>O conteudo esta disponivel no editor de texto.
-            </div>
-        `;
-        editorPanel.insertBefore(preview, document.getElementById('knowledge-actions'));
-        document.getElementById('knowledge-editor').style.display = 'block';
-        return;
-    }
-    
-    // Inicializa paginação
-    _xlsxPageState = { currentSheet: 0, pages: {} };
-    xlsxData.sheets.forEach((sheet, i) => {
-        _xlsxPageState.pages[i] = { page: 0, perPage: 50 };
-    });
-    
-    const preview = document.createElement('div');
-    preview.className = 'knowledge-xlsx-preview';
-    
-    // Tabs para múltiplas abas
-    let tabsHtml = '';
-    if (xlsxData.sheets.length > 1) {
-        tabsHtml = `<div class="knowledge-xlsx-tabs">
-            ${xlsxData.sheets.map((sheet, i) => 
-                `<button class="knowledge-xlsx-tab ${i === 0 ? 'active' : ''}" onclick="switchXlsxSheet(${i})" data-sheet-index="${i}">${esc(sheet.name)}</button>`
-            ).join('')}
-        </div>`;
-    }
-    
-    // Renderiza primeira aba
-    const firstSheet = xlsxData.sheets[0];
-    let tableHtml = renderXlsxSheetTable(firstSheet, 0);
-    
-    preview.innerHTML = `
-        <div class="knowledge-xlsx-header">
-            <div class="knowledge-xlsx-header-left">
-                <h4>Visualizacao da Planilha</h4>
-                ${tabsHtml}
-                <span class="knowledge-xlsx-info">${firstSheet.rowCount || 0} linhas x ${firstSheet.colCount || 0} colunas</span>
-            </div>
-            <div class="knowledge-xlsx-header-right">
-                <button class="btn-icon knowledge-xlsx-fullscreen-btn" onclick="toggleXlsxFullscreen()" title="Tela cheia">
-                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
-                    </svg>
-                </button>
-            </div>
-        </div>
-        ${tableHtml}
-    `;
-    
-    preview.dataset.xlsxData = JSON.stringify(xlsxData);
-    editorPanel.insertBefore(preview, document.getElementById('knowledge-actions'));
-}
-
-// Alterna modo tela cheia
-function toggleXlsxFullscreen() {
-    const preview = document.querySelector('.knowledge-xlsx-preview');
-    if (!preview) return;
-    
-    _xlsxFullscreen = !_xlsxFullscreen;
-    preview.classList.toggle('knowledge-xlsx-fullscreen', _xlsxFullscreen);
-    document.body.classList.toggle('knowledge-xlsx-fullscreen-body', _xlsxFullscreen);
-    
-    const btn = preview.querySelector('.knowledge-xlsx-fullscreen-btn');
-    if (btn) {
-        btn.innerHTML = _xlsxFullscreen
-            ? '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 14h6v6m10-10h-6V4m0 6l7-7M3 21l7-7"/></svg>'
-            : '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>';
-        btn.title = _xlsxFullscreen ? 'Sair da tela cheia' : 'Tela cheia';
-    }
-}
-
-// Renderiza tabela de uma aba com paginação
-function renderXlsxSheetTable(sheet, sheetIndex) {
-    if (!sheet.headers && !sheet.data) return '';
-    
-    // Fallback: dados em texto - tenta parsear em tabela
-    if (sheet.data && !sheet.headers) {
-        const lines = sheet.data.split('\n').filter(l => l.trim());
-        if (lines.length > 2) {
-            // Tenta detectar separador (tab ou 2+ espacos)
-            const firstDataLine = lines.find(l => !l.trim().startsWith('===')) || lines[0];
-            const hasTab = firstDataLine.includes('\t');
-            const separator = hasTab ? /\t/ : /\s{2,}/;
-            
-            // Primeira linha nao-vazia que nao comeca com === vira header
-            let headerIdx = 0;
-            for (let i = 0; i < lines.length; i++) {
-                if (!lines[i].trim().startsWith('===')) {
-                    headerIdx = i;
-                    break;
-                }
-            }
-            
-            const headers = lines[headerIdx].split(separator).map(h => h.trim()).filter(Boolean);
-            const dataLines = lines.slice(headerIdx + 1).filter(l => !l.trim().startsWith('==='));
-            const rows = dataLines.map(line => {
-                const cells = line.split(separator).map(c => c.trim());
-                // Preenche celulas faltantes
-                while (cells.length < headers.length) cells.push('');
-                return cells.slice(0, headers.length);
-            }).filter(row => row.some(c => c !== ''));
-            
-            if (headers.length > 0 && rows.length > 0) {
-                // Forca como sheet com headers/rows para usar a renderizacao normal
-                sheet = { ...sheet, headers, rows, rowCount: rows.length, colCount: headers.length };
-            }
-        }
-    }
-    
-    if (!sheet.headers) return '';
-    
-    // Se headers sao genericos (Col_1, Col_2...) e tem dados, tenta usar a primeira linha como header
-    let headers = sheet.headers || [];
-    let allRows = sheet.rows || [];
-    
-    if (headers.length > 0 && /^col_?\d+$/i.test(headers[0]) && allRows.length > 0) {
-        const firstRow = allRows[0];
-        if (firstRow && firstRow.length === headers.length) {
-            const looksLikeHeader = firstRow.every(cell => {
-                const s = String(cell || '').trim();
-                return s !== '' && isNaN(s.replace(',', '.'));
-            });
-            if (looksLikeHeader) {
-                headers = firstRow.map(h => String(h || '').trim() || '-');
-                allRows = allRows.slice(1);
-            }
-        }
-    }
-    
-    const pageState = _xlsxPageState.pages[sheetIndex] || { page: 0, perPage: 50 };
-    const totalRows = allRows.length;
-    const perPage = pageState.perPage;
-    const totalPages = Math.ceil(totalRows / perPage);
-    const currentPage = Math.min(pageState.page, totalPages - 1);
-    const startIdx = currentPage * perPage;
-    const endIdx = Math.min(startIdx + perPage, totalRows);
-    const displayRows = allRows.slice(startIdx, endIdx);
-    
-    let paginationHtml = '';
-    if (totalPages > 1) {
-        paginationHtml = `
-            <div class="knowledge-xlsx-pagination">
-                <button class="knowledge-xlsx-page-btn" onclick="xlsxGoPage(${sheetIndex}, 0)" ${currentPage === 0 ? 'disabled' : ''}>&laquo;</button>
-                <button class="knowledge-xlsx-page-btn" onclick="xlsxGoPage(${sheetIndex}, ${currentPage - 1})" ${currentPage === 0 ? 'disabled' : ''}>&lsaquo;</button>
-                <span class="knowledge-xlsx-page-info">Pagina ${currentPage + 1} de ${totalPages}</span>
-                <button class="knowledge-xlsx-page-btn" onclick="xlsxGoPage(${sheetIndex}, ${currentPage + 1})" ${currentPage >= totalPages - 1 ? 'disabled' : ''}>&rsaquo;</button>
-                <button class="knowledge-xlsx-page-btn" onclick="xlsxGoPage(${sheetIndex}, ${totalPages - 1})" ${currentPage >= totalPages - 1 ? 'disabled' : ''}>&raquo;</button>
-                <span class="knowledge-xlsx-page-count">${totalRows} linhas total</span>
-            </div>
-        `;
-    }
-    
-    return `
-        <div class="knowledge-xlsx-container">
-            <table class="knowledge-xlsx-table">
-                <thead>
-                    <tr>
-                        <th class="knowledge-xlsx-row-num">#</th>
-                        ${headers.map(h => `<th>${esc(h)}</th>`).join('')}
-                    </tr>
-                </thead>
-                <tbody>
-                    ${displayRows.length === 0 ? `<tr><td colspan="${headers.length + 1}" class="knowledge-xlsx-empty-row">Nenhum dado</td></tr>` : ''}
-                    ${displayRows.map((row, i) => {
-                        return `<tr>
-                            <td class="knowledge-xlsx-row-num">${startIdx + i + 1}</td>
-                            ${row.map((cell, ci) => {
-                                const val = String(cell || '').trim();
-                                const display = val === '' ? '' : esc(val);
-                                return `<td contenteditable="true" data-row="${startIdx + i}" data-col="${ci}" class="knowledge-xlsx-cell" title="${esc(val)}">${display}</td>`;
-                            }).join('')}
-                        </tr>`;
-                    }).join('')}
-                </tbody>
-            </table>
-        </div>
-        ${paginationHtml}
-    `;
-}
-
-// Navega para uma pagina especifica
-function xlsxGoPage(sheetIndex, page) {
-    const preview = document.querySelector('.knowledge-xlsx-preview');
-    if (!preview) return;
-    const xlsxData = JSON.parse(preview.dataset.xlsxData || '{}');
-    if (!xlsxData.sheets || !xlsxData.sheets[sheetIndex]) return;
-    
-    // Preserva edits da pagina atual antes de navegar
-    _preserveCurrentSheetEdits();
-    
-    const totalPages = Math.ceil((xlsxData.sheets[sheetIndex].rows || []).length / 50);
-    page = Math.max(0, Math.min(page, totalPages - 1));
-    _xlsxPageState.pages[sheetIndex].page = page;
-    
-    const sheet = xlsxData.sheets[sheetIndex];
-    const container = preview.querySelector('.knowledge-xlsx-container');
-    const pagination = preview.querySelector('.knowledge-xlsx-pagination');
-    const tempDiv = document.createElement('div');
-    tempDiv.innerHTML = renderXlsxSheetTable(sheet, sheetIndex);
-    
-    const newContainer = tempDiv.querySelector('.knowledge-xlsx-container');
-    const newPagination = tempDiv.querySelector('.knowledge-xlsx-pagination');
-    if (newContainer && container) container.replaceWith(newContainer);
-    if (newPagination && pagination) pagination.replaceWith(newPagination);
-    else if (newPagination && !pagination) preview.appendChild(newPagination);
-}
-
-// Troca aba da planilha xlsx
-function switchXlsxSheet(sheetIndex) {
-    // Preserva edits da aba atual antes de trocar
-    _preserveCurrentSheetEdits();
-    
-    _xlsxPageState.currentSheet = sheetIndex;
-    _xlsxPageState.pages[sheetIndex].page = 0;
-    
-    const preview = document.querySelector('.knowledge-xlsx-preview');
-    if (!preview) return;
-    
-    const xlsxData = JSON.parse(preview.dataset.xlsxData || '{}');
-    if (!xlsxData.sheets || !xlsxData.sheets[sheetIndex]) return;
-    
-    // Atualiza tabs
-    preview.querySelectorAll('.knowledge-xlsx-tab').forEach((tab, i) => {
-        tab.classList.toggle('active', i === sheetIndex);
-    });
-    
-    const sheet = xlsxData.sheets[sheetIndex];
-    const tableHtml = renderXlsxSheetTable(sheet, sheetIndex);
-    
-    // Remove container e pagination antigos
-    const oldContainer = preview.querySelector('.knowledge-xlsx-container');
-    const oldPagination = preview.querySelector('.knowledge-xlsx-pagination');
-    if (oldContainer) oldContainer.remove();
-    if (oldPagination) oldPagination.remove();
-    
-    // Atualiza info
-    const header = preview.querySelector('.knowledge-xlsx-header');
-    const infoSpan = header.querySelector('.knowledge-xlsx-info');
-    if (infoSpan) {
-        infoSpan.textContent = `${sheet.rowCount || 0} linhas x ${sheet.colCount || 0} colunas`;
-    }
-    
-    // Insere novo conteudo
-    const tempDiv = document.createElement('div');
-    tempDiv.innerHTML = tableHtml;
-    const newContainer = tempDiv.querySelector('.knowledge-xlsx-container');
-    const newPagination = tempDiv.querySelector('.knowledge-xlsx-pagination');
-    if (newContainer) preview.appendChild(newContainer);
-    if (newPagination) preview.appendChild(newPagination);
-}
-
-// Preserva edicoes da aba atual no xlsxData antes de trocar de aba
-function _preserveCurrentSheetEdits() {
-    const preview = document.querySelector('.knowledge-xlsx-preview');
-    if (!preview) return;
-    const xlsxData = JSON.parse(preview.dataset.xlsxData || '{}');
-    if (!xlsxData.sheets) return;
-    
-    const cells = preview.querySelectorAll('.knowledge-xlsx-cell[data-row]');
-    cells.forEach(cell => {
-        const rowIdx = parseInt(cell.dataset.row);
-        const colIdx = parseInt(cell.dataset.col);
-        const sheetIdx = _xlsxPageState.currentSheet;
-        const sheet = xlsxData.sheets[sheetIdx];
-        if (sheet && sheet.rows && rowIdx >= 0 && rowIdx < sheet.rows.length && colIdx >= 0 && colIdx < sheet.headers.length) {
-            sheet.rows[rowIdx][colIdx] = cell.textContent.trim();
-        }
-    });
-    
-    // Salva de volta no dataset
-    preview.dataset.xlsxData = JSON.stringify(xlsxData);
-}
-
-// Coleta dados editados da planilha.
-//
-// So a aba VISIVEL tem celulas no DOM. Antes, o laco sobre essas celulas rodava
-// dentro do map de todas as abas, entao os valores da aba aberta eram gravados
-// por indice em cima das outras: editar "CARDAPIO 1" (52x5) e salvar sobrescrevia
-// "BAIRRO 2" (50x3) e destruia a tabela de frete. Agora a consolidacao da aba
-// atual fica a cargo de _preserveCurrentSheetEdits() e as demais abas saem do
-// xlsxData intactas.
-function collectXlsxEdits() {
-    _preserveCurrentSheetEdits();
-
-    const preview = document.querySelector('.knowledge-xlsx-preview');
-    if (!preview) return null;
-    const xlsxData = JSON.parse(preview.dataset.xlsxData || '{}');
-    if (!xlsxData.sheets) return null;
-
-    const editedSheets = xlsxData.sheets.map(sheet => ({
-        name: sheet.name,
-        headers: sheet.headers || [],
-        rows: (sheet.rows || []).map(r => [...r]),
-    }));
-
-    return { sheets: editedSheets };
 }
 
 async function saveKnowledge() {
@@ -2355,29 +2003,7 @@ async function saveKnowledge() {
     const description = document.getElementById('knowledge-description').value;
     setBtnLoading(btn, true, 'Salvando...');
     
-    const isXlsx = currentKnowledgeFile.toLowerCase().endsWith('.xlsx');
-    
-    if (isXlsx) {
-        // Salva dados estruturados da planilha
-        const editedData = collectXlsxEdits();
-        if (!editedData) {
-            setBtnLoading(btn, false);
-            toast('Erro ao coletar dados da planilha', 'error');
-            return;
-        }
-        
-        const data = await api(`/api/knowledge/${encodeURIComponent(currentKnowledgeFile)}/xlsx-data`, {
-            method: 'PUT',
-            body: JSON.stringify({ sheets: editedData.sheets, description })
-        });
-        setBtnLoading(btn, false);
-        if (data?.error) {
-            toast(friendlyError(data.error), 'error');
-        } else {
-            toast('Planilha salva com sucesso!', 'success');
-            loadKnowledge();
-        }
-    } else {
+    {
         // Salva texto normal
         const content = document.getElementById('knowledge-editor').value;
         const data = await api(`/api/knowledge/${encodeURIComponent(currentKnowledgeFile)}`, {
@@ -2416,13 +2042,15 @@ async function importKnowledgeFile(event) {
     input.value = ''; // permite re-importar o mesmo arquivo
     if (!file) return;
     const lower = (file.name || '').toLowerCase();
-    const isBinary = lower.endsWith('.docx') || lower.endsWith('.xlsx');
+    // Planilha (.xlsx) nao entra mais: produtos, precos e bairros vem do
+    // cardapio digital (02/10/2026).
+    const isBinary = lower.endsWith('.docx');
     if (!lower.endsWith('.md') && !lower.endsWith('.txt') && !isBinary) {
-        toast('So sao permitidos arquivos .md, .txt, .docx ou .xlsx', 'error');
+        toast('So sao permitidos arquivos .md, .txt ou .docx', 'error');
         return;
     }
     if (isBinary) {
-        // .docx/.xlsx: envia direto ao server para parse
+        // .docx: envia direto ao server para parse
         const formData = new FormData();
         formData.append('files', file);
         toast('Enviando arquivo...', 'info');
@@ -2505,8 +2133,8 @@ async function importKnowledgeMultiple(event) {
     let validCount = 0;
     for (const file of files) {
         const lower = (file.name || '').toLowerCase();
-        if (!lower.endsWith('.md') && !lower.endsWith('.txt') && !lower.endsWith('.docx') && !lower.endsWith('.xlsx')) {
-            toast(`Arquivo ignorado: ${file.name} (so .md, .txt, .docx, .xlsx)`, 'error');
+        if (!lower.endsWith('.md') && !lower.endsWith('.txt') && !lower.endsWith('.docx')) {
+            toast(`Arquivo ignorado: ${file.name} (so .md, .txt, .docx)`, 'error');
             continue;
         }
         formData.append('files', file);
@@ -3738,8 +3366,6 @@ async function loadDonoAjustes() {
                 </div>
             </div>`).join('');
     }
-    await loadDonoProdutos();
-    donoTipoMudou();
 }
 
 async function salvarOfertas(ev) {
@@ -3750,116 +3376,6 @@ async function salvarOfertas(ev) {
     setBtnLoading(btn, false);
     if (res && res.ok) toast('Frases salvas. Onde ficou em branco vale a frase padrão.', 'success');
     else toast((res && res.error) || 'Erro ao salvar as frases', 'error');
-}
-
-async function loadDonoProdutos() {
-    const data = await api('/api/catalogo/extra');
-    if (!data) return;
-    const ligados = document.getElementById('dono-produtos-ligados');
-    if (ligados) {
-        ligados.innerHTML = (data.entradas || []).length ? (data.entradas || []).map(e => `
-            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
-                <span><b>${esc(e.nome_planilha)}</b> → ${esc(e.nome_cardapio)}
-                    <span class="muted">(${e.tipo === 'sabor' ? 'sabor de ' + esc(e.familia) : 'por unidade'})</span>
-                    ${(e.apelidos || []).length ? `<span class="muted"> · cliente diz: ${esc(e.apelidos.join(', '))}</span>` : ''}</span>
-                <button type="button" class="btn-secondary btn-sm" data-nome="${esc(e.nome_planilha)}" onclick="removerProdutoDono(this.dataset.nome)">Remover</button>
-            </div>`).join('') : '<p class="muted">Nenhum ainda.</p>';
-    }
-    const bloq = document.getElementById('dono-produtos-bloqueados');
-    if (bloq) {
-        bloq.innerHTML = (data.bloqueados || []).map(b => `
-            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
-                <span><b>${esc(b.nome)}</b> <span class="muted">(${esc(b.categoria)}) — ${esc(b.motivo)}</span></span>
-                ${b.liberado ? '<span class="badge">liberado</span>'
-                    : `<button type="button" class="btn-secondary btn-sm" data-nome="${esc(b.nome)}" data-categoria="${esc(b.categoria)}" onclick="preencherProdutoDono(this.dataset.nome, this.dataset.categoria)">Liberar</button>`}
-            </div>`).join('');
-    }
-}
-
-function donoTipoMudou() {
-    const tipo = (document.getElementById('dono-p-tipo') || {}).value;
-    const wrap = document.getElementById('dono-p-familia-wrap');
-    if (wrap) wrap.style.display = tipo === 'sabor' ? '' : 'none';
-}
-
-function preencherProdutoDono(nome, categoria) {
-    document.getElementById('dono-p-nome').value = nome;
-    const lote = ['Fritos', 'Assados'].includes(categoria);
-    document.getElementById('dono-p-tipo').value = lote ? 'sabor' : 'unidade';
-    if (lote) document.getElementById('dono-p-familia').value = categoria;
-    donoTipoMudou();
-    document.getElementById('dono-p-destino').focus();
-    document.getElementById('dono-p-resultado').innerHTML =
-        '<p class="muted">Agora informe o nome exato do item no cardápio digital e clique em Testar.</p>';
-}
-
-// Apaga o resultado do teste e esvazia o formulário. Não mexe no que já foi
-// salvo: para desfazer um produto ligado, use "Remover" na lista.
-function limparProdutoDono() {
-    ['dono-p-nome', 'dono-p-destino', 'dono-p-apelidos'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.value = '';
-    });
-    const tipo = document.getElementById('dono-p-tipo');
-    if (tipo) tipo.value = 'sabor';
-    const familia = document.getElementById('dono-p-familia');
-    if (familia) familia.value = 'Fritos';
-    donoTipoMudou();
-    const box = document.getElementById('dono-p-resultado');
-    if (box) box.innerHTML = '';
-}
-
-function entradaProdutoDono() {
-    const tipo = document.getElementById('dono-p-tipo').value;
-    return {
-        nome_planilha: document.getElementById('dono-p-nome').value.trim(),
-        tipo,
-        familia: tipo === 'sabor' ? document.getElementById('dono-p-familia').value : '',
-        nome_cardapio: document.getElementById('dono-p-destino').value.trim(),
-        apelidos: document.getElementById('dono-p-apelidos').value,
-    };
-}
-
-function mostrarResultadoProduto(r) {
-    const box = document.getElementById('dono-p-resultado');
-    if (!box || !r) return;
-    const linhas = [];
-    (r.motivos || []).forEach(m => linhas.push(`<li style="color:#ef4444">${esc(m)}</li>`));
-    (r.avisos || []).forEach(m => linhas.push(`<li style="color:#f59e0b">${esc(m)}</li>`));
-    if (r.ok) linhas.unshift(`<li style="color:#22c55e">Cardápio digital aceitou${r.entendido_como ? ' como “' + esc(r.entendido_como) + '”' : ''}.</li>`);
-    box.innerHTML = `<ul style="margin:0;padding-left:18px">${linhas.join('')}</ul>`;
-}
-
-async function testarProdutoDono(ev) {
-    const btn = ev && ev.currentTarget;
-    setBtnLoading(btn, true, 'Testando...');
-    const r = await api('/api/catalogo/testar', { method: 'POST', body: JSON.stringify({ entrada: entradaProdutoDono() }) });
-    setBtnLoading(btn, false);
-    mostrarResultadoProduto(r);
-}
-
-async function salvarProdutoDono(ev) {
-    const btn = ev && ev.currentTarget;
-    setBtnLoading(btn, true, 'Testando...');
-    const r = await api('/api/catalogo/extra', { method: 'POST', body: JSON.stringify({ entrada: entradaProdutoDono() }) });
-    setBtnLoading(btn, false);
-    mostrarResultadoProduto(r);
-    if (r && r.ok) {
-        toast('Produto ligado. A Sandrinha já pode vendê-lo.', 'success');
-        loadDonoProdutos();
-    } else {
-        toast('Não foi salvo — veja o motivo abaixo do formulário.', 'error');
-    }
-}
-
-async function removerProdutoDono(nome) {
-    const res = await api(`/api/catalogo/extra/${encodeURIComponent(nome)}`, { method: 'DELETE' });
-    if (res && res.ok) {
-        toast(`${nome} voltou ao padrão do sistema.`, 'success');
-        loadDonoProdutos();
-    } else {
-        toast((res && res.error) || 'Erro ao remover', 'error');
-    }
 }
 
 async function loadCardapioSettings() {

@@ -509,6 +509,14 @@ _RX_CONSULTORIA_DE_EVENTO = _re_mod.compile(
     r"(?:casamentos?|formaturas?|eventos?|empresas?|confraterniza\w*|buffet)")
 
 
+PERGUNTA_SOMAR_OU_NOVO = (
+    "Esse pedido já foi finalizado! Quer somar ao pedido que acabou de fechar "
+    "ou é um pedido novo? 😊")
+# Texto do BLOCO 0 do dono para alteracao de pedido em producao.
+ALTERACAO_EM_PRODUCAO = (
+    "Como seu pedido já entrou em linha de produção, vou chamar nossa equipe agora "
+    "para verificar se ainda dá tempo de ajustar. Um instante! 💛")
+
 MENSAGEM_EQUIPE_COMERCIAL = (
     "Vou te transferir agora para a nossa equipe comercial te atender! Um instante. 💛")
 
@@ -3978,6 +3986,40 @@ def _esperar_piso(chegada: float | None) -> None:
         time.sleep(RESPOSTA_MIN_SEG - decorrido)
 
 
+# ── Fila do painel ───────────────────────────────────────────────────────────
+# O que so atualiza o painel (espelho da mensagem enviada, conversa marcada
+# como lida) nao precisa segurar o cliente. Uma thread so, em ordem: as
+# mensagens aparecem no painel na sequencia em que sairam.
+import queue as _queue
+
+_fila_painel: "_queue.Queue" = _queue.Queue()
+
+
+def _trabalhador_do_painel() -> None:
+    while True:
+        func, args = _fila_painel.get()
+        try:
+            func(*args)
+        except Exception as e:
+            print(f"[painel] WARN {getattr(func, '__name__', func)} falhou: {e}")
+        finally:
+            _fila_painel.task_done()
+
+
+threading.Thread(target=_trabalhador_do_painel, daemon=True, name="fila-painel").start()
+
+
+def _no_painel(func, *args) -> None:
+    _fila_painel.put((func, args))
+
+
+def _marcar_conversa_lida(user: str) -> None:
+    conv = database.get_or_create_conversation(user)
+    database.reset_unread(conv["id"])
+    events.emit("conversation_updated", {"conversation_id": conv["id"], "unread_count": 0})
+    print(f"[flush] user={user} conv={conv['id']} marcada como lida (agente respondeu)")
+
+
 def enviar_em_blocos(user: str, texto: str, chegada: float | None = None) -> None:
     """Envia a resposta ja dividida, com o ritmo de digitacao, e espelha no painel.
 
@@ -3997,7 +4039,9 @@ def enviar_em_blocos(user: str, texto: str, chegada: float | None = None) -> Non
         if not res.get("ok"):
             print(f"[flush] ERRO ao enviar p/ {user}: {res.get('error')}")
             continue
-        send_msg_out_to_panel(user, chunk)
+        # O espelho no painel (3 consultas ao banco por mensagem) ia antes da
+        # proxima mensagem ao cliente. Vai para a fila do painel, na mesma ordem.
+        _no_painel(send_msg_out_to_panel, user, chunk)
 
 
 def _responder_direto(user: str, items: list[dict], texto: str,
@@ -4361,6 +4405,38 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             _responder_direto(user, items, _resposta_pos, _chegada)
             return
 
+        # Item novo logo depois de fechar ("pode ser o guarana" com o pedido
+        # ja enviado): somar ou pedido novo? Era o modelo quem decidia, e na
+        # medicao de 02/10 ele perguntou 2 vezes e transferiu 1. A pergunta e
+        # fixa, e a resposta decide: somar e alteracao (BLOCO 0: equipe), novo
+        # segue o atendimento.
+        _ultima_ag_pos = next((m.get("parts", [{}])[0].get("text", "") or ""
+                               for m in reversed(memory.get(user))
+                               if m.get("role") == "assistant"), "")
+        if PERGUNTA_SOMAR_OU_NOVO in _ultima_ag_pos:
+            _resp = facts.normalize(text_only)
+            if _re_mod.search(r"\b(?:somar|soma|junto|juntar|mesmo pedido|esse pedido|"
+                              r"anterior|nesse|neste|no mesmo|incluir|inclui)\b", _resp):
+                _memoria["items"] = []
+                conversation_memory.save(user, _memoria)
+                print(f"[pos-pedido] user={user} quer somar ao pedido fechado: equipe")
+                _responder_direto(user, items, ALTERACAO_EM_PRODUCAO, _chegada)
+                perform_transfer(user, reason=f"Acrescimo em pedido ja em producao: "
+                                 f"{text_only[:120]}", send_message=False)
+                return
+            if _re_mod.search(r"\b(?:novo|outro|separado|nova)\b", _resp):
+                # Pedido novo: a janela do pedido anterior nao vale mais para
+                # esta conversa, e o funil segue normal.
+                _memoria["ultimo_pedido_em"] = ""
+                conversation_memory.save(user, _memoria)
+                print(f"[pos-pedido] user={user} pedido novo depois do fechado")
+        elif (conversation_memory.pedido_recente(_memoria) is not None
+                and _memoria.get("items") and not _memoria.get("pedido_enviado")
+                and not _RX_CLIENTE_PERGUNTOU.search(text_only or "")):
+            print(f"[pos-pedido] user={user} item novo logo depois de fechar: somar ou novo?")
+            _responder_direto(user, items, PERGUNTA_SOMAR_OU_NOVO, _chegada)
+            return
+
         # ── Expediente e agendamento (decididos em codigo) ───────────────────
         # Estas duas respostas saem sem passar pelo LLM porque sao regras de
         # negocio fechadas, e eram justamente as que o modelo pulava quando o
@@ -4485,6 +4561,13 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                 # 26/09 19h21).
                 if _campo_invalido == "horario":
                     _memoria["horario"] = ""
+                    # "A gente so comeca as 08h00! Pode ser a partir desse
+                    # horario?": a hora oferecida fica guardada, e o "pode"
+                    # seguinte a aplica. No teste de 02/10 ela recebeu "Pode" e
+                    # perguntou "Qual horario?" depois da oferta.
+                    if "só começa" in _motivo:
+                        _abre = horario._turno(date.fromisoformat(_memoria["data_iso"]))[0]
+                        _memoria["horario_proposto"] = horario.formatar_horario(*_abre)
                 else:
                     _memoria["data_iso"] = ""
                     _memoria["data_agendada"] = ""
@@ -4842,6 +4925,11 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             "'normalmente indicamos'. Pergunta que voce nao entendeu nao e 'sim'. "
             "Produto que nao esta no cardapio NAO e duvida: diga que nao temos (o que "
             "nao consta no cardapio esta indisponivel)."
+            "\n9.8 FONTE DOS DADOS: produtos, precos, sabores, disponibilidade, taxas de "
+            "entrega, horario de atendimento e regras (taxa de retorno, endereco, chave "
+            "Pix) vem do CARDAPIO DIGITAL - o bloco 'CARDAPIO DIGITAL' e a linha "
+            "'Expediente' acima, atualizados a cada mensagem. Se algum numero escrito "
+            "nas instrucoes do dono for diferente desses dados, VALE O DO CARDAPIO."
             "\n10. SEMPRE responda primeiro a pergunta que o cliente fez (preco, frete, "
             "horario, endereco, forma de pagamento, se tem determinado produto) e so "
             "depois puxe o proximo dado do funil, na mesma mensagem. Isso vale tambem no "
@@ -5612,13 +5700,7 @@ def _handle_flush(user: str, items: list[dict]) -> None:
 
         # Meta: indicador some automaticamente apos 25s ou envio
 
-        try:
-            conv = database.get_or_create_conversation(user)
-            database.reset_unread(conv["id"])
-            events.emit("conversation_updated", {"conversation_id": conv["id"], "unread_count": 0})
-            print(f"[flush] user={user} conv={conv['id']} marcada como lida (agente respondeu)")
-        except Exception as e:
-            print(f"[flush] WARN reset_unread falhou p/ {user}: {e}")
+        _no_painel(_marcar_conversa_lida, user)
     except Exception as e:
         print(f"[flush] ERRO inesperado p/ {user}: {e}")
 
@@ -6452,65 +6534,6 @@ def api_set_ofertas():
     return jsonify({"ok": True})
 
 
-@app.get("/api/catalogo/extra")
-@login_required
-def api_get_catalogo_extra():
-    import cardapio_catalogo
-    entradas = config_dono.catalogo_extra()
-    liberados = {cardapio_catalogo._norm(e["nome_planilha"]) for e in entradas}
-    bloqueados = [
-        {"nome": nome, "categoria": categoria, "motivo": motivo,
-         "liberado": cardapio_catalogo._norm(nome) in liberados}
-        for nome, (categoria, motivo) in sorted(cardapio_catalogo.BLOQUEADOS.items())
-    ]
-    return jsonify({"entradas": entradas, "bloqueados": bloqueados,
-                    "familias": list(config_dono.FAMILIAS)})
-
-
-@app.post("/api/catalogo/testar")
-@login_required
-def api_testar_catalogo():
-    import cardapio_catalogo
-    data = request.get_json(silent=True) or {}
-    return jsonify(cardapio_catalogo.testar_entrada(
-        data.get("entrada") or {}, config_dono.catalogo_extra()))
-
-
-@app.post("/api/catalogo/extra")
-@login_required
-def api_salvar_catalogo_extra():
-    """Grava um produto SO depois de ele passar no teste."""
-    import cardapio_catalogo
-    data = request.get_json(silent=True) or {}
-    entrada = data.get("entrada") or {}
-    atuais = config_dono.catalogo_extra()
-    resultado = cardapio_catalogo.testar_entrada(entrada, atuais)
-    if not resultado.get("ok"):
-        return jsonify({"error": "; ".join(resultado.get("motivos") or ["teste falhou"]),
-                        **resultado}), 400
-    nova = config_dono._entrada_valida(entrada)
-    novas = [e for e in atuais
-             if cardapio_catalogo._norm(e["nome_planilha"]) != cardapio_catalogo._norm(nova["nome_planilha"])]
-    config_dono.salvar_catalogo(novas + [nova])
-    print(f"[config] produto ligado ao cardapio pelo painel: {nova['nome_planilha']} "
-          f"-> {nova['nome_cardapio']}")
-    return jsonify({"ok": True, **resultado})
-
-
-@app.delete("/api/catalogo/extra/<path:nome>")
-@login_required
-def api_remover_catalogo_extra(nome):
-    import cardapio_catalogo
-    atuais = config_dono.catalogo_extra()
-    novas = [e for e in atuais
-             if cardapio_catalogo._norm(e["nome_planilha"]) != cardapio_catalogo._norm(nome)]
-    if len(novas) == len(atuais):
-        return jsonify({"error": "produto nao encontrado"}), 404
-    config_dono.salvar_catalogo(novas)
-    print(f"[config] produto removido do painel (volta ao padrao): {nome}")
-    return jsonify({"ok": True})
-
-
 @app.get("/api/settings/reset")
 @login_required
 def api_get_reset_settings():
@@ -6972,226 +6995,6 @@ def api_knowledge_get(filename):
     return jsonify(file_data)
 
 
-@app.get("/api/knowledge/<filename>/xlsx-data")
-@login_required
-def api_knowledge_xlsx_data(filename):
-    """Retorna dados estruturados de um arquivo .xlsx para visualizacao em tabela."""
-    if not filename.endswith('.xlsx'):
-        return jsonify({"error": "Arquivo nao e xlsx"}), 400
-    
-    file_data = knowledge_rag.get_file(filename)
-    if not file_data:
-        return jsonify({"error": "Arquivo nao encontrado"}), 404
-    
-    try:
-        import openpyxl
-        from pathlib import Path
-        
-        # Busca o arquivo original do storage
-        uploads_dir = Path(__file__).parent / "uploads"
-        xlsx_path = uploads_dir / filename
-        
-        if not xlsx_path.exists():
-            xlsx_path = Path(__file__).parent / "static" / filename
-        
-        if not xlsx_path.exists():
-            xlsx_path = Path(__file__).parent / filename
-        
-        if not xlsx_path.exists():
-            content = file_data.get("content", "")
-            return jsonify({
-                "sheets": [{"name": "Dados", "data": content}],
-                "filename": filename
-            })
-        
-        wb = openpyxl.load_workbook(str(xlsx_path), read_only=True, data_only=True)
-        sheets = []
-        
-        for sheet_name in wb.sheetnames:
-            ws = wb[sheet_name]
-            
-            # Le todas as linhas como listas
-            all_rows = []
-            for row in ws.iter_rows(values_only=True):
-                vals = [str(cell) if cell is not None else "" for cell in row]
-                all_rows.append(vals)
-            
-            if not all_rows:
-                continue
-            
-            # Remove colunas totalmente vazias (conta colunas com pelo menos 1 valor)
-            non_empty_cols = set()
-            for row in all_rows:
-                for ci, cell in enumerate(row):
-                    if cell.strip():
-                        non_empty_cols.add(ci)
-            
-            if not non_empty_cols:
-                continue
-            
-            non_empty_cols = sorted(non_empty_cols)
-            all_rows = [[row[ci] if ci < len(row) else "" for ci in non_empty_cols] for row in all_rows]
-            
-            # Remove linhas totalmente vazias
-            all_rows = [r for r in all_rows if any(cell.strip() for cell in r)]
-            
-            if not all_rows:
-                continue
-            
-            # Detecta linha de headers: procura a primeira linha com 2+ valores nao-vazios
-            # que parecem ser nomes de coluna (nao numericos)
-            header_idx = 0
-            for idx, row in enumerate(all_rows):
-                non_empty = [c.strip() for c in row if c.strip()]
-                if len(non_empty) >= 2:
-                    # Verifica se parece header (valores sao texto, nao numeros puros)
-                    has_text = any(
-                        not c.replace(".", "").replace(",", "").isdigit()
-                        for c in non_empty
-                    )
-                    if has_text:
-                        header_idx = idx
-                        break
-            
-            headers = [c.strip() or f"Col_{i+1}" for i, c in enumerate(all_rows[header_idx])]
-            data_rows = all_rows[header_idx + 1:]
-            
-            # Remove linhas totalmente vazias apos headers
-            data_rows = [r for r in data_rows if any(cell.strip() for cell in r)]
-            
-            sheets.append({
-                "name": sheet_name,
-                "headers": headers,
-                "rows": data_rows,
-                "rowCount": len(data_rows),
-                "colCount": len(headers)
-            })
-        
-        wb.close()
-        
-        return jsonify({
-            "sheets": sheets,
-            "filename": filename,
-            "totalSheets": len(sheets)
-        })
-        
-    except Exception as e:
-        print(f"[knowledge] ERRO ao processar xlsx: {e}")
-        # Fallback: retorna o conteudo como texto
-        content = file_data.get("content", "")
-        return jsonify({
-            "sheets": [{"name": "Dados", "data": content}],
-            "filename": filename,
-            "error": str(e)
-        })
-
-
-@app.put("/api/knowledge/<filename>/xlsx-data")
-@login_required
-def api_knowledge_xlsx_data_update(filename):
-    """Salva dados editados de uma planilha .xlsx de volta ao arquivo."""
-    if not filename.endswith('.xlsx'):
-        return jsonify({"error": "Arquivo nao e xlsx"}), 400
-    
-    data = request.get_json(silent=True) or {}
-    sheets = data.get("sheets", [])
-    description = data.get("description", "").strip()
-    
-    if not sheets:
-        return jsonify({"error": "Nenhum dado fornecido"}), 400
-    
-    try:
-        import openpyxl
-        from pathlib import Path
-        
-        # Busca o arquivo
-        uploads_dir = Path(__file__).parent / "uploads"
-        xlsx_path = uploads_dir / filename
-        if not xlsx_path.exists():
-            xlsx_path = Path(__file__).parent / "static" / filename
-        if not xlsx_path.exists():
-            xlsx_path = Path(__file__).parent / filename
-        
-        if not xlsx_path.exists():
-            return jsonify({"error": "Arquivo xlsx nao encontrado no disco"}), 404
-        
-        # Abre o workbook existente
-        wb = openpyxl.load_workbook(str(xlsx_path))
-        
-        for sheet_data in sheets:
-            sheet_name = sheet_data.get("name", "")
-            headers = sheet_data.get("headers", [])
-            rows = sheet_data.get("rows", [])
-            
-            if sheet_name not in wb.sheetnames:
-                continue
-            
-            ws = wb[sheet_name]
-            
-            # Encontra onde comecam os headers no worksheet original
-            header_row_idx = None
-            for row_idx in range(1, min(ws.max_row + 1, 20)):
-                row_vals = [str(ws.cell(row=row_idx, column=ci + 1).value or "").strip() for ci in range(len(headers))]
-                # Compara com os headers atuais
-                if row_vals == headers or row_vals[:len(headers)] == headers:
-                    header_row_idx = row_idx
-                    break
-            
-            if header_row_idx is None:
-                # Headers nao encontrados - escreve a partir da linha 1
-                header_row_idx = 1
-                # Escreve headers
-                for ci, h in enumerate(headers):
-                    ws.cell(row=1, column=ci + 1, value=h)
-                header_row_idx = 2
-            
-            # Limpa dados antigos (mantem headers)
-            max_data_row = ws.max_row
-            for row_idx in range(header_row_idx, max_data_row + 1):
-                for ci in range(len(headers)):
-                    ws.cell(row=row_idx, column=ci + 1, value=None)
-            
-            # Escreve novos dados
-            for ri, row in enumerate(rows):
-                for ci, val in enumerate(row):
-                    # Tenta manter tipo numerico quando possivel
-                    cell_val = val
-                    if val and isinstance(val, str):
-                        try:
-                            cell_val = float(val.replace(",", "."))
-                        except (ValueError, AttributeError):
-                            cell_val = val
-                    ws.cell(row=header_row_idx + ri, column=ci + 1, value=cell_val)
-        
-        # Salva o arquivo
-        wb.save(str(xlsx_path))
-        wb.close()
-        
-        # Atualiza o texto no knowledge no MESMO formato do carregamento
-        # oficial: uma linha por registro, colunas separadas por ' | '.
-        content_parts = []
-        for sheet_data in sheets:
-            texto = parse_knowledge.sheet_rows_to_text(
-                sheet_data.get("name", "Dados"),
-                sheet_data.get("headers", []),
-                sheet_data.get("rows", []),
-            )
-            if texto:
-                content_parts.append(texto)
-
-        full_content = "\n\n".join(content_parts)
-        knowledge_rag.save_knowledge_raw(filename, full_content, description=description)
-        
-        print(f"[knowledge] planilha salva: {filename}")
-        return jsonify({"ok": True})
-        
-    except Exception as e:
-        print(f"[knowledge] ERRO ao salvar xlsx: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({"error": f"Erro ao salvar planilha: {str(e)}"}), 500
-
-
 @app.post("/api/knowledge")
 @login_required
 def api_knowledge_create():
@@ -7202,8 +7005,8 @@ def api_knowledge_create():
     skip_embed = data.get("skip_embed", True)
     if not filename:
         return jsonify({"error": "filename obrigatorio"}), 400
-    if not filename.endswith(('.md', '.txt', '.docx', '.xlsx')):
-        return jsonify({"error": "Extensao invalida (.md, .txt, .docx ou .xlsx)"}), 400
+    if not filename.endswith(('.md', '.txt', '.docx')):
+        return jsonify({"error": "Extensao invalida (.md, .txt ou .docx)"}), 400
     existing = knowledge_rag.get_file(filename)
     if existing:
         return jsonify({"error": "Arquivo ja existe"}), 409
@@ -7309,25 +7112,14 @@ def _parse_docx_upload(file_storage) -> str:
         return ""
 
 
-def _parse_xlsx_upload(file_storage) -> str:
-    """Extrai texto de um arquivo .xlsx enviado via upload (todas as abas).
-
-    Usa o mesmo conversor do carregamento oficial: uma linha por registro. O
-    formato antigo (df.to_string) alinhava colunas com dezenas de espacos e as
-    linhas eram cortadas na indexacao, quebrando precos e taxas.
-    """
-    try:
-        import io
-        return parse_knowledge.xlsx_to_text(io.BytesIO(file_storage.read()))
-    except Exception as e:
-        print(f"[knowledge] ERRO parse xlsx: {e}")
-        return ""
-
-
 @app.post("/api/knowledge/upload")
 @login_required
 def api_knowledge_upload():
-    """Upload de múltiplos arquivos (multipart). Aceita .md, .txt, .docx, .xlsx."""
+    """Upload de múltiplos arquivos (multipart). Aceita .md, .txt e .docx.
+
+    Planilha (.xlsx) nao entra mais (02/10/2026): produtos, precos, bairros e
+    horario vem do cardapio digital (cardapio_fonte.py).
+    """
     files = request.files.getlist("files")
     if not files:
         return jsonify({"error": "Nenhum arquivo enviado"}), 400
@@ -7339,8 +7131,9 @@ def api_knowledge_upload():
         if not filename:
             continue
         lower = filename.lower()
-        if not lower.endswith(('.md', '.txt', '.docx', '.xlsx')):
-            errors.append({"filename": filename, "error": "Extensao invalida (.md, .txt, .docx ou .xlsx)"})
+        if not lower.endswith(('.md', '.txt', '.docx')):
+            errors.append({"filename": filename, "error": "Extensao invalida (.md, .txt ou .docx). "
+                                                          "Produtos e bairros vem do cardapio digital."})
             continue
         existing = knowledge_rag.get_file(filename)
         if existing:
@@ -7349,8 +7142,6 @@ def api_knowledge_upload():
         try:
             if lower.endswith('.docx'):
                 content = _parse_docx_upload(f)
-            elif lower.endswith('.xlsx'):
-                content = _parse_xlsx_upload(f)
             else:
                 content = f.read().decode("utf-8", errors="replace")
             if not content or not content.strip():

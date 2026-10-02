@@ -27,7 +27,7 @@ INTERVALO_FIM = (13, 59)
 def _turno(dia: date | None = None) -> tuple:
     """(abertura, inicio_do_intervalo, fim_do_intervalo, fechamento) do dia.
 
-    Com FONTE_DADOS=cardapio o expediente vem do BusinessHours do cardapio
+    O expediente vem do BusinessHours do cardapio
     digital (intervalo 12:00-14:00 la vira 12h01-13h59 aqui, como sempre foi).
     Nas outras fontes, ou se o cardapio nao responder, valem as constantes
     acima - o comportamento de antes.

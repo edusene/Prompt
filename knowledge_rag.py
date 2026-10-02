@@ -249,7 +249,7 @@ def search_context(query: str, top_k: int = 3) -> str:
     if not query or not query.strip():
         return ""
 
-    # Com FONTE_DADOS=cardapio os trechos da planilha nao voltam na busca: o
+    # Trechos da planilha antiga (se alguem a subir de novo) nao voltam na busca: o
     # dado oficial e o do cardapio digital, que ja esta no prompt.
     def _sem_planilha(resultados):
         try:
@@ -421,7 +421,7 @@ def get_full_knowledge_content(include_prompts: bool = False) -> str:
     aqui duplicava instruções e criava regras conflitantes no mesmo contexto.
     """
     cache_key = "all" if include_prompts else "dados"
-    # Com FONTE_DADOS=cardapio a planilha nao vai para o prompt: no lugar dela
+    # A planilha antiga nao vai para o prompt: no lugar dela
     # entra o texto montado do cardapio digital (cardapio_fonte.texto_para_prompt).
     # A chave do cache acompanha a leitura do cardapio (5 minutos).
     texto_cardapio = ""

@@ -27,7 +27,6 @@ import parse_knowledge  # noqa: E402
 
 BASE = Path(__file__).parent
 
-XLSX = "PLANILHA CARDAPIO E BAIRROS EDUARDO.xlsx"
 DOCX = parse_knowledge.PROMPT_DOCX_NAME
 # Versoes anteriores do prompt: sao APAGADAS da base. O agente le a primeira
 # versao que encontrar, e duas na base valem como duas instrucoes diferentes
@@ -96,14 +95,8 @@ def collect_sources() -> dict:
     """{filename: texto_consertado} a partir das melhores origens disponiveis."""
     sources = {}
 
-    xlsx_path = BASE / XLSX
-    if xlsx_path.exists():
-        # A planilha e reconvertida do binario original: nunca esta danificada.
-        texto = parse_knowledge.xlsx_to_text(str(xlsx_path))
-        if texto:
-            sources[XLSX] = texto
-    else:
-        print(f"[reindex] AVISO: {XLSX} nao encontrado em disco")
+    # A planilha nao entra mais no knowledge (02/10/2026): produtos, precos,
+    # bairros e horario vem do cardapio digital (cardapio_fonte.py).
 
     docx_path = BASE / DOCX
     disco_docx = ""

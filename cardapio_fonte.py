@@ -21,7 +21,7 @@ da planilha, com os MESMOS nomes de item que o resto do codigo ja conhece
 dos dados muda; produto novo do cardapio entra com o nome que tem la.
 
 Nunca derruba o atendimento: cache de 5 minutos, ultima leitura boa guardada
-no banco, e quem chama (facts) volta para a planilha se nada disso existir.
+no banco e, por ultimo, o retrato salvo em fixtures/.
 """
 
 import json
@@ -113,11 +113,30 @@ def bruto(forcar: bool = False) -> dict | None:
             if _cache is not None:
                 _cache_em = time.monotonic()     # nao martela a API caida
                 return _cache
-            guardado = _snapshot_do_banco()
+            guardado = _snapshot_do_banco() or _retrato_do_repositorio()
             if guardado:
                 _cache, _cache_em = guardado, time.monotonic()
                 return guardado
             return None
+
+
+# Ultima reserva: o retrato do cardapio salvo no repositorio. Com a planilha
+# fora do sistema, e o que garante que um servidor novo, sem banco e com o
+# cardapio fora do ar, ainda tenha produtos e bairros para atender.
+_RETRATO = "fixtures/cardapio_snapshot_2026-10-02.json"
+
+
+def _retrato_do_repositorio() -> dict | None:
+    try:
+        import os
+        caminho = os.path.join(os.path.dirname(os.path.abspath(__file__)), _RETRATO)
+        with open(caminho, encoding="utf-8") as f:
+            dados = json.load(f)
+        print(f"[cardapio-fonte] WARN usando o retrato do repositorio ({_RETRATO})")
+        return dados or None
+    except Exception as e:
+        print(f"[cardapio-fonte] WARN retrato do repositorio ilegivel: {e}")
+        return None
 
 
 # ── Nomes: cardapio -> nome que o codigo ja conhece ───────────────────────────
@@ -362,7 +381,7 @@ def montar_dados(dados_brutos: dict | None = None) -> dict | None:
 def texto_para_prompt(dados: dict) -> str:
     """Os dados do cardapio no formato de tabela que a planilha tinha no prompt.
 
-    Com FONTE_DADOS=cardapio o texto da planilha deixa de ir para o modelo (ele
+    No lugar do texto da planilha, que ia para o modelo (ele
     leria a taxa antiga do Eldorado, por exemplo); vai este, montado do cardapio.
     """
     linhas = ["=== CARDAPIO (cardapio digital) ===",

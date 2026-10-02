@@ -1,5 +1,5 @@
 """
-parse_knowledge.py — Le os arquivos .docx e .xlsx de conhecimento da BALBS
+parse_knowledge.py — Le o .docx do prompt operacional da BALBS
 e retorna o conteudo formatado para injetar no system prompt do agente.
 Busca primeiro no banco de dados, depois fallback para arquivos locais.
 """
@@ -25,10 +25,6 @@ PROMPT_DOCX_VERSOES = (
 )
 PROMPT_DOCX_NAME = PROMPT_DOCX_VERSOES[0]
 
-_DADOS_XLSX = _dir / "PLANILHA CARDAPIO E BAIRROS EDUARDO.xlsx"
-
-# Nomes dos arquivos como serao salvos no knowledge DB
-_DADOS_DB_NAME = "PLANILHA CARDAPIO E BAIRROS EDUARDO.xlsx"
 
 
 def _read_from_db(filename: str) -> str:
@@ -107,119 +103,6 @@ def _adaptar_prompt_docx(texto: str) -> str:
     # Remove linhas de disparo obrigatório duplicadas
     texto = re.sub(r"=+\nDISPARO OBRIGATÓRIO.*", "", texto, flags=re.DOTALL)
     return texto.strip()
-
-
-def _clean_cell(value) -> str:
-    """Normaliza uma celula da planilha para texto."""
-    if value is None:
-        return ""
-    text = str(value).strip()
-    if text.lower() in ("nan", "nat", "none"):
-        return ""
-    # 8.0 -> 8 ; 12.5 -> 12.5 (evita "R$ 8.0" na tabela de frete)
-    if text.replace(".", "", 1).replace("-", "", 1).isdigit() and text.endswith(".0"):
-        text = text[:-2]
-    return text
-
-
-def sheet_rows_to_text(sheet_name: str, headers: list, rows: list) -> str:
-    """Formata uma aba como cabecalho + UMA LINHA POR REGISTRO.
-
-    Uma linha por registro e essencial: o chunker nunca quebra uma linha, entao
-    nenhum bairro fica separado da sua taxa nem produto do seu preco.
-    """
-    headers = [_clean_cell(h) or f"col{i+1}" for i, h in enumerate(headers)]
-    lines = [f"=== {sheet_name} ===", " | ".join(headers)]
-    seen = set()
-    for row in rows:
-        cells = [_clean_cell(c) for c in row]
-        while cells and not cells[-1]:
-            cells.pop()
-        if not any(cells):
-            continue
-        line = " | ".join(cells)
-        # A planilha repete blocos de cabecalho/linhas; duplicata vira ruido
-        if line in seen or line == " | ".join(headers):
-            continue
-        seen.add(line)
-        lines.append(line)
-    return ("\n").join(lines)
-
-
-def _detect_header_row(rows: list) -> int:
-    """Indice da primeira linha que parece cabecalho (2+ celulas de texto)."""
-    for idx, row in enumerate(rows):
-        filled = [c for c in row if c]
-        if len(filled) >= 2 and any(not c.replace(".", "").replace(",", "").isdigit() for c in filled):
-            return idx
-    return 0
-
-
-def xlsx_to_text(source) -> str:
-    """Converte um .xlsx (caminho ou file-like) em texto estruturado limpo.
-
-    Substitui o antigo df.to_string(), que alinhava colunas com dezenas de
-    espacos e era truncado no meio das linhas pelo chunker — origem dos precos
-    e fretes errados que o agente informava. Usa openpyxl (dependencia
-    declarada); pandas nao e necessario.
-    """
-    try:
-        import openpyxl
-    except ImportError:
-        print("[parse_knowledge] openpyxl nao instalado, pulando xlsx")
-        return ""
-
-    wb = openpyxl.load_workbook(source, read_only=True, data_only=True)
-    partes = []
-    try:
-        for sheet_name in wb.sheetnames:
-            ws = wb[sheet_name]
-            rows = []
-            for row in ws.iter_rows(values_only=True):
-                cells = [_clean_cell(c) for c in row]
-                if any(cells):
-                    rows.append(cells)
-            if not rows:
-                continue
-
-            # Remove colunas totalmente vazias
-            width = max(len(r) for r in rows)
-            keep = [
-                ci for ci in range(width)
-                if any(ci < len(r) and r[ci] for r in rows)
-            ]
-            rows = [[r[ci] if ci < len(r) else "" for ci in keep] for r in rows]
-
-            header_idx = _detect_header_row(rows)
-            headers = rows[header_idx]
-            texto = sheet_rows_to_text(sheet_name, headers, rows[header_idx + 1:])
-            if texto:
-                partes.append(texto)
-    finally:
-        try:
-            wb.close()
-        except Exception:
-            pass
-
-    return ("\n\n").join(partes)
-
-
-def _read_xlsx() -> str:
-    """Le o .xlsx e converte cada aba para texto estruturado limpo.
-    Tenta DB primeiro, depois local.
-    """
-    content = _read_from_db(_DADOS_DB_NAME)
-    if content:
-        return content
-
-    if not _DADOS_XLSX.exists():
-        print(f"[parse_knowledge] arquivo nao encontrado: {_DADOS_XLSX.name}")
-        return ""
-    try:
-        return xlsx_to_text(str(_DADOS_XLSX))
-    except Exception as e:
-        print(f"[parse_knowledge] ERRO ao ler xlsx: {e}")
-        return ""
 
 
 def get_prompt_system() -> str:
