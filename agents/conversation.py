@@ -700,7 +700,16 @@ def detectar_horario(message: str) -> str:
 
 
 _IMEDIATO = re.compile(
-    r"\b(?:pra|para|e)\s+agora\b|\bagora\s+mesmo\b|\bimediat[oa]\b"
+    r"\b(?:pra|para)\s+agora\b|\bagora\s+mesmo\b|\bimediat[oa]\b"
+    # "e agora" so quando fecha a frase ("e agora!" = e para agora); "e agora,
+    # o que eu faco?" e duvida, nao horario.
+    r"|\be\s+agora\s*[.!]*\s*$"
+    # "pra retirar agora", "entrega agora", "pode mandar agora" (teste de
+    # 02/10: so "pra agora" era entendido, e ela pedia data e horario).
+    r"|\b(?:retir\w*|entreg\w*|buscar|busco|pegar|pego|mandar|manda|levar|enviar|sair|"
+    r"saia|fazer|preparar)\s+(?:(?:ele|ela|eles|elas|isso|tudo)\s+)?agora\b"
+    # "quero 25 coxinhas agora": o "agora" fechando o pedido.
+    r"|\b(?:quero|queria|preciso|manda|mande)\b.*\bagora\s*[.!]*\s*$"
     r"|\bo\s+(?:quanto\s+antes|mais\s+rapido(?:\s+possivel)?)\b"
     r"|^\s*(?:agora|ja|ja\s+ja|agorinha)\s*(?:pf|por\s+favor|pfv)?\s*[.!]*\s*$"
 )
@@ -750,7 +759,9 @@ def detectar_referencia(message: str) -> str:
 # Onde o nome da rua termina: o proximo campo do pedido. Sem isto o endereco
 # engolia pagamento, horario e dia, e ia inteiro para a comanda.
 _FIM_DA_RUA = re.compile(
-    r"\s+(?:bairro|pagamento|pago|vou\s+pagar|pix|cart[aã]o|dinheiro|troco|"
+    # "rua guapore 120 no pix": o "no" sobrava no endereco (02/10).
+    r"\s+(?:(?:no|na|em|pelo|pela)\s+(?:pix|cart[aã]o|dinheiro|debito|credito)|"
+    r"bairro|pagamento|pago|vou\s+pagar|pix|cart[aã]o|dinheiro|troco|"
     r"[aà]s\s|\d{1,2}\s*h(?:oras)?\b|hoje|amanh[aã]|depois\s+de\s+amanh[aã]|"
     r"data|hor[aá]rio|ponto\s+de\s+refer|refer[eê]ncia|entrega|retirada|"
     # "rua julia 6559 igarape pra agora" foi impresso assim no espelho (teste

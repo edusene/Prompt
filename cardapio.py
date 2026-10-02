@@ -756,7 +756,18 @@ def montar_resumo(items: list[dict], subtotal: float, delivery_fee: float,
     # segunda-feira (21/09)?"), mas no espelho o dono quer o formato fechado —
     # no teste de 22/09 saiu "hoje, terca-feira (22/09)".
     linhas.append(f"📅 Data: {_data_numerica(data_iso) or dia or '[DIA - PERGUNTE AO CLIENTE]'}")
-    linhas.append(f"⏰ Horário: {horario or '[HORARIO]'}")
+    horario_txt = horario or "[HORARIO]"
+    if (horario or "").strip().lower() == "imediato":
+        # Pedido "agora": a regra do cardapio manda informar o tempo de preparo.
+        try:
+            import cardapio_fonte
+            unidades = sum(int(float(i.get("quantity") or 0)) for i in items or [])
+            minutos = cardapio_fonte.tempo_de_preparo(unidades)
+        except Exception:
+            minutos = None
+        if minutos:
+            horario_txt = f"Imediato (pronto em cerca de {minutos} min)"
+    linhas.append(f"⏰ Horário: {horario_txt}")
 
     if retirada:
         linhas.append(f"📍 Retirada: No balcão da fábrica ({endereco_fabrica()})")

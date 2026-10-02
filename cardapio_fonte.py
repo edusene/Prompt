@@ -400,6 +400,22 @@ def texto_para_prompt(dados: dict) -> str:
     return "\n".join(linhas)
 
 
+def tempo_de_preparo(unidades: int) -> int | None:
+    """Minutos de preparo pela regra tempo_preparo do cardapio.
+
+    "Ate 100 unidades: ~30 min. Ate 500 unidades: ~40 min. 1000+ unidades:
+    encaminhar..." -> 30 para ate 100, 40 para ate 500. None sem a regra.
+    """
+    import re
+    texto = regra("tempo_preparo", "")
+    faixas = sorted((int(a), int(b)) for a, b in
+                    re.findall(r"at[eé]\s*(\d+)\s*unidades?\s*:\s*~?\s*(\d+)\s*min", texto, re.IGNORECASE))
+    for limite, minutos in faixas:
+        if unidades <= limite:
+            return minutos
+    return faixas[-1][1] if faixas else None
+
+
 def regra(chave: str, padrao: str = "") -> str:
     """Valor de uma InternalBusinessRule (endereco_retirada, chave_pix...)."""
     b = bruto()

@@ -4561,13 +4561,10 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                 # 26/09 19h21).
                 if _campo_invalido == "horario":
                     _memoria["horario"] = ""
-                    # "A gente so comeca as 08h00! Pode ser a partir desse
-                    # horario?": a hora oferecida fica guardada, e o "pode"
-                    # seguinte a aplica. No teste de 02/10 ela recebeu "Pode" e
-                    # perguntou "Qual horario?" depois da oferta.
-                    if "só começa" in _motivo:
-                        _abre = horario._turno(date.fromisoformat(_memoria["data_iso"]))[0]
-                        _memoria["horario_proposto"] = horario.formatar_horario(*_abre)
+                    # Sem horario proposto de proposito: depois de "A gente so
+                    # comeca as 08h00!", o "pode" do cliente e sobre o pedido,
+                    # nao necessariamente sobre as 08h00 - ela pergunta o
+                    # horario (decisao do usuario, 02/10).
                 else:
                     _memoria["data_iso"] = ""
                     _memoria["data_agendada"] = ""

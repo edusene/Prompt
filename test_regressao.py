@@ -2471,11 +2471,28 @@ database_real.delete_conversation_state("5500000000000")
 _db_fx.fetch_one, _db_fx.execute = _fetch_real, _exec_real
 checa("espelho do painel vai para a fila (nao segura o cliente)",
       "_no_painel(send_msg_out_to_panel, user, chunk)" in open("app.py", encoding="utf-8").read())
+for _txt, _esp in (("quero 25 coxinhas pra retirar agora", "Imediato"),
+                   ("quero 25 coxinhas pra entrega agora", "Imediato"),
+                   ("quero 25 coxinhas agora", "Imediato"), ("pode mandar agora", "Imediato"),
+                   ("agora", "Imediato"), ("é agora", "Imediato"),
+                   ("e agora o que faço?", ""), ("agora quero 2 coxinhas", ""),
+                   ("quero retirar agora às 16h", "16h")):
+    checa(f"'agora': {_txt!r}", _cv_0110.detectar_horario(_txt) == _esp, _cv_0110.detectar_horario(_txt))
+_cf_fx.bruto = lambda forcar=False: _RETRATO_FX
+checa("tempo de preparo da regra do cardapio: 25 un -> 30 min, 300 un -> 40 min",
+      _cf_fx.tempo_de_preparo(25) == 30 and _cf_fx.tempo_de_preparo(300) == 40)
+_res_imed = app.cardapio.montar_resumo([{"name": "Coxinha frango", "quantity": 25, "price": 0.8}], 20, 0, 0, 20,
+                                       modalidade="retirada", dia="hoje", horario="Imediato")
+checa("resumo do pedido 'agora' informa o tempo de preparo",
+      "Horário: Imediato (pronto em cerca de 30 min)" in _res_imed, _res_imed)
+checa("'no pix' nao fica no endereco",
+      _cv_0110._extract_data_from_message("bairro olaria rua guapore 120 no pix",
+                                         _cv_0110.ConversationState()).get("endereco") == "rua guapore 120")
 checa("item novo logo depois de fechar: pergunta fixa 'somar ou novo'",
       "_responder_direto(user, items, PERGUNTA_SOMAR_OU_NOVO, _chegada)" in open("app.py", encoding="utf-8").read()
       and "Como seu pedido já entrou em linha de produção" in app.ALTERACAO_EM_PRODUCAO)
-checa("'pode' depois de 'so comeca as 08h00' guarda a hora oferecida",
-      'if "só começa" in _motivo:' in open("app.py", encoding="utf-8").read())
+checa("'pode' depois de 'so comeca as 08h00' NAO vira 08h00 (ela pergunta o horario)",
+      'if "só começa" in _motivo:' not in open("app.py", encoding="utf-8").read())
 
 print()
 print("=" * 78)
