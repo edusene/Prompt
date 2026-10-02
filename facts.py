@@ -11,7 +11,10 @@ exata (normalizacao + apelidos + similaridade), usadas por:
 """
 
 import re
+import threading
+import time
 import unicodedata
+from contextlib import contextmanager
 from difflib import SequenceMatcher
 
 DADOS_FILENAME = "PLANILHA CARDAPIO E BAIRROS EDUARDO.xlsx"
@@ -155,7 +158,43 @@ def _build() -> dict:
     }
 
 
-def get() -> dict:
+# ── De onde vem os dados ─────────────────────────────────────────────────────
+# FONTE_DADOS (painel/banco, ou variavel de ambiente):
+#   planilha - como sempre foi (padrao enquanto a troca e validada);
+#   sombra   - atende pela planilha e refaz as consultas pelo cardapio digital,
+#              registrando no log cada diferenca ([fonte] ...), sem mudar nada
+#              para o cliente;
+#   cardapio - os dados vem do cardapio digital (cardapio_fonte.py). Se ele e o
+#              snapshot salvo estiverem indisponiveis, volta para a planilha.
+FONTES = ("planilha", "sombra", "cardapio")
+_fonte_cache = ("", 0.0)
+_local = threading.local()
+_cache_cardapio: dict | None = None
+_bruto_cardapio = None
+_avisou_queda = False
+
+
+def fonte_ativa() -> str:
+    global _fonte_cache
+    valor, lido_em = _fonte_cache
+    if valor and time.monotonic() - lido_em < 30:
+        return valor
+    valor = ""
+    try:
+        import database
+        valor = (database.get_setting("FONTE_DADOS", "") or "").strip().lower()
+    except Exception:
+        valor = ""
+    if not valor:
+        import os
+        valor = (os.getenv("FONTE_DADOS", "") or "").strip().lower()
+    if valor not in FONTES:
+        valor = "planilha"
+    _fonte_cache = (valor, time.monotonic())
+    return valor
+
+
+def _dados_planilha() -> dict:
     global _cache
     if _cache is None:
         _cache = _build()
@@ -167,10 +206,81 @@ def get() -> dict:
     return _cache
 
 
+def _dados_cardapio() -> dict | None:
+    """Dados montados do cardapio digital, reaproveitados enquanto a leitura
+    bruta (cache de 5 minutos em cardapio_fonte) for a mesma."""
+    global _cache_cardapio, _bruto_cardapio
+    try:
+        import cardapio_fonte
+        bruto = cardapio_fonte.bruto()
+    except Exception as e:
+        print(f"[facts] WARN cardapio indisponivel: {e}")
+        return None
+    if not bruto:
+        return None
+    if bruto is not _bruto_cardapio or _cache_cardapio is None:
+        import cardapio_fonte
+        _cache_cardapio = cardapio_fonte.montar_dados(bruto)
+        _bruto_cardapio = bruto
+        if _cache_cardapio:
+            print(f"[facts] cardapio digital: {len(_cache_cardapio['bairros'])} bairros, "
+                  f"{len(_cache_cardapio['produtos'])} produtos")
+    return _cache_cardapio
+
+
+def get() -> dict:
+    global _avisou_queda
+    forcada = getattr(_local, "fonte", None)
+    fonte = forcada or fonte_ativa()
+    if fonte == "cardapio":
+        dados = _dados_cardapio()
+        if dados:
+            return dados
+        if not _avisou_queda:
+            print("[facts] WARN FONTE_DADOS=cardapio, mas o cardapio e o snapshot "
+                  "estao indisponiveis; usando a planilha")
+            _avisou_queda = True
+    return _dados_planilha()
+
+
+@contextmanager
+def com_fonte(nome: str):
+    """Forca a fonte nesta thread (comparacao de sombra, testes)."""
+    anterior = getattr(_local, "fonte", None)
+    _local.fonte = nome
+    try:
+        yield
+    finally:
+        _local.fonte = anterior
+
+
+def _resumo(valor):
+    if isinstance(valor, dict):
+        return {k: valor.get(k) for k in ("bairro", "taxa", "preco_unitario", "item_oficial")
+                if k in valor}
+    return valor
+
+
+def _sombra(rotulo: str, consulta, *args, **kwargs):
+    """Executa pela fonte ativa; no modo sombra, compara com o cardapio."""
+    resultado = consulta(*args, **kwargs)
+    if getattr(_local, "fonte", None) is None and fonte_ativa() == "sombra":
+        try:
+            with com_fonte("cardapio"):
+                outro = consulta(*args, **kwargs)
+            if _resumo(outro) != _resumo(resultado):
+                print(f"[fonte] {rotulo}{args!r}: planilha={_resumo(resultado)} "
+                      f"cardapio={_resumo(outro)}")
+        except Exception as e:
+            print(f"[fonte] WARN comparacao de {rotulo} falhou: {e}")
+    return resultado
+
+
 def invalidate() -> None:
     """Chamado sempre que o knowledge muda."""
-    global _cache
+    global _cache, _fonte_cache
     _cache = None
+    _fonte_cache = ("", 0.0)
 
 
 def is_loaded() -> bool:
@@ -181,6 +291,10 @@ def is_loaded() -> bool:
 # ── Consultas ────────────────────────────────────────────────────────────────
 
 def lookup_frete(bairro: str) -> dict | None:
+    return _sombra("frete", _lookup_frete, bairro)
+
+
+def _lookup_frete(bairro: str) -> dict | None:
     """Taxa de entrega de um bairro. None quando o bairro nao esta na tabela.
 
     Casa por nome exato, apelido cadastrado, prefixo e, por ultimo,
@@ -353,6 +467,10 @@ QTD_MINIMA_FESTA = 25
 
 
 def resolve_unit_price(nome: str, quantity: int = 1) -> dict | None:
+    return _sombra("preco", _resolve_unit_price, nome, quantity)
+
+
+def _resolve_unit_price(nome: str, quantity: int = 1) -> dict | None:
     """Preco unitario oficial de um item do pedido.
 
     Existe porque o modelo manda (ou omite) o preco na tool calculate_order — e

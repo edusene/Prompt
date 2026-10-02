@@ -23,6 +23,39 @@ FECHAMENTO = (20, 0)
 INTERVALO_INICIO = (12, 1)
 INTERVALO_FIM = (13, 59)
 
+
+def _turno(dia: date | None = None) -> tuple:
+    """(abertura, inicio_do_intervalo, fim_do_intervalo, fechamento) do dia.
+
+    Com FONTE_DADOS=cardapio o expediente vem do BusinessHours do cardapio
+    digital (intervalo 12:00-14:00 la vira 12h01-13h59 aqui, como sempre foi).
+    Nas outras fontes, ou se o cardapio nao responder, valem as constantes
+    acima - o comportamento de antes.
+    """
+    padrao = (ABERTURA, INTERVALO_INICIO, INTERVALO_FIM, FECHAMENTO)
+    try:
+        import facts
+        if facts.fonte_ativa() != "cardapio":
+            return padrao
+        import cardapio_fonte
+        exp = cardapio_fonte.expediente()
+    except Exception:
+        return padrao
+    if not exp:
+        return padrao
+    chave = ((dia or agora().date()).weekday() + 1) % 7      # 0 = domingo no cardapio
+    reg = exp.get(chave) or exp.get(1)
+    if not reg or not all(reg):
+        return padrao
+    abre, almoco_ini, almoco_fim, fecha = reg
+    ini = (almoco_ini[0], almoco_ini[1] + 1) if almoco_ini[1] < 59 else (almoco_ini[0] + 1, 0)
+    fim = (almoco_fim[0], almoco_fim[1] - 1) if almoco_fim[1] > 0 else (almoco_fim[0] - 1, 59)
+    return abre, ini, fim, fecha
+
+
+def _hm_txt(hm: tuple) -> str:
+    return f"{hm[0]:02d}h{hm[1]:02d}"
+
 # Acentuados: estes nomes vao direto para a tela do cliente ("Data: hoje,
 # sabado (19/09)" destoava do resto do texto). O dicionario de ENTRADA abaixo
 # continua sem acento de proposito: ele compara texto ja normalizado.
@@ -120,6 +153,7 @@ def status(now: datetime | None = None) -> dict:
     """
     now = now or agora()
     minuto_atual = _minutos(now.hour, now.minute)
+    abertura, int_ini, int_fim, fechamento = _turno(now.date())
 
     if not eh_dia_util(now.date()):
         proximo = proximo_dia_util(now.date() + timedelta(days=1))
@@ -134,19 +168,19 @@ def status(now: datetime | None = None) -> dict:
             ),
         }
 
-    if minuto_atual < _minutos(*ABERTURA):
+    if minuto_atual < _minutos(*abertura):
         return {
             "aberto": False,
             "motivo": "antes_da_abertura",
             "aceita_hoje": True,
             "sugestao_data": now.date(),
             "mensagem": (
-                "A gente começa a atender às 07h40! Já posso deixar seu pedido "
+                f"A gente começa a atender às {_hm_txt(abertura)}! Já posso deixar seu pedido "
                 "anotado para hoje a partir desse horário? 😊"
             ),
         }
 
-    if minuto_atual >= _minutos(*FECHAMENTO):
+    if minuto_atual >= _minutos(*fechamento):
         proximo = proximo_dia_util(now.date() + timedelta(days=1))
         return {
             "aberto": False,
@@ -155,11 +189,11 @@ def status(now: datetime | None = None) -> dict:
             "sugestao_data": proximo,
             "mensagem": (
                 "Nossa produção já encerrou por hoje! Posso deixar seu pedido "
-                f"agendado para {formatar_data(proximo, now)}, a partir das 07h40? 💛"
+                f"agendado para {formatar_data(proximo, now)}, a partir das {_hm_txt(_turno(proximo)[0])}? 💛"
             ),
         }
 
-    if _minutos(*INTERVALO_INICIO) <= minuto_atual <= _minutos(*INTERVALO_FIM):
+    if _minutos(*int_ini) <= minuto_atual <= _minutos(*int_fim):
         return {
             "aberto": False,
             "motivo": "intervalo",
@@ -392,26 +426,28 @@ def validar_agendamento(
         return False, "Falta o horario do pedido.", None, "horario"
 
     minuto_pedido = _minutos(*hm)
+    abertura, int_ini, int_fim, fechamento = _turno(data_pedido)
 
-    if minuto_pedido < _minutos(*ABERTURA):
+    if minuto_pedido < _minutos(*abertura):
         return False, (
-            "A gente só começa às 07h40! Pode ser a partir desse horário? 😊"
+            f"A gente só começa às {_hm_txt(abertura)}! Pode ser a partir desse horário? 😊"
         ), None, "horario"
 
     # ">" e nao ">=": a loja atende ATE as 20h, entao 20h00 e horario valido
     # - o ultimo. Com ">=" ela recusava as 20h em ponto e mandava o cliente
     # escolher "antes disso", e o dono bateu nisso tres vezes seguidas no
     # teste de 25/09 as 18h.
-    if minuto_pedido > _minutos(*FECHAMENTO):
+    if minuto_pedido > _minutos(*fechamento):
         return False, (
-            "Nosso atendimento vai até às 20h00! Qual horário antes disso "
+            f"Nosso atendimento vai até às {_hm_txt(fechamento)}! Qual horário antes disso "
             "funciona melhor pra você? 😊"
         ), None, "horario"
 
-    if _minutos(*INTERVALO_INICIO) <= minuto_pedido <= _minutos(*INTERVALO_FIM):
+    if _minutos(*int_ini) <= minuto_pedido <= _minutos(*int_fim):
         return False, (
-            "Das 12h01 às 13h59 estamos no intervalo de almoço! Pode ser às 14h "
-            "ou prefere antes das 12h? 😊"
+            f"Das {_hm_txt(int_ini)} às {_hm_txt(int_fim)} estamos no intervalo de almoço! "
+            f"Pode ser às {formatar_horario(int_fim[0] + 1, 0)} ou prefere antes das "
+            f"{formatar_horario(int_ini[0], 0)}? 😊"
         ), None, "horario"
 
     # Horario de hoje que ja passou nao e agendamento, e pedido perdido.
@@ -435,12 +471,14 @@ def contexto_para_prompt(now: datetime | None = None, aviso_ja_dado: bool = Fals
     """
     now = now or agora()
     st = status(now)
+    abre, int_ini, int_fim, fecha = _turno(now.date())
     linhas = [
         f"Agora em Porto Velho: {nome_dia(now.date())}, {now.strftime('%d/%m/%Y as %Hh%M')}",
         f'Saudacao correta neste momento: "{saudacao(now)}" (nao use outra)',
         f"Hoje e: {formatar_data(now.date(), now)}",
         f"Amanha e: {formatar_data(now.date() + timedelta(days=1), now)}",
-        "Expediente: segunda a sabado, 07h40 as 20h00 (intervalo 12h01-13h59)",
+        f"Expediente: segunda a sabado, {_hm_txt(abre)} as {_hm_txt(fecha)} "
+        f"(intervalo {_hm_txt(int_ini)}-{_hm_txt(int_fim)})",
         f"Situacao agora: {'ABERTO' if st['aberto'] else 'FECHADO (' + st['motivo'] + ')'}",
     ]
     if not st["aberto"] and aviso_ja_dado:

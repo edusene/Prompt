@@ -598,12 +598,39 @@ def calcular_taxa_retorno(modalidade: str, pagamento: str) -> float:
     """
     if (modalidade or "").strip().lower() != "entrega":
         return 0.0
-    if (pagamento or "").strip().lower() in _PAGAMENTOS_COM_RETORNO:
-        return TAXA_RETORNO
-    return 0.0
+    pagamento = (pagamento or "").strip().lower()
+    if pagamento not in _PAGAMENTOS_COM_RETORNO:
+        return 0.0
+    # Com FONTE_DADOS=cardapio vale a regra taxa_retorno_maquina do cardapio
+    # digital. Hoje ela diz "R$ 2,00 SOMENTE em pagamento com cartao": o
+    # dinheiro deixa de pagar retorno. Sem a regra, vale o BLOCO 3 do prompt.
+    regra = _regra_do_cardapio("taxa_retorno_maquina")
+    if regra and "somente" in regra.lower() and "cart" in regra.lower() and pagamento == "dinheiro":
+        return 0.0
+    return TAXA_RETORNO
 
 
 ENDERECO_FABRICA = "Av. Calama, 5892 - Igarapé"
+
+
+def _regra_do_cardapio(chave: str) -> str:
+    """Regra do cardapio digital (InternalBusinessRule), so com FONTE_DADOS=cardapio."""
+    try:
+        import facts
+        if facts.fonte_ativa() != "cardapio":
+            return ""
+        import cardapio_fonte
+        return cardapio_fonte.regra(chave, "")
+    except Exception:
+        return ""
+
+
+def endereco_fabrica() -> str:
+    return _regra_do_cardapio("endereco_retirada") or ENDERECO_FABRICA
+
+
+def chave_pix() -> str:
+    return _regra_do_cardapio("chave_pix") or "84749274000178"
 
 # Como o resumo do cliente mostra a forma de pagamento. Curto desde a reuniao
 # de 01/10: o dono pediu "Cartao", e nao "Cartao na entrega", e texto curto em
@@ -732,7 +759,7 @@ def montar_resumo(items: list[dict], subtotal: float, delivery_fee: float,
     linhas.append(f"⏰ Horário: {horario or '[HORARIO]'}")
 
     if retirada:
-        linhas.append(f"📍 Retirada: No balcão da fábrica ({ENDERECO_FABRICA})")
+        linhas.append(f"📍 Retirada: No balcão da fábrica ({endereco_fabrica()})")
     else:
         linhas.append(f"📍 Bairro: {bairro or '[BAIRRO]'}")
         # O BLOCO 5 pede "Rua, Numero e Ponto de Referencia" na mesma linha.

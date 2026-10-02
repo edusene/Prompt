@@ -31,6 +31,11 @@ _LER_JSON_REAL = config_dono._ler_json
 config_dono._ler_json = lambda chave: None
 import conversation_memory as memoria_mod  # noqa: E402
 import facts  # noqa: E402
+# Os casos daqui foram escritos com os dados da planilha: a fonte fica fixa nela,
+# seja qual for o FONTE_DADOS do banco/ambiente. A fonte cardapio tem a secao
+# propria no fim, com um retrato do cardapio salvo em fixtures/.
+_FONTE_ATIVA_REAL = facts.fonte_ativa
+facts.fonte_ativa = lambda: "planilha"
 from agents.conversation import (  # noqa: E402
     ConversationState,
     _extract_data_from_message,
@@ -1791,6 +1796,9 @@ checa("'nao temos X, mas temos Y' perde a sugestao",
       app._RX_NAO_TEMOS_MAS.sub(lambda m: m.group(1).rstrip() + ".",
                                 "Não temos salgado de chocolate no cardápio, mas temos churros.")
       == "Não temos salgado de chocolate no cardápio.")
+checa("'Temos Y, mas X nao temos' vira so o 'nao temos'",
+      app._so_o_nao_temos("Temos churros doce de leite, mas salgado de chocolate não temos.")
+      == "Não temos salgado de chocolate no cardápio.")
 checa("regra 9.7 (nao invente nada) no prompt de execucao",
       "9.7 NAO INVENTE NADA" in open("app.py", encoding="utf-8").read())
 _F_RET = dict(memoria_mod._empty(), items=[{"name": "Coxinha", "quantity": 25}], modality="retirada",
@@ -1990,7 +1998,7 @@ _CROQUETE = {"nome_planilha": "Croquete de carne", "tipo": "sabor", "familia": "
              "nome_cardapio": "croquete de carne", "apelidos": ["croquete", "coxinha"]}
 _camada(catalogo=[_CROQUETE])
 checa("liberado sai dos bloqueados", "Croquete de carne" not in _cat.bloqueados_efetivos())
-checa("os outros bloqueados continuam", "Refrigerante 2 Litros" in _cat.bloqueados_efetivos())
+checa("os outros bloqueados continuam", "Panqueca de Carne" in _cat.bloqueados_efetivos())
 _api, _bloq = _cat.traduzir([{"name": "Croquete de carne", "quantity": 50}])
 checa("liberado traduz para o sabor que o dono informou",
       not _bloq and _api and _api[0].get("selected_flavors") == ["croquete de carne"], str((_api, _bloq)))
@@ -2360,6 +2368,61 @@ checa("comprovante no meio do pedido: avisa que a equipe valida e segue",
 checa("o prompt nao manda mais pedir texto em audio",
       "solicite envio digitado" not in (database.get_knowledge_document(
           "PROMPTS ATUALIZADO PARA ENVIAR EDUARDO 18.09.26.docx") or ""))
+
+secao("--- 02/10: dados vindos do cardapio digital (retrato em fixtures/) ---")
+import json as _json_cf  # noqa: E402
+import cardapio_fonte as _cf  # noqa: E402
+_RETRATO = _json_cf.load(open("fixtures/cardapio_snapshot_2026-10-02.json", encoding="utf-8"))
+_bruto_real = _cf.bruto
+_cf.bruto = lambda forcar=False: _RETRATO
+facts._cache_cardapio = None
+_DADOS_CF = _cf.montar_dados(_RETRATO)
+checa("adaptador: 71 bairros do cardapio", len(_DADOS_CF["bairros"]) == 71)
+checa("adaptador: pacotes de fritos com o preco do cardapio",
+      any(p["categoria"] == "Fritos" and p["item"] == "Porção (25 un)" and p["preco"] == 20.0
+          for p in _DADOS_CF["produtos"]))
+checa("adaptador: sabor com o nome que o codigo conhece",
+      any(p["item"] == "Coxinha frango" and p["preco"] is None for p in _DADOS_CF["produtos"]))
+checa("adaptador: um sabor por nome (sem 'Coxinha (frango)' duplicado)",
+      not any(p["item"] == "Coxinha (frango)" for p in _DADOS_CF["produtos"]))
+checa("adaptador: canudinho nao vira porcao de fritos a R$ 30",
+      not any(p["categoria"] == "Fritos" and p["preco"] == 30.0 for p in _DADOS_CF["produtos"]))
+with facts.com_fonte("cardapio"):
+    checa("cardapio: taxa de Eldorado e a do cardapio (R$ 15)", facts.lookup_frete("eldorado")["taxa"] == 15.0)
+    checa("cardapio: bairro que so o cardapio tem (Centro)", bool(facts.lookup_frete("centro")))
+    checa("cardapio: 'tupi' e o Tupy (nao o Tucumanzal)", facts.lookup_frete("tupi")["bairro"] == "Tupy")
+    checa("cardapio: 'cuniae' (nome da planilha) casa com Cunia", facts.lookup_frete("cuniae") is not None)
+    checa("cardapio: 50 coxinhas a R$ 0,80", facts.resolve_unit_price("Coxinha", 50)["preco_unitario"] == 0.8)
+    checa("cardapio: brigadeiro com o preco que o calculateOrder cobra (R$ 65)",
+          facts.resolve_unit_price("Meio Cento de Brigadeiros (50 un)", 1)["preco_unitario"] == 65.0)
+    checa("cardapio: produto que so o cardapio tem (Empada Doce)",
+          facts.resolve_unit_price("Empada Doce", 1) is not None)
+    _api_cf, _bloq_cf = catalogo.traduzir([{"name": "Coxinha frango", "quantity": 25},
+                                           {"name": "Mini Pizza (Brotinho)", "quantity": 2},
+                                           {"name": "Refrigerante 2 Litros", "quantity": 1, "sabor": "Coca cola"}])
+    checa("cardapio: pedido com produto novo e Refri 2L traduz sem bloqueio",
+          not _bloq_cf and any(a["name"] == "Mini Pizza (Brotinho)" for a in _api_cf)
+          and any(a["name"] == "Refrigerante 2 L" for a in _api_cf), str((_api_cf, _bloq_cf)))
+    _api_cz, _bloq_cz = catalogo.traduzir([{"name": "Calzone de frango", "quantity": 50}])
+    checa("cardapio: sabor novo de assado vai com o nome da opcao",
+          not _bloq_cz and _api_cz[0]["selected_flavors"] == ["Calzone de frango"], str((_api_cz, _bloq_cz)))
+    checa("cardapio: rotulo de formato sozinho continua bloqueado",
+          bool(catalogo.traduzir([{"name": "Cento (100 un)", "quantity": 1}])[1]))
+_cf.bruto = _bruto_real
+facts._cache_cardapio = None
+_FONTE_SOMBRA = []
+facts.fonte_ativa = lambda: "sombra"
+_print_real = print
+import builtins as _bt  # noqa: E402
+_bt.print = lambda *a, **k: _FONTE_SOMBRA.append(" ".join(str(x) for x in a))
+_cf.bruto = lambda forcar=False: _RETRATO
+_r_sombra = facts.lookup_frete("eldorado")
+_bt.print = _print_real
+_cf.bruto = _bruto_real
+facts.fonte_ativa = lambda: "planilha"
+checa("sombra: atende pela planilha e registra a diferenca do cardapio",
+      _r_sombra["taxa"] == 10.0 and any("[fonte] frete" in l and "15.0" in l for l in _FONTE_SOMBRA),
+      str(_FONTE_SOMBRA[-1:]))
 
 print()
 print("=" * 78)

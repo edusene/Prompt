@@ -170,6 +170,11 @@ MAPA = {
         "sabor_fixo": "Brigadeiro",
         "quantidade_teste": 1, "preco_esperado": 65.00,
     },
+    # Cadastrado no cardapio digital (com sabores) - antes so existia o Tuchaua.
+    "Refrigerante 2 Litros": {
+        "categoria": "Bebidas", "nome_base44": "Refrigerante 2 L", "context": "unidade",
+        "quantidade_teste": 1, "preco_esperado": 15.00,
+    },
     "Refrigerante Lata": {
         "categoria": "Bebidas", "nome_base44": "Refrigerante Lata", "context": "unidade",
         "quantidade_teste": 1, "preco_esperado": 7.00,
@@ -197,7 +202,6 @@ BLOQUEADOS = {
     "Meio Cento de Beijinhos (50 un)": ("Bolos e Doces", "o cardapio digital nao tem beijinho; a busca cai na bandeja de 16 docinhos"),
     "Cento Misto Brigadeiro e Beijinho (100 un)": ("Bolos e Doces", "o cardapio digital nao tem misto; a busca cai em brigadeiro"),
     "Meio Cento Misto (50 un)": ("Bolos e Doces", "o cardapio digital nao tem misto; a busca cai em brigadeiro"),
-    "Refrigerante 2 Litros": ("Bebidas", "o cardapio so tem 2L do Tuchaua; a busca cai na lata"),
     "Suco 500ml": ("Bebidas", "o cardapio digital so tem 'Suco Natural 300 ml', de tamanho diferente"),
 }
 
@@ -291,7 +295,15 @@ def _linha_da_planilha(nome: str) -> dict | None:
 
 def _sabor_oficial(familia: str, nome: str, sabores: dict | None = None) -> str | None:
     """Nome do sabor como o cardapio digital o conhece."""
-    return _achar((sabores if sabores is not None else sabores_efetivos()).get(familia, {}), nome)
+    achado = _achar((sabores if sabores is not None else sabores_efetivos()).get(familia, {}), nome)
+    if achado:
+        return achado
+    # Com os dados vindos do cardapio digital (facts FONTE_DADOS=cardapio), a
+    # linha do sabor ja traz o nome da opcao la ("Calzone de frango").
+    linha = _linha_da_planilha(nome)
+    if linha and linha.get("origem") and linha.get("preco") is None:
+        return linha["origem"]
+    return None
 
 
 def _escolher_pacote(familia: str, quantidade: int) -> dict | None:
@@ -496,6 +508,12 @@ def traduzir(items: list[dict], extras: list | None = None) -> tuple[list[dict],
 
         # Item por unidade
         destino = _achar(_mapa, nome)
+        if (not destino and linha is not None and linha.get("origem")
+                and linha.get("preco") is not None
+                and linha.get("categoria") not in ("Fritos", "Assados")):
+            # Produto que so o cardapio digital tem (Mini Pizza, Empada Doce...):
+            # o nome dele la e o proprio destino.
+            destino = {"nome_base44": linha["origem"], "context": "unidade"}
         if destino:
             api_item = {
                 "name": destino["nome_base44"],

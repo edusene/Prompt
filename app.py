@@ -591,15 +591,14 @@ _FATOS_DO_DONO = (
     (_re_mod.compile(r"\b(?:qual|onde|me\s+(?:passa|manda|envia))\b.{0,25}\b(?:endereco|localizacao|loja|fabrica)\b"
                      r"|\bonde\s+(?:fica|ficam|voces\s+ficam|e\s+a\s+loja|retiro|busco)\b"
                      r"|\b(?:qual|de\s+que|em\s+que)\s+cidade\b|\bde\s+onde\s+(?:voces\s+)?sao\b"),
-     "calama", f"Nossa loja fica na {cardapio.ENDERECO_FABRICA}! 😊"),
+     "calama", lambda: f"Nossa loja fica na {cardapio.endereco_fabrica()}! 😊"),
     (_re_mod.compile(r"^(?!.*\bantecedencia\b).*\b(?:quanto\s+tempo|demora|prazo|tempo\s+de\s+entrega"
                      r"|em\s+quanto\s+tempo)\b"),
      "30 a 40", "A estimativa média é de 30 a 40 minutos, podendo variar conforme o "
                 "movimento e a rota da entrega! 😊"),
     (_re_mod.compile(r"\b(?:que\s+horas|qual\s+(?:e\s+)?o\s+horario|horario\s+de|ate\s+que\s+horas"
                      r"|abrem?\s+(?:que\s+horas|sabado|domingo)|fecham?\b|funcionam?\b|madrugada)\b"),
-     "07h40", "Atendemos de segunda a sábado, das 07h40 às 12h00 e das 14h00 às 20h00. "
-              "Aos domingos a fábrica não abre."),
+     lambda: horario._hm_txt(horario._turno()[0]).lower(), lambda: _texto_do_expediente()),
     # BLOCO 2 (triagem de tamanho e linha mini festa). Em 1 de 3 rodadas a
     # explicacao do modelo era apagada pela trava de "aula de lote".
     (_re_mod.compile(r"\bdiferenca\b.{0,40}\b(?:mini|grande|lanche|festa)\b"
@@ -667,6 +666,23 @@ def _conferir_refri_perguntado(user: str, pergunta: str, reply: str) -> str:
 # o "nao temos"; o resto sai.
 _RX_NAO_TEMOS_MAS = _re_mod.compile(
     r"(N[aã]o (?:temos|trabalhamos com|fazemos) [^.!?\n]*?)\s*,\s*mas\b[^.!?\n]*([.!]?)")
+# A forma invertida: "Temos churros doce de leite, mas salgado de chocolate
+# nao temos." vira "Nao temos salgado de chocolate no cardapio."
+_RX_TEMOS_MAS_NAO = _re_mod.compile(
+    r"Temos [^.!?\n]*?,\s*mas\s+([^.!?\n]+?)\s+n[aã]o (?:temos|fazemos)\b[^.!?\n]*[.!]?")
+
+
+def _so_o_nao_temos(reply: str) -> str:
+    reply = _RX_NAO_TEMOS_MAS.sub(lambda m: m.group(1).rstrip() + ".", reply or "")
+    return _RX_TEMOS_MAS_NAO.sub(lambda m: f"Não temos {m.group(1).strip()} no cardápio.", reply)
+
+
+def _texto_do_expediente() -> str:
+    """O horario do BLOCO 1, montado a partir do expediente vigente."""
+    abre, int_ini, _int_fim, fecha = horario._turno()
+    return (f"Atendemos de segunda a sábado, das {horario._hm_txt(abre)} às "
+            f"{int_ini[0]:02d}h00 e das {_int_fim[0] + 1:02d}h00 às {horario._hm_txt(fecha)}. "
+            f"Aos domingos a fábrica não abre.")
 
 
 def _conferir_fato_do_dono(user: str, pergunta: str, reply: str,
@@ -678,6 +694,9 @@ def _conferir_fato_do_dono(user: str, pergunta: str, reply: str,
     for rx, prova, frase in _FATOS_DO_DONO:
         if not rx.search(norm_p):
             continue
+        # Texto e prova podem depender do cardapio digital (horario, endereco).
+        prova = prova() if callable(prova) else prova
+        frase = frase() if callable(frase) else frase
         # Sempre o texto do dono: o modelo acertava o fato, mas a cada rodada
         # com outra redacao e outro acrescimo ("aos domingos nao abre para
         # entregas imediatas" numa sexta-feira). Espelho nao se toca.
@@ -2476,7 +2495,7 @@ def _fechamento_pix(total: float) -> str:
     return "\n".join([
         f"Pedido finalizado! 💛{quanto}",
         "Chave Pix (CNPJ):",
-        CHAVE_PIX,
+        cardapio.chave_pix(),
         "Balbs Salgados",
         "Favor Enviar Comprovante de pgto para liberação do pedido 💛",
     ])
@@ -5559,7 +5578,7 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                 if _refri != reply:
                     _seguinte = _proxima_pergunta_do_funil(_memoria)
                     reply = f"{_refri}\n\n{_seguinte}".strip() if _seguinte else _refri
-                reply = _RX_NAO_TEMOS_MAS.sub(lambda m: m.group(1).rstrip() + ".", reply)
+                reply = _so_o_nao_temos(reply)
             if _primeira_resposta:
                 reply = _conferir_saudacao(reply, _agora, _memoria.get("name") or "")
 
