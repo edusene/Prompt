@@ -981,7 +981,7 @@ def _produto_conhecido(bruto: str) -> str | None:
 _SABORES_DE_LOTE = frozenset(_PRODUTOS_FRI_COCOQ.values()) | frozenset(_PRODUTOS_ASSADOS.values())
 
 
-def sabores_possiveis(bruto: str, so_lote: bool = True) -> list[str]:
+def sabores_possiveis(bruto: str, so_lote: bool = True, preparo: str = "") -> list[str]:
     """Produtos que a palavra do cliente pode significar, quando serve a varios.
 
     "30 de carne" nao e pedido de nada em especial: cabe em pastel de carne,
@@ -1006,23 +1006,59 @@ def sabores_possiveis(bruto: str, so_lote: bool = True) -> list[str]:
             return []          # o cliente foi MAIS especifico: nao ha duvida
         if alvo in chave and canonico not in achados:
             achados.append(canonico)
+    # Sabores de pacote do cardapio que o mapa do codigo nao conhece: "30 de
+    # queijo" nunca oferecia o Misto de Queijo e Presunto (teste de 03/10).
+    do_cardapio = []
+    if so_lote:
+        try:
+            import facts
+            ja = {facts.normalize((facts.resolve_unit_price(a, 25) or {}).get("item_oficial") or a)
+                  for a in achados}
+            for p in facts.get()["produtos"]:
+                if (facts.normalize(p["categoria"]) in ("fritos", "assados")
+                        and p.get("preco") is None and p.get("disponivel", True)
+                        and alvo in _forma_de_busca(p["item"])
+                        and facts.normalize(p["item"]) not in ja):
+                    achados.append(p["item"])
+                    do_cardapio.append(p["item"])
+                    ja.add(facts.normalize(p["item"]))
+        except Exception:
+            pass
     if len(achados) < 2:
         return []
     if so_lote:
         de_lote_do_dono = {e["nome_planilha"] for e in _extras_do_dono() if e["tipo"] == "sabor"}
-        de_lote = [a for a in achados if a in _SABORES_DE_LOTE or a in de_lote_do_dono]
+        de_lote = [a for a in achados if a in _SABORES_DE_LOTE or a in de_lote_do_dono
+                   or a in do_cardapio]
         if de_lote:
             achados = de_lote
-    # Esgotado nao entra na lista de opcoes: oferecer o que a fabrica nao tem e
-    # so adiar a pergunta.
+    # So entra o que o cardapio vende no pacote: o sabor tem de cair numa linha
+    # de Fritos/Assados. "Pastel Queijo" so existe no combo e era resolvido
+    # para o Rissole de Queijo e Presunto grande - passava como disponivel e
+    # era oferecido para "30 de queijo" (teste de 03/10).
+    # E, se o cliente disse o preparo, so os dele: "100 salgados fritos: 30 de
+    # carne" recebia Esfirra de carne, que e assada.
+    categorias = {"fritos", "assados"} if so_lote else set()
+    if preparo:
+        categorias = {"fritos"} if preparo == "frito" else {"assados"}
+    # Esgotado tambem nao entra: oferecer o que a fabrica nao tem e so adiar
+    # a pergunta.
     disponiveis = []
     for nome in achados:
         try:
             import facts
-            if facts.resolve_unit_price(nome, 25):
-                disponiveis.append(nome)
+            oficial = facts.resolve_unit_price(nome, 25)
+            if not oficial:
+                continue
+            categoria = facts.normalize(str(oficial.get("base", "")).split(":")[0])
+            if categorias and categoria not in categorias:
+                continue
+            disponiveis.append(nome)
         except Exception:
             disponiveis.append(nome)
+    if not disponiveis and preparo:
+        # Nenhum sabor daquele preparo: pergunta entre os que existem.
+        return sabores_possiveis(bruto, so_lote)
     return disponiveis or achados
 
 
@@ -1801,7 +1837,8 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
                 # o defeito), mas tambem nao pode sumir: o cliente pediu "30 de
                 # carne" e o ajuste de lote saiu sem esse sabor, como se ele
                 # nunca tivesse falado (teste do dono, 26/09 18h20).
-                opcoes = sabores_possiveis(product_name)
+                opcoes = sabores_possiveis(product_name,
+                                           preparo=preparo_dito(msg_lower))
                 if len(opcoes) == 1:
                     # Depois de descartar os itens de balcao e os esgotados
                     # sobrou um so: "30 de queijo" num pedido de fritos e

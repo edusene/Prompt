@@ -2570,6 +2570,29 @@ checa("espelho curto e reconhecido como espelho",
       app._RX_LINHA_DE_RESUMO.search(_esp_ret) and app._RX_LINHA_DE_RESUMO.search(_esp_ent))
 checa("'sim' depois do espelho curto fecha o pedido",
       app._confirmou_o_resumo(_esp_ret, "sim") and app._confirmou_o_resumo(_esp_ent, "pode confirmar"))
+print()
+print("--- Teste de 03/10: opcoes de sabor so do cardapio e do preparo pedido")
+from agents.conversation import sabores_possiveis as _sp  # noqa: E402
+checa("'carne' em pedido de fritos nao oferece esfirra (assada)",
+      "Esfirra de Carne" not in _sp("carne", preparo="frito")
+      and "Pastel Carne" in _sp("carne", preparo="frito"), _sp("carne", preparo="frito"))
+checa("'carne' em pedido de assados: so a esfirra",
+      _sp("carne", preparo="assado") == ["Esfirra de Carne"], _sp("carne", preparo="assado"))
+checa("'queijo' nao oferece Pastel Queijo (so existe no combo)",
+      "Pastel Queijo" not in _sp("queijo"), _sp("queijo"))
+checa("'queijo' oferece o Misto de Queijo e Presunto do cardapio",
+      "Misto de Queijo e Presunto" in _sp("queijo"), _sp("queijo"))
+_pend = {"items": [], "sabores_pendentes": [
+    {"qtd": 30, "termo": "carne", "opcoes": ["Pastel Carne", "Rissole de Carne", "Croquete de Carne"]},
+    {"qtd": 30, "termo": "queijo", "opcoes": ["Bolinha de Queijo", "Misto de Queijo e Presunto"]}]}
+_f = __import__("copy").deepcopy(_pend)
+checa("'pasteis e misto' escolhe os dois sabores",
+      len(memoria_mod.aplicar_escolha_de_sabor(_f, "pasteis e misto")) == 2
+      and not _f["sabores_pendentes"], _f["items"])
+_f = __import__("copy").deepcopy(_pend)
+checa("'pastel ou rissole?' nao escolhe nada",
+      memoria_mod.aplicar_escolha_de_sabor(_f, "pastel ou rissole?") == [])
+
 checa("data curta de outro dia",
       horario.formatar_data_curta(horario.agora().date() + __import__("datetime").timedelta(days=3))
       .endswith(")") )

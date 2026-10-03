@@ -1096,6 +1096,27 @@ def pendencia_de_divisao(memoria: dict) -> str:
             f"{len(sabores)} sabores? 😊")
 
 
+def _opcao_pela_palavra_propria(pendente: dict, limpo: str) -> str:
+    """A opcao citada pela palavra que so ela tem: "misto", "bolinha", "pasteis".
+
+    Ninguem repete "Misto de Queijo e Presunto" inteiro. A palavra tem de ser
+    so daquela opcao (nao o termo do cliente, nem palavra comum a outra) e
+    tem de ser uma opcao so - "pastel ou rissole" nao escolhe nada.
+    """
+    opcoes = pendente.get("opcoes") or []
+    termo = set(_sem_acento(pendente.get("termo") or "").split())
+    palavras = {o: {w for w in _sem_acento(o).split() if len(w) >= 4} - termo
+                for o in opcoes}
+    citadas = []
+    for opcao, suas in palavras.items():
+        outras = set().union(*(v for k, v in palavras.items() if k != opcao))
+        for w in suas - outras:
+            if _re.search(r"\b" + _re.escape(w[:5]), limpo):
+                citadas.append(opcao)
+                break
+    return citadas[0] if len(citadas) == 1 else ""
+
+
 def aplicar_escolha_de_sabor(memoria: dict, texto: str) -> list[str]:
     """O cliente respondeu qual sabor era. Vira item na ficha.
 
@@ -1115,6 +1136,8 @@ def aplicar_escolha_de_sabor(memoria: dict, texto: str) -> list[str]:
             if _sem_acento(opcao) in limpo:
                 escolhido = opcao
                 break
+        if not escolhido and p.get("termo") not in ("docinho", "refrigerante"):
+            escolhido = _opcao_pela_palavra_propria(p, limpo)
         _qtd_doce = 0
         if not escolhido and p.get("termo") == "docinho":
             # "bandeja", "o meio cento", "2 bandejas": o formato pelo nome curto.
