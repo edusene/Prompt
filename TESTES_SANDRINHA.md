@@ -369,7 +369,7 @@ BAIRRO OLARIA RUA SALGADO 2325 CARTAO
 
 | | |
 |---|---|
-| ✅ Esperado | `50 un - Coxinha frango — R$ 40,00` + `150 un - Churros doce de leite — R$ 120,00` · Subtotal **R$ 160,00** · Total **R$ 174,00** |
+| ✅ Esperado | `50 un - Coxinha frango — R$ 40,00` + `150 un - Churros doce de leite — R$ 120,00` · Total **R$ 174,00** (frete R$ 14,00) |
 | 🚩 Alerta | "não existe meio cento para churros" · "é vendido como sabor incluso no pacote" · pedir para ajustar · **Subtotal R$ 280,00 / Total R$ 294,00** |
 
 **Confira o subtotal com a calculadora.** No teste do senhor saiu R$ 280,00 num
@@ -515,10 +515,10 @@ Meu nome é Eduardo. Quero 25 pão pizza e 25 esfirras para entregar amanhã às
 ```
 • 25 un - Pão Pizza — R$ 30,00
 • 25 un - Esfirra de Carne — R$ 30,00
-💰 Subtotal: R$ 60,00
 🚚 Frete: R$ 15,00
 🛵 Taxa de retorno: R$ 2,00
-💵 Total: R$ 77,00
+💰 Total: R$ 77,00
+💳 Pgt: Cartão
 ```
 
 🚩 **Alerta:** "ajusto para 50 de cada" — 25 + 25 **já é** meio cento.

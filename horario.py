@@ -133,6 +133,21 @@ def formatar_data(d: date, now: datetime | None = None) -> str:
     return f"{prefixo}{nome_dia(d)} ({d.strftime('%d/%m')})"
 
 
+_DIAS_CURTOS = ["seg", "ter", "qua", "qui", "sex", "sáb", "dom"]
+
+
+def formatar_data_curta(d: date, now: datetime | None = None) -> str:
+    """'hoje (sex, 02/10)' — a data da pergunta final do espelho curto (dono,
+    02/10). Sem hoje/amanha: 'segunda (05/10)'."""
+    now = now or agora()
+    delta = (d - now.date()).days
+    if delta == 0:
+        return f"hoje ({_DIAS_CURTOS[d.weekday()]}, {d.strftime('%d/%m')})"
+    if delta == 1:
+        return f"amanhã ({_DIAS_CURTOS[d.weekday()]}, {d.strftime('%d/%m')})"
+    return f"{nome_dia(d).replace('-feira', '')} ({d.strftime('%d/%m')})"
+
+
 def eh_dia_util(d: date) -> bool:
     """Segunda a sabado."""
     return d.weekday() != 6

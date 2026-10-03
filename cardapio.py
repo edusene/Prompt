@@ -750,14 +750,17 @@ def montar_resumo(items: list[dict], subtotal: float, delivery_fee: float,
     """
     retirada = (modalidade or "").strip().lower() == "retirada"
 
-    linhas = [f"👤 Cliente: {cliente or '[Nome]'}"]
+    # Formato curto do dono (02/10 19h31): sem "No balcao da fabrica", sem
+    # subtotal, "Pgt:" no lugar de "Pagamento:", bairro e rua numa linha so.
+    linhas = [f"Cliente: {cliente or '[Nome]'}"]
     # O BLOCO 5 pede a data NUMERICA no espelho ("Data: [DD/MM/AAAA]"). Na
     # conversa o texto amigavel continua valendo ("Posso deixar para
     # segunda-feira (21/09)?"), mas no espelho o dono quer o formato fechado —
     # no teste de 22/09 saiu "hoje, terca-feira (22/09)".
     linhas.append(f"📅 Data: {_data_numerica(data_iso) or dia or '[DIA - PERGUNTE AO CLIENTE]'}")
     horario_txt = horario or "[HORARIO]"
-    if (horario or "").strip().lower() == "imediato":
+    imediato = (horario or "").strip().lower() == "imediato"
+    if imediato:
         # Pedido "agora": a regra do cardapio manda informar o tempo de preparo.
         try:
             import cardapio_fonte
@@ -770,14 +773,13 @@ def montar_resumo(items: list[dict], subtotal: float, delivery_fee: float,
     linhas.append(f"⏰ Horário: {horario_txt}")
 
     if retirada:
-        linhas.append(f"📍 Retirada: No balcão da fábrica ({endereco_fabrica()})")
+        linhas.append(f"📍 Retirada: ({endereco_fabrica()})")
     else:
-        linhas.append(f"📍 Bairro: {bairro or '[BAIRRO]'}")
         # O BLOCO 5 pede "Rua, Numero e Ponto de Referencia" na mesma linha.
         _end = endereco or "[ENDERECO]"
         if referencia and referencia.lower() not in _end.lower():
             _end = f"{_end}, {referencia}"
-        linhas.append(f"📍 Endereço: {_end}")
+        linhas.append(f"📍 Entrega: {_end} - {bairro or '[BAIRRO]'}")
 
     linhas.append("Itens:")
     for item in items or []:
@@ -793,25 +795,30 @@ def montar_resumo(items: list[dict], subtotal: float, delivery_fee: float,
 
     if retirada:
         linhas.append(f"💰 Total: {_brl(total)}")
-        linhas.append("💳 Pagamento: Balcão da fábrica")
+        linhas.append("💳 Pgt: Balcão")
     else:
-        linhas.append(f"💰 Subtotal: {_brl(subtotal)}")
         if delivery_fee:
             linhas.append(f"🚚 Frete: {_brl(delivery_fee)}")
-        # Taxa de retorno e obrigatoria em dinheiro/cartao na entrega
-        # (BLOCO 3 do prompt) e isenta no Pix.
+        # Taxa de retorno: so no cartao na entrega (regra do cardapio).
         if return_fee:
             linhas.append(f"🛵 Taxa de retorno: {_brl(return_fee)}")
-        linhas.append(f"💵 Total: {_brl(total)}")
-        linhas.append(f"💳 Pagamento: {_rotulo_pagamento(pagamento, troco, total)}")
+        linhas.append(f"💰 Total: {_brl(total)}")
+        linhas.append(f"💳 Pgt: {_rotulo_pagamento(pagamento, troco, total)}")
 
     # A confirmacao cita dia e hora juntos: ultima chance de o cliente corrigir
     # o dia antes de o pedido entrar na producao.
-    if dia and (horario or "").strip().lower() == "imediato":
+    quando = ""
+    try:
+        from datetime import date as _date
+        import horario as _horario
+        quando = _horario.formatar_data_curta(_date.fromisoformat(str(data_iso)))
+    except Exception:
+        quando = dia
+    if quando and imediato:
         # "Pra agora": sem "às Imediato" (teste de 01/10).
-        linhas.append(f"Posso confirmar o seu pedido para {dia}, agora? 💛")
-    elif dia and horario:
-        linhas.append(f"Posso confirmar o seu pedido para {dia} às {horario}? 💛")
+        linhas.append(f"Posso confirmar pra {quando}, agora? 💛")
+    elif quando and horario:
+        linhas.append(f"Posso confirmar pra {quando} às {horario}? 💛")
     else:
         linhas.append("Posso confirmar o seu pedido? 💛")
 

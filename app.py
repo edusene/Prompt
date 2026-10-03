@@ -1780,8 +1780,11 @@ _RX_FIM_DE_FRASE = _re_mod.compile(r"\n+|(?<!Av\.)(?<!av\.)(?<!\bR\.)(?<=[?!.])\
 
 # O espelho do pedido, que o filtro nao pode tocar.
 _RX_LINHA_DE_RESUMO = _re_mod.compile(
-    r"(💵\s*total|💰\s*subtotal|👤\s*cliente|🚚\s*frete)",
-    _re_mod.IGNORECASE)
+    # Os dois formatos: o antigo (👤 Cliente, 💵 Total, 💳 Pagamento) e o curto
+    # do dono de 02/10 (Cliente:, 💰 Total, 💳 Pgt).
+    r"(💵\s*total|💰\s*subtotal|💰\s*total|👤\s*cliente|🚚\s*frete|💳\s*pgt"
+    r"|^cliente\s*:)",
+    _re_mod.IGNORECASE | _re_mod.MULTILINE)
 
 
 def _quantidade_da_ficha(itens_do_modelo: list, memoria: dict) -> list:
@@ -2199,11 +2202,17 @@ def _conferir_espelho_obrigatorio(user: str, reply: str, memoria: dict,
         _sem_preco = [l for l in reply.splitlines()
                       if _re_mod.match(r"\s*•\s*\d+\s*un\b", l)
                       and "R$" not in l and "incluso" not in l]
-        if _sem_preco and not conversation_memory.faltando(memoria):
+        # Espelho no formato longo (👤, Subtotal, "💳 Pagamento:"): o dono
+        # pediu o curto em 02/10, e o curto e o do codigo.
+        _baixo = reply.lower()
+        _formato_longo = ("👤" in reply or "subtotal" in _baixo
+                          or "💳 pagamento" in _baixo or "📋" in reply)
+        if ((_sem_preco or _formato_longo)
+                and not conversation_memory.faltando(memoria)):
             resumo = (_numeros_do_pedido(memoria) or {}).get("resumo_formatado") or ""
             if resumo:
                 print(f"[espelho] user={user} espelho do modelo sem preco por "
-                      f"item; trocado pelo do codigo")
+                      f"item ou no formato longo; trocado pelo do codigo")
                 return resumo
         return reply
     if _parece_fechamento(reply):
@@ -2274,9 +2283,49 @@ def _conferir_sem_numero(user: str, reply: str) -> str:
     # Se o corte esvaziou a mensagem, pergunto direto em vez de devolver
     # um toco sem sentido.
     if len([c for c in limpo if c.isalpha()]) < 12:
-        limpo = "Qual é o número da casa? 🛵"
+        limpo = conversation_memory._PERGUNTA_CURTA["endereco_numero"]
     print(f"[endereco] user={user} cortada a oferta de casa sem numero")
     return limpo.strip()
+
+
+# Cabecalho de lista de dados que ficou sem item embaixo.
+_RX_CABECALHO_DE_DADOS = _re_mod.compile(
+    r"^\s*(faltam essas informa[cç][oõ]es|informe)\s*:?\s*$", _re_mod.IGNORECASE)
+
+
+def _conferir_troco_fora_de_hora(user: str, cliente: str, reply: str,
+                                 memoria: dict) -> str:
+    """Tira o troco da resposta enquanto falta outro dado da entrega.
+
+    O troco tem pergunta propria e e o ULTIMO dado (BLOCO 3). No teste do dono
+    de 02/10 19h02 ela mandou "Faltam essas informacoes: - Troco para
+    dinheiro" e "Qual a rua e o numero?" juntos; a cliente respondeu a rua e o
+    numero da casa virou troco. Perguntando um de cada vez, a resposta so pode
+    ser de uma pergunta.
+    """
+    if not reply or _RX_LINHA_DE_RESUMO.search(reply):
+        return reply
+    pendentes = conversation_memory.faltando(memoria)
+    if "troco_para" not in pendentes or len(pendentes) < 2:
+        return reply
+    if "troco" not in facts.normalize(reply) or "troco" in facts.normalize(cliente or ""):
+        return reply
+    if _RX_TROCO_INSUFICIENTE.search(facts.normalize(reply)):
+        return reply
+    linhas = [l for l in reply.split("\n") if "troco" not in facts.normalize(l)]
+    # "Faltam essas informacoes:" sem nenhum "- item" depois dele sai junto.
+    limpas = []
+    for i, linha in enumerate(linhas):
+        if _RX_CABECALHO_DE_DADOS.match(linha):
+            seguinte = next((l for l in linhas[i + 1:] if l.strip()), "")
+            if not seguinte.lstrip().startswith(("-", "•", "*")):
+                continue
+        limpas.append(linha)
+    limpo = _re_mod.sub(r"\n{3,}", "\n\n", "\n".join(limpas)).strip()
+    if len([c for c in limpo if c.isalpha()]) < 12:
+        limpo = conversation_memory.pedido_de_dados(memoria)
+    print(f"[troco] user={user} troco perguntado antes dos outros dados; tirado")
+    return limpo
 
 # Como ela nega um formato que o catalogo aceita. Formas colhidas do teste do
 # dono de 25/09 20h05, em 4 de 5 rodadas: 'nao existe meio cento ou cento e
@@ -3504,7 +3553,7 @@ def _conferir_troco_no_espelho(user: str, reply: str, memoria: dict) -> str:
         except (TypeError, ValueError):
             total = 0.0
         rotulo = cardapio._rotulo_pagamento("dinheiro", troco, total)
-        linhas[i] = f"\U0001f4b3 Pagamento: {rotulo}"
+        linhas[i] = f"\U0001f4b3 Pgt: {rotulo}"
         print(f"[troco] user={user} espelho saiu sem o troco da ficha "
               f"({troco}); linha de pagamento reescrita")
         return "\n".join(linhas)
@@ -3704,10 +3753,25 @@ def _conferir_uma_pergunta(user: str, reply: str, memoria: dict | None = None) -
     # "10 croquetes e uma coca" recebeu as perguntas de tamanho e de
     # refrigerante, e sobrava a do refrigerante - o tamanho nunca era
     # perguntado (medido em 01/10).
-    if memoria is not None and conversation_memory.pergunta_bloqueante(memoria):
+    _travada = (conversation_memory.pergunta_bloqueante(memoria)
+                if memoria is not None else "")
+    if _travada:
         _cobre = [p for p in perguntas if conversation_memory.etapa_coberta(memoria, p)]
         if _cobre:
             ultima = _cobre[-1]
+        else:
+            # Nenhuma cobre a etapa inteira: "30 de carne?" e "30 de queijo?"
+            # em perguntas separadas, e sobrava so a do queijo (chat 26/09,
+            # caso 2, 2 em 7 rodadas). Sai a pergunta do codigo, que cita
+            # todos os sabores pendentes.
+            cabeca = reply
+            for p in perguntas:
+                cabeca = cabeca.replace(p, "")
+            cabeca = _re_mod.sub(r"[ \t]{2,}", " ", cabeca).strip()
+            cabeca = _re_mod.sub(r"\n{3,}", "\n\n", cabeca)
+            print(f"[formato] user={user} a resposta fazia {len(perguntas)} "
+                  f"perguntas e nenhuma cobria a etapa; pergunta do codigo")
+            return f"{cabeca}\n\n{_travada}".strip() if cabeca else _travada
     corte = reply.rfind(ultima)
     cabeca, cauda = reply[:corte], reply[corte:]
     for p in perguntas:
@@ -3867,7 +3931,8 @@ def _e_concordancia(texto: str) -> bool:
 
 # Marcas de que a mensagem anterior do agente FOI o espelho do pedido. Ambas
 # saem de montar_resumo e do modelo do BLOCO 5.
-_MARCAS_DE_RESUMO = ("posso confirmar o seu pedido", "resumo do pedido")
+_MARCAS_DE_RESUMO = ("posso confirmar o seu pedido", "posso confirmar pra",
+                     "resumo do pedido")
 
 # Aceites listados no BLOCO 5 do prompt operacional, mais os que aparecem na
 # pratica. Mais largo que _CONCORDANCIAS de proposito: aqui existe o contexto
@@ -5627,12 +5692,16 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             # negativa que ja estiver na mensagem.
             # Troco: unico dado faltando, a pergunta e a do BLOCO 3, sem
             # variacao ("Informe o valor para troco, por favor" saiu num teste).
-            if (conversation_memory.faltando(_memoria) == ["troco_para"]
+            # Numero da casa: a mesma coisa, com o texto do dono (02/10) - saia
+            # "Falta o numero da casa. Qual e o numero da casa? 🛵".
+            _so_falta = conversation_memory.faltando(_memoria)
+            if (_so_falta in (["troco_para"], ["endereco_numero"])
                     and not _RX_LINHA_DE_RESUMO.search(reply or "")
                     and not _RX_TROCO_INSUFICIENTE.search(facts.normalize(reply or ""))
                     and not _RX_CLIENTE_PERGUNTOU.search(text_only or "")
                     and not conversation_memory.pergunta_bloqueante(_memoria)):
-                reply = conversation_memory._PERGUNTA_CURTA["troco_para"]
+                reply = conversation_memory._PERGUNTA_CURTA[_so_falta[0]]
+            reply = _conferir_troco_fora_de_hora(user, text_only, reply, _memoria)
             if _minis_ajustados:
                 _sabores_mini = " e ".join(_minis_ajustados)
                 reply = (f"A quantidade mínima de fábrica é a porção de 25 "

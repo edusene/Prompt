@@ -1026,8 +1026,16 @@ for _redacao in ("Perfeito! Vou seguir com o seu pedido então. 😊",
           app._RX_LINHA_DE_RESUMO.search(_espelho_obrig(_redacao)) is not None)
 
 # O que a trava NAO pode atropelar.
+_espelho_curto = ("Cliente: Balbino\n💰 Total: R$ 34,00\n💳 Pgt: Pix\n"
+                  "Posso confirmar pra hoje (sex, 02/10) às 20h? 💛")
 checa("espelho que ja saiu nao e refeito",
-      _espelho_obrig(_espelho) == _espelho)
+      _espelho_obrig(_espelho_curto) == _espelho_curto)
+# Formato longo (👤, Subtotal) escrito pelo modelo: o dono pediu o curto em
+# 02/10, e o curto e o do codigo.
+_saida_longo = _espelho_obrig(_espelho)
+checa("espelho no formato longo vira o curto do codigo",
+      "Pgt:" in _saida_longo and "👤" not in _saida_longo
+      and "Subtotal" not in _saida_longo, _saida_longo[:60].replace(chr(10), " | "))
 checa("mensagem de fechamento passa",
       "Pedido" in _espelho_obrig(
           "Pedido finalizado com sucesso! Já está sendo preparado com carinho."))
@@ -2493,6 +2501,78 @@ checa("item novo logo depois de fechar: pergunta fixa 'somar ou novo'",
       and "Como seu pedido já entrou em linha de produção" in app.ALTERACAO_EM_PRODUCAO)
 checa("'pode' depois de 'so comeca as 08h00' NAO vira 08h00 (ela pergunta o horario)",
       'if "só começa" in _motivo:' not in open("app.py", encoding="utf-8").read())
+
+# --- Teste do dono de 02/10 (noite) -----------------------------------------
+print()
+print("--- Dono 02/10: numero da casa, troco fora de hora, espelho curto")
+checa("numero da casa no texto do dono",
+      memoria_mod._PERGUNTA_CURTA["endereco_numero"] == "Qual número da casa? 🛵")
+_f_num = {"name": "Balbino", "items": [{"name": "Coxinha", "quantity": 50}],
+          "modality": "entrega", "bairro": "Olaria", "endereco": "RUA SALGADO FILHO",
+          "data_agendada": "hoje", "horario": "20h", "payment_method": "pix"}
+checa("rua sem numero: so falta o numero",
+      memoria_mod.faltando(_f_num) == ["endereco_numero"], memoria_mod.faltando(_f_num))
+checa("trava da pergunta do numero no fim da cadeia",
+      '_so_falta in (["troco_para"], ["endereco_numero"])' in open("app.py", encoding="utf-8").read())
+
+# 19h02: troco e rua perguntados juntos, "rua bejamin 2253" virou troco.
+_f_troco = {"payment_method": "dinheiro"}
+_perg = "Faltam essas informações: - Troco para dinheiro\nQual a rua e o número? 😊"
+for _resp in ("rua bejamin 2253", "Nº 2253", "av calama 5892", "casa 40 perto do mercado"):
+    _f = dict(_f_troco)
+    memoria_mod.capturar_troco(_f, _perg, _resp)
+    checa(f"endereco nao vira troco: {_resp!r}", not _f.get("troco_para"), _f.get("troco_para"))
+for _resp, _esperado in (("100", "100.00"), ("R$ 100", "100.00"), ("nao preciso", "nao"),
+                         ("troco pra 200 na rua", "200.00")):
+    _f = dict(_f_troco)
+    memoria_mod.capturar_troco(_f, "Precisa de troco para quanto? 💵", _resp)
+    checa(f"troco de verdade continua: {_resp!r}", _f.get("troco_para") == _esperado,
+          _f.get("troco_para"))
+
+_f_falta = {"name": "Balbino", "items": [{"name": "Coxinha", "quantity": 50}],
+            "modality": "entrega", "bairro": "Agenor de Carvalho",
+            "data_agendada": "hoje", "horario": "19h30", "payment_method": "dinheiro"}
+_s = app._conferir_troco_fora_de_hora(
+    "55", "19:30", "Faltam essas informações: - Troco para dinheiro (preciso saber "
+    "para quanto levar)\n\nQual a rua e o número? 😊", _f_falta)
+checa("troco sai enquanto falta a rua", _s == "Qual a rua e o número? 😊", _s)
+_s = app._conferir_troco_fora_de_hora(
+    "55", "19:30", "Faltam essas informações:\n- Rua e número\n- Troco", _f_falta)
+checa("troco sai da lista, o resto fica", _s == "Faltam essas informações:\n- Rua e número", _s)
+_s = app._conferir_troco_fora_de_hora("55", "19:30", "Precisa de troco para quanto? 💵", _f_falta)
+checa("so o troco perguntado vira o pedido do que falta",
+      "troco" not in _s.lower() and "rua" in _s.lower(), _s)
+_f_so_troco = dict(_f_falta, endereco="rua bejamin 2253")
+checa("com so o troco faltando, a pergunta fica",
+      app._conferir_troco_fora_de_hora("55", "x", "Precisa de troco para quanto? 💵", _f_so_troco)
+      == "Precisa de troco para quanto? 💵")
+
+_hoje_iso = horario.agora().date().isoformat()
+_esp_ret = cardapio.montar_resumo(
+    [{"name": "Quiche de Frango", "quantity": 20, "price": 12}], 240, 0, 0, 240,
+    modalidade="retirada", dia="hoje", horario="20h", cliente="Balbino",
+    data_iso=_hoje_iso)
+checa("espelho curto da retirada",
+      _esp_ret.startswith("Cliente: Balbino\n📅 Data: ")
+      and "📍 Retirada: (" in _esp_ret and "balcão da fábrica" not in _esp_ret
+      and "💳 Pgt: Balcão" in _esp_ret and "💰 Total: R$ 240,00" in _esp_ret
+      and "Posso confirmar pra hoje (" in _esp_ret and "às 20h? 💛" in _esp_ret, _esp_ret)
+_esp_ent = cardapio.montar_resumo(
+    [{"name": "Coxinha frango", "quantity": 50, "price": 0.8}], 40, 12, 0, 52,
+    bairro="Olaria", modalidade="entrega", dia="hoje", horario="20h",
+    cliente="Balbino", pagamento="pix", endereco="RUA SALGADO FILHO, 2252",
+    data_iso=_hoje_iso)
+checa("espelho curto da entrega",
+      "📍 Entrega: RUA SALGADO FILHO, 2252 - Olaria" in _esp_ent
+      and "Subtotal" not in _esp_ent and "🚚 Frete: R$ 12,00" in _esp_ent
+      and "💰 Total: R$ 52,00" in _esp_ent and "💳 Pgt: Pix" in _esp_ent, _esp_ent)
+checa("espelho curto e reconhecido como espelho",
+      app._RX_LINHA_DE_RESUMO.search(_esp_ret) and app._RX_LINHA_DE_RESUMO.search(_esp_ent))
+checa("'sim' depois do espelho curto fecha o pedido",
+      app._confirmou_o_resumo(_esp_ret, "sim") and app._confirmou_o_resumo(_esp_ent, "pode confirmar"))
+checa("data curta de outro dia",
+      horario.formatar_data_curta(horario.agora().date() + __import__("datetime").timedelta(days=3))
+      .endswith(")") )
 
 print()
 print("=" * 78)

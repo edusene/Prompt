@@ -478,6 +478,14 @@ _EXTENSO_DE_TROCO = {
     "mil": 1000,
 }
 
+# Resposta que e endereco, e nao dinheiro (sobre o texto sem acento).
+_RX_CARA_DE_ENDERECO = _re.compile(
+    r"\b(rua|av|avenida|travessa|tv|alameda|estrada|rodovia|bairro|quadra"
+    r"|qd|lote|lt|conjunto|cond|condominio|residencial|apto|apartamento|bloco"
+    r"|casa|numero|cep|perto|proximo|esquina)\b")
+# "Nº 2252", "n° 40", "n. 12" (sobre o texto cru: o normalize apaga o º).
+_RX_NUMERO_DE_CASA = _re.compile(r"\bn\s*[º°o.]\s*\d", _re.IGNORECASE)
+
 _NUMERO_RE = _re.compile(r"\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+(?:[.,]\d{1,2})?|\d+")
 
 
@@ -611,6 +619,13 @@ def capturar_troco(memoria: dict, pergunta_anterior: str, texto: str) -> str:
     cliente_falou_troco = "troco" in limpo
     agente_perguntou = "troco" in _sem_acento(pergunta_anterior)
     if not (cliente_falou_troco or agente_perguntou):
+        return ""
+    # Endereco nao e troco. O agente perguntou troco e rua juntos, a cliente
+    # respondeu "rua bejamin 2253" e o espelho saiu com troco para R$ 2253,00
+    # (teste do dono, 02/10 19h02). So o "troco" dito pela cliente passa por
+    # cima disto.
+    if not cliente_falou_troco and (_RX_CARA_DE_ENDERECO.search(limpo)
+                                    or _RX_NUMERO_DE_CASA.search(texto)):
         return ""
 
     # "tenho troco" / "vou precisar de troco" nao sao negativa; "nao preciso de
@@ -759,7 +774,9 @@ _PERGUNTA_CURTA = {
     "modality": "Será entrega ou retirada? 😊",
     "bairro": "Qual o bairro? 😊",
     "endereco": "Qual a rua e o número? 😊",
-    "endereco_numero": "Qual é o número da casa? 🛵",
+    # Texto do dono (02/10): "Qual numero da casa? 🛵", sem o "Falta o numero
+    # da casa." que o modelo punha na frente.
+    "endereco_numero": "Qual número da casa? 🛵",
     "endereco_referencia": "Qual o ponto de referência da casa? 😊",
     "data_agendada": "Para qual dia? 😊",
     "horario": "Qual horário? 😊",
