@@ -364,7 +364,13 @@ def parse_horario(texto: str) -> tuple[int, int] | None:
     for molde in moldes:
         for m in molde.finditer(t):
             hora = int(m.group(1))
-            minuto = int(m.group(2) or 0)
+            minuto_txt = m.group(2)
+            # "AS 8 HORAS 10 COXINHAS": o 10 separado por espaco e seguido de
+            # palavra e quantidade, nao minuto (teste do dono, 04/10: 08h10).
+            if (minuto_txt and t[m.start(2) - 1].isspace()
+                    and re.match(r"\s+(?!min)[a-z]", t[m.end():])):
+                minuto_txt = None
+            minuto = int(minuto_txt or 0)
             if hora <= 23 and minuto <= 59:
                 return _periodo(hora, m.end()), minuto
     # Por ultimo, e so se nada acima achou: a hora dita so pela preposicao.

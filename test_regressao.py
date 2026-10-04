@@ -1766,7 +1766,7 @@ _api_doce, _ = _cat.traduzir([{"name": "Bandeja de Brigadeiros (16 un)", "quanti
 checa("a bandeja vai com o sabor Brigadeiro", _api_doce[0].get("selected_flavors") == ["Brigadeiro"])
 secao("--- 02/10: nao inventar nada (varredura de 46 perguntas) ---")
 for _txt in ("voces estao admitindo atendente?", "tem vaga de emprego ai?", "posso parcelar no cartão?",
-             "posso pagar metade no pix e metade no cartão?", "vocês vendem salgado congelado?",
+             "posso pagar metade no pix e metade no cartão?",
              "qual o instagram de vocês?", "vocês emitem nota fiscal?", "vocês abrem no feriado dia 12?",
              "qual o telefone da loja?", "vocês tem kit festa?", "quem é o dono da fábrica?",
              "tem estacionamento na loja?", "com quanto tempo de antecedência preciso encomendar?",
@@ -2634,6 +2634,67 @@ checa("'QUANTOTEMPO LEVA PARA CHEGAR' e pergunta de prazo",
       (app._fato_perguntado("OLA QUERO 50 ESFIRRAS QUANTOTEMPO LEVA PARA CHEGAR") or ("",))[0] == "30 a 40")
 checa("resposta de loja fechada responde o fato perguntado",
       "_fato = _fato_perguntado(text_only)" in open("app.py", encoding="utf-8").read())
+
+print()
+print("--- Dono 04/10: regra prioritaria, respostas do balcao, fora do cardapio")
+_BALCAO = {
+    "Meu pedido já saiu para entrega?": ("Vou verificar !", True),
+    "O motoboy já está chegando?": ("JÁ SAIU SEU PEDIDO!", False),
+    "Quero cancelar meu pedido.": ("Já estou acionando a equipe para atender sobre o cancelamento.", True),
+    "Quero mudar o endereço de entrega do pedido que acabei de fazer.":
+        ("Envie o novo endereço completo aqui, por favor!", True),
+    "Mandei o comprovante do Pix, já confirmou?": ("Comprovante recebido!", False),
+    "Veio faltando 10 coxinhas na minha caixa.":
+        ("Pedimos sinceras desculpas pelo ocorrido! Nossa equipe já está assumindo seu "
+         "atendimento aqui para resolver isso imediatamente.", True),
+    "O salgado chegou frio / revirado.":
+        ("Sentimos muito por isso! Já passei a situação para a equipe responsável verificar "
+         "o transporte e te dar uma solução agora.", True),
+    "Posso pagar na maquininha na entrega em vez de Pix?": ("SIM MANDO PELO MOTOBOY", False),
+    "Quero acrescentar mais um cento no pedido que já está no forno/pronto.":
+        ("PODE SIM QUAL SABOR VOCE QUER", True),
+    "Tem como me entregar daqui a 15 minutos com urgência?":
+        ("Nosso tempo médio de preparo e entrega é de 30 a 40 minutos, mas vou verificar "
+         "com a equipe para agilizar.", True),
+    "vocês vendem salgado congelado grande pra fritar?":
+        ("Congelado trabalhamos apenas com o tamanho mini de festa (R$ 40 o cento).", False),
+}
+for _p, (_txt, _eq) in _BALCAO.items():
+    _r = app._resposta_do_balcao(_p, {})
+    checa(f"balcao: {_p[:40]!r}", _r is not None and _r[1] == _txt and _r[2] == _eq, _r)
+for _p in ("quero 50 coxinhas e 1 coca", "cancela a coca", "quero mudar o endereço",
+           "quero 2 centos pra amanha", "pago no cartão"):
+    checa(f"balcao nao dispara: {_p!r}", app._resposta_do_balcao(_p, {}) is None)
+from agents.conversation import item_fora_do_cardapio as _ifc  # noqa: E402
+checa("'pastel de queijo' e fora do cardapio (pastel de carne nao)",
+      _ifc("QUERO 50 PASTEL DE QUEIJO E 50 PASTEL DE CARNE") == "pastel de queijo"
+      and _ifc("quero 50 pastel de carne") == "", _ifc("QUERO 50 PASTEL DE QUEIJO"))
+checa("'pastelzinho de queijo' e 'torta de frango' sao fora do cardapio",
+      _ifc("1 cento pastelzinho de queijo e bolinha") and _ifc("torta de frango"))
+for _p in ("50 coxinhas de frango", "esfirra de carne", "quibe de carne", "canudinho de camarão",
+           "enroladinho de salsicha", "coxinha de festa", "rissole de queijo"):
+    checa(f"no cardapio: {_p!r}", _ifc(_p) == "", _ifc(_p))
+checa("texto de fora do cardapio chama a equipe, sem 'humano'",
+      "equipe" in app._texto_fora_do_cardapio("pastel de queijo")
+      and "human" not in app._texto_fora_do_cardapio("pastel de queijo"))
+checa("'humano' e 'robo' saem da resposta",
+      app._sem_palavra_proibida("Vou te passar para um atendente humano. Não sou um robô! Um instante.")
+      == "Vou te passar para nossa equipe. Um instante.")
+_sq = app._sabores_de("Vcs tem algum salgado de queijo além da bolinha de queijo ?")
+checa("salgado de queijo: lista do cardapio (mini e grande)",
+      "Misto de Queijo e Presunto" in _sq and "Bolinha de Queijo" in _sq
+      and "Rissole de Queijo e Presunto" in _sq and "Pastel" not in _sq, _sq)
+checa("'pode dim' aceita o dia", app._e_concordancia("pode dim"))
+checa("'AS 8 HORAS 10 COXINHAS' e 8h (o 10 e quantidade)",
+      horario.parse_horario("QUERO PARA AMANHA AS 8 HORAS 10 COXINHAS") == (8, 0)
+      and horario.parse_horario("as 19:30 de amanha") == (19, 30)
+      and horario.parse_horario("8 horas 30 minutos") == (8, 30))
+checa("'salgado de queijo grande': so a linha do grande",
+      "Mini" not in app._sabores_de("tem salgado de queijo grande?")
+      and "Rissole de Queijo e Presunto" in app._sabores_de("tem salgado de queijo grande?"))
+checa("prompt: regra prioritaria e vocabulario",
+      "REGRA PRIORITARIA DO DONO" in open("app.py", encoding="utf-8").read()
+      and "'humano', 'atendente humano' ou 'robo'" in open("app.py", encoding="utf-8").read())
 
 checa("data curta de outro dia",
       horario.formatar_data_curta(horario.agora().date() + __import__("datetime").timedelta(days=3))

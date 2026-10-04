@@ -1372,6 +1372,53 @@ _RX_OUTRO_BOLO = re.compile(
     r"|recheado|tematic|aniversari|festa|casamento|chocolate|cenoura|fuba)")
 
 
+# "pastel de queijo", "pasteis de frango", "torta de frango": tipo de salgado
+# com sabor. Se o cardapio nao tem nada com os dois, o item e fora do cardapio.
+_RX_SALGADO_COM_SABOR = re.compile(
+    r"\b(past[ea]\w*|coxinh\w*|rissol\w*|esfi\w*|empad\w*|canudinh\w*|enroladinh\w*"
+    r"|croquet\w*|bolinh\w*|quibe\w*|kibe\w*|calzone\w*|quiche\w*|bomba\w*|torta\w*"
+    r"|pao|paes)\s+(?:de|com)\s+([a-z]+)")
+
+# "coxinha de festa", "pastel de 25": nao e sabor.
+_NAO_E_SABOR = {"festa", "lanche", "mini", "grande", "cento", "porcao", "unidade",
+                "hoje", "amanha", "manha", "tarde", "noite"}
+
+
+def item_fora_do_cardapio(texto: str) -> str:
+    """O salgado com sabor que o cardapio nao tem ("pastel de queijo"), ou "".
+
+    Teste do dono de 04/10: "pastelzinho de queijo" virou Pastel de CARNE no
+    espelho, e "pastel de queijo" virou o Rissole de Queijo e Presunto grande a
+    R$ 9,00. O dono: item fora do cardapio fixo vai para a equipe verificar a
+    disponibilidade do dia, sem negativa seca.
+    """
+    try:
+        import facts
+        nomes = [facts.normalize(p["item"]) for p in facts.get()["produtos"]]
+    except Exception:
+        return ""
+    if not nomes:
+        return ""
+    t = _horario_norm(texto)
+    for m in _RX_SALGADO_COM_SABOR.finditer(t):
+        base, sabor = m.group(1), m.group(2)
+        if sabor in _NAO_E_SABOR or len(sabor) < 4:
+            continue
+        b, s = base[:5] if base not in ("pao", "paes") else "pao", sabor[:5]
+        com_base = [n for n in nomes if any(w.startswith(b) for w in n.split())]
+        # "Quibe" e uma palavra so: o sabor dele e implicito ("quibe de carne").
+        if any(len(n.split()) == 1 for n in com_base):
+            continue
+        if not any(any(w.startswith(s) for w in n.split()) for n in com_base):
+            return f"{base} de {sabor}"
+    return ""
+
+
+def _horario_norm(texto: str) -> str:
+    import horario as _horario
+    return _horario._norm(texto or "")
+
+
 def bolo_fora_do_cardapio(texto: str) -> bool:
     import horario as _horario
     return bool(_RX_OUTRO_BOLO.search(_horario._norm(texto or "")))

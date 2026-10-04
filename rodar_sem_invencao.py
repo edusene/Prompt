@@ -65,6 +65,9 @@ _INVENTADO = re.compile(
     r"|congelad|estacionamento|parcel|kit festa", re.IGNORECASE)
 
 
+_TEXTOS_DO_DONO = {resposta for _n, _rx, resposta, _eq in app._RESPOSTAS_DO_BALCAO}
+
+
 def _uma(pergunta: str) -> str:
     t_ag._ficha.clear()
     memory._store.pop(t_ag.TELEFONE, None)
@@ -85,7 +88,10 @@ def _chave(r: str) -> str:
 problemas = []
 for q in PERGUNTAS:
     respostas = [_uma(q) for _ in range(RODADAS)]
-    inventou = [r for r in respostas if r != "[EQUIPE]" and _INVENTADO.search(facts.normalize(r))]
+    # Texto exato que o dono deu (balcao, 04/10) nao e invencao.
+    inventou = [r for r in respostas if r != "[EQUIPE]"
+                and r.strip() not in _TEXTOS_DO_DONO
+                and _INVENTADO.search(facts.normalize(r))]
     distintas = {_chave(r) for r in respostas}
     marca = "OK "
     if inventou:

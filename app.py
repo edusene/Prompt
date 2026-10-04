@@ -97,7 +97,7 @@ FULL_SYSTEM_PROMPT += (
     "\nVoce tem acesso a uma tool 'consultar_frete' que retorna a taxa OFICIAL de "
     "entrega de um bairro. Use SEMPRE que precisar informar frete: ela le a tabela "
     "oficial. Se ela responder que o bairro nao esta na tabela, NAO invente um valor "
-    "- pergunte o bairro de novo ou transfira para um humano."
+    "- pergunte o bairro de novo ou transfira para a equipe."
     "\nVoce tem acesso a uma tool 'consultar_preco' que retorna o preco OFICIAL de um "
     "produto do cardapio. Use SEMPRE antes de informar qualquer preco."
     "\nVoce tem acesso a uma tool 'search_knowledge' para buscar informacoes "
@@ -555,7 +555,6 @@ _RX_ASSUNTO_DA_EQUIPE = _re_mod.compile(
     r"|\b(?:telefone|numero\s+(?:da\s+loja|de\s+voces|fixo|da\s+fabrica)|whats(?:app)?\s+(?:da\s+loja|de\s+voces|da\s+fabrica))\b"
     r"|\b(?:nota\s+fiscal|cupom\s+fiscal|nf\b|nfe\b|cnpj\s+(?:para|pra)\s+nota)"
     r"|\bferiado\b|\bquem\s+(?:e|sao)\s+os?\s+donos?\b|\bnome\s+do\s+dono\b|\bproprietari\w*"
-    r"|\b(?:vendem|vende|tem|fazem)\s+(?:salgad\w*\s+)?congelad\w*"
     r"|\bkit\s+festa\b|\bestacionamento\b|\bparcel\w*"
     r"|\bmetade\s+(?:no|em|pelo)\s+(?:pix|cartao|dinheiro)\b|\bduas\s+formas\s+de\s+pagamento\b"
     r"|\bdividir\s+o\s+pagamento\b|\bfornecedor\w*|\bparceria\b|\brevend\w*|\bfranquia\b"
@@ -576,6 +575,105 @@ _RX_INGREDIENTE = _re_mod.compile(
 
 TEXTO_CONFIRMAR_COM_EQUIPE = (
     "Preciso confirmar essa informação com nossa equipe antes de te passar certinho! 😊")
+
+
+# Respostas do balcao padronizadas pelo dono (04/10), com o texto exato dele.
+# (nome, regex sobre o texto normalizado, resposta, passa para a equipe).
+# A ordem importa: "motoboy ja esta chegando?" e a 2, nao a 1.
+_RESPOSTAS_DO_BALCAO = (
+    ("frio", _re_mod.compile(
+        r"\b(?:chegou|chegaram|veio|vieram|esta|estao|ta|tao)\b.{0,25}"
+        r"\b(?:frio|fria|frios|frias|revirad\w*|amassad\w*|desmanchad\w*)\b"),
+     "Sentimos muito por isso! Já passei a situação para a equipe responsável "
+     "verificar o transporte e te dar uma solução agora.", True),
+    ("faltando", _re_mod.compile(
+        r"\b(?:veio|vieram|chegou|chegaram|esta|ta)\b.{0,25}\bfaltando\b"
+        r"|\bfaltou\b.{0,30}\b(?:salgad\w*|coxinh\w*|caixa|pedido|unidades?|\d+)\b"
+        r"|\bfaltando\b.{0,30}\b(?:na|no)\s+(?:minha\s+|meu\s+)?(?:caixa|pedido)\b"),
+     "Pedimos sinceras desculpas pelo ocorrido! Nossa equipe já está assumindo seu "
+     "atendimento aqui para resolver isso imediatamente.", True),
+    ("cancelamento", _re_mod.compile(
+        r"\bcancel\w*\s+(?:o\s+|meu\s+|a\s+|minha\s+|esse\s+|essa\s+)?(?:pedido|compra|encomenda)\b"
+        r"|\b(?:pedido|compra|encomenda)\b.{0,20}\bcancel\w*|^\s*(?:quero\s+)?cancel\w*\s*$"),
+     "Já estou acionando a equipe para atender sobre o cancelamento.", True),
+    ("comprovante", _re_mod.compile(
+        r"\bcomprovante\b.{0,60}\b(?:confirm\w*|receb\w*|chegou|viu|olhou)"
+        r"|\b(?:confirm\w*|receb\w*)\b.{0,30}\bcomprovante\b"),
+     "Comprovante recebido!", False),
+    ("urgencia", _re_mod.compile(
+        r"\bdaqui\s+(?:a\s+)?\d{1,2}\s*min|\bem\s+\d{1,2}\s*min\w*|\burgen(?:te|cia)\b"),
+     "Nosso tempo médio de preparo e entrega é de 30 a 40 minutos, mas vou verificar "
+     "com a equipe para agilizar.", True),
+    # Congelado: texto do dono (04/10). Antes ia para a equipe.
+    ("congelado", _re_mod.compile(r"\bcongelad\w*"),
+     "Congelado trabalhamos apenas com o tamanho mini de festa (R$ 40 o cento).", False),
+    ("motoboy", _re_mod.compile(
+        r"\b(?:motoboy|motoqueiro|entregador|motoca)\b.{0,30}"
+        r"\b(?:chegando|chega|vindo|vem|perto|demora|onde)\b"),
+     "JÁ SAIU SEU PEDIDO!", False),
+    ("saiu", _re_mod.compile(
+        r"\bja\s+saiu\b|\bsaiu\s+(?:pra|para)\s+(?:a\s+)?entrega\b|\bsaiu\s+o\s+(?:meu\s+)?pedido\b"),
+     "Vou verificar !", True),
+    ("maquininha", _re_mod.compile(
+        r"^(?=.*\b(?:posso|pode|da\s+pra|da\s+para|aceita\w*|leva|manda|tem)\b)"
+        r".*\bmaquin\w*"),
+     "SIM MANDO PELO MOTOBOY", False),
+)
+
+# 4 e 9 so valem para pedido ja feito: no meio do funil, mudar o endereco e
+# corrigir um dado, e "mais um cento" e pedido.
+_RX_MUDA_ENDERECO = _re_mod.compile(
+    r"\b(?:mudar|muda|trocar|troca|alterar|altera|corrigir)\b.{0,25}\bendereco\b")
+_RX_ACRESCENTA = _re_mod.compile(
+    r"\b(?:acrescentar|acrescenta|adicionar|adiciona|incluir|inclui|somar|soma"
+    r"|colocar\s+mais|mais\s+um)\b")
+_RX_PEDIDO_JA_FEITO = _re_mod.compile(
+    r"\b(?:forno|pronto|producao|acabei\s+de\s+fazer|ja\s+fiz|que\s+fiz|ja\s+(?:esta|ta)"
+    r"|pedido\s+(?:anterior|feito))\b")
+
+TEXTO_MUDA_ENDERECO = "Envie o novo endereço completo aqui, por favor!"
+TEXTO_ACRESCENTA = "PODE SIM QUAL SABOR VOCE QUER"
+
+
+def _resposta_do_balcao(texto: str, memoria: dict) -> tuple[str, str, bool] | None:
+    """(nome, resposta exata do dono, passa para a equipe) ou None."""
+    t = facts.normalize(texto or "")
+    if not t:
+        return None
+    pedido_feito = (bool(_RX_PEDIDO_JA_FEITO.search(t))
+                    or conversation_memory.em_pos_pedido(memoria, aceita_itens=True))
+    if _RX_MUDA_ENDERECO.search(t) and pedido_feito:
+        return "endereco", TEXTO_MUDA_ENDERECO, True
+    if _RX_ACRESCENTA.search(t) and "pedido" in t and pedido_feito:
+        return "acrescimo", TEXTO_ACRESCENTA, True
+    for nome, rx, resposta, equipe in _RESPOSTAS_DO_BALCAO:
+        if rx.search(t):
+            return nome, resposta, equipe
+    return None
+
+
+# "Humano", "atendente humano" e "robo" sao proibidos pelo dono (04/10): sempre
+# "equipe". A frase com robo sai inteira ("nao sou um robo").
+_RX_HUMANO = _re_mod.compile(
+    r"\b(?:(?:um|uma|o|a|nosso|nossa|ao|à|com\s+um)\s+)?"
+    r"(?:atendentes?\s+humanos?|atendimento\s+humano|humanos?)\b", _re_mod.IGNORECASE)
+_RX_FRASE_COM_ROBO = _re_mod.compile(r"[^.!?\n]*\brob[oô]s?\b[^.!?\n]*[.!?]?\s*",
+                                     _re_mod.IGNORECASE)
+
+
+def _sem_palavra_proibida(reply: str) -> str:
+    if not reply:
+        return reply
+    limpo = _RX_HUMANO.sub("nossa equipe", reply)
+    limpo = _RX_FRASE_COM_ROBO.sub(" ", limpo)
+    limpo = _re_mod.sub(r"[ \t]{2,}", " ", limpo).strip()
+    return limpo or reply
+
+
+def _texto_fora_do_cardapio(item: str) -> str:
+    """Item fora do cardapio fixo: a equipe verifica o dia (dono, 04/10)."""
+    return (f"Vou chamar nossa equipe para verificar a disponibilidade de {item} "
+            f"pra você! Um instante, por favor. 💛")
 
 
 def _assunto_da_equipe(texto: str) -> str | None:
@@ -708,6 +806,71 @@ def _conferir_fato_do_dono(user: str, pergunta: str, reply: str,
     seguinte = _proxima_pergunta_do_funil(memoria) if memoria is not None else ""
     print(f"[fato] user={user} pergunta sobre fato do prompt; texto do dono")
     return f"{frase}\n\n{seguinte}".strip() if seguinte else frase
+
+
+# "Vcs tem algum salgado de queijo alem da bolinha?" (teste do dono, 04/10):
+# ela respondeu tres vezes com uma lista diferente, e numa delas "so a bolinha
+# de queijo mini" - o Misto de Queijo e Presunto existe. A lista sai do cardapio.
+_RX_SALGADO_DE = _re_mod.compile(
+    r"\b(?:salgad\w*|algo|algum\w*|opc\w*|sabor\w*|outr[oa]s?)\s+(?:de|com)\s+([a-z]{4,})")
+_RX_PERGUNTA_DE_TER = _re_mod.compile(r"\?|\b(?:tem|tens|quais|qual|vcs|voces|existe)\b")
+
+
+def _sabores_de(pergunta: str) -> str:
+    """A lista do cardapio para "tem salgado de X?", ou ''."""
+    t = facts.normalize(pergunta or "")
+    m = _RX_SALGADO_DE.search(t)
+    if not m or not _RX_PERGUNTA_DE_TER.search(t):
+        return ""
+    termo = m.group(1)
+    if termo in ("festa", "lanche", "mini", "grande", "voces", "vcs"):
+        return ""
+    raiz = termo[:5]
+    mini, grande = [], []
+    try:
+        for p in facts.get()["produtos"]:
+            nome = p["item"]
+            if not any(w.startswith(raiz) for w in facts.normalize(nome).split()):
+                continue
+            cat = facts.normalize(p["categoria"])
+            if cat in ("fritos", "assados") and p.get("preco") is None:
+                if nome not in mini:
+                    mini.append(nome)
+            elif cat == "salgados grandes" and nome not in grande:
+                grande.append(nome)
+    except Exception:
+        return ""
+    so_mini = bool(_re_mod.search(r"\bmini\b|\bfesta\b", t))
+    so_grande = not so_mini and bool(_re_mod.search(r"\bgrandes?\b|\blanche\b", t))
+    linhas = []
+    if mini and not so_grande:
+        linhas.append("• Mini (festa): " + " e ".join([", ".join(mini[:-1]), mini[-1]]
+                                                      if len(mini) > 1 else mini))
+    if grande and not so_mini:
+        linhas.append("• Grande (lanche): " + " e ".join([", ".join(grande[:-1]), grande[-1]]
+                                                          if len(grande) > 1 else grande))
+    if not linhas:
+        return ""
+    return f"De {termo} temos:\n" + "\n".join(linhas) + " 😊"
+
+
+def _conferir_sabores_de(user: str, pergunta: str, reply: str, memoria: dict) -> str:
+    lista = _sabores_de(pergunta)
+    if not lista:
+        # "QUERO SABER DOS MINI" logo depois da lista: o termo vem dela.
+        t = facts.normalize(pergunta or "")
+        if _re_mod.search(r"\b(?:mini|festa|grandes?|lanche)\b", t) and len(t.split()) <= 6:
+            _ultima = next((m.get("parts", [{}])[0].get("text", "") or ""
+                            for m in reversed(memory.get(user))
+                            if m.get("role") == "assistant"), "")
+            achado = _re_mod.search(r"\bDe (\w+) temos:", _ultima)
+            if achado:
+                lista = _sabores_de(f"tem salgado de {achado.group(1)} {t}?")
+    if not lista:
+        return reply
+    seguinte = _proxima_pergunta_do_funil(memoria) if memoria.get("items") else ""
+    print(f"[cardapio] user={user} pergunta de sabores; lista do cardapio")
+    return f"{lista}\n\n{seguinte}".strip() if seguinte else lista
 
 
 def _fato_perguntado(pergunta: str) -> tuple[str, str] | None:
@@ -3776,6 +3939,14 @@ def _conferir_uma_pergunta(user: str, reply: str, memoria: dict | None = None) -
             cabeca = reply
             for p in perguntas:
                 cabeca = cabeca.replace(p, "")
+            # Frase que a pergunta do codigo ja traz nao fica antes dela:
+            # "Escolha ate 8 sabores (25 de cada)." saia duas vezes seguidas
+            # (teste do dono, 04/10).
+            _trav_norm = facts.normalize(_travada)
+            cabeca = " ".join(
+                f for f in _RX_FIM_DE_FRASE.split(cabeca)
+                if f.strip() and facts.normalize(f).strip()
+                and facts.normalize(f).strip() not in _trav_norm)
             cabeca = _re_mod.sub(r"[ \t]{2,}", " ", cabeca).strip()
             cabeca = _re_mod.sub(r"\n{3,}", "\n\n", cabeca)
             print(f"[formato] user={user} a resposta fazia {len(perguntas)} "
@@ -3921,8 +4092,12 @@ def _concorda(frase: str) -> bool:
     # Erro de digitacao em volta do "sim": "POSE SIM AS 8 HORAS" nao aceitava o
     # dia oferecido e ela perguntou segunda-feira de novo (teste do dono, 03/10).
     palavras = sem_horario.split()
-    return (0 < len(palavras) <= 3 and "sim" in palavras
-            and not set(palavras) & _NAO_E_ACEITE)
+    if set(palavras) & _NAO_E_ACEITE:
+        return False
+    # "pode dim" (teste do dono, 04/10): "pode" + uma palavra torta.
+    if 0 < len(palavras) <= 2 and palavras[0] in ("pode", "pd", "pde", "podi"):
+        return True
+    return 0 < len(palavras) <= 3 and "sim" in palavras
 
 
 _NAO_E_ACEITE = {"nao", "não", "mas", "outro", "outra", "prefiro", "melhor", "so"}
@@ -4262,6 +4437,32 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                              send_message=False)
             return
 
+        # Perguntas do balcao com resposta padronizada pelo dono (04/10), e
+        # item fora do cardapio fixo (equipe verifica a disponibilidade do
+        # dia). Antes das palavras-chave: "cancelar" tem texto proprio agora.
+        _memoria_balcao = conversation_memory.load(user)
+        _balcao = _resposta_do_balcao(_texto_cliente, _memoria_balcao)
+        _fora = ""
+        if not _balcao:
+            from agents.conversation import item_fora_do_cardapio, bolo_fora_do_cardapio
+            _fora = item_fora_do_cardapio(_texto_cliente)
+            if not _fora and bolo_fora_do_cardapio(_texto_cliente):
+                _fora = "bolo"
+        if _balcao or _fora:
+            _nome_b, _texto_b, _equipe_b = (_balcao or ("fora do cardapio",
+                                                        _texto_fora_do_cardapio(_fora), True))
+            if (_nome_b == "maquininha" and _memoria_balcao.get("items")
+                    and not _memoria_balcao.get("pedido_enviado")):
+                _memoria_balcao["payment_method"] = "cartao"
+                conversation_memory.save(user, _memoria_balcao)
+            print(f"[balcao] user={user} resposta padrao do dono: {_nome_b}"
+                  f"{' (' + _fora + ')' if _fora else ''}")
+            _responder_direto(user, items, _texto_b, _chegada)
+            if _equipe_b:
+                perform_transfer(user, reason=f"{_nome_b}: {_texto_cliente[:120]}",
+                                 send_message=False)
+            return
+
         matched_kw = _check_transfer_keywords(items)
         if not matched_kw:
             matched_kw = _pede_consultoria_de_evento(" ".join(
@@ -4362,6 +4563,12 @@ def _handle_flush(user: str, items: list[dict]) -> None:
         # em "entrega ou retirada?" e o total nunca era calculado.
         if conversation_memory.inferir_modalidade(_memoria):
             print(f"[memoria] {user}: modalidade inferida pelo endereco -> entrega")
+        # Numero da casa ja aqui: a validacao do horario abaixo responde e
+        # encerra a vez, e "AMANHA NUMERO 2125 PAGAMENTO PIX" perdia o numero
+        # quando o horario nao cabia (teste do dono, 04/10).
+        _numero_cedo = conversation_memory.capturar_numero_da_casa(_memoria, text_only)
+        if _numero_cedo:
+            print(f"[memoria] {user}: numero da casa -> {_numero_cedo}")
         conversation_memory.save(user, _memoria)
         if _mudancas:
             print(f"[memoria] {user}: {', '.join(_mudancas)}")
@@ -4581,8 +4788,16 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                   f"{' horario ' + str(_memoria.get('horario')) if _horario_dado else ''}; "
                   f"sem aviso generico")
 
+        # Pergunta sem pedido ("tem algum salgado de queijo alem da bolinha?")
+        # e respondida primeiro - regra prioritaria do dono (04/10). O aviso
+        # de fechado saia no lugar da resposta. Ele volta quando houver pedido.
+        _so_pergunta = (not _memoria.get("items") and not _memoria.get("volume_pendente")
+                        and bool(_RX_CLIENTE_PERGUNTOU.search(text_only or "")
+                                 or _re_mod.search(r"\b(?:quero|queria|gostaria\s+de)\s+saber\b",
+                                                   facts.normalize(text_only or ""))))
         if (not _expediente["aberto"] and not _agendou_valido
                 and not _pedido_outro_dia and not _horario_dado
+                and not _so_pergunta
                 and not _memoria.get("aviso_horario_dado")):
             _memoria["aviso_horario_dado"] = True
             if horario.eh_imediato(_memoria.get("horario") or ""):
@@ -5021,19 +5236,27 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             "agradecimento longo nem 'ja esta sendo preparado com muito carinho'."
             "\n9.7 NAO INVENTE NADA: so afirme o que esta neste prompt, na planilha ou "
             "no retorno de uma tool. Instagram, site, telefone, nota fiscal, feriado, "
-            "nome do dono, ingredientes, oleo, validade, gramas, congelado, kit, "
+            "nome do dono, ingredientes, oleo, validade, gramas, kit, "
             "parcelamento, vagas de emprego e qualquer outro dado que nao esteja aqui: "
             "responda 'Preciso confirmar essa informacao com nossa equipe antes de te "
             "passar certinho! 😊' e nada mais sobre o assunto. NUNCA deduza, estime nem "
             "'normalmente indicamos'. Pergunta que voce nao entendeu nao e 'sim'. "
-            "Produto que nao esta no cardapio NAO e duvida: diga que nao temos (o que "
-            "nao consta no cardapio esta indisponivel)."
+            "Produto que nao esta no cardapio (tortas, itens sazonais, sabor que nao "
+            "existe): NUNCA de negativa seca - diga que vai chamar a equipe para "
+            "verificar a disponibilidade do dia e use transfer_to_human."
             "\n9.8 FONTE DOS DADOS: produtos, precos, sabores, disponibilidade, taxas de "
             "entrega, horario de atendimento e regras (taxa de retorno, endereco, chave "
             "Pix) vem do CARDAPIO DIGITAL - o bloco 'CARDAPIO DIGITAL' e a linha "
             "'Expediente' acima, atualizados a cada mensagem. Se algum numero escrito "
             "nas instrucoes do dono for diferente desses dados, VALE O DO CARDAPIO."
-            "\n10. SEMPRE responda primeiro a pergunta que o cliente fez (preco, frete, "
+            "\n9.9 VOCABULARIO (dono): e terminantemente proibido usar as palavras "
+            "'humano', 'atendente humano' ou 'robo'. Refira-se sempre e exclusivamente "
+            "como 'equipe'."
+            "\n10. REGRA PRIORITARIA DO DONO: se o cliente perguntar algo, a resposta a "
+            "pergunta e a prioridade da mensagem - curta e direta, sem desviar o "
+            "assunto. Puxar agendamento, horario, pedido ou fechamento so DEPOIS de "
+            "sanar a duvida."
+            "\n10.1 SEMPRE responda primeiro a pergunta que o cliente fez (preco, frete, "
             "horario, endereco, forma de pagamento, se tem determinado produto) e so "
             "depois puxe o proximo dado do funil, na mesma mensagem. Isso vale tambem no "
             "primeiro contato: se a primeira mensagem ja traz uma pergunta, responda-a e "
@@ -5111,8 +5334,8 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             performed = perform_transfer(user, reason, send_message=False)
             _transfer_done = True
             if performed:
-                return "Transferência realizada com sucesso. O atendente humano continuará o atendimento."
-            return "O cliente já está sendo atendido por um humano."
+                return "Transferência realizada com sucesso. A equipe continuará o atendimento."
+            return "O cliente já está sendo atendido pela equipe."
 
         def _contextual_knowledge_handler(query: str = "", filename: str = "", **kwargs) -> str:
             if not filename and query and len(query.split()) <= 3 and last_assistant_text:
@@ -5689,6 +5912,8 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                                  send_message=False)
                 _transfer_done = True
 
+        reply = _sem_palavra_proibida(reply)
+
         # Se a IA transferiu, envia a resposta do LLM (knowledge/explicação) e depois a msg de transferência
         if _transfer_done:
             print(f"[flush] user={user} transferido pela IA, enviando resposta do LLM antes da transferência")
@@ -5777,6 +6002,7 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                 reply = _conferir_preco_perguntado(user, text_only, reply, _memoria)
                 reply = _conferir_ingrediente(user, text_only, reply, _memoria)
                 reply = _conferir_fato_do_dono(user, text_only, reply, _memoria)
+                reply = _conferir_sabores_de(user, text_only, reply, _memoria)
                 _refri = _conferir_refri_perguntado(user, text_only, reply)
                 if _refri != reply:
                     _seguinte = _proxima_pergunta_do_funil(_memoria)
