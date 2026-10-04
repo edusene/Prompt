@@ -600,8 +600,9 @@ _FATOS_DO_DONO = (
                      r"|\bonde\s+(?:fica|ficam|voces\s+ficam|e\s+a\s+loja|retiro|busco)\b"
                      r"|\b(?:qual|de\s+que|em\s+que)\s+cidade\b|\bde\s+onde\s+(?:voces\s+)?sao\b"),
      "calama", lambda: f"Nossa loja fica na {cardapio.endereco_fabrica()}! 😊"),
-    (_re_mod.compile(r"^(?!.*\bantecedencia\b).*\b(?:quanto\s+tempo|demora|prazo|tempo\s+de\s+entrega"
-                     r"|em\s+quanto\s+tempo)\b"),
+    # "QUANTOTEMPO LEVA PARA CHEGAR", tudo grudado (teste do dono, 03/10).
+    (_re_mod.compile(r"^(?!.*\bantecedencia\b).*\b(?:quanto\s*tempo|demora|prazo|tempo\s+de\s+entrega"
+                     r"|tempo\s+(?:leva|demora)|leva\s+(?:pra|para)\s+chegar)\b"),
      "30 a 40", "A estimativa média é de 30 a 40 minutos, podendo variar conforme o "
                 "movimento e a rota da entrega! 😊"),
     (_re_mod.compile(r"\b(?:que\s+horas|qual\s+(?:e\s+)?o\s+horario|horario\s+de|ate\s+que\s+horas"
@@ -695,25 +696,33 @@ def _texto_do_expediente() -> str:
 
 def _conferir_fato_do_dono(user: str, pergunta: str, reply: str,
                            memoria: dict | None = None) -> str:
-    if not pergunta or "?" not in pergunta and not _re_mod.search(
-            r"\b(?:qual|onde|quanto|que horas|ate que)\b", facts.normalize(pergunta)):
+    achado = _fato_perguntado(pergunta)
+    if not achado:
         return reply
+    prova, frase = achado
+    # Sempre o texto do dono: o modelo acertava o fato, mas a cada rodada
+    # com outra redacao e outro acrescimo ("aos domingos nao abre para
+    # entregas imediatas" numa sexta-feira). Espelho nao se toca.
+    if _RX_LINHA_DE_RESUMO.search(reply or ""):
+        return reply if prova in facts.normalize(reply or "") else _juntar_antes(frase, reply)
+    seguinte = _proxima_pergunta_do_funil(memoria) if memoria is not None else ""
+    print(f"[fato] user={user} pergunta sobre fato do prompt; texto do dono")
+    return f"{frase}\n\n{seguinte}".strip() if seguinte else frase
+
+
+def _fato_perguntado(pergunta: str) -> tuple[str, str] | None:
+    """(prova, frase do dono) do fato perguntado, ou None."""
+    # "quanto" sem \b no fim: "QUANTOTEMPO" chega grudado.
+    if not pergunta or "?" not in pergunta and not _re_mod.search(
+            r"\b(?:qual|onde|quanto|que horas|ate que)", facts.normalize(pergunta)):
+        return None
     norm_p = facts.normalize(pergunta)
     for rx, prova, frase in _FATOS_DO_DONO:
-        if not rx.search(norm_p):
-            continue
-        # Texto e prova podem depender do cardapio digital (horario, endereco).
-        prova = prova() if callable(prova) else prova
-        frase = frase() if callable(frase) else frase
-        # Sempre o texto do dono: o modelo acertava o fato, mas a cada rodada
-        # com outra redacao e outro acrescimo ("aos domingos nao abre para
-        # entregas imediatas" numa sexta-feira). Espelho nao se toca.
-        if _RX_LINHA_DE_RESUMO.search(reply or ""):
-            return reply if prova in facts.normalize(reply or "") else _juntar_antes(frase, reply)
-        seguinte = _proxima_pergunta_do_funil(memoria) if memoria is not None else ""
-        print(f"[fato] user={user} pergunta sobre fato do prompt; texto do dono")
-        return f"{frase}\n\n{seguinte}".strip() if seguinte else frase
-    return reply
+        if rx.search(norm_p):
+            # Texto e prova podem depender do cardapio digital (horario, endereco).
+            return (prova() if callable(prova) else prova,
+                    frase() if callable(frase) else frase)
+    return None
 
 
 def _pede_consultoria_de_evento(texto: str) -> str | None:
@@ -3907,7 +3916,16 @@ def _concorda(frase: str) -> bool:
         return True
     # "pode sim, as 11h": tira o horario e reavalia o que sobrou.
     sem_horario = " ".join(_SO_HORARIO.sub(" ", limpo).split())
-    return bool(sem_horario) and sem_horario in _CONCORDANCIAS
+    if sem_horario in _CONCORDANCIAS:
+        return bool(sem_horario)
+    # Erro de digitacao em volta do "sim": "POSE SIM AS 8 HORAS" nao aceitava o
+    # dia oferecido e ela perguntou segunda-feira de novo (teste do dono, 03/10).
+    palavras = sem_horario.split()
+    return (0 < len(palavras) <= 3 and "sim" in palavras
+            and not set(palavras) & _NAO_E_ACEITE)
+
+
+_NAO_E_ACEITE = {"nao", "não", "mas", "outro", "outra", "prefiro", "melhor", "so"}
 
 
 def _e_concordancia(texto: str) -> bool:
@@ -3965,7 +3983,8 @@ _MARCAS_DE_FECHAMENTO = (
 
 # Como o cliente escolhe o lado da duvida "pacote ou salgado grande".
 _MARCAS_ESCOLHEU_PACOTE = (
-    "pacote", "porcao", "porcoes", "festa", "mini", "de 25", "25 de cada",
+    # "pequeno": resposta do dono a "grande (lanche) ou mini (festa)?" (03/10).
+    "pacote", "porcao", "porcoes", "festa", "mini", "de 25", "25 de cada", "pequen", "menor",
     "meio cento", "cento",
 )
 _MARCAS_ESCOLHEU_BALCAO = (
@@ -4582,9 +4601,15 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             # extracao; o que faltava era dizer isso ao cliente.
             _itens_lidos = conversation_memory._formatar_itens(_memoria.get("items"))
             _eco = f"Anotei seu pedido: {_itens_lidos}.\n\n" if _itens_lidos else ""
+            # Pergunta de fato junto com o pedido ("QUANTOTEMPO LEVA PARA
+            # CHEGAR"): esta resposta nao passa pelo modelo, e a pergunta
+            # ficava sem resposta (teste do dono, 03/10).
+            _fato = _fato_perguntado(text_only)
+            _fato_txt = f"{_fato[1]}\n\n" if _fato else ""
             _resposta = (
                 f"{horario.saudacao(_agora)}{_nome}! Aqui é a Sandrinha da BALBS.\n\n"
-                f"{_eco}{_negativas_do_bloco_6(user, text_only, _expediente['mensagem'], _memoria)}"
+                f"{_eco}{_fato_txt}"
+                f"{_negativas_do_bloco_6(user, text_only, _expediente['mensagem'], _memoria)}"
             )
             _memoria["saudacao_feita"] = True
             # Guarda o dia oferecido na mensagem para o "pode sim" seguinte.
@@ -4760,6 +4785,22 @@ def _handle_flush(user: str, items: list[dict]) -> None:
         if _divisao:
             conversation_memory.save(user, _memoria)
             print(f"[memoria] {user}: {'; '.join(_divisao)}")
+
+        # "PODE ESCOLHER POR MIM" com o total ja dito: excecao do dono (04/10),
+        # ela escolhe sabores aleatorios do cardapio para as porcoes.
+        _escolhidos_por_ela = []
+        if (not _memoria.get("items") and _memoria.get("volume_pendente")
+                and conversation_memory.escolheu_por_mim(text_only)):
+            _escolhidos_por_ela = conversation_memory.escolher_sabores(
+                int(_memoria["volume_pendente"]), _memoria.get("preparo_pendente") or "")
+            if _escolhidos_por_ela:
+                _memoria["items"] = _escolhidos_por_ela
+                _memoria["volume_pendente"] = 0
+                _memoria["divisao_pendente"] = {}
+                _memoria["pedido_por_volume"] = True
+                conversation_memory.save(user, _memoria)
+                print(f"[memoria] {user}: cliente deixou a escolha com ela -> "
+                      f"{[(i['name'], i['quantity']) for i in _escolhidos_por_ela]}")
 
         if _memoria.get("sabores_pendentes"):
             _escolha_sabor = conversation_memory.aplicar_escolha_de_sabor(
@@ -5702,6 +5743,14 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                     and not conversation_memory.pergunta_bloqueante(_memoria)):
                 reply = conversation_memory._PERGUNTA_CURTA[_so_falta[0]]
             reply = _conferir_troco_fora_de_hora(user, text_only, reply, _memoria)
+            if _escolhidos_por_ela and not _RX_LINHA_DE_RESUMO.search(reply or ""):
+                # O cliente precisa saber o que ela escolheu antes de seguir.
+                _lista = ", ".join(f"{i['quantity']} {i['name']}" for i in _escolhidos_por_ela)
+                _seguinte = _proxima_pergunta_do_funil(_memoria)
+                reply = f"Escolhi os sabores pra você: {_lista}. 😊"
+                if _seguinte:
+                    reply = f"{reply}\n\n{_seguinte}"
+                print(f"[escolha] user={user} sabores escolhidos por ela anunciados")
             if _minis_ajustados:
                 _sabores_mini = " e ".join(_minis_ajustados)
                 reply = (f"A quantidade mínima de fábrica é a porção de 25 "

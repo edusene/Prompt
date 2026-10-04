@@ -1089,7 +1089,9 @@ def volume_sem_sabor(msg_lower: str) -> int:
     return 0
 
 
-_RX_TOTAL_DE_SALGADOS = re.compile(r"(?<![\d,.])(\d{2,3})\s+(?:mini\s*)?salgad\w*\b(?!\s+filho)")
+# "QUERO 400 VARIADOS" tambem e o total (teste do dono, 03/10).
+_RX_TOTAL_DE_SALGADOS = re.compile(
+    r"(?<![\d,.])(\d{2,3})\s+(?:mini\s*)?(?:salgad\w*|variad\w*|sortid\w*|unidades)\b(?!\s+filho)")
 
 
 _RX_FRITO = re.compile(r"\bfrit[oa]s?\b")

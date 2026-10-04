@@ -573,6 +573,33 @@ def traduzir(items: list[dict], extras: list | None = None) -> tuple[list[dict],
         # Pacote que aceita varios sabores: tudo numa linha so, porque cada
         # sabor sozinho ficaria abaixo do minimo do pacote.
         if len(sabores) > pacote["max_sabores"]:
+            # Mais sabores do que a linha aceita: vai em mais de um pacote,
+            # cada um com ate max_sabores. O dono deixa escolher ate total/25
+            # sabores (300 -> 12), e o pedido inteiro era recusado no envio.
+            grupos = [sabores[i:i + pacote["max_sabores"]]
+                      for i in range(0, len(sabores), pacote["max_sabores"])]
+            linhas = []
+            for grupo in grupos:
+                total_g = sum(q for _, q in grupo)
+                pac_g = _escolher_pacote(familia, total_g)
+                if pac_g is None:
+                    linhas = []
+                    break
+                # Sobra abaixo do cento: porcao de 25, uma linha por sabor.
+                partes = ([(s, q, [s]) for s, q in grupo] if pac_g["max_sabores"] == 1
+                          else [(None, total_g, [s for s, _ in grupo])])
+                if len(partes[0][2]) > pac_g["max_sabores"]:
+                    linhas = []
+                    break
+                for _s, qtd_l, sabores_l in partes:
+                    linha_api = {"name": pac_g["nome_base44"], "quantity": qtd_l,
+                                 "selected_flavors": sabores_l}
+                    if cfg.get("context"):
+                        linha_api["context"] = cfg["context"]
+                    linhas.append(linha_api)
+            if linhas:
+                saida.extend(linhas)
+                continue
             bloqueados.append(
                 f"{familia}: {len(sabores)} sabores, mas o pacote "
                 f"'{pacote['nome_base44']}' aceita no maximo {pacote['max_sabores']}"

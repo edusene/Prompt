@@ -328,6 +328,8 @@ def merge(memoria: dict, extraido: dict, novo_da_mensagem: dict | None = None) -
         memoria["sabores_pendentes"] = sabores_novos
         mudancas.append(f"sabores_pendentes={[s['termo'] for s in sabores_novos]}")
 
+    _volume_novo(memoria, novo_da_mensagem or {}, mudancas)
+
     # Troco so existe para dinheiro. Quem pediu troco para 100 e depois trocou
     # para Pix nao pode levar essa observacao para a comanda.
     if memoria.get("troco_para") and memoria.get("payment_method") != "dinheiro":
@@ -1010,6 +1012,95 @@ def pendencia_de_sabor(memoria: dict) -> str:
     )
 
 
+def _volume_novo(memoria: dict, novo: dict, mudancas: list) -> None:
+    """O cliente mudou o total: "3 centos" e depois "quero 400".
+
+    merge so preenche lacuna, entao o 300 ficava e os sabores eram divididos
+    em 75; e "POCA PEDIR 400 SALGADINHOS" depois do espelho repetia o espelho
+    de 300 (teste do dono, 03/10). Sem itens, o volume novo troca o antigo;
+    com itens vindos de volume, divide de novo entre os mesmos sabores.
+    """
+    try:
+        volume = int(novo.get("volume_pendente") or 0)
+    except (TypeError, ValueError):
+        return
+    if not volume or novo.get("items") or volume % 25:
+        return
+    itens = [i for i in (memoria.get("items") or []) if isinstance(i, dict)]
+    if not itens:
+        if memoria.get("volume_pendente") and int(memoria["volume_pendente"]) != volume:
+            memoria["volume_pendente"] = volume
+            memoria["divisao_pendente"] = {}
+            mudancas.append(f"volume_pendente={volume} (cliente mudou o total)")
+        return
+    if not memoria.get("pedido_por_volume"):
+        return
+    acompanhamentos = [i for i in itens if _e_acompanhamento(i.get("name"))]
+    salgados = [i for i in itens if i not in acompanhamentos]
+    try:
+        total = sum(int(float(i.get("quantity") or 0)) for i in salgados)
+    except (TypeError, ValueError):
+        return
+    if not salgados or total == volume:
+        return
+    nomes = [str(i.get("name")) for i in salgados]
+    if (volume // 25) % len(nomes) == 0:
+        memoria["items"] = _itens_da_divisao(volume, nomes) + acompanhamentos
+        mudancas.append(f"volume {total} -> {volume}: dividido de novo entre {nomes}")
+    else:
+        memoria["divisao_pendente"] = {"volume": volume, "sabores": nomes}
+        mudancas.append(f"volume {total} -> {volume}: divisao pendente em {nomes}")
+
+
+# Cliente que deixa a escolha com ela: "pode escolher por mim", "aleatorio".
+# Excecao do dono (04/10): ai ela escolhe os sabores sozinha.
+_RX_ESCOLHE_POR_MIM = _re.compile(
+    r"\b(?:pode|podem|voce|vc|vcs|voces)\s+(?:mesm[oa]\s+)?escolh"
+    r"|\bescolh\w*\s+(?:voce|vc|por\s+mim|pra\s+mim|para\s+mim)"
+    r"|\baleatori|\btanto\s+faz\b|\bqualquer\s+sabor|\ba\s+sua\s+escolha\b"
+    r"|\bvoce\s+que\s+sabe\b|\bsurpreend")
+
+# Doce nao entra na escolha de salgados.
+_FORA_DA_ESCOLHA = ("churros",)
+
+
+def escolheu_por_mim(texto: str) -> bool:
+    return bool(_RX_ESCOLHE_POR_MIM.search(_sem_acento(texto)))
+
+
+def escolher_sabores(volume: int, preparo: str = "", rng=None) -> list[dict]:
+    """Sabores aleatorios para o volume, em porcoes de 25 por sabor.
+
+    So sabor de pacote disponivel no cardapio, do preparo pedido (fritos
+    quando o cliente nao disse). As porcoes vao em rodizio numa ordem
+    aleatoria: cada sabor fica com multiplo de 25 e a soma e o volume.
+    """
+    import random
+    rng = rng or random
+    if not volume or volume % 25:
+        return []
+    try:
+        import facts
+        categoria = "assados" if preparo == "assado" else "fritos"
+        sabores = [p["item"] for p in facts.get()["produtos"]
+                   if facts.normalize(p["categoria"]) == categoria
+                   and p.get("preco") is None and p.get("disponivel", True)
+                   and not any(f in facts.normalize(p["item"]) for f in _FORA_DA_ESCOLHA)]
+    except Exception:
+        return []
+    if not sabores:
+        return []
+    sabores = list(dict.fromkeys(sabores))
+    rng.shuffle(sabores)
+    porcoes = volume // 25
+    escolhidos = sabores[:porcoes]
+    blocos = {nome: 0 for nome in escolhidos}
+    for n in range(porcoes):
+        blocos[escolhidos[n % len(escolhidos)]] += 1
+    return [i for nome, b in blocos.items()
+            for i in _itens_da_divisao(b * 25, [nome])]
+
+
 def _itens_da_divisao(volume: int, sabores: list[str], extra_para: str = "",
                       so_o_que_fecha: bool = False) -> list[dict]:
     """Os itens do volume dividido em lotes de 25 pelos sabores."""
@@ -1048,6 +1139,7 @@ def aplicar_divisao_do_volume(memoria: dict, texto: str) -> list[str]:
     # bolinha pra amanha as 9 horas" tem os sabores do volume na mesma frase.
     citados = sabores_citados(texto) or sabores_do_volume(" ".join((texto or "").lower().split()))
     if pendente:
+        memoria["pedido_por_volume"] = True
         sabores = pendente.get("sabores") or []
         volume = int(pendente.get("volume") or 0)
         # "Acrescentar um sabor": sabor novo entra na divisao. Se a conta
@@ -1078,6 +1170,8 @@ def aplicar_divisao_do_volume(memoria: dict, texto: str) -> list[str]:
     if not volume or memoria.get("items") or len(citados) < 2 or volume % 25:
         return []
     memoria["volume_pendente"] = 0
+    # Os itens vem de um total: um total novo depois os divide de novo.
+    memoria["pedido_por_volume"] = True
     if (volume // 25) % len(citados) == 0:
         memoria["items"] = _itens_da_divisao(volume, citados)
         return [f"volume dividido: {', '.join(f'{i['quantity']} {i['name']}' for i in memoria['items'])}"]

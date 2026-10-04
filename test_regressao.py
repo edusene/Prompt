@@ -1620,7 +1620,9 @@ checa("sem modalidade, a pergunta e a modalidade",
       == "Será para entrega ou retirada na loja? 😊")
 _F_PROP = dict(_F_MOD, modality="retirada", horario="14h", data_proposta="2026-10-05")
 checa("dia ja oferecido: repete a oferta",
-      memoria_mod.pedido_de_dados(_F_PROP, ["data_agendada"]).startswith("Posso deixar para segunda-feira (05/10)"),
+      # "amanha, segunda-feira (05/10)" quando o teste roda no domingo 04/10.
+      memoria_mod.pedido_de_dados(_F_PROP, ["data_agendada"]).startswith("Posso deixar para ")
+      and "segunda-feira (05/10)?" in memoria_mod.pedido_de_dados(_F_PROP, ["data_agendada"]),
       memoria_mod.pedido_de_dados(_F_PROP, ["data_agendada"]))
 checa("'sm' e sim", app._concorda("sm"))
 _res_im = app.cardapio.montar_resumo([], 20, 0, 0, 20, modalidade="retirada",
@@ -2592,6 +2594,46 @@ checa("'pasteis e misto' escolhe os dois sabores",
 _f = __import__("copy").deepcopy(_pend)
 checa("'pastel ou rissole?' nao escolhe nada",
       memoria_mod.aplicar_escolha_de_sabor(_f, "pastel ou rissole?") == [])
+
+print()
+print("--- Teste do dono de 03/10 (noite)")
+checa("'POSE SIM AS 8 HORAS' aceita o dia oferecido", app._e_concordancia("POSE SIM AS 8 HORAS"))
+checa("'sim mas outro dia' nao e aceite", not app._e_concordancia("sim mas outro dia"))
+checa("'PEQUENO' e mini (pacote)",
+      app._escolheu_pacote("PEQUENO") and not app._escolheu_lanche("PEQUENO"))
+from agents.conversation import volume_sem_sabor as _vss  # noqa: E402
+checa("'400 variados' e o total", _vss("quero 400 variados pode escolher por mim") == 400)
+_f = {"items": [], "volume_pendente": 300}
+memoria_mod._volume_novo(_f, {"volume_pendente": 400}, [])
+checa("total novo sem itens troca o antigo (300 -> 400)", _f["volume_pendente"] == 400)
+_f = {"pedido_por_volume": True, "items": [
+    {"name": n, "quantity": 75, "price": 0.8}
+    for n in ("Bolinha de Queijo", "Coxinha", "Quibe", "Croquete de Carne")]}
+memoria_mod._volume_novo(_f, {"volume_pendente": 400}, [])
+checa("'POCA PEDIR 400' depois do espelho: 100 de cada",
+      [i["quantity"] for i in _f["items"]] == [100] * 4, _f["items"])
+checa("'pode escolher por mim' e delegar",
+      memoria_mod.escolheu_por_mim("QUERO 400 VARIADOS PODE ESCOLHER POR MIM")
+      and not memoria_mod.escolheu_por_mim("quero 3 centos variados"))
+import random as _random  # noqa: E402
+_esc = memoria_mod.escolher_sabores(400, "frito", _random.Random(1))
+_fritos = {p["item"] for p in facts.get()["produtos"] if p["categoria"] == "Fritos"}
+checa("escolha por ela: soma 400, multiplos de 25, so fritos, sem churros",
+      sum(i["quantity"] for i in _esc) == 400
+      and all(i["quantity"] % 25 == 0 for i in _esc)
+      and all(i["name"] in _fritos and "Churros" not in i["name"] for i in _esc), _esc)
+import cardapio_catalogo as _cc  # noqa: E402
+_tr, _bl = _cc.traduzir(_esc)
+checa("8 sabores vao em 2 centos de 4 (o pacote aceita 4)",
+      not _bl and len(_tr) == 2 and all(len(l["selected_flavors"]) <= 4 for l in _tr), (_tr, _bl))
+_tr, _bl = _cc.traduzir([{"name": n, "quantity": 25, "price": 0.8} for n in
+                         ("Coxinha frango", "Quibe", "Pastel carne", "Rissole de Carne",
+                          "Bolinha de Queijo", "Croquete de carne")])
+checa("6 sabores de 25: 1 cento de 4 + 2 porcoes", not _bl and len(_tr) == 3, (_tr, _bl))
+checa("'QUANTOTEMPO LEVA PARA CHEGAR' e pergunta de prazo",
+      (app._fato_perguntado("OLA QUERO 50 ESFIRRAS QUANTOTEMPO LEVA PARA CHEGAR") or ("",))[0] == "30 a 40")
+checa("resposta de loja fechada responde o fato perguntado",
+      "_fato = _fato_perguntado(text_only)" in open("app.py", encoding="utf-8").read())
 
 checa("data curta de outro dia",
       horario.formatar_data_curta(horario.agora().date() + __import__("datetime").timedelta(days=3))
