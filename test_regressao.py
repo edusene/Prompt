@@ -2763,6 +2763,18 @@ checa("resposta longa continua dividida",
 import cardapio_fonte as _cf  # noqa: E402
 checa("cardapio vencido devolve a leitura anterior sem esperar",
       "_reler_em_segundo_plano()" in open("cardapio_fonte.py", encoding="utf-8").read())
+checa("'consigo retirar as 7:40?' e pergunta, nao escolhe retirada",
+      _dmod("consigo retirar um pedido as 7:40?") == "" and _dmod("e pra entrega consigo ?") == ""
+      and _dmod("quero 50 coxinhas, posso retirar as 10h?") == "retirada")
+_AG_QTD = ("Os canudinhos de camarão são assados e vendidos em porções fechadas: meio cento "
+           "(50 un) por R$ 60,00, ou em combos como o Combo 15 Canudinhos + Coca-Cola Lata por "
+           "R$ 24,00. Qual a quantidade que você deseja?")
+checa("'Quero 50 uni' depois de 'Qual a quantidade...?' citando o combo",
+      _cpc("Quero 50 uni", _AG_QTD, "Queria fazer um pedido de canudinhos de camarão")
+      == "50 Canudinho de Camarao")
+checa("transferencia sem mensagem nao grava mensagem 'enviada' no painel",
+      "Salva a mensagem de transferência no banco para envio posterior"
+      not in open("app.py", encoding="utf-8").read())
 checa("repergunta mantem a resposta quando o cliente perguntou",
       "_resposta_dada" in open("app.py", encoding="utf-8").read())
 

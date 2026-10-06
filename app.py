@@ -1680,16 +1680,10 @@ def perform_transfer(phone: str, reason: str = "", send_message: bool = True) ->
             database.update_conversation(conv["id"], last_message_at=database.agora_utc())
         else:
             print(f"[transfer] WARN: falha ao enviar msg de transferência p/ {phone}: {res.get('error')}")
-    else:
-        # Salva a mensagem de transferência no banco para envio posterior
-        database.save_message(
-            conversation_id=conv["id"],
-            phone=phone,
-            direction="out",
-            body=transfer_msg,
-            sender="agent",
-            msg_type="text",
-        )
+    # send_message=False: o cliente ja recebeu um aviso proprio ("Vou chamar
+    # nossa equipe para verificar...", o texto do balcao) e esta mensagem NAO
+    # sai. Ela era gravada assim mesmo como enviada, e o painel mostrava uma
+    # mensagem que o cliente nunca recebeu (teste do dono, 06/10).
 
     # Emite evento SSE para o painel atualizar em tempo real
     events.emit("conversation_updated", {
@@ -4649,7 +4643,13 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             _ultima_ag = next((m.get("parts", [{}])[0].get("text", "") or ""
                                for m in reversed(memory.get(user))
                                if m.get("role") == "assistant"), "")
-            _texto_ctx = completar_pelo_contexto(text_only, _ultima_ag)
+            # A mensagem anterior DO CLIENTE (a atual pode ja estar no historico).
+            _do_cliente = [(m.get("parts", [{}])[0].get("text", "") or "")
+                           for m in memory.get(user) if m.get("role") == "user"]
+            if _do_cliente and _do_cliente[-1].strip() == text_only.strip():
+                _do_cliente = _do_cliente[:-1]
+            _texto_ctx = completar_pelo_contexto(text_only, _ultima_ag,
+                                                 _do_cliente[-1] if _do_cliente else "")
             if _texto_ctx != text_only:
                 _itens_ctx = _extract_data_from_message(
                     _texto_ctx, ConversationState(phone=user)).get("items")

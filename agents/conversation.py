@@ -537,6 +537,13 @@ def corrigir_digitacao_do_funil(texto_normalizado: str) -> str:
     return re.sub(r"[a-z]+", _troca, texto_normalizado or "")
 
 
+_RX_PERGUNTA_DE_MODALIDADE = re.compile(
+    r"\b(?:consigo|posso|da\s+pra|da\s+para|tem\s+como|pode|voces?\s+(?:entregam|fazem))\b"
+    r".{0,30}\b(?:retir\w*|busc\w*|peg\w*|entreg\w*|receb\w*)"
+    r"|\b(?:retir\w*|busc\w*|entreg\w*)\b.{0,20}\b(?:consigo|posso|da\s+pra|tem\s+como)\b")
+_RX_TEM_PEDIDO = re.compile(r"\b(?:quero|queria|vou\s+querer|manda|me\s+ve)\b|\d+\s*(?:un\b|unidades|cox|salg|past)")
+
+
 def detectar_modalidade(message: str) -> str:
     """'entrega', 'retirada' ou '' quando o cliente ainda nao escolheu.
 
@@ -551,6 +558,11 @@ def detectar_modalidade(message: str) -> str:
     if not t:
         return ""
 
+    # "consigo retirar um pedido as 7:40?" e PERGUNTA, nao escolha: virava
+    # retirada e ela respondia o frete com "Voce escolheu retirada, entao nao
+    # ha taxa de entrega" (teste do dono, 06/10).
+    if "?" in t and _RX_PERGUNTA_DE_MODALIDADE.search(t) and not _RX_TEM_PEDIDO.search(t):
+        return ""
     ret = [m.start() for m in _RETIRADA_EXPLICITA.finditer(t)]
     ent = [m.start() for m in _ENTREGA_EXPLICITA.finditer(t)]
     if ret:
@@ -1201,7 +1213,7 @@ _RX_SO_COMPLEMENTO = re.compile(
     r"(?:\s+(?P<qtd2>\d{1,3})\s*(?:unidades?|un|unid|uni)?)?\s*[.!]*\s*$")
 
 
-def completar_pelo_contexto(texto: str, ultima_do_agente: str) -> str:
+def completar_pelo_contexto(texto: str, ultima_do_agente: str, ultima_do_cliente: str = "") -> str:
     """Reescreve, SO para a extracao, o pedido que depende da mensagem anterior.
 
     Teste de 01/10: a Sandrinha disse "temos Quiche de Frango e Quiche de Carne
@@ -1245,7 +1257,19 @@ def completar_pelo_contexto(texto: str, ultima_do_agente: str) -> str:
     # quer?": a quantidade e do produto que a pergunta nomeou (teste do dono,
     # 05/10 - o pedido sumiu e ela perguntou "Qual o seu pedido?").
     m = _RX_SO_QUANTIDADE.match(t)
-    if m and ultima_do_agente and re.search(r"\bquant[oa]s?\b", ultima_do_agente.lower()):
+    # "Queria fazer um pedido de canudinhos de camarao" e depois "Quero 50
+    # uni": o produto e o que o CLIENTE citou sem quantidade. Mais firme que
+    # ler a pergunta dela, que variou ("Qual a quantidade...?", citando ate o
+    # combo) e o pedido sumiu (teste do dono, 06/10).
+    if m and ultima_do_cliente and not re.search(r"\d", ultima_do_cliente):
+        doc = _forma_de_busca(ultima_do_cliente)
+        casados_c = [(chave, canon) for chave, canon in _indice_de_produtos().items()
+                     if len(chave) >= 6 and re.search(r"\b" + re.escape(chave) + r"\b", doc)]
+        prod_c = {canon for chave, canon in casados_c
+                  if not any(chave != outra and chave in outra for outra, _c in casados_c)}
+        if len(prod_c) == 1:
+            return f"{m.group('qtd')} {prod_c.pop()}"
+    if m and ultima_do_agente and re.search(r"\bquant\w*\b", ultima_do_agente.lower()):
         anterior = _forma_de_busca(ultima_do_agente)
         casados = [(chave, canon) for chave, canon in _indice_de_produtos().items()
                    if len(chave) >= 6 and re.search(r"\b" + re.escape(chave) + r"\b", anterior)]
