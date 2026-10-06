@@ -3514,7 +3514,8 @@ _RX_NAO_E_LUGAR = _re_mod.compile(
     r"|madrugada|casa|minha casa|meu bairro|seu bairro|todo|toda|qualquer|rua|r|av|avenida|travessa|alameda|estrada|rodovia|condominio|residencial)\b")
 
 
-def _conferir_frete_perguntado(user: str, pergunta: str, reply: str) -> str:
+def _conferir_frete_perguntado(user: str, pergunta: str, reply: str,
+                              memoria: dict | None = None) -> str:
     """"Quanto e a entrega no Pedrinhas?" tem resposta na tabela de frete.
 
     A resposta do modelo dava o valor, mas uma variacao dela era cortada pelas
@@ -3554,6 +3555,19 @@ def _conferir_frete_perguntado(user: str, pergunta: str, reply: str) -> str:
     # Frase de frete com OUTRO valor sai: "Pedrinhas e R$ 15,00" seguido de
     # "Pedrinhas e R$ 8,00" - o 8 era do bairro da pergunta anterior
     # (reuniao com o dono, 05/10).
+    if memoria is not None:
+        # Resposta inteira do codigo, curta (teste do dono, 06/10: "depende da
+        # modalidade de entrega, que voce ainda nao definiu..." - texto grande
+        # demais). Valor + o proximo passo do funil.
+        frase = f"A taxa de entrega para {frete['bairro']} é {valor}."
+        if memoria.get("items") and not memoria.get("modality"):
+            seguinte = f"Será entrega no {frete['bairro']} ou retirada? 😊"
+        else:
+            seguinte = _proxima_pergunta_do_funil(memoria)
+        print(f"[frete] user={user} pergunta de frete; resposta curta do codigo")
+        if not seguinte:
+            return frase
+        return f"{frase}\n\n{seguinte}" if "\n" in seguinte else f"{frase} {seguinte}"
     frases = [f.strip() for f in _RX_FIM_DE_FRASE.split(reply or "") if f.strip()]
     certas = [f for f in frases
               if not (_re_mod.search(r"\b(?:taxa|frete|entrega)\b", facts.normalize(f))
@@ -6132,7 +6146,7 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             # de 01/10).
             reply = _re_mod.sub(r"^\s*😊\s+(?=\w)", "", reply or "")
             if not _RX_LINHA_DE_RESUMO.search(reply or ""):
-                reply = _conferir_frete_perguntado(user, text_only, reply)
+                reply = _conferir_frete_perguntado(user, text_only, reply, _memoria)
                 reply = _conferir_preco_perguntado(user, text_only, reply, _memoria)
                 reply = _conferir_ingrediente(user, text_only, reply, _memoria)
                 reply = _conferir_fato_do_dono(user, text_only, reply, _memoria)

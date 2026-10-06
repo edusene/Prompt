@@ -2775,6 +2775,16 @@ checa("'Quero 50 uni' depois de 'Qual a quantidade...?' citando o combo",
 checa("transferencia sem mensagem nao grava mensagem 'enviada' no painel",
       "Salva a mensagem de transferência no banco para envio posterior"
       not in open("app.py", encoding="utf-8").read())
+_fv = memoria_mod._empty()
+checa("frete sem pedido: valor + 'Qual o seu pedido?' (curto)",
+      app._conferir_frete_perguntado("55", "QUAL VALOR DO FRETE PARA BAIRRO PEDRINHAS",
+                                     "O frete depende da modalidade que voce ainda nao definiu...", _fv)
+      == "A taxa de entrega para Pedrinhas é R$ 15,00. Qual o seu pedido? 😊")
+_fv2 = dict(memoria_mod._empty(), items=[{"name": "Coxinha", "quantity": 50, "price": 0.8}],
+            upsell_feito=True)
+checa("frete com pedido e sem modalidade: 'Será entrega no X ou retirada?'",
+      app._conferir_frete_perguntado("55", "qual o frete pro pedrinhas?", "x", _fv2)
+      == "A taxa de entrega para Pedrinhas é R$ 15,00. Será entrega no Pedrinhas ou retirada? 😊")
 checa("repergunta mantem a resposta quando o cliente perguntou",
       "_resposta_dada" in open("app.py", encoding="utf-8").read())
 
