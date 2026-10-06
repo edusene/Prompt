@@ -281,6 +281,10 @@ _PRODUTOS_ASSADOS = {
     "canudinho de frango": "Canudinho de Frango",
     "canudinho de camarao": "Canudinho de Camarao",
     "canudinho de camarão": "Canudinho de Camarao",
+    # "1 cento de canudos de frango" (teste do dono, 05/10).
+    "canudo de frango": "Canudinho de Frango",
+    "canudo de camarao": "Canudinho de Camarao",
+    "canudo de camarão": "Canudinho de Camarao",
 }
 
 _PRODUTOS_GRANDES = {
@@ -369,7 +373,7 @@ _ENTREGA_EXPLICITA = re.compile(
 _ENTREGA_SUBSTANTIVO = re.compile(
     r"(?<!taxa de )(?<!valor da )(?<!preco da )(?<!custo da )"
     r"\bentrega\s+(?:hoje|amanha|depois|pra|para|em|na|no|as|ate|neste|nesse"
-    r"|rua|r|av|avenida|travessa|bairro|agora)\b"
+    r"|rua|r|av|avenida|travessa|bairro|agora|aqui)\b"
 )
 
 # Intencao de retirar, dita com verbo: vale mesmo numa frase com pergunta.
@@ -547,9 +551,17 @@ def detectar_modalidade(message: str) -> str:
     if not t:
         return ""
 
-    if _RETIRADA_EXPLICITA.search(t):
+    ret = [m.start() for m in _RETIRADA_EXPLICITA.finditer(t)]
+    ent = [m.start() for m in _ENTREGA_EXPLICITA.finditer(t)]
+    if ret:
+        ent += [m.start() for m in _ENTREGA_SUBSTANTIVO.finditer(t)]
+    if ret and ent:
+        # "pra retirar agora. Nao, mentira, entrega aqui no Bairro..." - vale
+        # a ultima: o cliente se corrigiu (teste do dono, 05/10).
+        return "entrega" if max(ent) > max(ret) else "retirada"
+    if ret:
         return "retirada"
-    if _ENTREGA_EXPLICITA.search(t):
+    if ent:
         return "entrega"
 
     # Pergunta SOBRE entrega nao e escolha de entrega. Repare que nao basta a
@@ -1229,10 +1241,30 @@ def completar_pelo_contexto(texto: str, ultima_do_agente: str) -> str:
         citados = [x for x in nomes if facts.normalize(x) in anterior]
         if 0 < n <= 40 and len(citados) == 1:
             return f"{n * 25} {citados[0]}"
+    # "Quero 50 uni" depois de "Quantas unidades de canudinhos de camarao voce
+    # quer?": a quantidade e do produto que a pergunta nomeou (teste do dono,
+    # 05/10 - o pedido sumiu e ela perguntou "Qual o seu pedido?").
+    m = _RX_SO_QUANTIDADE.match(t)
+    if m and ultima_do_agente and re.search(r"\bquant[oa]s?\b", ultima_do_agente.lower()):
+        anterior = _forma_de_busca(ultima_do_agente)
+        casados = [(chave, canon) for chave, canon in _indice_de_produtos().items()
+                   if len(chave) >= 6 and re.search(r"\b" + re.escape(chave) + r"\b", anterior)]
+        # "canudinho de camarao" contem o apelido "canudinho": fica a chave
+        # mais especifica.
+        achados = {canon for chave, canon in casados
+                   if not any(chave != outra and chave in outra for outra, _c in casados)}
+        if len(achados) == 1:
+            return f"{m.group('qtd')} {achados.pop()}"
     m = _RX_QTD_NO_FIM.match(t)
     if m and not re.search(r"\b(?:rua|av|avenida|numero|n)\b", m.group("prod")):
         return f"{m.group('qtd')} {m.group('prod').strip()}"
     return texto
+
+
+# So a quantidade: "50", "quero 50", "Quero 50 uni", "50 unidades".
+_RX_SO_QUANTIDADE = re.compile(
+    r"^(?:(?:quero|queria|vou\s+querer|pode\s+ser|manda|sao|serao)\s+)?(?P<qtd>\d{1,4})"
+    r"\s*(?:un\w*|pcs?|pecas?)?\s*[.!]?$")
 
 
 def _separar_sabores_sem_virgula(parte: str, de_lote) -> list[str]:
@@ -1411,7 +1443,22 @@ def item_fora_do_cardapio(texto: str) -> str:
             continue
         if not any(any(w.startswith(s) for w in n.split()) for n in com_base):
             return f"{base} de {sabor}"
+    # "salgado de chocolate": nenhum produto tem o sabor (bateria de 06/10 -
+    # em 1 de 3 rodadas ela disse que chamaria a equipe e nao chamou).
+    for m in _RX_SALGADO_DE_SABOR.finditer(t):
+        sabor = m.group(1)
+        if sabor in _NAO_E_SABOR or sabor in _NAO_E_SABOR_DE_SALGADO or len(sabor) < 4:
+            continue
+        if not any(any(w.startswith(sabor[:5]) for w in n.split()) for n in nomes):
+            return f"salgado de {sabor}"
     return ""
+
+
+_RX_SALGADO_DE_SABOR = re.compile(r"\bsalgad\w*\s+(?:de|com)\s+([a-z]+)")
+# "salgados de aniversario", "salgado de forno": ocasiao ou preparo, nao sabor.
+_NAO_E_SABOR_DE_SALGADO = {"aniversario", "casamento", "evento", "eventos", "forno",
+                           "fritura", "qualidade", "verdade", "voces", "vcs", "tamanho",
+                           "sabor", "sabores", "todos", "tipos", "tipo"}
 
 
 def _horario_norm(texto: str) -> str:
@@ -1716,6 +1763,9 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
     """
     message = numeros_por_extenso(message or "")
     msg_lower = message.lower().strip()
+    # "um centoQu frito misto de coxinha e bolinha" (teste do dono, 05/10):
+    # letra a mais grudada no "cento" apagava o pedido inteiro.
+    msg_lower = re.sub(r"\bcento(?!s\b)[a-z]{1,2}\b", "cento", msg_lower)
     extracted = {}
 
     # ── Nome ────────────────────────────────────────────────────────────────

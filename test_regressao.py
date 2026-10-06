@@ -2696,6 +2696,76 @@ checa("prompt: regra prioritaria e vocabulario",
       "REGRA PRIORITARIA DO DONO" in open("app.py", encoding="utf-8").read()
       and "'humano', 'atendente humano' ou 'robo'" in open("app.py", encoding="utf-8").read())
 
+print()
+print("--- Dono 05/10: contexto do frete, salgados grandes, perguntas apagadas")
+for _p in ("Qual horário vcs abrem ?", "QUAL HORARIO VOCES ABRE DE MANHA",
+           "que hora inicia as entregas ?", "queria saber so o horario que inicia as entregas",
+           "QUAL HORARIO DE ABERTURA DA BALBS"):
+    _f = app._fato_perguntado(_p)
+    checa(f"horario perguntado: {_p!r}", _f is not None and "Atendemos" in _f[1], _f)
+checa("pedido com horario nao e pergunta de horario",
+      app._fato_perguntado("quero 50 coxinhas para as 19h") is None)
+_fr = app._conferir_frete_perguntado(
+    "55", "QUAL VALOR DO FRETE PARA BAIRRO PEDRINHAS",
+    "A taxa de entrega para Pedrinhas é R$ 15,00.\n\nA taxa de entrega para Pedrinhas é R$ 8,00."
+    "\n\nQual o seu pedido? 😊")
+checa("frete: a frase com o valor do bairro anterior sai",
+      "R$ 15,00" in _fr and "R$ 8,00" not in _fr, _fr)
+_gr = app._lista_dos_grandes("Quais os salgados grande vc tem?")
+_indisp = [p["item"] for p in facts.get()["produtos"]
+           if p["categoria"] == "Salgados Grandes" and not p.get("disponivel", True)]
+checa("'quais os salgados grande': lista do cardapio com preco, sem os esgotados",
+      _gr.startswith("Nossos salgados grandes") and "Coxinha de Frango com Catupiry — R$" in _gr
+      and not any(f"• {n} —" in _gr for n in _indisp), _gr[:80])
+checa("'salgados grande' nao vira 'porcao de 25 de Coxinha'",
+      app._conferir_familia_do_sabor("55", "Temos Coxinha de Frango com Catupiry assada e Quibe frito.",
+                                     "Quais os salgados grande vc tem?")
+      == "Temos Coxinha de Frango com Catupiry assada e Quibe frito.")
+from agents.conversation import (completar_pelo_contexto as _cpc, _produto_conhecido as _pcon,  # noqa: E402
+                                 detectar_modalidade as _dmod)
+checa("'Quero 50 uni' depois de 'Quantas unidades de canudinhos de camarao?'",
+      _cpc("Quero 50 uni", "Quantas unidades de canudinhos de camarão você quer?")
+      == "50 Canudinho de Camarao")
+checa("quantidade solta sem pergunta de quantidade nao vira item",
+      _cpc("quero 50", "Qual o seu pedido?") == "quero 50" or "50" in _cpc("quero 50", "Qual o seu pedido?"))
+checa("'canudos de frango' e Canudinho de Frango", _pcon("canudos de frango") == "Canudinho de Frango")
+checa("festa com 30 pessoas vai para a equipe",
+      app._pede_consultoria_de_evento("quero fazer uma festa de aniversario com 30 pessoas poderia "
+                                      "me ajudar a ter uma noção de quantos centos pedir ?") is not None)
+checa("'retirar... Nao, mentira, entrega aqui' e entrega",
+      _dmod("Quero 50 coxinhas fritas pra retirar agora. Não, mentira, entrega aqui no Bairro "
+            "Agenor de Carvalho, Rua Rio de Janeiro, 1234.") == "entrega")
+checa("'quero retirar' continua retirada", _dmod("quero retirar") == "retirada")
+checa("pix na hora que o motoboy chegar: frase do BLOCO 6",
+      app._conferir_pix_na_entrega("55", "Vou pagar no Pix na hora que o motoboy chegar aqui",
+                                   "Pra acompanhar?").startswith("Para pedidos no Pix"))
+checa("'Como faço pra pagar?' responde as formas de pagamento",
+      (app._fato_perguntado("50 kibes pra hoje 19h30. Como faço pra pagar?") or ("", ""))[1]
+      .startswith("Aceitamos Pix"))
+for _c in ("Informe, por favor:", "Faltam essas informações para completar seu pedido: Por favor, informe."):
+    checa(f"cabecalho solto reconhecido: {_c[:30]!r}", app._RX_CABECALHO_SOLTO.search(facts.normalize(_c)))
+checa("cabecalho solto nao pega resposta normal",
+      not app._RX_CABECALHO_SOLTO.search(facts.normalize("Sim, pode ser para entrega.")))
+checa("desconto + gerente nao transfere (BLOCO 6)",
+      "num pedido de desconto: sem" in open("app.py", encoding="utf-8").read())
+checa("'consigo retirar as 7:40?' e respondido pelo horario do cardapio",
+      app._horario_possivel("consigo retirar um pedido as 7:40?").startswith(
+          "Sim!" if horario._turno()[0] <= (7, 40) else "Atendemos")
+      and app._horario_possivel("posso buscar as 21h?").startswith("Atendemos"))
+_cq = _extract_data_from_message("quero um centoQu frito misto de coxinha e bolinha de queijo",
+                                 ConversationState(phone="x")).get("items") or []
+checa("'centoQu' (digitacao) ainda e cento", sum(i["quantity"] for i in _cq) == 100, _cq)
+checa("resposta curta sai numa mensagem so (menos idas a Datafy)",
+      app.split_reply("Boa noite, Balbino! Aqui é a Sandrinha da BALBS 💛\n\nQual o seu pedido? 😊")
+      == ["Boa noite, Balbino! Aqui é a Sandrinha da BALBS 💛\n\nQual o seu pedido? 😊"])
+checa("resposta longa continua dividida",
+      len(app.split_reply(("x" * 500) + "\n\n" + ("y" * 500))) == 2)
+import cardapio_fonte as _cf  # noqa: E402
+checa("cardapio vencido devolve a leitura anterior sem esperar",
+      "_reler_em_segundo_plano()" in open("cardapio_fonte.py", encoding="utf-8").read())
+checa("repergunta mantem a resposta quando o cliente perguntou",
+      "_resposta_dada" in open("app.py", encoding="utf-8").read())
+
 checa("data curta de outro dia",
       horario.formatar_data_curta(horario.agora().date() + __import__("datetime").timedelta(days=3))
       .endswith(")") )

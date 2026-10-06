@@ -488,6 +488,13 @@ def upsert_contact(phone: str, name: str = "", **extra: Any) -> dict:
     """Insere ou atualiza contato pelo phone. Retorna o contato."""
     now = datetime.utcnow().isoformat()
     existing = db.fetch_one("SELECT * FROM contacts WHERE phone=?", (phone,))
+    _campos_contato = ("name", "email", "company", "notes", "avatar_url", "avatar_color",
+                       "assigned_to", "auto_mode")
+    if existing and all(existing.get(k) == v for k, v in extra.items() if k in _campos_contato) \
+            and (not name or existing.get("name") == name):
+        # Nada mudou (o caso de toda mensagem de um cliente conhecido): sem o
+        # UPDATE, uma ida ao banco a menos antes de o atendimento comecar.
+        return dict(existing)
     if existing:
         fields = []
         vals = []

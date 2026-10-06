@@ -502,6 +502,10 @@ _RX_CONSULTORIA_DE_EVENTO = _re_mod.compile(
     r"\bquant[oa]s?\s+(?:salgad\w*|docinh\w*|doces|unidades|porc\w*)\s+(?:eu\s+)?"
     r"(?:preciso|precisaria|devo|tenho que|vou precisar|da|serve|seria)"
     r"|\b(?:para|pra|p/)\s+\d{1,4}\s+(?:pessoas|convidados|pessoa)\b"
+    # "festa de aniversario com 30 pessoas... nocao de quantos centos pedir"
+    # (teste do dono, 05/10: "normalmente indicamos 3 a 4 centos").
+    r"|\bcom\s+\d{1,4}\s+(?:pessoas|convidados)\b|\bquant[oa]s?\s+centos?\b"
+    r"|\b(?:nocao|ideia)\s+de\s+quant"
     r"|\bquantas\s+pessoas\b|\bc[o0]+f+e+\s*-?\s*break|\bcafe\s+da\s+manha\s+corporativ"
     r"|\bbuffet\b|\borcamento\s+(?:para|pra|de)\s+(?:um\s+|uma\s+|o\s+|a\s+)?"
     r"(?:evento|festa|casamento|aniversario|confraterniza|formatura|empresa|coffee|cofee)"
@@ -670,6 +674,24 @@ def _sem_palavra_proibida(reply: str) -> str:
     return limpo or reply
 
 
+# "Vou pagar no Pix na hora que o motoboy chegar" (teste do dono, 05/10): o
+# BLOCO 3 proibe autorizar Pix na entrega, e o BLOCO 6 tem a frase.
+_RX_PIX_NA_ENTREGA = _re_mod.compile(
+    r"\bpix\b.{0,40}\b(?:na\s+hora\s+que|quando)\s+(?:o\s+)?(?:motoboy|entregador|moto)\b"
+    r"|\bpix\s+na\s+(?:entrega|porta)\b|\bpix\b.{0,20}\bna\s+hora\s+da\s+entrega\b")
+TEXTO_PIX_NA_ENTREGA = ("Para pedidos no Pix, a liberação da produção é feita mediante "
+                        "envio do comprovante antes da saída!")
+
+
+def _conferir_pix_na_entrega(user: str, pergunta: str, reply: str) -> str:
+    if (not reply or _RX_LINHA_DE_RESUMO.search(reply)
+            or not _RX_PIX_NA_ENTREGA.search(facts.normalize(pergunta or ""))
+            or "comprovante antes" in facts.normalize(reply)):
+        return reply
+    print(f"[pagamento] user={user} pix na entrega pedido; frase do BLOCO 6")
+    return f"{TEXTO_PIX_NA_ENTREGA}\n\n{reply}"
+
+
 def _texto_fora_do_cardapio(item: str) -> str:
     """Item fora do cardapio fixo: a equipe verifica o dia (dono, 04/10)."""
     return (f"Vou chamar nossa equipe para verificar a disponibilidade de {item} "
@@ -703,8 +725,11 @@ _FATOS_DO_DONO = (
                      r"|tempo\s+(?:leva|demora)|leva\s+(?:pra|para)\s+chegar)\b"),
      "30 a 40", "A estimativa média é de 30 a 40 minutos, podendo variar conforme o "
                 "movimento e a rota da entrega! 😊"),
-    (_re_mod.compile(r"\b(?:que\s+horas|qual\s+(?:e\s+)?o\s+horario|horario\s+de|ate\s+que\s+horas"
-                     r"|abrem?\s+(?:que\s+horas|sabado|domingo)|fecham?\b|funcionam?\b|madrugada)\b"),
+    # "Qual horario vcs abrem", "QUAL HORARIO VOCES ABRE DE MANHA", "que hora
+    # inicia as entregas" (teste do dono, 05/10) viravam "Qual o seu pedido?".
+    (_re_mod.compile(r"\b(?:que\s+horas?|qual\s+(?:e\s+)?(?:o\s+)?horario|horario\s+(?:de|que|voces|vcs)"
+                     r"|ate\s+que\s+horas|abrem?\b|abertura|inicia\w*\s+as\s+entregas"
+                     r"|fecham?\b|funcionam?\b|madrugada)\b"),
      lambda: horario._hm_txt(horario._turno()[0]).lower(), lambda: _texto_do_expediente()),
     # BLOCO 2 (triagem de tamanho e linha mini festa). Em 1 de 3 rodadas a
     # explicacao do modelo era apagada pela trava de "aula de lote".
@@ -714,7 +739,10 @@ _FATOS_DO_DONO = (
                     "sabor. O grande é o salgado de lanche, vendido por unidade. 😊"),
     # Formas de pagamento, como o BLOCO 6 diz ("Aceitamos Pix, cartao ou
     # dinheiro"). Vale refeicao, boleto, cheque: a resposta e esta mesma.
-    (_re_mod.compile(r"^(?!.*\bpix\b.*\bentrega\b)(?!.*\bentrega\b.*\bpix\b).*(?:\baceitam?\b|\bformas?\s+de\s+pagamento\b|\bquais\s+(?:as\s+)?formas\b)"),
+    # "Como faco pra pagar?" junto do pedido (teste do dono, 05/10) ficava sem
+    # resposta: ela foi direto a oferta do refrigerante.
+    (_re_mod.compile(r"^(?!.*\bpix\b.*\bentrega\b)(?!.*\bentrega\b.*\bpix\b).*(?:\baceitam?\b|\bformas?\s+de\s+pagamento\b|\bquais\s+(?:as\s+)?formas\b"
+                     r"|\bcomo\s+(?:eu\s+)?(?:faco|faz|posso)?\s*(?:pra|para)?\s*pag(?:ar|o)\b)"),
      "pix cartao ou dinheiro", "Aceitamos Pix, cartão ou dinheiro. 😊"),
     # O link do BLOCO 1. "Voces tem cardapio?" ficava so com "Qual o seu pedido?".
     (_re_mod.compile(r"\b(?:tem|tens|manda|mande|envia|envie|qual|cade|passa|mostra|ver)\b.{0,15}\bcardapio\b|^\s*cardapio\s*$"),
@@ -816,6 +844,31 @@ _RX_SALGADO_DE = _re_mod.compile(
 _RX_PERGUNTA_DE_TER = _re_mod.compile(r"\?|\b(?:tem|tens|quais|qual|vcs|voces|existe)\b")
 
 
+# Pergunta pelos salgados grandes (de lanche, vendidos por unidade).
+GRANDES_PERGUNTADOS = _re_mod.compile(
+    r"\bsalgad\w*\s+(?:\w+\s+)?(?:grandes?|de\s+lanche)\b|\bgrandes?\b.{0,20}\bsalgad\w*"
+    r"|\b(?:quais|qual)\b.{0,20}\b(?:grandes?|de\s+lanche)\b")
+
+
+def _lista_dos_grandes(pergunta: str) -> str:
+    """"Quais os salgados grande vc tem?" -> os grandes do cardapio, com preco."""
+    t = facts.normalize(pergunta or "")
+    if not GRANDES_PERGUNTADOS.search(t) or not _RX_PERGUNTA_DE_TER.search(t):
+        return ""
+    if _RX_SALGADO_DE.search(t):
+        return ""          # "salgado de queijo grande": a lista por sabor responde
+    try:
+        grandes = [(p["item"], p["preco"]) for p in facts.get()["produtos"]
+                   if facts.normalize(p["categoria"]) == "salgados grandes"
+                   and p.get("disponivel", True) and p.get("preco")]
+    except Exception:
+        return ""
+    if not grandes:
+        return ""
+    linhas = "\n".join(f"• {nome} — {cardapio._brl(float(preco))}" for nome, preco in grandes)
+    return f"Nossos salgados grandes (lanche, por unidade):\n{linhas}"
+
+
 def _sabores_de(pergunta: str) -> str:
     """A lista do cardapio para "tem salgado de X?", ou ''."""
     t = facts.normalize(pergunta or "")
@@ -854,8 +907,35 @@ def _sabores_de(pergunta: str) -> str:
     return f"De {termo} temos:\n" + "\n".join(linhas) + " 😊"
 
 
+# "consigo retirar um pedido as 7:40?" (teste do dono, 05/10): ela so pediu o
+# pedido, sem responder. A resposta sai do horario do cardapio.
+_RX_CONSIGO_NO_HORARIO = _re_mod.compile(
+    r"\b(?:consigo|posso|da\s+pra|da\s+para|tem\s+como|pode|voces?\s+(?:entregam|fazem))\b"
+    r".{0,40}\b(?:retir\w*|busc\w*|peg\w*|entreg\w*|receb\w*)\b")
+
+
+def _horario_possivel(pergunta: str) -> str:
+    """Resposta para "consigo retirar/receber as HH?", ou ''."""
+    t = facts.normalize(pergunta or "")
+    if "?" not in (pergunta or "") or not _RX_CONSIGO_NO_HORARIO.search(t):
+        return ""
+    hm = horario.parse_horario(pergunta)
+    if not hm:
+        return ""
+    try:
+        abre, almoco_ini, almoco_fim, fecha = horario._turno()
+    except Exception:
+        return ""
+    minutos = hm[0] * 60 + hm[1]
+    m = lambda x: x[0] * 60 + x[1]   # noqa: E731
+    hora_txt = horario.formatar_horario(*hm)
+    if m(abre) <= minutos < m(almoco_ini) or m(almoco_fim) <= minutos < m(fecha):
+        return f"Sim! Às {hora_txt} já estamos atendendo. 😊"
+    return _texto_do_expediente()
+
+
 def _conferir_sabores_de(user: str, pergunta: str, reply: str, memoria: dict) -> str:
-    lista = _sabores_de(pergunta)
+    lista = _sabores_de(pergunta) or _lista_dos_grandes(pergunta) or _horario_possivel(pergunta)
     if not lista:
         # "QUERO SABER DOS MINI" logo depois da lista: o termo vem dela.
         t = facts.normalize(pergunta or "")
@@ -877,7 +957,7 @@ def _fato_perguntado(pergunta: str) -> tuple[str, str] | None:
     """(prova, frase do dono) do fato perguntado, ou None."""
     # "quanto" sem \b no fim: "QUANTOTEMPO" chega grudado.
     if not pergunta or "?" not in pergunta and not _re_mod.search(
-            r"\b(?:qual|onde|quanto|que horas|ate que)", facts.normalize(pergunta)):
+            r"\b(?:qual|onde|quanto|que horas|ate que|saber)", facts.normalize(pergunta)):
         return None
     norm_p = facts.normalize(pergunta)
     for rx, prova, frase in _FATOS_DO_DONO:
@@ -1247,7 +1327,15 @@ def split_reply(text: str) -> list[str]:
             continue
         vistos.add(chave)
         unicos.append(c)
+    # Resposta curta vai numa mensagem so: cada mensagem a mais e uma ida a
+    # Datafy (~1s no log de 05/10) e uma pausa de digitacao. A linha em branco
+    # entre os paragrafos fica dentro da mesma mensagem.
+    if len(unicos) > 1 and sum(len(c) for c in unicos) <= MAX_UMA_MENSAGEM:
+        return ["\n\n".join(unicos)]
     return unicos
+
+
+MAX_UMA_MENSAGEM = 700
 
 
 # ── Multimodal parts builder ─────────────────────────────────────────────────
@@ -1395,7 +1483,9 @@ def _build_user_parts(items: list[dict]) -> list[dict]:
         text = item.get("text", "")
         msg_id = item.get("msg_id")
 
-        if msg_id:
+        # Texto puro nao tem midia a buscar: a consulta ao banco era uma ida a
+        # toa por mensagem (log de 05/10: 450 ms cada).
+        if msg_id and (item.get("wa_media_id") or str(text).lstrip().startswith("[")):
             msg = database.get_message(msg_id)
             media_url = str((msg or {}).get("media_url") or "").strip()
             msg_type = str((msg or {}).get("msg_type") or "text")
@@ -2280,7 +2370,7 @@ def _sabores_citados(reply: str) -> list:
     return achados
 
 
-def _conferir_familia_do_sabor(user: str, reply: str) -> str:
+def _conferir_familia_do_sabor(user: str, reply: str, pergunta: str = "") -> str:
     """Corrige a resposta que poe um sabor na linha errada do cardapio.
 
     "Qual o valor da porcao de esfirra?" recebeu "A porcao de 25 unidades de
@@ -2306,6 +2396,11 @@ def _conferir_familia_do_sabor(user: str, reply: str) -> str:
     # sai R$ 20,00" (teste de 01/10 16h04).
     if _re_mod.search(r"\b(?:grandes?|lanche|por unidade|cada unidade|avuls\w*|balcao)\b",
                       facts.normalize(reply)):
+        return reply
+    # A CLIENTE perguntou dos grandes ("Quais os salgados grande vc tem?"): a
+    # lista nao e de porcao, e a reescrita mandava "a porcao de 25 de Coxinha
+    # sai R$ 20,00" duas vezes seguidas (teste do dono, 05/10).
+    if GRANDES_PERGUNTADOS.search(facts.normalize(pergunta or "")):
         return reply
     citados = _sabores_citados(reply)
     if not citados:
@@ -2459,6 +2554,12 @@ def _conferir_sem_numero(user: str, reply: str) -> str:
     print(f"[endereco] user={user} cortada a oferta de casa sem numero")
     return limpo.strip()
 
+
+# Frase que so anuncia a coleta ("Informe, por favor:", "Faltam essas
+# informacoes para entrega:"). Sem a lista embaixo, nao diz nada.
+_RX_CABECALHO_SOLTO = _re_mod.compile(
+    r"^\W*(?:\w+\s*,?\s*){0,3}?(?:faltam?\s+(?:essas\s+|as\s+seguintes\s+)?informac\w*"
+    r"|(?:por\s+favor\s*,?\s*)?informe\b|preciso\s+(?:de|dos|das)\s+(?:seguintes\s+)?(?:dados|informac\w*))")
 
 # Cabecalho de lista de dados que ficou sem item embaixo.
 _RX_CABECALHO_DE_DADOS = _re_mod.compile(
@@ -3456,10 +3557,20 @@ def _conferir_frete_perguntado(user: str, pergunta: str, reply: str) -> str:
     if not frete:
         return reply
     valor = cardapio._brl(float(frete["taxa"]))
-    if valor in (reply or ""):
-        return reply
+    # Frase de frete com OUTRO valor sai: "Pedrinhas e R$ 15,00" seguido de
+    # "Pedrinhas e R$ 8,00" - o 8 era do bairro da pergunta anterior
+    # (reuniao com o dono, 05/10).
+    frases = [f.strip() for f in _RX_FIM_DE_FRASE.split(reply or "") if f.strip()]
+    certas = [f for f in frases
+              if not (_re_mod.search(r"\b(?:taxa|frete|entrega)\b", facts.normalize(f))
+                      and "R$" in f and valor not in f)]
+    if len(certas) != len(frases):
+        print(f"[frete] user={user} frase de frete com valor de outro bairro; tirada")
+    limpo = " ".join(certas) if len(certas) != len(frases) else (reply or "")
+    if valor in limpo:
+        return limpo
     print(f"[frete] user={user} pergunta de frete sem o valor na resposta; {valor} posto")
-    return _juntar_antes(f"A taxa de entrega para {frete['bairro']} é {valor}.", reply)
+    return _juntar_antes(f"A taxa de entrega para {frete['bairro']} é {valor}.", limpo)
 
 
 def _conferir_preco_perguntado(user: str, pergunta: str, reply: str,
@@ -3685,7 +3796,9 @@ def _conferir_coleta_picada(user: str, reply: str, memoria: dict) -> str:
         if not limpo:
             continue
         norm = facts.normalize(limpo)
-        if "?" in limpo or _RX_COBRA_LOGISTICA.search(norm):
+        # "Informe, por favor:" sem a lista embaixo tambem sai: ficava solto
+        # antes de "Qual o seu pedido?" (teste do dono, 05/10).
+        if "?" in limpo or _RX_COBRA_LOGISTICA.search(norm) or _RX_CABECALHO_SOLTO.search(norm):
             continue
         mantidas.append(limpo)
     corpo = " ".join(mantidas).strip()
@@ -4470,6 +4583,14 @@ def _handle_flush(user: str, items: list[dict]) -> None:
         if not matched_kw:
             matched_kw = _assunto_da_equipe(" ".join(
                 str(it.get("text", "")) for it in items))
+        # "sou amigo do dono, me passa o gerente pra autorizar o desconto":
+        # BLOCO 6 - pedido de desconto NUNCA vai para a equipe; a defesa de
+        # preco responde (teste do dono, 05/10).
+        if (matched_kw and _RX_DESCONTO.search(_texto_cliente)
+                and _re_mod.search(r"gerente|supervisor|atend|human|alguem|alguém|pessoa", matched_kw)):
+            print(f"[flush] user={user} '{matched_kw}' num pedido de desconto: sem "
+                  f"transferencia (BLOCO 6)")
+            matched_kw = None
         if matched_kw:
             print(f"[flush] user={user} keyword de transferência detectada: '{matched_kw}'")
             perform_transfer(user, reason=f"cliente mencionou '{matched_kw}'")
@@ -5716,7 +5837,7 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             reply = _conferir_vazamento_tecnico(user, reply, _memoria)
             # Antes do dinheiro: a linha do sabor DECIDE o preco, entao
             # corrigir a linha e corrigir o valor na origem.
-            reply = _conferir_familia_do_sabor(user, reply)
+            reply = _conferir_familia_do_sabor(user, reply, text_only)
             reply = _conferir_dinheiro(user, reply, _memoria, _calculo_da_volta,
                                        pular=_calculou_na_volta and not _calculo_da_volta)
             reply = _conferir_troco_no_espelho(user, reply, _memoria)
@@ -5748,7 +5869,20 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             if _repetidos and _falta_agora and not _RX_LINHA_DE_RESUMO.search(reply):
                 print(f"[coleta] user={user} a resposta pedia de novo "
                       f"{_repetidos}; pergunta reescrita pelo codigo")
-                reply = _proxima_pergunta_do_funil(_memoria)
+                # O cliente PERGUNTOU algo: a resposta fica, sai so a
+                # repergunta. "Qual horario vcs abrem?" virava so "Qual o seu
+                # pedido?" (teste do dono, 05/10) - regra prioritaria dele.
+                _resposta_dada = ""
+                if _RX_CLIENTE_PERGUNTOU.search(text_only or ""):
+                    _resposta_dada = " ".join(
+                        f.strip() for f in _RX_FIM_DE_FRASE.split(reply)
+                        if f.strip() and "?" not in f
+                        and not _RX_CABECALHO_SOLTO.search(facts.normalize(f)))
+                _seguinte = _proxima_pergunta_do_funil(_memoria)
+                if len([c for c in _resposta_dada if c.isalpha()]) >= 12:
+                    reply = f"{_resposta_dada}\n\n{_seguinte}".strip()
+                else:
+                    reply = _seguinte
 
             # Por ultimo, porque as tres reescrevem a resposta inteira e tem de
             # ver o texto final: a etapa do funil que faltava, a coleta em lista
@@ -6003,6 +6137,7 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                 reply = _conferir_ingrediente(user, text_only, reply, _memoria)
                 reply = _conferir_fato_do_dono(user, text_only, reply, _memoria)
                 reply = _conferir_sabores_de(user, text_only, reply, _memoria)
+                reply = _conferir_pix_na_entrega(user, text_only, reply)
                 _refri = _conferir_refri_perguntado(user, text_only, reply)
                 if _refri != reply:
                     _seguinte = _proxima_pergunta_do_funil(_memoria)
@@ -6216,6 +6351,14 @@ app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 limiter = Limiter(get_remote_address, app=app, default_limits=["200 per minute"])
 
 buffer = MessageBuffer(wait_seconds=BUFFER_SECONDS, on_flush=handle_flush)
+
+# O cardapio digital e lido assim que o servidor sobe, em segundo plano: sem
+# isto o primeiro cliente depois de um deploy pagava as 4 leituras do Base44.
+try:
+    import cardapio_fonte as _cf_aquecer
+    threading.Thread(target=lambda: (_cf_aquecer.bruto(), facts.get()), daemon=True).start()
+except Exception as _e_aquecer:
+    print(f"[cardapio-fonte] WARN aquecimento nao iniciou: {_e_aquecer}")
 
 database.init_db()
 

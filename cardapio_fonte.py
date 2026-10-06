@@ -70,7 +70,32 @@ def ler(entidade: str, timeout: float = 10.0) -> list[dict]:
     return dados
 
 
+_relendo = threading.Event()
+_ultimo_salvo = [""]
+
+
+def _reler_em_segundo_plano() -> None:
+    """Uma releitura por vez; quem pediu segue com a leitura anterior."""
+    if _relendo.is_set():
+        return
+    _relendo.set()
+
+    def _trabalho():
+        try:
+            bruto(forcar=True)
+        finally:
+            _relendo.clear()
+
+    threading.Thread(target=_trabalho, daemon=True).start()
+
+
 def _salvar_snapshot(bruto: dict) -> None:
+    # So grava quando o cardapio mudou: o snapshot e um JSON grande, e
+    # regrava-lo igual a cada 5 minutos era uma ida ao banco a toa.
+    assinatura = json.dumps(bruto, ensure_ascii=False, sort_keys=True)
+    if assinatura == _ultimo_salvo[0]:
+        return
+    _ultimo_salvo[0] = assinatura
     try:
         import database
         database.set_setting(_SNAPSHOT_KEY, json.dumps(
@@ -97,6 +122,13 @@ def bruto(forcar: bool = False) -> dict | None:
     usa a planilha.
     """
     global _cache, _cache_em
+    # Vencido, mas com leitura na mao: o cliente recebe a leitura de ate
+    # alguns minutos atras e a releitura corre em segundo plano. Eram 4
+    # chamadas ao Base44 e a gravacao do snapshot DENTRO do atendimento, a
+    # cada 5 minutos - foi o "boa noite" de 8,8s do log de 05/10.
+    if not forcar and _cache is not None and time.monotonic() - _cache_em >= TTL_SEG:
+        _reler_em_segundo_plano()
+        return _cache
     with _lock:
         if not forcar and _cache is not None and time.monotonic() - _cache_em < TTL_SEG:
             return _cache
