@@ -281,6 +281,13 @@ _PRODUTOS_ASSADOS = {
     "canudinho de frango": "Canudinho de Frango",
     "canudinho de camarao": "Canudinho de Camarao",
     "canudinho de camarão": "Canudinho de Camarao",
+    # Sabores da porcao de 25 assados cadastrada em 07/10.
+    "calzone": "Calzone de frango",
+    "calzone de frango": "Calzone de frango",
+    # Sem "salsicha" na chave: "50 de salsicha" continua sendo o frito, e nao
+    # uma duvida entre os dois.
+    "enroladinho assado": "Enroladinho de salsicha com Catupiry",
+    "enroladinho com catupiry": "Enroladinho de salsicha com Catupiry",
     # "1 cento de canudos de frango" (teste do dono, 05/10).
     "canudo de frango": "Canudinho de Frango",
     "canudo de camarao": "Canudinho de Camarao",
@@ -897,10 +904,18 @@ def _forma_de_busca(nome: str) -> str:
         limpo = " ".join((nome or "").lower().split())
     palavras = []
     for p in limpo.split():
-        if len(p) > 3 and p.endswith("s"):
+        if p in _GRAFIAS_DE_PASTEL:
+            p = "pastel"
+        elif len(p) > 3 and p.endswith("s"):
             p = p[:-1]
         palavras.append(p)
     return " ".join(palavras)
+
+
+# "PASTEIS" perdia o "l" no corte do plural ("pastei") e "PASTEID" e como o
+# cliente digitou as 14h37 de 07/10: os dois sumiam do pedido.
+_GRAFIAS_DE_PASTEL = frozenset({"pasteis", "pastei", "pasteid", "pasteiz", "pastes",
+                                "pastels", "pasteu", "pasteus"})
 
 
 _INDICE_PRODUTOS: dict[str, str] | None = None
@@ -1358,6 +1373,28 @@ def sabores_do_volume(msg_lower: str) -> list[str]:
     return list(quebrados[0][1]) if len(quebrados) == 1 else []
 
 
+# "200 PASTEL DE CARNE E DE QUEIJO" (teste do dono, 07/10 14h37): um volume so,
+# com o tipo dito uma vez e dois sabores - o "e de" sem repetir o pastel e o
+# sinal. A leitura comum pegava 200 de carne e o queijo sumia.
+_RX_UM_VOLUME_DOIS_SABORES = re.compile(
+    r"\b(?P<n>\d{2,3})\s+(?P<tipo>[a-z]{4,})\s+de\s+(?P<a>[a-z]{3,}(?:\s+[a-z]{3,})?)"
+    r"\s+e\s+de\s+(?P<b>[a-z]{3,})\b")
+
+
+def _volume_de_dois_sabores(m: re.Match) -> str:
+    """'200 pastel de carne e de queijo' -> '200 salgados pastel de carne e pastel de queijo'.
+
+    So reescreve quando os dois sabores sao produtos conhecidos e diferentes;
+    a divisao (e a pergunta, se nao fechar em 25) fica com itens_divididos.
+    """
+    tipo, a, b = m.group("tipo"), m.group("a"), m.group("b")
+    sabor_a = _produto_conhecido(f"{tipo} de {a}")
+    sabor_b = _produto_conhecido(f"{tipo} de {b}")
+    if not sabor_a or not sabor_b or sabor_a == sabor_b:
+        return m.group(0)
+    return f"{m.group('n')} salgados {tipo} de {a} e {tipo} de {b}"
+
+
 def itens_divididos(msg_lower: str, quebrados: list | None = None) -> list[dict]:
     """Volume dividido por igual entre os sabores ditos. [] quando nao ha.
 
@@ -1370,6 +1407,7 @@ def itens_divididos(msg_lower: str, quebrados: list | None = None) -> list[dict]
     fecha em lotes de 25 - senao quem decide e o fluxo normal, que pergunta.
     """
     alvo = " ".join((msg_lower or "").lower().split())
+    alvo = _RX_UM_VOLUME_DOIS_SABORES.sub(_volume_de_dois_sabores, alvo)
     trechos = []
     marcas = list(_RX_VOLUME_DIVIDIDO.finditer(alvo))
     for i, m in enumerate(marcas):

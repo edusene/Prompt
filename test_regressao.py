@@ -165,8 +165,9 @@ secao("--- lote: passo por sabor, minimo por familia ---")
 checa("meio cento de assados 25+25 nao pede ajuste",
       _sugestoes([{"name": "Esfirra de Carne", "quantity": 25},
                   {"name": "Pão Pizza", "quantity": 25}]) == [])
-checa("25 assados sozinhos sobem para 50",
-      _sugestoes([{"name": "Esfirra de Carne", "quantity": 25}]) == [50])
+# 07/10: o dono cadastrou a porcao de 25 assados - 25 sozinhos ja fecham.
+checa("25 assados sozinhos fecham na porcao de 25",
+      _sugestoes([{"name": "Esfirra de Carne", "quantity": 25}]) == [])
 checa("30 fritos arredondam para 25",
       _sugestoes([{"name": "Coxinha frango", "quantity": 30}]) == [25])
 checa("25 fritos ja fecham", _sugestoes([{"name": "Coxinha frango", "quantity": 25}]) == [])
@@ -1666,8 +1667,11 @@ _F_DIN = dict(memoria_mod._empty(), name="Ana", items=[{"name": "Coxinha", "quan
               payment_method="dinheiro")
 checa("dinheiro sem troco: o troco falta antes do espelho",
       memoria_mod.faltando(_F_DIN) == ["troco_para"], str(memoria_mod.faltando(_F_DIN)))
-checa("a pergunta do troco e a do BLOCO 3",
-      memoria_mod.pedido_de_dados(_F_DIN) == "Precisa de troco para quanto? 💵")
+# 07/10 14h30: o cliente nao sabia o total para pedir troco. 25 coxinhas
+# R$ 20,00 + frete Aponia R$ 8,00 + retorno R$ 2,00.
+checa("a pergunta do troco traz o total",
+      memoria_mod.pedido_de_dados(_F_DIN) == "O total fica R$ 30,00. Precisa de troco para quanto? 💵",
+      memoria_mod.pedido_de_dados(_F_DIN))
 _F_DIN2 = dict(_F_DIN, bairro="", horario="")
 checa("troco nao entra na lista com outros dados",
       "roco" not in memoria_mod.pedido_de_dados(_F_DIN2), memoria_mod.pedido_de_dados(_F_DIN2))
@@ -2847,6 +2851,101 @@ checa("repergunta mantem a resposta quando o cliente perguntou",
 checa("data curta de outro dia",
       horario.formatar_data_curta(horario.agora().date() + __import__("datetime").timedelta(days=3))
       .endswith(")") )
+
+# ── Testes do dono de 07/10 ────────────────────────────────────────────────
+secao("--- dono 07/10: troco com total, retorno no dinheiro, cardapio novo ---")
+# 14h16: entrega paga em dinheiro saiu sem os R$ 2,00 de retorno do motoboy.
+checa("entrega em dinheiro paga o retorno de R$ 2,00",
+      cardapio.calcular_taxa_retorno("entrega", "dinheiro") == 2.00)
+_cf_fx.bruto = lambda forcar=False: dict(_RETRATO_FX, InternalBusinessRule=[
+    {"rule_key": "taxa_retorno_maquina", "active": True,
+     "rule_value": "R$ 2,00 somente em pagamento com cartao. Sem taxa para dinheiro."}])
+checa("a regra antiga do cardapio ('somente cartao') nao isenta mais o dinheiro",
+      cardapio.calcular_taxa_retorno("entrega", "dinheiro") == 2.00)
+_regra_prompt = [r["valor"] for r in _cf_fx.montar_dados()["regras"]
+                 if r["chave"] == "taxa_retorno_maquina"]
+checa("o modelo le a regra do dono, nao a do cardapio",
+      _regra_prompt and "dinheiro ou cart" in _regra_prompt[0], str(_regra_prompt))
+_cf_fx.bruto = lambda forcar=False: _RETRATO_FX
+
+# 14h30: "UAI QUANDO E VALOR TOTAL" na etapa do troco (oferta ja feita).
+_F_TROCO = dict(_F_DIN, upsell_feito=True)
+checa("cliente pergunta o total na etapa do troco: o codigo responde",
+      app._resposta_total_no_troco("UAI QUANDO E VALR=OR TOTAL", dict(_F_TROCO))
+      == "O total fica R$ 30,00. Precisa de troco para quanto? 💵",
+      app._resposta_total_no_troco("UAI QUANDO E VALR=OR TOTAL", dict(_F_TROCO)))
+checa("'quanto fica?' tambem", app._resposta_total_no_troco("quanto fica?", dict(_F_TROCO)) != "")
+checa("valor de troco nao e pergunta de total",
+      app._resposta_total_no_troco("troco para 50", dict(_F_TROCO)) == "")
+checa("fora da etapa do troco nao responde",
+      app._resposta_total_no_troco("qual o total?", dict(_F_TROCO, troco_para="nao")) == "")
+checa("sem frete oficial a pergunta fica sem total",
+      memoria_mod.pergunta_do_troco(dict(_F_DIN, bairro="Marte City"))
+      == "Precisa de troco para quanto? 💵")
+
+# Audio + print do dono: "25 uni Salgadinhos assados" cadastrado como venda
+# "unit" de 25 em 25, na categoria "salgadinhos assados" (com espaco).
+_ASSADO_25 = {"name": "25 uni Salgadinhos assados", "category": "salgadinhos assados",
+              "sales_mode": "unit", "unit_increment": 25.0, "batch_size": None,
+              "min_quantity": None, "price": 30.0, "max_flavors": 1.0, "available": True,
+              "flavor_options": ["esfirra de carne", "enroladinho de salsicha",
+                                 "calzone de frango", "empada de frango", "pão pizza"]}
+_prod_25 = _cf_fx._produtos([_ASSADO_25])
+checa("porcao de 25 assados entra no catalogo",
+      any(p["categoria"] == "Assados" and p["item"] == "Porção (25 un)" and p["preco"] == 30.0
+          for p in _prod_25), str(_prod_25[:2]))
+_sab_25 = {p["item"] for p in _prod_25 if p["formato"] == "Sabor Cento/Porção"}
+checa("sabores da porcao com o nome que o codigo conhece",
+      {"Esfirra de Carne", "Empadinha de Frango", "Pão Pizza",
+       "Enroladinho de salsicha com Catupiry"} <= _sab_25, str(_sab_25))
+checa("enroladinho da porcao de assados nao vira o frito",
+      "Enroladinho de Salsicha" not in _sab_25)
+_api, _bl = catalogo.traduzir([{"name": "Esfirra de Carne", "quantity": 25}])
+checa("25 esfirras vao na porcao de 25 com a grafia dela",
+      not _bl and _api == [{"name": "25 uni Salgadinhos assados", "quantity": 25,
+                           "selected_flavors": ["esfirra de carne"]}], str((_api, _bl)))
+_api, _bl = catalogo.traduzir([{"name": "Esfirra de Carne", "quantity": 25},
+                               {"name": "Empadinha de Frango", "quantity": 25},
+                               {"name": "Pão Pizza", "quantity": 25}])
+checa("75 assados de 3 sabores: meio cento + porcao",
+      not _bl and [(a["name"], a["quantity"]) for a in _api]
+      == [("Meio Cento Salgadinhos Assados", 50), ("25 uni Salgadinhos assados", 25)], str(_api))
+
+# 14h37/14h40: pastel de queijo cadastrado nos fritos (retrato de 07/10).
+_RETRATO_0710 = _json_fx.load(open("fixtures/cardapio_snapshot_2026-10-07.json", encoding="utf-8"))
+_cf_fx.bruto = lambda forcar=False: _RETRATO_0710
+facts.invalidate()
+_api, _bl = catalogo.traduzir([{"name": "Pastel carne", "quantity": 100},
+                               {"name": "Pastel queijo", "quantity": 50}])
+checa("pastel de queijo nao e mais bloqueado",
+      not _bl and _api and _api[0]["selected_flavors"] == ["pastel de carne", "pastel de queijo"],
+      str((_api, _bl)))
+checa("'pastel de queijo' do cardapio vira o sabor Pastel queijo",
+      _cf_fx._nome_do_sabor("pastel de queijo", "Fritos") == "Pastel queijo")
+from agents.conversation import item_fora_do_cardapio as _ifc_0710  # noqa: E402
+checa("'100 pastel de carne e 50 pastel de queijo' nao e item fora do cardapio",
+      _ifc_0710("100 PASTEL DE CARNE E 50 PASTEL DE QUEIJO") == "",
+      _ifc_0710("100 PASTEL DE CARNE E 50 PASTEL DE QUEIJO"))
+checa("'200 PASTEID DE CARNE E DE QUEIJO' (14h37) vira 100 + 100",
+      _itens("QUERO PARA ENTREGA 200 PASTEID DE CARNE E DE QUEIJO")
+      == [(100, "Pastel Carne"), (100, "Pastel Queijo")],
+      str(_itens("QUERO PARA ENTREGA 200 PASTEID DE CARNE E DE QUEIJO")))
+checa("'100 PASTEL DE CARNE E 50 PASTEL DE QUEIJO' (14h40)",
+      _itens("100 PASTEL DE CARNE E 50 PASTEL DE QUEIJO")
+      == [(100, "Pastel Carne"), (50, "Pastel Queijo")])
+checa("'pasteis' no plural", _itens("quero 50 pasteis de queijo") == [(50, "Pastel Queijo")])
+checa("'25 calzone' e sabor da porcao de assados",
+      _itens("25 calzone") == [(25, "Calzone de frango")])
+checa("'enroladinhos assados' e o assado, nao o frito",
+      _itens("quero 25 enroladinhos assados") == [(25, "Enroladinho de salsicha com Catupiry")])
+checa("dois sabores com tipo repetido nao sao divididos",
+      _itens("200 coxinhas e 100 bolinhas de queijo") == [(200, "Coxinha"), (100, "Bolinha de Queijo")],
+      str(_itens("200 coxinhas e 100 bolinhas de queijo")))
+checa("porcao de 25 assados no catalogo de hoje",
+      any(p["categoria"] == "Assados" and p["item"] == "Porção (25 un)" and p["preco"] == 30.0
+          for p in facts.get()["produtos"]))
+_cf_fx.bruto = lambda forcar=False: _RETRATO_FX
+facts.invalidate()
 
 print()
 print("=" * 78)

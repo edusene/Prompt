@@ -824,6 +824,8 @@ def pedido_de_dados(memoria: dict, pendentes: list[str] | None = None) -> str:
                 return f"Posso deixar para {dia}? 😊"
             except Exception:
                 pass
+        if pendentes[0] == "troco_para":
+            return pergunta_do_troco(memoria)
         return _PERGUNTA_CURTA.get(pendentes[0], f"Qual {pendentes[0]}? 😊")
     nada_ainda = not any(memoria.get(c) for c in _DADOS_DE_LOGISTICA)
     linhas = []
@@ -1476,6 +1478,46 @@ def subtotal_dos_salgados(memoria: dict) -> float:
     return round(total, 2)
 
 
+def total_previsto(memoria: dict) -> float:
+    """Total do pedido da ficha, antes do espelho. 0 quando falta alguma parte.
+
+    Mesma conta do calculate_order: itens pelo preco do cardapio, frete da
+    tabela oficial e a taxa de retorno. Existe para a pergunta do troco: ela
+    vinha antes do total, e o cliente nao tinha como saber para quanto pedir
+    troco (teste do dono, 07/10 14h30: "o cliente nao sabe qual valor").
+    """
+    subtotal = subtotal_dos_salgados(memoria)
+    if not subtotal:
+        return 0.0
+    frete = 0.0
+    modalidade = memoria.get("modality", "")
+    if modalidade == "entrega":
+        try:
+            import facts
+            achado = facts.lookup_frete(memoria.get("bairro", ""))
+        except Exception:
+            achado = None
+        if not achado:
+            return 0.0           # sem frete oficial nao ha total para mostrar
+        frete = float(achado["taxa"])
+    try:
+        import cardapio
+        retorno = cardapio.calcular_taxa_retorno(modalidade, memoria.get("payment_method", ""))
+    except Exception:
+        return 0.0
+    return round(subtotal + frete + retorno, 2)
+
+
+def pergunta_do_troco(memoria: dict) -> str:
+    """"Precisa de troco para quanto?" com o total na frente, quando ja da para somar."""
+    # A conta de agora primeiro: o "total" da ficha pode ser de antes de o
+    # cliente mudar os itens.
+    total = total_previsto(memoria) or float(memoria.get("total") or 0)
+    if total > 0:
+        return f"O total fica {_brl(total)}. Precisa de troco para quanto? 💵"
+    return _PERGUNTA_CURTA["troco_para"]
+
+
 def oferta_com_valor(memoria: dict, agora=None) -> str:
     """A oferta adicional, com o valor na frente quando o pedido veio por volume.
 
@@ -1731,8 +1773,8 @@ def pendencia_de_detalhe(memoria: dict) -> str:
         if total > 0 and not troco:
             return (
                 f"Pagamento em dinheiro e o total ja esta calculado "
-                f"({_brl(total)}). Pergunte: 'Precisa de troco para quanto? 💵' "
-                "antes de fechar o pedido."
+                f"({_brl(total)}). Pergunte exatamente: '{pergunta_do_troco(memoria)}' "
+                "antes de fechar o pedido. Se o cliente perguntar o total, informe-o."
             )
         try:
             valor = float(troco)

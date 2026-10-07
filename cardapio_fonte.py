@@ -155,7 +155,7 @@ def bruto(forcar: bool = False) -> dict | None:
 # Ultima reserva: o retrato do cardapio salvo no repositorio. Com a planilha
 # fora do sistema, e o que garante que um servidor novo, sem banco e com o
 # cardapio fora do ar, ainda tenha produtos e bairros para atender.
-_RETRATO = "fixtures/cardapio_snapshot_2026-10-02.json"
+_RETRATO = "fixtures/cardapio_snapshot_2026-10-07.json"
 
 
 def _retrato_do_repositorio() -> dict | None:
@@ -205,6 +205,8 @@ _NOME_DO_SABOR = {
     "rissoles de carne": "Rissole de Carne",
     "bolinha de queijo": "Bolinha de Queijo",
     "pastel de carne": "Pastel carne",
+    # Cadastrado nos fritos em 07/10 (antes so existia no combo).
+    "pastel de queijo": "Pastel queijo",
     "enroladinho de salsicha": "Enroladinho de Salsicha",
     "misto de queijo e presunto": "Misto de Queijo e Presunto",
     "misto queijo e presunto": "Misto de Queijo e Presunto",
@@ -223,6 +225,17 @@ _NOME_DO_SABOR = {
     "canudinho camarao": "Canudinho de Camarão",
     "esfirra carne": "Esfirra de Carne",
     "pao pizza queijo presunto": "Pão Pizza",
+    # Porcao de 25 assados (07/10): o dono escreveu os sabores de outro jeito.
+    "esfirra de carne": "Esfirra de Carne",
+    "empada de frango": "Empadinha de Frango",
+    "pao pizza": "Pão Pizza",
+}
+
+# O mesmo texto de opcao com outro produto conforme a familia: no pacote de 25
+# assados, "enroladinho de salsicha" e o assado com catupiry do cento e do
+# meio cento, nao o frito.
+_NOME_DO_SABOR_NA_FAMILIA = {
+    "Assados": {"enroladinho de salsicha": "Enroladinho de salsicha com Catupiry"},
 }
 
 # Categoria do cardapio -> categoria interna (a da planilha).
@@ -261,13 +274,23 @@ _APELIDOS_DE_BAIRRO = {
 }
 
 
+def _categoria(cat_cardapio: str) -> str | None:
+    """Categoria interna. O dono cadastrou a porcao de 25 assados (07/10) em
+    "salgadinhos assados", com espaco: a busca exata nao achava e o produto
+    sumia do catalogo inteiro."""
+    import re
+    chave = re.sub(r"[\s_]+", "_", _n(cat_cardapio).strip())
+    return _CATEGORIA.get(chave)
+
+
 def _mapa_normalizado(mapa: dict) -> dict:
     return {_n(k): v for k, v in mapa.items()}
 
 
-def _nome_do_sabor(opcao: str) -> str:
+def _nome_do_sabor(opcao: str, familia: str = "") -> str:
     chave = _n(opcao)
-    return (_mapa_normalizado(_NOME_DO_SABOR).get(chave)
+    return (_mapa_normalizado(_NOME_DO_SABOR_NA_FAMILIA.get(familia, {})).get(chave)
+            or _mapa_normalizado(_NOME_DO_SABOR).get(chave)
             or opcao.strip()[:1].upper() + opcao.strip()[1:])
 
 
@@ -279,7 +302,7 @@ def _produtos(itens: list[dict]) -> list[dict]:
         if not nome:
             continue
         cat_cardapio = str(it.get("category") or "").strip()
-        categoria = _CATEGORIA.get(cat_cardapio)
+        categoria = _categoria(cat_cardapio)
         if not categoria:
             # mini_churros e afins: o churros ja e sabor do lote de fritos.
             continue
@@ -294,11 +317,19 @@ def _produtos(itens: list[dict]) -> list[dict]:
             # Pacote proprio de canudinhos (R$ 30 o lote de 25): os sabores ja
             # sao opcoes do lote de assados, como na planilha.
             continue
-        if categoria in ("Fritos", "Assados") and modo == "batch_25":
+        # A porcao de 25 assados veio como venda "unit" de 25 em 25, com
+        # sabores (07/10): e lote do mesmo jeito que o batch_25.
+        try:
+            _passo = int(float(it.get("unit_increment") or 0))
+        except (TypeError, ValueError):
+            _passo = 0
+        em_lote = modo == "batch_25" or (_passo == 25 and bool(it.get("flavor_options")))
+        if categoria in ("Fritos", "Assados") and em_lote:
             # Pacote em lote: a linha do formato tem o preco; cada sabor das
             # opcoes vira uma linha "Incluso no Pacote".
             try:
-                lote = int(float(it.get("batch_size") or it.get("min_quantity") or 25))
+                lote = int(float(it.get("batch_size") or it.get("min_quantity")
+                                 or _passo or 25))
             except (TypeError, ValueError):
                 lote = 25
             rotulo, formato = _ROTULO_DO_LOTE.get(lote, (f"{nome}", "Lote"))
@@ -308,7 +339,7 @@ def _produtos(itens: list[dict]) -> list[dict]:
                                  "disponivel": True, "origem": nome})
             familia = sabores_por_familia.setdefault(categoria, {})
             for opcao in it.get("flavor_options") or []:
-                sabor = _nome_do_sabor(str(opcao))
+                sabor = _nome_do_sabor(str(opcao), categoria)
                 # Um sabor por nome: "Calzone de frango" e "Calzone de Frango"
                 # vem de pacotes diferentes e sao o mesmo.
                 chave = _n(sabor)
@@ -347,8 +378,6 @@ def _produtos(itens: list[dict]) -> list[dict]:
     pacotes = [p for p in produtos if p["categoria"] in ("Fritos", "Assados") and p["formato"] != "Unidade"]
     resto = [p for p in produtos if p not in pacotes]
     produtos = sorted(pacotes, key=lambda p: _ordem.get(p["categoria"], 9)) +         sorted(sabores_rows, key=lambda p: _ordem.get(p["categoria"], 9)) +         sorted(resto, key=lambda p: _ordem.get(p["categoria"], 9))
-    # Porcao de 25 dos assados: o cardapio vende a partir de 50, mas o preco
-    # unitario e o mesmo - a linha so documenta o valor por porcao.
     return produtos
 
 
@@ -385,8 +414,19 @@ def _horarios(horas: list[dict]) -> list[dict]:
     return saida
 
 
+# Regras do cardapio que o dono mudou depois de cadastradas: o texto que vai
+# ao modelo segue o codigo, senao ele diria o contrario do total cobrado.
+# taxa_retorno_maquina ainda isenta o dinheiro la; o dono pediu a taxa no
+# dinheiro em 07/10 (ver cardapio.calcular_taxa_retorno).
+_REGRAS_DO_DONO = {
+    "taxa_retorno_maquina": ("R$ 2,00 de retorno do motoboy em entregas pagas em dinheiro "
+                             "ou cartão (débito ou crédito). Sem taxa no Pix e na retirada."),
+}
+
+
 def _regras(regras: list[dict]) -> list[dict]:
-    return [{"chave": r.get("rule_key", ""), "valor": str(r.get("rule_value") or ""),
+    return [{"chave": r.get("rule_key", ""),
+             "valor": _REGRAS_DO_DONO.get(r.get("rule_key", ""), str(r.get("rule_value") or "")),
              "obs": r.get("description", "")}
             for r in regras if r.get("active", True)]
 

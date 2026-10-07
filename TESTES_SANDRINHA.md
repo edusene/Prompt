@@ -338,13 +338,13 @@ Seguindo do teste acima, responda:
 RUA DOS PIONEIROS 450
 ```
 
-O total dá **R$ 92,00** (desde 02/10/2026 a taxa de retorno é só no cartão,
-regra do cardápio digital) e o troco pedido foi **R$ 50,00** — impossível. Ela
-apresentou o resumo pedindo confirmação assim mesmo.
+O total dá **R$ 94,00** (com os R$ 2,00 de retorno do motoboy: o dinheiro voltou
+a pagar a taxa em 07/10/2026, pedido do dono) e o troco pedido foi **R$ 50,00** —
+impossível. Ela apresentou o resumo pedindo confirmação assim mesmo.
 
 | | |
 |---|---|
-| ✅ Esperado | "O total do seu pedido deu R$ 92,00. O valor para troco precisa ser maior que o total da compra. Dinheiro para quanto? 💵" |
+| ✅ Esperado | "O total do seu pedido deu R$ 94,00. O valor para troco precisa ser maior que o total da compra. Dinheiro para quanto? 💵" |
 | 🚩 Alerta | resumo com "troco para R$ 50,00" · pedir confirmação · enviar o pedido |
 
 Responda `troco para 100` → tem que **aceitar e seguir**. (Se ela ignorar o 100

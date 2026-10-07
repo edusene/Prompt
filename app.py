@@ -682,6 +682,30 @@ def _resposta_do_balcao(texto: str, memoria: dict) -> tuple[str, str, bool] | No
     return None
 
 
+# Etapa do troco: o cliente pergunta quanto deu antes de dizer o troco. O
+# modelo respondia "o total ainda nao posso informar sem o valor do troco" - e
+# o cliente nao sabe o troco justamente porque nao sabe o total (dono, 07/10).
+_RX_PERGUNTA_TOTAL = _re_mod.compile(
+    r"\b(?:total|quanto\s+(?:fica|ficou|deu|da|vai\s+(?:dar|ficar)|e|sai|saiu|custa"
+    r"|pago|tenho\s+que\s+pagar)|valor\s+(?:do\s+pedido|de\s+tudo|final|a\s+pagar))\b")
+
+
+def _resposta_total_no_troco(texto: str, memoria: dict) -> str:
+    """O total + a pergunta do troco, quando e so isso que o cliente quer saber."""
+    if memoria.get("payment_method") != "dinheiro" or memoria.get("pedido_enviado"):
+        return ""
+    if conversation_memory.faltando(memoria) != ["troco_para"]:
+        return ""
+    if conversation_memory.pergunta_bloqueante(memoria):
+        return ""
+    t = facts.normalize(texto or "")
+    # Numero na mensagem pode ser o proprio troco ou item novo: segue o fluxo.
+    if any(c.isdigit() for c in t) or not _RX_PERGUNTA_TOTAL.search(t):
+        return ""
+    pergunta = conversation_memory.pergunta_do_troco(memoria)
+    return pergunta if pergunta.startswith("O total") else ""
+
+
 # "Humano", "atendente humano" e "robo" sao proibidos pelo dono (04/10): sempre
 # "equipe". A frase com robo sai inteira ("nao sou um robo").
 _RX_HUMANO = _re_mod.compile(
@@ -4650,6 +4674,12 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                                  send_message=False)
             return
 
+        _total_troco = _resposta_total_no_troco(_texto_cliente, _memoria_balcao)
+        if _total_troco:
+            print(f"[troco] user={user} cliente perguntou o total antes do troco")
+            _responder_direto(user, items, _total_troco, _chegada)
+            return
+
         matched_kw = _check_transfer_keywords(items)
         if not matched_kw:
             matched_kw = _pede_consultoria_de_evento(" ".join(
@@ -5805,8 +5835,8 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                         "erro": "FALTA_TROCO",
                         "instrucao": (
                             "Pagamento em dinheiro sem troco definido. Pergunte "
-                            "'Precisa de troco para quanto? 💵' e so entao envie "
-                            "o pedido."
+                            f"'{conversation_memory.pergunta_do_troco(_memoria)}' "
+                            "e so entao envie o pedido."
                         ),
                     }, ensure_ascii=False)
 

@@ -48,9 +48,19 @@ LOTES = {
         "preco_unitario": 1.20,
         "passo": 25,
         "pacotes": [
-            # O cardapio digital NAO tem porcao de 25 de assados: o minimo e 50.
             {"nome_base44": "Cento Salgadinhos Assados", "minimo": 100, "max_sabores": 4},
             {"nome_base44": "Meio Cento Salgadinhos Assados", "minimo": 50, "max_sabores": 2},
+            # Porcao de 25 cadastrada pelo dono em 07/10 (R$ 30,00, 1 sabor).
+            # Os sabores la tem outra grafia: o de-para do pacote traduz o
+            # nome do cento para o desta lista.
+            {"nome_base44": "25 uni Salgadinhos assados", "minimo": 25, "max_sabores": 1,
+             "sabores": {
+                 "Esfirra (carne)": "esfirra de carne",
+                 "Empadinha (frango)": "empada de frango",
+                 "Pão pizza (queijo presunto)": "pão pizza",
+                 "Calzone de frango": "calzone de frango",
+                 "Enroladinho de salsicha com Catupiry": "enroladinho de salsicha",
+             }},
         ],
         "quantidade_teste": 100,
         "preco_esperado": 120.00,
@@ -78,6 +88,8 @@ SABORES = {
         "Bolinha de Queijo": "bolinha de queijo",
         "Enroladinho de Salsicha": "enroladinho de salsicha",
         "Pastel carne": "pastel de carne",
+        # Cadastrado nos fritos em 07/10 (25, 50 e cento).
+        "Pastel queijo": "pastel de queijo",
         "Quibe": "quibe",
         "Rissole de Carne": "rissoles de carne",
         "Misto de Queijo e Presunto": "misto de queijo e presunto",
@@ -97,6 +109,10 @@ SABORES = {
         "Pão Pizza": "Pão pizza (queijo presunto)",
         "Canudinho de Frango": "Canudinho (frango)",
         "Canudinho de Camarão": "Canudinho (camarão)",
+        # Com a porcao de 25 (07/10) a primeira grafia lida passou a ser a
+        # dela ("calzone de frango"); o cento e o meio cento usam estas.
+        "Calzone de frango": "Calzone de frango",
+        "Enroladinho de salsicha com Catupiry": "Enroladinho de salsicha com Catupiry",
     },
     "Canudinhos": {
         "Canudinho de Frango": "Canudinho (frango)",
@@ -197,7 +213,6 @@ BLOQUEADOS = {
     "Panqueca de Carne": ("Salgados Grandes", "nao existe no cardapio digital"),
     "Panqueca de Frango": ("Salgados Grandes", "nao existe no cardapio digital"),
     "Saltenha Frita": ("Salgados Grandes", "o cardapio so tem 'Mini Saltenha Frita' (R$ 2,00, minimo 10), que e outro produto"),
-    "Pastel queijo": ("Fritos", "nao esta na lista de sabores de fritos do cardapio digital"),
     "Cento de Beijinhos (100 un)": ("Bolos e Doces", "o cardapio digital nao tem beijinho; a busca cai em brigadeiro"),
     "Meio Cento de Beijinhos (50 un)": ("Bolos e Doces", "o cardapio digital nao tem beijinho; a busca cai na bandeja de 16 docinhos"),
     "Cento Misto Brigadeiro e Beijinho (100 un)": ("Bolos e Doces", "o cardapio digital nao tem misto; a busca cai em brigadeiro"),
@@ -304,6 +319,11 @@ def _sabor_oficial(familia: str, nome: str, sabores: dict | None = None) -> str 
     if linha and linha.get("origem") and linha.get("preco") is None:
         return linha["origem"]
     return None
+
+
+def _sabor_no_pacote(pacote: dict, sabor: str) -> str:
+    """O sabor com a grafia do pacote, quando ele tem lista propria."""
+    return _achar(pacote.get("sabores") or {}, sabor) or sabor
 
 
 def _escolher_pacote(familia: str, quantidade: int) -> dict | None:
@@ -563,7 +583,7 @@ def traduzir(items: list[dict], extras: list | None = None) -> tuple[list[dict],
                 api_item = {
                     "name": pacote["nome_base44"],
                     "quantity": qtd,
-                    "selected_flavors": [sabor],
+                    "selected_flavors": [_sabor_no_pacote(pacote, sabor)],
                 }
                 if cfg.get("context"):
                     api_item["context"] = cfg["context"]
@@ -586,7 +606,8 @@ def traduzir(items: list[dict], extras: list | None = None) -> tuple[list[dict],
                     linhas = []
                     break
                 # Sobra abaixo do cento: porcao de 25, uma linha por sabor.
-                partes = ([(s, q, [s]) for s, q in grupo] if pac_g["max_sabores"] == 1
+                partes = ([(s, q, [_sabor_no_pacote(pac_g, s)]) for s, q in grupo]
+                          if pac_g["max_sabores"] == 1
                           else [(None, total_g, [s for s, _ in grupo])])
                 if len(partes[0][2]) > pac_g["max_sabores"]:
                     linhas = []

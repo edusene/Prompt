@@ -601,12 +601,10 @@ def calcular_taxa_retorno(modalidade: str, pagamento: str) -> float:
     pagamento = (pagamento or "").strip().lower()
     if pagamento not in _PAGAMENTOS_COM_RETORNO:
         return 0.0
-    # Vale a regra taxa_retorno_maquina do cardapio
-    # digital. Hoje ela diz "R$ 2,00 SOMENTE em pagamento com cartao": o
-    # dinheiro deixa de pagar retorno. Sem a regra, vale o BLOCO 3 do prompt.
-    regra = _regra_do_cardapio("taxa_retorno_maquina")
-    if regra and "somente" in regra.lower() and "cart" in regra.lower() and pagamento == "dinheiro":
-        return 0.0
+    # O dinheiro PAGA o retorno do motoboy. A regra taxa_retorno_maquina do
+    # cardapio digital ainda diz "SOMENTE cartao" e isentava o dinheiro; o dono
+    # corrigiu no teste de 07/10 14h16 ("faltou cobrar a taxa de 2,00 de
+    # retorno motoboy" numa entrega paga em dinheiro). Vale o BLOCO 3.
     return TAXA_RETORNO
 
 
