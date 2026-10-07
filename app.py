@@ -565,7 +565,9 @@ _RX_ASSUNTO_DA_EQUIPE = _re_mod.compile(
     # Segunda varredura (02/10): antecedencia virava "30 a 40 minutos", o
     # combo "so tem Tuchaua", e pedido minimo e promocao ficavam sem resposta.
     r"|\bantecedencia\b|\bcom\s+quanto\s+tempo\s+antes\b"
-    r"|\bcombo\b.{0,30}\b(?:refri\w*|sabor\w*|vem\s+com)\b"
+    # "O combo vem com qual refrigerante?" (o cardapio nao diz). "Tem combo
+    # com refrigerante?" responde a lista de combos (teste de 06/10).
+    r"|\bcombo\b.{0,30}\b(?:qual|quais)\s+(?:refri\w*|sabor\w*)|\b(?:qual|quais)\s+(?:refri\w*|sabor\w*).{0,30}\bcombo\b"
     r"|\b(?:pedido|valor|compra)\s+minim[oa]\b|\bminimo\s+(?:pra|para)\s+entrega\b"
     r"|\bpromoc\w*|\bpromo\b|\bcupom\b"
     r"|\b(?:trocar|alterar|mudar|mexer\s+n)\w*\s+(?:o\s+|no\s+)?pedido\s+depois"
@@ -604,12 +606,19 @@ _RESPOSTAS_DO_BALCAO = (
         r"\bcomprovante\b.{0,60}\b(?:confirm\w*|receb\w*|chegou|viu|olhou)"
         r"|\b(?:confirm\w*|receb\w*)\b.{0,30}\bcomprovante\b"),
      "Comprovante recebido!", False),
+    # "chego em 5 min" e o CLIENTE chegando, nao urgencia de entrega (teste
+    # do dono, 06/10).
     ("urgencia", _re_mod.compile(
-        r"\bdaqui\s+(?:a\s+)?\d{1,2}\s*min|\bem\s+\d{1,2}\s*min\w*|\burgen(?:te|cia)\b"),
+        r"^(?!.*\b(?:chego|chegando|to\s+indo|estou\s+indo|passo\s+ai)\b)"
+        r".*(?:\bdaqui\s+(?:a\s+)?\d{1,2}\s*min|\bem\s+\d{1,2}\s*min\w*|\burgen(?:te|cia)\b)"),
      "Nosso tempo médio de preparo e entrega é de 30 a 40 minutos, mas vou verificar "
      "com a equipe para agilizar.", True),
     # Congelado: texto do dono (04/10). Antes ia para a equipe.
-    ("congelado", _re_mod.compile(r"\bcongelad\w*"),
+    # So quem quer COMPRAR congelado: "veio tudo congelado e murcho" e
+    # reclamacao (teste do dono, 06/10 - recebia o texto de venda).
+    ("congelado", _re_mod.compile(
+        r"\b(?:vend\w*|tem|tens|fazem|faz|trabalh\w*|quero|queria|encomend\w*|compr\w*)\b"
+        r".{0,40}\bcongelad\w*|\bcongelad\w*\b.{0,25}\b(?:pra|para)\s+fritar"),
      "Congelado trabalhamos apenas com o tamanho mini de festa (R$ 40 o cento).", False),
     ("motoboy", _re_mod.compile(
         r"\b(?:motoboy|motoqueiro|entregador|motoca)\b.{0,30}"
@@ -639,11 +648,24 @@ TEXTO_MUDA_ENDERECO = "Envie o novo endereço completo aqui, por favor!"
 TEXTO_ACRESCENTA = "PODE SIM QUAL SABOR VOCE QUER"
 
 
+# BLOCO 4 do dono: termo critico -> texto padrao, transfere e silencia. Vem
+# antes de tudo: "veio congelado... quero o estorno do Pix" recebia a resposta
+# de venda de congelado (teste do dono, 06/10).
+_RX_CRISE = _re_mod.compile(
+    r"\bestorn\w*|\bdevolv\w*\s+(?:o\s+|meu\s+)?(?:pix|dinheiro)\b|\bdinheiro\s+de\s+volta\b"
+    r"|\bprocon\b|\bvigilancia\b|\bpass(?:a|ou|ei|aram|ando)\w*\s+mal\b|\barame\b|\binseto\b"
+    r"|\bbarata\b")
+TEXTO_CRISE = ("Compreendo a situação e a sua preocupação. Já direcionei o seu atendimento "
+               "com prioridade máxima para a gerência da fábrica assumir a conversa agora mesmo.")
+
+
 def _resposta_do_balcao(texto: str, memoria: dict) -> tuple[str, str, bool] | None:
     """(nome, resposta exata do dono, passa para a equipe) ou None."""
     t = facts.normalize(texto or "")
     if not t:
         return None
+    if _RX_CRISE.search(t):
+        return "crise", TEXTO_CRISE, True
     pedido_feito = (bool(_RX_PEDIDO_JA_FEITO.search(t))
                     or conversation_memory.em_pos_pedido(memoria, aceita_itens=True))
     if _RX_MUDA_ENDERECO.search(t) and pedido_feito:
@@ -850,6 +872,27 @@ GRANDES_PERGUNTADOS = _re_mod.compile(
     r"|\b(?:quais|qual)\b.{0,20}\b(?:grandes?|de\s+lanche)\b")
 
 
+def _lista_de_combos(pergunta: str) -> str:
+    """"Tem algum combo com refrigerante?" -> os combos do cardapio, com preco."""
+    t = facts.normalize(pergunta or "")
+    if not _re_mod.search(r"\bcombos?\b", t) or not _RX_PERGUNTA_DE_TER.search(t):
+        return ""
+    try:
+        combos = [(p["item"], p["preco"]) for p in facts.get()["produtos"]
+                  if facts.normalize(p["categoria"]) == "combos"
+                  and p.get("disponivel", True) and p.get("preco")]
+    except Exception:
+        return ""
+    if _re_mod.search(r"\brefri\w*|\bcoca\b|\bbebida", t):
+        com_bebida = [c for c in combos
+                      if _re_mod.search(r"refri|coca|guarana|bebida", facts.normalize(c[0]))]
+        combos = com_bebida or combos
+    if not combos:
+        return ""
+    linhas = "\n".join(f"• {nome} — {cardapio._brl(float(preco))}" for nome, preco in combos)
+    return f"Nossos combos:\n{linhas}"
+
+
 def _lista_dos_grandes(pergunta: str) -> str:
     """"Quais os salgados grande vc tem?" -> os grandes do cardapio, com preco."""
     t = facts.normalize(pergunta or "")
@@ -935,7 +978,8 @@ def _horario_possivel(pergunta: str) -> str:
 
 
 def _conferir_sabores_de(user: str, pergunta: str, reply: str, memoria: dict) -> str:
-    lista = _sabores_de(pergunta) or _lista_dos_grandes(pergunta) or _horario_possivel(pergunta)
+    lista = (_sabores_de(pergunta) or _lista_dos_grandes(pergunta) or _lista_de_combos(pergunta)
+             or _horario_possivel(pergunta))
     if not lista:
         # "QUERO SABER DOS MINI" logo depois da lista: o termo vem dela.
         t = facts.normalize(pergunta or "")
@@ -2590,7 +2634,10 @@ def _conferir_troco_fora_de_hora(user: str, cliente: str, reply: str,
         limpas.append(linha)
     limpo = _re_mod.sub(r"\n{3,}", "\n\n", "\n".join(limpas)).strip()
     if len([c for c in limpo if c.isalpha()]) < 12:
-        limpo = conversation_memory.pedido_de_dados(memoria)
+        # O proximo passo do funil, que respeita a etapa travada (escolha dos
+        # sabores): pedido_de_dados dava "Qual o seu pedido?" com o volume ja
+        # dito (teste do dono, 06/10).
+        limpo = _proxima_pergunta_do_funil(memoria)
     print(f"[troco] user={user} troco perguntado antes dos outros dados; tirado")
     return limpo
 
@@ -3751,6 +3798,11 @@ def _conferir_etapa_travada(user: str, reply: str, memoria: dict) -> str:
             _re_mod.match(r"^O [^!?]{2,60} está em falta hoje! ", travada):
         travada = _re_mod.sub(r"^O [^!?]{2,60} está em falta hoje! ", "", travada)
 
+    # Reconfere DEPOIS dos filtros: o de cima tira a frase que repete a
+    # pergunta travada, e era justamente ela que "cobria" a etapa - sobrava so
+    # a saudacao (teste do dono, 06/10: "2 centos de salgados" sem a pergunta
+    # dos sabores).
+    ja_cobriu = conversation_memory.etapa_coberta(memoria, corpo)
     if len([c for c in corpo if c.isalpha()]) < 12:
         novo = travada
     elif ja_cobriu:

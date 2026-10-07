@@ -697,6 +697,11 @@ _DURACAO = re.compile(
 )
 
 
+_RX_HORA_ATUAL = re.compile(
+    r"\b(?:agora\s+)?(?:sao|ja\s+sao)\s+(?:quase\s+)?\d{1,2}\s*(?:h|:|horas?)\s*\d{0,2}"
+    r"(?=\s*(?:e\b|,|\.|$|da\s+(?:manha|tarde|noite)|aqui))")
+
+
 def detectar_horario(message: str) -> str:
     """Horario do pedido no formato da ficha ("18h", "18h30"), ou "".
 
@@ -711,6 +716,10 @@ def detectar_horario(message: str) -> str:
     t = _horario._norm(message)
     if _DURACAO.search(t):
         return ""
+    # "pra entregar agora, sao 12h30 e o pessoal ta com fome": a hora de
+    # AGORA, nao a do pedido (teste do dono, 06/10 - virou pedido para 12h30
+    # e ela avisou do intervalo de almoco).
+    t = _RX_HORA_ATUAL.sub(" ", t)
     hm = _horario.parse_horario(t)
     if hm:
         return _horario.formatar_horario(*hm)
@@ -1110,7 +1119,29 @@ def volume_sem_sabor(msg_lower: str) -> int:
         unidades = int(m.group(1))
         if 25 <= unidades < 1000 and unidades % 25 == 0:
             return unidades
+    # "Quero 1 cento, mas nao sei quais sabores. Escolhe por mim" (teste de
+    # 06/10): o cento sozinho, sem "de salgados", tambem e o volume.
+    m = _RX_CENTO_SOLTO.search(msg_lower or "")
+    if m:
+        if m.group("meio"):
+            return 50
+        if m.group("e_meio"):
+            return 150
+        n = m.group("n")
+        n = int(n) if n.isdigit() else _CENTOS_SOLTOS.get(n, 1)
+        if 1 <= n <= 9:
+            return n * 100
     return 0
+
+
+_CENTOS_SOLTOS = {"um": 1, "uma": 1, "dois": 2, "duas": 2, "tres": 3, "três": 3, "quatro": 4,
+                  "cinco": 5}
+_RX_CENTO_SOLTO = re.compile(
+    r"\b(?:(?P<meio>meio\s+cento)|(?P<n>\d|um|uma|dois|duas|tres|três|quatro|cinco)\s+cento"
+    r"(?P<e_meio>\s+e\s+meio)?s?)\b"
+    # "meio cento de brigadeiro" e doce com formato proprio: so vale o cento
+    # solto ou "de salgados/fritos/assados".
+    r"(?!\s+(?:de|do|da|dos|das)\s+(?!salgad|salgadinh|frit|assad|variad|sortid)\w)")
 
 
 # "QUERO 400 VARIADOS" tambem e o total (teste do dono, 03/10).
@@ -1467,6 +1498,26 @@ def item_fora_do_cardapio(texto: str) -> str:
             continue
         if not any(any(w.startswith(s) for w in n.split()) for n in com_base):
             return f"{base} de {sabor}"
+    # "50 travesseirinhos de carne": quantidade de um produto que o cardapio
+    # nao tem. Sumia do pedido sem aviso - o espelho saiu so com as coxinhas
+    # (teste do dono, 06/10).
+    for m in _RX_QTD_E_NOME.finditer(t):
+        nome = m.group(2)
+        primeira = nome.split()[0]
+        if primeira.startswith(_NAO_E_PRODUTO):
+            continue
+        # Pedido de produto vem no plural ("50 travesseirinhos") ou com sabor
+        # ("1 torta de frango"). Sem isso o numero da casa pegava a palavra
+        # seguinte: "RUA SALGADO 2325 CARTAO", "RUA GUANABARA 45 PAGAMENTO"
+        # (roteiro 1.8 e 1.17, 06/10).
+        if " de " not in nome and not primeira.endswith("s"):
+            continue
+        if _produto_conhecido(nome) or _produto_conhecido(primeira) or sabores_possiveis(primeira):
+            continue
+        raiz = _forma_de_busca(primeira)[:5]
+        if any(any(w.startswith(raiz) for w in n.split()) for n in nomes):
+            continue
+        return nome
     # "salgado de chocolate": nenhum produto tem o sabor (bateria de 06/10 -
     # em 1 de 3 rodadas ela disse que chamaria a equipe e nao chamou).
     for m in _RX_SALGADO_DE_SABOR.finditer(t):
@@ -1479,6 +1530,20 @@ def item_fora_do_cardapio(texto: str) -> str:
 
 
 _RX_SALGADO_DE_SABOR = re.compile(r"\bsalgad\w*\s+(?:de|com)\s+([a-z]+)")
+_RX_QTD_E_NOME = re.compile(r"\b(\d{1,4})\s+([a-z]{5,}(?:\s+de\s+[a-z]{4,})?)")
+# Palavra depois de um numero que nao e produto (comeco da palavra).
+_NAO_E_PRODUTO = (
+    "salgad", "frit", "assad", "variad", "sortid", "unidad", "reais", "real", "minut", "hora",
+    "pessoa", "convid", "cento", "porc", "sabor", "litro", "lata", "mini", "grand", "gram",
+    "dias", "misto", "refri", "guaran", "docinh", "brigad", "beijin", "coca", "bolo", "pacot",
+    "caixa", "bandej", "kilo", "quilo", "metro", "numer", "casa", "apart", "bloco", "lote",
+    "quadra", "anos", "vezes", "combo", "suco", "pudim", "alfaj", "bairr", "perto", "esquin",
+    "frente", "fundos", "lado", "andar", "outr", "pedid", "opcoe", "tipos", "moto", "entreg",
+    "semana", "meses", "parcel", "fatia", "pedac", "garraf", "copo", "agua", "graus",
+    "pagament", "pago", "pagar", "pix", "cartao", "cartoes", "dinheiro", "debito", "credito",
+    "troco", "amanha", "hoje", "agora", "retir", "busca", "avenid", "travessa", "esquina",
+    "conjunto", "condomin", "residenc", "setor", "manha", "tarde", "noite", "horas", "vezes",
+    "pessoas", "filhos", "irmaos", "amigos", "clientes", "funcionar", "alunos", "criancas")
 # "salgados de aniversario", "salgado de forno": ocasiao ou preparo, nao sabor.
 _NAO_E_SABOR_DE_SALGADO = {"aniversario", "casamento", "evento", "eventos", "forno",
                            "fritura", "qualidade", "verdade", "voces", "vcs", "tamanho",
@@ -1790,6 +1855,8 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
     # "um centoQu frito misto de coxinha e bolinha" (teste do dono, 05/10):
     # letra a mais grudada no "cento" apagava o pedido inteiro.
     msg_lower = re.sub(r"\bcento(?!s\b)[a-z]{1,2}\b", "cento", msg_lower)
+    # "DOI CENTO DE SALGADOS" (dois sem o s) virava 1 cento (teste de 06/10).
+    msg_lower = re.sub(r"\bdoi\s+(centos?)\b", r"dois \1", msg_lower)
     extracted = {}
 
     # ── Nome ────────────────────────────────────────────────────────────────

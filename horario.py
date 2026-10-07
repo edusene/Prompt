@@ -255,7 +255,9 @@ def resolver_data(texto: str, now: datetime | None = None) -> date | None:
         return hoje
     if re.search(r"\bdepois de amanha\b", t):
         return hoje + timedelta(days=2)
-    if re.search(r"\bamanha\b", t):
+    # "amnha", "amanhan", "amanah" (teste de 06/10: "amnha" repetiu "Para
+    # qual dia?").
+    if re.search(r"\b(?:amanha|amnha|amanhan|amanah|amaha|amanhaa)\b", t):
         return hoje + timedelta(days=1)
 
     m = re.search(r"\b(\d{1,2})[/.-](\d{1,2})(?:[/.-](\d{2,4}))?\b", t)

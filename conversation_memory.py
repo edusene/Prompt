@@ -1167,8 +1167,16 @@ def aplicar_divisao_do_volume(memoria: dict, texto: str) -> list[str]:
         volume = int(memoria.get("volume_pendente") or 0)
     except (TypeError, ValueError):
         volume = 0
-    if not volume or memoria.get("items") or len(citados) < 2 or volume % 25:
+    if not volume or memoria.get("items") or not citados or volume % 25:
         return []
+    if len(citados) == 1:
+        # "todos coxinha", "quero so coxinha": o volume inteiro num sabor. A
+        # divisao exigia 2 sabores, nada entrava na ficha e a pergunta dos
+        # sabores voltava em laco (teste do dono, 06/10: 2 centos de coxinha).
+        memoria["volume_pendente"] = 0
+        memoria["pedido_por_volume"] = True
+        memoria["items"] = _itens_da_divisao(volume, citados)
+        return [f"volume num sabor so: {volume} {citados[0]}"]
     memoria["volume_pendente"] = 0
     # Os itens vem de um total: um total novo depois os divide de novo.
     memoria["pedido_por_volume"] = True

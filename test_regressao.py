@@ -2542,8 +2542,8 @@ _s = app._conferir_troco_fora_de_hora(
     "55", "19:30", "Faltam essas informações:\n- Rua e número\n- Troco", _f_falta)
 checa("troco sai da lista, o resto fica", _s == "Faltam essas informações:\n- Rua e número", _s)
 _s = app._conferir_troco_fora_de_hora("55", "19:30", "Precisa de troco para quanto? 💵", _f_falta)
-checa("so o troco perguntado vira o pedido do que falta",
-      "troco" not in _s.lower() and "rua" in _s.lower(), _s)
+checa("so o troco perguntado vira o proximo passo do funil",
+      "troco" not in _s.lower() and _s == app._proxima_pergunta_do_funil(_f_falta), _s)
 _f_so_troco = dict(_f_falta, endereco="rua bejamin 2253")
 checa("com so o troco faltando, a pergunta fica",
       app._conferir_troco_fora_de_hora("55", "x", "Precisa de troco para quanto? 💵", _f_so_troco)
@@ -2785,6 +2785,48 @@ _fv2 = dict(memoria_mod._empty(), items=[{"name": "Coxinha", "quantity": 50, "pr
 checa("frete com pedido e sem modalidade: 'Será entrega no X ou retirada?'",
       app._conferir_frete_perguntado("55", "qual o frete pro pedrinhas?", "x", _fv2)
       == "A taxa de entrega para Pedrinhas é R$ 15,00. Será entrega no Pedrinhas ou retirada? 😊")
+print()
+print("--- Dono 06/10 (tarde): volume num sabor, crise, combos, item desconhecido")
+_fs = dict(memoria_mod._empty(), volume_pendente=200)
+memoria_mod.aplicar_divisao_do_volume(_fs, "todos coxinha")
+checa("'todos coxinha' com 2 centos: 200 coxinhas",
+      [(i["name"], i["quantity"]) for i in _fs["items"]] == [("Coxinha", 200)], _fs.get("items"))
+_fs = dict(memoria_mod._empty(), volume_pendente=200)
+memoria_mod.aplicar_divisao_do_volume(_fs, "quero so coxinha")
+checa("'quero so coxinha' com 2 centos: 200 coxinhas",
+      sum(i["quantity"] for i in _fs["items"]) == 200)
+from agents.conversation import detectar_horario as _dhor, item_fora_do_cardapio as _ifc2  # noqa: E402
+checa("'pra entregar agora, sao 12h30 e...' nao e horario 12h30",
+      _dhor("Manda 2 centos pra entregar agora, são 12h30 e o pessoal tá com fome") == "Imediato"
+      and _dhor("o horario e 19h.") == "19h")
+checa("'DOI CENTO' e 2 centos e '1 cento' solto e volume",
+      _extract_data_from_message("DOI CENTO DE SALGADOS", ConversationState(phone="x")).get("volume_pendente") == 200
+      and _extract_data_from_message("Quero 1 cento, escolhe por mim",
+                                     ConversationState(phone="x")).get("volume_pendente") == 100)
+checa("reclamacao com estorno e crise (BLOCO 4), nao venda de congelado",
+      (app._resposta_do_balcao("veio tudo congelado e murcho. Quero o estorno do Pix agora!", {}) or ("",))[0]
+      == "crise"
+      and (app._resposta_do_balcao("vocês vendem salgado congelado?", {}) or ("",))[0] == "congelado")
+checa("'meu filho passou mal' e crise",
+      (app._resposta_do_balcao("meu filho passou mal com o salgado", {}) or ("",))[0] == "crise")
+checa("'chego em 5 min' nao e urgencia",
+      app._resposta_do_balcao("quero 2 coxinhas pra retirar agora chego em 5 min", {}) is None)
+_cb = app._lista_de_combos("tem algum combo com refrigerantes ?")
+checa("'tem combo com refrigerante?' lista os combos do cardapio",
+      _cb.startswith("Nossos combos") and "R$" in _cb, _cb[:60])
+checa("'o combo vem com qual refrigerante?' continua com a equipe",
+      app._assunto_da_equipe("o combo vem com qual refrigerante?") is not None
+      and app._assunto_da_equipe("tem algum combo com refrigerantes ?") is None)
+checa("'50 travesseirinhos de carne' e item fora do cardapio",
+      _ifc2("Quero 1 cento (50 coxinhas, 50 travesseirinhos de carne)") == "travesseirinhos de carne")
+for _p in ("quero 50 coxinhas e 50 kibes fritos", "Manda 3 saltenhas e 2 quiches", "quero 2 litros de coca",
+           "festa com 30 pessoas", "50 COX,50 RISSOLES,50 QUIBE E 50 SALSICHA", "quero 100 esfihas"):
+    checa(f"item conhecido nao e fora do cardapio: {_p!r}", _ifc2(_p) == "", _ifc2(_p))
+for _p in ("OLARIA RUA GUANABARA 45 PAGAMENTO NO PIX", "BAIRRO OLARIA RUA SALGADO 2325 CARTAO",
+           "RUA JAMARI 2125 DINHEIRO"):
+    checa(f"numero da casa + palavra nao e item fora do cardapio: {_p!r}", _ifc2(_p) == "", _ifc2(_p))
+checa("'amnha' e amanha", horario.resolver_data("amnha") == horario.agora().date()
+      + __import__("datetime").timedelta(days=1))
 checa("repergunta mantem a resposta quando o cliente perguntou",
       "_resposta_dada" in open("app.py", encoding="utf-8").read())
 
