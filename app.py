@@ -666,8 +666,12 @@ def _resposta_do_balcao(texto: str, memoria: dict) -> tuple[str, str, bool] | No
         return None
     if _RX_CRISE.search(t):
         return "crise", TEXTO_CRISE, True
-    pedido_feito = (bool(_RX_PEDIDO_JA_FEITO.search(t))
-                    or conversation_memory.em_pos_pedido(memoria, aceita_itens=True))
+    # Com um pedido ABERTO na ficha (montando, esperando o "sim"), acrescentar
+    # e somar a ele - nao e pedido feito. "QUERO ACRESCENTAR NO PEDIDO 50
+    # CHURROS" antes de confirmar ia para a equipe (teste do dono, 06/10).
+    aberto = bool(memoria.get("items")) and not memoria.get("pedido_enviado")
+    pedido_feito = not aberto and (bool(_RX_PEDIDO_JA_FEITO.search(t))
+                                   or conversation_memory.em_pos_pedido(memoria))
     if _RX_MUDA_ENDERECO.search(t) and pedido_feito:
         return "endereco", TEXTO_MUDA_ENDERECO, True
     if _RX_ACRESCENTA.search(t) and "pedido" in t and pedido_feito:
@@ -2512,13 +2516,18 @@ def _conferir_espelho_obrigatorio(user: str, reply: str, memoria: dict,
         _baixo = reply.lower()
         _formato_longo = ("👤" in reply or "subtotal" in _baixo
                           or "💳 pagamento" in _baixo or "📋" in reply)
-        if ((_sem_preco or _formato_longo)
-                and not conversation_memory.faltando(memoria)):
+        # E, com a ficha completa, o espelho e SEMPRE o do codigo: o do modelo
+        # tirou o sabor do refrigerante depois de um acrescimo ("Refrigerante
+        # 2 Litros" sem "(Coca cola)", teste do dono, 06/10). O que ele escreveu
+        # ANTES do espelho (resposta a uma duvida) fica.
+        if not conversation_memory.faltando(memoria):
             resumo = (_numeros_do_pedido(memoria) or {}).get("resumo_formatado") or ""
-            if resumo:
-                print(f"[espelho] user={user} espelho do modelo sem preco por "
-                      f"item ou no formato longo; trocado pelo do codigo")
-                return resumo
+            if resumo and resumo.strip() != reply.strip():
+                _ini = _re_mod.search(r"(?m)^(?:👤\s*)?Cliente\s*:|📋", reply)
+                _antes = reply[:_ini.start()].strip() if _ini else ""
+                print(f"[espelho] user={user} espelho do modelo trocado pelo do codigo"
+                      f"{' (sem preco/formato longo)' if (_sem_preco or _formato_longo) else ''}")
+                return f"{_antes}\n\n{resumo}" if _antes else resumo
         return reply
     if _parece_fechamento(reply):
         return reply
@@ -3370,6 +3379,11 @@ def _negativas_do_bloco_6(user: str, pedido_do_cliente: str, reply: str,
 # indo buscar", "ja vou autorizar a portaria" sao respondidos com uma palavra.
 # A Sandrinha lia cada um como pedido novo e perguntava "e novo ou soma ao
 # anterior?" - ou dizia que o pedido "nao pode ser alterado".
+# Pedido para SOMAR ao que ja esta na ficha (sobre o texto normalizado).
+_RX_SOMA_AO_PEDIDO = _re_mod.compile(
+    r"\bmais\s+(?:\d|um\b|uma\b|meio\b|cento\b|dois\b|duas\b)|\btambem\b|\bacrescent\w*|\badicion\w*"
+    r"|\binclu[ia]\w*|\bsoma\w*|\bjunto\b|\b(?:coloca|poe|bota|manda)\w*\s+mais\b|\besqueci\b")
+
 _RX_ACRESCIMO = _re_mod.compile(
     r"\binclu[ií]\w*|\bacrescent\w*|\badicion\w*|\bfaltou\b"
     r"|\besqueci\s+de\s+(?:pedir|colocar|por|p[oô]r)"
@@ -4743,6 +4757,28 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                 _ext.pop("bebidas", None)
                 _ext.pop("bebidas_pendentes", None)
 
+        # Havia pedido aberto ANTES desta mensagem? Decide se "acrescentar" e
+        # somar ao pedido em montagem ou mexer num pedido ja fechado.
+        _aberto_antes = bool(_memoria.get("items")) and not _memoria.get("pedido_enviado")
+        # "QUERO MAIS 50 CHURROS" com o pedido aberto: SOMA ao que ja esta na
+        # ficha. O merge le itens novos como correcao e trocava o pedido: as
+        # 100 coxinhas e os 50 croquetes sumiram e o pedido fechou so com os
+        # churros (teste do dono, 06/10 21h15).
+        if (_memoria.get("items") and not _memoria.get("pedido_enviado")
+                and _extracted_fresh.get("items")
+                and _RX_SOMA_AO_PEDIDO.search(facts.normalize(text_only or ""))):
+            _somados = [dict(i) for i in _memoria["items"] if isinstance(i, dict)]
+            for _novo in _extracted_fresh["items"]:
+                _igual = next((i for i in _somados if facts.normalize(str(i.get("name")))
+                               == facts.normalize(str(_novo.get("name")))), None)
+                if _igual:
+                    _igual["quantity"] = int(_igual.get("quantity") or 0) + int(_novo.get("quantity") or 0)
+                else:
+                    _somados.append(dict(_novo))
+            _extracted_fresh["items"] = _somados
+            _extracted["items"] = _somados
+            print(f"[memoria] {user}: acrescimo no pedido aberto -> "
+                  f"{[(i.get('name'), i.get('quantity')) for i in _somados]}")
         _memoria, _mudancas = conversation_memory.merge(_memoria, _extracted, _extracted_fresh)
 
         # Bairro ou rua na ficha, com itens pedidos, e entrega: ninguem da o
@@ -4857,7 +4893,8 @@ def _handle_flush(user: str, items: list[dict]) -> None:
         # ── Pos-pedido: aviso rapido e acrescimo (BLOCO 0) ───────────────────
         # Antes do expediente: "vou autorizar a portaria" as 20h10, depois de
         # um pedido das 19h, nao pode virar "nossa producao ja encerrou".
-        _tipo_pos, _resposta_pos = resposta_pos_pedido(text_only, _memoria)
+        _tipo_pos, _resposta_pos = (("", "") if _aberto_antes
+                                    else resposta_pos_pedido(text_only, _memoria))
         if _tipo_pos == "pagamento":
             print(f"[pos-pedido] user={user} aviso de pagamento depois do pedido: "
                   f"silencio e conferencia humana (regra do dono)")
@@ -4909,6 +4946,7 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                 conversation_memory.save(user, _memoria)
                 print(f"[pos-pedido] user={user} pedido novo depois do fechado")
         elif (conversation_memory.pedido_recente(_memoria) is not None
+                and not _aberto_antes
                 and _memoria.get("items") and not _memoria.get("pedido_enviado")
                 and not _RX_CLIENTE_PERGUNTOU.search(text_only or "")):
             print(f"[pos-pedido] user={user} item novo logo depois de fechar: somar ou novo?")
@@ -5187,6 +5225,12 @@ def _handle_flush(user: str, items: list[dict]) -> None:
         if _divisao:
             conversation_memory.save(user, _memoria)
             print(f"[memoria] {user}: {'; '.join(_divisao)}")
+        # A divisao fechou nesta mensagem (os itens entraram agora): o proximo
+        # passo e do codigo. O modelo ora escrevia so a oferta, ora "1 porcao de
+        # 25 pasteis adicionada." antes dela (oscilacao medida em 06/10).
+        _divisao_fechou = bool(_memoria.get("items")) and any(
+            d.startswith(("divisao:", "divisao com sabor novo:", "volume dividido",
+                          "volume num sabor so")) for d in (_divisao or []))
 
         # "PODE ESCOLHER POR MIM" com o total ja dito: excecao do dono (04/10),
         # ela escolhe sabores aleatorios do cardapio para as porcoes.
@@ -5518,6 +5562,17 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                     "dinheiro) e siga o funil do pedido. Nao diga que vai chamar "
                     "ninguem."
                 )
+            # Acrescimo com o pedido ainda ABERTO (montando, esperando o "sim")
+            # nao e da equipe: e somar a ficha e mostrar o espelho de novo.
+            # "QUERO ACRESCENTAR NO PEDIDO 50 CHURROS" antes de confirmar foi
+            # transferido e o cliente ficou sem resposta (teste do dono, 06/10).
+            if (_aberto_antes and not _memoria.get("pedido_enviado")
+                    and _re_mod.search(r"acresc|adicion|inclu|soma|mais\s+\d|alter|mud",
+                                       facts.normalize(reason or ""))):
+                print(f"[transbordo] user={user} RECUSADO: acrescimo em pedido aberto: {reason!r}")
+                return ("TRANSFERENCIA RECUSADA. O pedido ainda nao foi fechado: o item ja "
+                        "foi somado a ficha. Apresente o espelho atualizado com a pergunta "
+                        "de confirmacao.")
             performed = perform_transfer(user, reason, send_message=False)
             _transfer_done = True
             if performed:
@@ -6168,6 +6223,14 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                     and not conversation_memory.pergunta_bloqueante(_memoria)):
                 reply = conversation_memory._PERGUNTA_CURTA[_so_falta[0]]
             reply = _conferir_troco_fora_de_hora(user, text_only, reply, _memoria)
+            if (_divisao_fechou and not _escolhidos_por_ela
+                    and not _RX_LINHA_DE_RESUMO.search(reply or "")
+                    and not _RX_TROCO_INSUFICIENTE.search(facts.normalize(reply or ""))
+                    and not _RX_CLIENTE_PERGUNTOU.search(text_only or "")):
+                _seguinte_div = _proxima_pergunta_do_funil(_memoria)
+                if _seguinte_div:
+                    reply = _seguinte_div
+                    print(f"[funil] user={user} divisao fechou; proximo passo do codigo")
             if _escolhidos_por_ela and not _RX_LINHA_DE_RESUMO.search(reply or ""):
                 # O cliente precisa saber o que ela escolheu antes de seguir.
                 _lista = ", ".join(f"{i['quantity']} {i['name']}" for i in _escolhidos_por_ela)

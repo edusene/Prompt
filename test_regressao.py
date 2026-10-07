@@ -1028,8 +1028,11 @@ for _redacao in ("Perfeito! Vou seguir com o seu pedido então. 😊",
 # O que a trava NAO pode atropelar.
 _espelho_curto = ("Cliente: Balbino\n💰 Total: R$ 34,00\n💳 Pgt: Pix\n"
                   "Posso confirmar pra hoje (sex, 02/10) às 20h? 💛")
-checa("espelho que ja saiu nao e refeito",
-      _espelho_obrig(_espelho_curto) == _espelho_curto)
+_espelho_do_codigo = (app._numeros_do_pedido(dict(_FICHA_PRONTA)) or {}).get("resumo_formatado") or ""
+checa("espelho certo (o do codigo) nao e refeito",
+      _espelho_do_codigo and _espelho_obrig(_espelho_do_codigo) == _espelho_do_codigo)
+checa("espelho do modelo diferente da ficha vira o do codigo",
+      _espelho_obrig(_espelho_curto) == _espelho_do_codigo)
 # Formato longo (👤, Subtotal) escrito pelo modelo: o dono pediu o curto em
 # 02/10, e o curto e o do codigo.
 _saida_longo = _espelho_obrig(_espelho)
@@ -2825,6 +2828,17 @@ for _p in ("quero 50 coxinhas e 50 kibes fritos", "Manda 3 saltenhas e 2 quiches
 for _p in ("OLARIA RUA GUANABARA 45 PAGAMENTO NO PIX", "BAIRRO OLARIA RUA SALGADO 2325 CARTAO",
            "RUA JAMARI 2125 DINHEIRO"):
     checa(f"numero da casa + palavra nao e item fora do cardapio: {_p!r}", _ifc2(_p) == "", _ifc2(_p))
+checa("'100 MINI SANDUICHE' e item fora do cardapio",
+      _ifc2("POSSO ENCOMENDAR 100 MINI SANDUICHE PARA AMANHA") == "mini sanduiche"
+      and _ifc2("quero 50 mini coxinhas") == "")
+checa("'QUERO MAIS 50 CHURROS' soma ao pedido aberto (nao troca)",
+      app._RX_SOMA_AO_PEDIDO.search(facts.normalize("ACHO QUE NAO VAI.QUERO MAIS 50 CHURROS"))
+      and app._RX_SOMA_AO_PEDIDO.search(facts.normalize("QUERO ACRESCENTAR NO PEDIDO 50 CHURROS"))
+      and not app._RX_SOMA_AO_PEDIDO.search(facts.normalize("quero 50 churros")))
+_fa = dict(memoria_mod._empty(), items=[{"name": "Coxinha", "quantity": 100}],
+           ultimo_pedido_em=__import__("datetime").datetime.now().isoformat(timespec="seconds"))
+checa("acrescentar com pedido aberto nao e acrescimo em pedido feito (balcao)",
+      app._resposta_do_balcao("QUERO ACRESCENTAR NO PEDIDO 50 CHURROS", _fa) is None)
 checa("'amnha' e amanha", horario.resolver_data("amnha") == horario.agora().date()
       + __import__("datetime").timedelta(days=1))
 checa("repergunta mantem a resposta quando o cliente perguntou",

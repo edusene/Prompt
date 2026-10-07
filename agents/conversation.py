@@ -1498,6 +1498,19 @@ def item_fora_do_cardapio(texto: str) -> str:
             continue
         if not any(any(w.startswith(s) for w in n.split()) for n in com_base):
             return f"{base} de {sabor}"
+    # "100 MINI SANDUICHE" (teste do dono, 06/10): o "mini" na frente
+    # escondia o produto, e ela respondeu com o texto de congelado.
+    for m in _RX_QTD_MINI_E_NOME.finditer(t):
+        nome = m.group(1)
+        primeira = nome.split()[0]
+        if primeira.startswith(_NAO_E_PRODUTO):
+            continue
+        if _produto_conhecido(nome) or _produto_conhecido(primeira) or sabores_possiveis(primeira):
+            continue
+        raiz = _forma_de_busca(primeira)[:5]
+        if any(any(w.startswith(raiz) for w in n.split()) for n in nomes):
+            continue
+        return f"mini {nome}"
     # "50 travesseirinhos de carne": quantidade de um produto que o cardapio
     # nao tem. Sumia do pedido sem aviso - o espelho saiu so com as coxinhas
     # (teste do dono, 06/10).
@@ -1531,6 +1544,7 @@ def item_fora_do_cardapio(texto: str) -> str:
 
 _RX_SALGADO_DE_SABOR = re.compile(r"\bsalgad\w*\s+(?:de|com)\s+([a-z]+)")
 _RX_QTD_E_NOME = re.compile(r"\b(\d{1,4})\s+([a-z]{5,}(?:\s+de\s+[a-z]{4,})?)")
+_RX_QTD_MINI_E_NOME = re.compile(r"\b\d{1,4}\s+(?:minis?|grandes?)\s+([a-z]{4,}(?:\s+de\s+[a-z]{4,})?)")
 # Palavra depois de um numero que nao e produto (comeco da palavra).
 _NAO_E_PRODUTO = (
     "salgad", "frit", "assad", "variad", "sortid", "unidad", "reais", "real", "minut", "hora",
