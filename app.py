@@ -3495,6 +3495,9 @@ _RX_SOMA_AO_PEDIDO = _re_mod.compile(
     r"\bmais\s+(?:\d|um\b|uma\b|meio\b|cento\b|dois\b|duas\b)|\btambem\b|\bacrescent\w*|\badicion\w*"
     r"|\binclu[ia]\w*|\bsoma\w*|\bjunto\b|\b(?:coloca|poe|bota|manda)\w*\s+mais\b|\besqueci\b")
 
+_RX_POE_ITEM = _re_mod.compile(
+    r"\b(?:coloca|coloque|colocar|poe|ponha|bota|bote|adiciona|adicione|acrescenta|inclui)\b")
+
 _RX_ACRESCIMO = _re_mod.compile(
     r"\binclu[ií]\w*|\bacrescent\w*|\badicion\w*|\bfaltou\b"
     r"|\besqueci\s+de\s+(?:pedir|colocar|por|p[oô]r)"
@@ -4780,19 +4783,23 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             _fora = item_fora_do_cardapio(_texto_cliente)
             if not _fora and bolo_fora_do_cardapio(_texto_cliente):
                 _fora = "bolo"
-        # Sabor que nao existe de um salgado que existe ("50 empadas de
-        # queijo"): o dono (08/10) nao quer equipe nem silencio - avisa, mostra
-        # os sabores e segue o atendimento. O resto da mensagem entra na ficha.
+        # Item fora do cardapio ("50 empadas de queijo", "uma torta"): o dono
+        # (08/10) nao quer equipe nem silencio - avisa, lista os sabores da
+        # categoria e segue o atendimento. O resto da mensagem entra na ficha.
+        # Equipe so se o cliente pedir atendente: ai vale a palavra-chave.
         _sabor_inexistente = None
-        if _fora and _fora != "bolo":
+        if _fora and _check_transfer_keywords(items):
+            _fora = ""
+        if _fora:
             _m_qtd = _re_mod.search(r"(\d+)\s+(?:de\s+)?" + _re_mod.escape(
                 conversation_memory._sem_acento(_fora)),
                 conversation_memory._sem_acento(_texto_cliente))
             _qtd_fora = int(_m_qtd.group(1)) if _m_qtd else 0
             _alts = conversation_memory.alternativas_do_sabor(_fora, _qtd_fora)
             if _alts:
-                _sabor_inexistente = {"qtd": _qtd_fora, "termo": _fora, "opcoes": _alts}
-                print(f"[sabor] user={user} sabor inexistente: {_fora} -> opcoes {_alts}")
+                _sabor_inexistente = {"qtd": _qtd_fora, "termo": _fora, "opcoes": _alts,
+                                      "inexistente": True}
+                print(f"[sabor] user={user} item fora do cardapio: {_fora} -> opcoes {_alts}")
                 _fora = ""
         if _balcao or _fora:
             _nome_b, _texto_b, _equipe_b = (_balcao or ("fora do cardapio",
@@ -4938,11 +4945,15 @@ def _handle_flush(user: str, items: list[dict]) -> None:
         # churros (teste do dono, 06/10 21h15).
         if (_memoria.get("items") and not _memoria.get("pedido_enviado")
                 and _extracted_fresh.get("items")
-                and _RX_SOMA_AO_PEDIDO.search(facts.normalize(text_only or ""))):
+                and (_RX_SOMA_AO_PEDIDO.search(facts.normalize(text_only or ""))
+                     # "tira os quibes e POE 25 coxinhas": o que entra junto
+                     # com uma remocao soma na linha que ja existe (dono, 08/10).
+                     or (_RX_POE_ITEM.search(facts.normalize(text_only or ""))
+                         and conversation_memory._itens_a_tirar(text_only, _memoria["items"])))):
             _somados = [dict(i) for i in _memoria["items"] if isinstance(i, dict)]
             for _novo in _extracted_fresh["items"]:
-                _igual = next((i for i in _somados if facts.normalize(str(i.get("name")))
-                               == facts.normalize(str(_novo.get("name")))), None)
+                _igual = next((i for i in _somados
+                               if conversation_memory._mesmo_item(i, _novo)), None)
                 if _igual:
                     _igual["quantity"] = int(_igual.get("quantity") or 0) + int(_novo.get("quantity") or 0)
                 else:
@@ -4972,6 +4983,17 @@ def _handle_flush(user: str, items: list[dict]) -> None:
         # A escolha do sabor ja aqui: a validacao do horario abaixo responde
         # e encerra a vez, e "troca por empada de frango" se perdia quando o
         # horario do pedido nao cabia (teste do dono, 08/10).
+        # "Quero 50 calzones" em resposta ao aviso: o item ja entrou pela
+        # extracao, com a quantidade dita. Aplicada a escolha tambem, eram 100.
+        _pend = _memoria.get("sabores_pendentes") or []
+        _ja_vieram = [n for n in (_extracted_fresh.get("items") or []) if isinstance(n, dict)]
+        _resolvidas = [p for p in _pend if p.get("inexistente") and any(
+            conversation_memory._mesmo_item(n, {"name": o, "quantity": n.get("quantity")})
+            for n in _ja_vieram for o in p.get("opcoes") or [])]
+        if _resolvidas:
+            _memoria["sabores_pendentes"] = [p for p in _pend if p not in _resolvidas]
+            conversation_memory.save(user, _memoria)
+            print(f"[memoria] {user}: sabor inexistente resolvido pela propria mensagem")
         if _memoria.get("sabores_pendentes"):
             _escolha_cedo = conversation_memory.aplicar_escolha_de_sabor(_memoria, text_only)
             if _escolha_cedo:
@@ -5674,8 +5696,10 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             "passar certinho! 😊' e nada mais sobre o assunto. NUNCA deduza, estime nem "
             "'normalmente indicamos'. Pergunta que voce nao entendeu nao e 'sim'. "
             "Produto que nao esta no cardapio (tortas, itens sazonais, sabor que nao "
-            "existe): NUNCA de negativa seca - diga que vai chamar a equipe para "
-            "verificar a disponibilidade do dia e use transfer_to_human."
+            "existe): NAO chame a equipe. Diga 'Nao temos esse sabor no momento', "
+            "liste os sabores disponiveis da mesma categoria do cardapio e pergunte "
+            "qual o cliente prefere, seguindo o atendimento. transfer_to_human so se "
+            "o cliente pedir expressamente para falar com atendente."
             "\n9.8 FONTE DOS DADOS: produtos, precos, sabores, disponibilidade, taxas de "
             "entrega, horario de atendimento e regras (taxa de retorno, endereco, chave "
             "Pix) vem do CARDAPIO DIGITAL - o bloco 'CARDAPIO DIGITAL' e a linha "

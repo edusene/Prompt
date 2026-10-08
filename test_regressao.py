@@ -2961,15 +2961,34 @@ _ext_emp = _extract_data_from_message("quero 35 coxinhas e 50 empadas de queijo 
                                       ConversationState(phone="x"))
 checa("'50 empadas de queijo' nao vira empada de frango na ficha",
       [i["name"] for i in _ext_emp["items"]] == ["Coxinha"], _ext_emp["items"])
-checa("empada de queijo: opcoes de pacote", memoria_mod.alternativas_do_sabor(
-    "empadas de queijo", 50) == ["Empadinha de Frango"])
-checa("tipo que nao existe continua com a equipe (torta, mini sanduiche)",
-      memoria_mod.alternativas_do_sabor("torta", 25) == []
-      and memoria_mod.alternativas_do_sabor("mini sanduiche", 100) == [])
-_aviso = memoria_mod.aviso_de_sabor_inexistente("empadas de queijo", ["Empadinha de Frango"])
-checa("aviso do dono: 'Nao temos esse sabor... Quer trocar por qual?'",
-      _aviso.startswith("Não temos esse sabor, os disponíveis são:\n• Empadinha de Frango")
-      and "Quer trocar por qual?" in _aviso)
+_alt_emp = memoria_mod.alternativas_do_sabor("empadas de queijo", 50)
+checa("empada de queijo: lista os assados de festa",
+      "Empadinha de Frango" in _alt_emp and "Esfirra de Carne" in _alt_emp
+      and "Coxinha frango" not in _alt_emp, _alt_emp)
+checa("coxinha de carne: lista os fritos",
+      memoria_mod._rotulo_das_opcoes(memoria_mod.alternativas_do_sabor("coxinha de carne", 100))
+      == "fritos")
+checa("tipo que nao existe (torta, mini sanduiche) tambem tem opcoes, sem equipe",
+      memoria_mod.alternativas_do_sabor("torta", 25)
+      and memoria_mod.alternativas_do_sabor("mini sanduiche", 100))
+checa("bolo que nao existe lista os bolos e doces",
+      "Bolo de Milho" in memoria_mod.alternativas_do_sabor("bolo de chocolate", 1))
+_aviso = memoria_mod.aviso_de_sabor_inexistente("empadas de queijo", _alt_emp)
+checa("aviso do dono: 'Nao temos esse sabor no momento. Nossos assados...'",
+      _aviso.startswith("Não temos esse sabor no momento. Nossos assados disponíveis são:\n• ")
+      and _aviso.endswith("Qual você prefere? 😊"), _aviso)
+checa("item que nao existe: 'Nao temos esse item'",
+      memoria_mod.aviso_de_sabor_inexistente(
+          "torta", memoria_mod.alternativas_do_sabor("torta", 0)).startswith("Não temos esse item"))
+checa("'tira a esfirra' sem esfirra na ficha nao apaga o carrinho",
+      _tira("na verdade tira a esfirra e coloca 25 coxinhas",
+            [{"name": "Pastel Carne", "quantity": 100}]) == [("Pastel Carne", 100), ("Coxinha", 25)],
+      _tira("na verdade tira a esfirra e coloca 25 coxinhas", [{"name": "Pastel Carne", "quantity": 100}]))
+checa("'tira tudo e coloca 50 coxinhas' troca o pedido",
+      _tira("tira tudo e coloca 50 coxinhas") == [("Coxinha", 50)])
+checa("'poe' junto com 'tira' soma na linha existente",
+      bool(app._RX_POE_ITEM.search(facts.normalize("tira os quibes e poe 25 coxinhas")))
+      and not app._RX_POE_ITEM.search(facts.normalize("50 coxinhas por favor")))
 _f_emp = dict(memoria_mod._empty(), items=[{"name": "Coxinha", "quantity": 35}],
               sabores_pendentes=[{"qtd": 50, "termo": "empadas de queijo",
                                   "opcoes": ["Empadinha de Frango"]}])

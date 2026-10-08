@@ -269,43 +269,96 @@ def _itens_a_tirar(texto: str, atuais: list) -> list:
     return tirar
 
 
-def alternativas_do_sabor(item_pedido: str, quantidade: int = 0) -> list[str]:
-    """Os produtos do cardapio do mesmo tipo do sabor que nao existe.
+def _pede_tirar_produto(texto: str) -> bool:
+    """"tira a coca", "remove os quibes": o cliente mandou tirar UM produto.
 
-    "empadas de queijo" -> Empadinha de Frango. Festa (25 ou mais) oferece os
-    sabores de pacote; abaixo disso, os salgados grandes. [] quando o tipo nao
-    existe no cardapio (torta, sanduiche): ai e item fora do cardapio.
+    Mesmo que ele nao esteja na ficha, nao e troca do pedido inteiro: o "tira"
+    sem item correspondente apagava o carrinho todo (pedido do dono, 08/10).
+    "Tira tudo" e "retirar amanha" (retirada) nao contam.
+    """
+    try:
+        from agents.conversation import _produto_conhecido
+    except Exception:
+        return False
+    for m in _RX_TIRA_ITEM.finditer(_sem_acento(texto or "")):
+        verbo = m.group(0).split()[0]
+        if not verbo.startswith(("tir", "retir", "remov", "exclu", "cancel")):
+            continue
+        if m.group(1).split()[0] in ("tudo", "pedido"):
+            continue
+        if _produto_conhecido(m.group(1)):
+            return True
+    return False
+
+
+# Categorias de salgado que entram na lista de opcoes do sabor que nao existe.
+_CATEGORIAS_DE_SALGADO = ("fritos", "assados", "salgados grandes")
+
+
+def alternativas_do_sabor(item_pedido: str, quantidade: int = 0) -> list[str]:
+    """Os sabores da mesma categoria do que o cliente pediu e nao existe.
+
+    "50 empadas de queijo" -> os assados de festa (a empada e assada). Festa
+    (25 ou mais, ou sem quantidade) oferece os sabores de pacote; abaixo de 25,
+    os salgados grandes. Tipo que o cardapio nao tem (torta, sanduiche): os
+    fritos e assados de festa. Bolo: os bolos e doces. Pedido do dono (08/10):
+    o bot contorna sozinho, sem chamar a equipe.
     """
     try:
         import facts
         from agents.conversation import _forma_de_busca
-        palavras = [w for w in _forma_de_busca(item_pedido or "").split()
-                    if w not in ("mini", "grande", "salgado", "salgadinho")]
-        base = palavras[0][:5] if palavras else ""
-        if base in ("past", "pate"):
-            base = "paste"
-        if not base:
-            return []
-        candidatos = [p for p in facts.get()["produtos"]
-                      if p.get("disponivel", True)
-                      and _sem_acento(p["categoria"]) not in ("combos", "bolos e doces", "bebidas")
-                      and _forma_de_busca(p["item"]).split()[0].startswith(base[:4])]
+        produtos = [p for p in facts.get()["produtos"] if p.get("disponivel", True)]
     except Exception:
         return []
-    pacote = [p["item"] for p in candidatos if p.get("preco") is None]
-    grandes = [p["item"] for p in candidatos if p.get("preco") is not None
+    if _sem_acento(item_pedido or "").startswith("bolo"):
+        return list(dict.fromkeys(p["item"] for p in produtos
+                                  if _sem_acento(p["categoria"]) == "bolos e doces"))
+    salgados = [p for p in produtos if _sem_acento(p["categoria"]) in _CATEGORIAS_DE_SALGADO]
+    pacote = [p for p in salgados if p.get("preco") is None]
+    grandes = [p for p in salgados if p.get("preco") is not None
                and _sem_acento(p["categoria"]) == "salgados grandes"]
-    if quantidade >= 25 and pacote:
-        return list(dict.fromkeys(pacote))
-    if grandes:
-        return list(dict.fromkeys(grandes))
-    return list(dict.fromkeys(pacote))
+    palavras = [w for w in _forma_de_busca(item_pedido or "").split()
+                if w not in ("mini", "grande", "salgado", "salgadinho")]
+    base = palavras[0][:5] if palavras else ""
+    if base in ("past", "pate"):
+        base = "paste"
+    if 0 < quantidade < 25:
+        return list(dict.fromkeys(p["item"] for p in grandes))
+    mesma_base = [p for p in pacote if base
+                  and _forma_de_busca(p["item"]).split()[0].startswith(base[:4])]
+    categorias = {_sem_acento(p["categoria"]) for p in mesma_base}
+    return list(dict.fromkeys(p["item"] for p in pacote
+                              if not categorias or _sem_acento(p["categoria"]) in categorias))
+
+
+def _rotulo_das_opcoes(opcoes: list[str]) -> str:
+    """"assados", "fritos", "salgados grandes", "bolos e doces" ou "salgados"."""
+    try:
+        import facts
+        # A categoria comum a TODAS as opcoes: Quibe e Rissole tambem existem
+        # como salgado grande, e a lista dos fritos saia como "salgados".
+        produtos = facts.get()["produtos"]
+        categorias = None
+        for opcao in opcoes:
+            suas = {_sem_acento(p["categoria"]) for p in produtos if p["item"] == opcao}
+            categorias = suas if categorias is None else categorias & suas
+        categorias = categorias or set()
+    except Exception:
+        categorias = set()
+    return categorias.pop() if len(categorias) == 1 else "salgados"
 
 
 def aviso_de_sabor_inexistente(item_pedido: str, opcoes: list[str]) -> str:
     """Texto do dono (08/10): avisa, mostra as opcoes e segue o atendimento."""
-    return ("Não temos esse sabor, os disponíveis são:\n"
-            + "\n".join(f"• {o}" for o in opcoes) + "\nQuer trocar por qual? 😊")
+    try:
+        from agents.conversation import _produto_conhecido
+        tipo_existe = bool(_produto_conhecido(item_pedido or ""))
+    except Exception:
+        tipo_existe = True
+    esse = "esse sabor" if tipo_existe else "esse item"
+    return (f"Não temos {esse} no momento. Nossos {_rotulo_das_opcoes(opcoes)} "
+            f"disponíveis são:\n" + "\n".join(f"• {o}" for o in opcoes)
+            + "\nQual você prefere? 😊")
 
 
 def _mesmo_item(a: dict, b: dict) -> bool:
@@ -360,7 +413,8 @@ def merge(memoria: dict, extraido: dict, novo_da_mensagem: dict | None = None,
         itens_novos = [n for n in (itens_novos or []) if isinstance(n, dict)
                        and not any(_mesmo_item(n, r) for r in removidos)]
     if itens_novos and itens_novos != memoria.get("items") and atuais \
-            and (removidos or not _RX_TROCA_O_PEDIDO.search(_sem_acento(texto))):
+            and (removidos or _pede_tirar_produto(texto)
+                 or not _RX_TROCA_O_PEDIDO.search(_sem_acento(texto))):
         # Lista CUMULATIVA (pedido do dono, 07/10): item citado de novo tem a
         # quantidade atualizada, item novo entra, e o que nao foi citado FICA.
         # Antes a mensagem com itens trocava o pedido inteiro: "Sim, ajusta para
