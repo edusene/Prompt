@@ -1764,7 +1764,7 @@ _F_DOCE = dict(memoria_mod._empty(), items=[{"name": "Churros", "quantity": 50}]
                sabores_pendentes=_cv_0110.doces_citados("opa quero beijinho")[1])
 _P_DOCE = memoria_mod.pergunta_bloqueante(_F_DOCE)
 checa("beijinho: avisa a falta e oferece os formatos de brigadeiro",
-      _P_DOCE.startswith("O Beijinho está em falta hoje! Qual docinho você prefere:")
+      _P_DOCE.startswith("O Beijinho está em falta hoje! Qual docinho você prefere?")
       and "Meio Cento de Brigadeiros (50 un)" in _P_DOCE, _P_DOCE)
 memoria_mod.aplicar_escolha_de_sabor(_F_DOCE, "meio cento")
 checa("'meio cento' responde a pergunta do doce",
@@ -2901,6 +2901,87 @@ checa("'qual preco de meio cento?' depois do canudinho: R$ 60,00",
           anterior="O cento de Canudinho de Frango sai R$ 120,00."))
 checa("envio usa os valores do codigo (nao o preco do modelo)",
       "envio com os valores do codigo" in open("app.py", encoding="utf-8").read())
+print()
+print("--- Dono 08/10: opcoes na pergunta dos sabores, listas uma por linha")
+_fv8 = memoria_mod._frase_do_volume({"volume_pendente": 100, "preparo_pendente": "assado"})[0]
+checa("'Escolha ate 4 sabores assados' ja traz as opcoes, uma por linha",
+      _fv8.startswith("Escolha até 4 sabores assados (25 de cada):\n• ")
+      and "\n• Pão Pizza" in _fv8 and _fv8.endswith("Quais você quer? 😊"), _fv8)
+_fv8f = memoria_mod._frase_do_volume({"volume_pendente": 200, "preparo_pendente": "frito"})[0]
+checa("fritos: so os fritos do cardapio", "• Coxinha frango" in _fv8f and "Esfirra" not in _fv8f, _fv8f)
+_lst = app._listas_em_linhas("Os sabores assados são: Esfirra de Carne, Pão Pizza e Canudinho de Camarão.")
+checa("lista do modelo com virgulas vira uma por linha",
+      _lst == "Os sabores assados são:\n• Esfirra de Carne\n• Pão Pizza\n• Canudinho de Camarão", _lst)
+checa("frase comum com virgula nao vira lista",
+      app._listas_em_linhas("Aceitamos Pix, cartão ou dinheiro. 😊") == "Aceitamos Pix, cartão ou dinheiro. 😊")
+checa("espelho nao e mexido",
+      app._listas_em_linhas("Cliente: X\nItens:\n• 25 un - A — R$ 20,00\n💰 Total: R$ 20,00")
+      == "Cliente: X\nItens:\n• 25 un - A — R$ 20,00\n💰 Total: R$ 20,00")
+print()
+print("--- Dono 08/10: 'tira X' remove so o item citado")
+_carr = [{"name": "Esfirra de Carne", "quantity": 30, "price": 1.2},
+         {"name": "Pastel Carne", "quantity": 100, "price": 0.8}]
+
+
+def _tira(texto, itens=None):
+    _f = dict(memoria_mod._empty(), items=[dict(i) for i in (itens or _carr)])
+    _novo = _extract_data_from_message(texto.lower(), ConversationState(phone="x"))
+    memoria_mod.merge(_f, {}, _novo, texto=texto)
+    return [(i["name"], i["quantity"]) for i in _f["items"]]
+
+
+checa("'Na verdade tira as esfirras e coloca 25 coxinhas' mantem os pasteis",
+      _tira("Na verdade tira as esfirras e coloca 25 coxinhas") == [("Pastel Carne", 100), ("Coxinha", 25)],
+      _tira("Na verdade tira as esfirras e coloca 25 coxinhas"))
+checa("'tira os pasteis' tira so os pasteis", _tira("tira os pasteis") == [("Esfirra de Carne", 30)])
+checa("'em vez da esfirra coloca 50 quibes'",
+      _tira("em vez da esfirra coloca 50 quibes") == [("Pastel Carne", 100), ("Quibe", 50)])
+checa("'vou retirar amanha' nao tira nada (retirada)",
+      _tira("vou retirar amanha as 10h") == [("Esfirra de Carne", 30), ("Pastel Carne", 100)])
+checa("'tira a coca' tira o refrigerante (pelo sabor)",
+      _tira("tira a coca", [{"name": "Coxinha", "quantity": 50},
+                            {"name": "Refrigerante 2 Litros", "quantity": 1, "sabor": "Coca cola"}])
+      == [("Coxinha", 50)])
+checa("'na verdade quero 50 kibes' (sem tira) ainda troca o pedido",
+      _tira("na verdade quero 50 kibes") == [("Quibe", 50)])
+print("--- Dono 08/10: sabor que nao existe, 'tira X e poe Y'")
+_carr2 = [{"name": "Coxinha", "quantity": 50}, {"name": "Quibe", "quantity": 25},
+          {"name": "Enroladinho de salsicha com Catupiry", "quantity": 25}]
+checa("'tira so os quibes e coloca mais 25 coxinhas' tira o quibe e mantem o enroladinho",
+      [n for n, _ in _tira("Na verdade tira só os quibes e coloca mais 25 coxinhas", _carr2)]
+      == ["Coxinha", "Enroladinho de salsicha com Catupiry"],
+      _tira("Na verdade tira só os quibes e coloca mais 25 coxinhas", _carr2))
+checa("'coloca mais 25' cai na soma ao pedido aberto",
+      bool(app._RX_SOMA_AO_PEDIDO.search(facts.normalize("coloca mais 25 coxinhas"))))
+checa("enroladinho de salsicha com catupiry e o assado",
+      [i["name"] for i in _extract_data_from_message(
+          "25 enroladinhos de salsicha com catupiry", ConversationState(phone="x"))["items"]]
+      == ["Enroladinho de salsicha com Catupiry"])
+_ext_emp = _extract_data_from_message("quero 35 coxinhas e 50 empadas de queijo pra amanha",
+                                      ConversationState(phone="x"))
+checa("'50 empadas de queijo' nao vira empada de frango na ficha",
+      [i["name"] for i in _ext_emp["items"]] == ["Coxinha"], _ext_emp["items"])
+checa("empada de queijo: opcoes de pacote", memoria_mod.alternativas_do_sabor(
+    "empadas de queijo", 50) == ["Empadinha de Frango"])
+checa("tipo que nao existe continua com a equipe (torta, mini sanduiche)",
+      memoria_mod.alternativas_do_sabor("torta", 25) == []
+      and memoria_mod.alternativas_do_sabor("mini sanduiche", 100) == [])
+_aviso = memoria_mod.aviso_de_sabor_inexistente("empadas de queijo", ["Empadinha de Frango"])
+checa("aviso do dono: 'Nao temos esse sabor... Quer trocar por qual?'",
+      _aviso.startswith("Não temos esse sabor, os disponíveis são:\n• Empadinha de Frango")
+      and "Quer trocar por qual?" in _aviso)
+_f_emp = dict(memoria_mod._empty(), items=[{"name": "Coxinha", "quantity": 35}],
+              sabores_pendentes=[{"qtd": 50, "termo": "empadas de queijo",
+                                  "opcoes": ["Empadinha de Frango"]}])
+memoria_mod.aplicar_escolha_de_sabor(_f_emp, "Troca por empada de frango então")
+checa("'troca por empada de frango' entra com a quantidade pedida",
+      [(i["name"], i["quantity"]) for i in _f_emp["items"]]
+      == [("Coxinha", 35), ("Empadinha de Frango", 50)] and not _f_emp["sabores_pendentes"])
+_dup = app._conferir_etapa_travada(
+    "55", "Boa tarde! Eu sou a Sandrinha da BALBS 💛 Fazemos de 25 em 25 por sabor!",
+    dict(memoria_mod._empty(), items=[{"name": "Coxinha", "quantity": 50},
+                                      {"name": "Empadinha de Frango", "quantity": 30}]))
+checa("'Fazemos de 25 em 25' nao sai duas vezes", _dup.count("Fazemos de 25") == 1, _dup)
 checa("'amnha' e amanha", horario.resolver_data("amnha") == horario.agora().date()
       + __import__("datetime").timedelta(days=1))
 checa("repergunta mantem a resposta quando o cliente perguntou",

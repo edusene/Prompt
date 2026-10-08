@@ -234,6 +234,80 @@ _RX_TROCA_O_PEDIDO = _re.compile(
     r"|somente|apenas|esquece\w*|tira\w*|retira\w*|mud\w*\s+(?:o\s+)?pedido|refaz\w*)\b")
 
 
+# "tira as esfirras", "retira os 30 pasteis", "sem a coca", "em vez da esfirra".
+_RX_TIRA_ITEM = _re.compile(
+    r"\b(?:tira|tirar|tire|retira|retirar|retire|remove|remover|exclui|excluir|cancela|cancelar"
+    r"|sem|em\s+vez\s+d[eoa]s?|ao\s+inves\s+d[eoa]s?)\s+"
+    # "tira SO os quibes" (teste do dono, 08/10 12h39)
+    r"(?:(?:so|somente|apenas)\s+)?"
+    r"(?:o\s+|a\s+|os\s+|as\s+|aquel[ea]s?\s+|tod[oa]s\s+(?:os\s+|as\s+)?)?(?:\d+\s+)?(?:de\s+)?"
+    r"([a-z]{4,}(?:\s+de\s+[a-z]{4,})?)")
+
+
+def _itens_a_tirar(texto: str, atuais: list) -> list:
+    """Itens da ficha que o cliente mandou tirar - so os citados."""
+    if not texto or not atuais:
+        return []
+    try:
+        from agents.conversation import _forma_de_busca
+    except Exception:
+        return []
+    alvos = [_forma_de_busca(m.group(1)) for m in _RX_TIRA_ITEM.finditer(_sem_acento(texto))]
+    tirar = []
+    for alvo in alvos:
+        palavras = [w[:5] for w in alvo.split() if len(w) >= 4 and w != "de"]
+        if not palavras:
+            continue
+        for item in atuais:
+            # O sabor conta: "tira a coca" e o Refrigerante 2 Litros (Coca cola).
+            nome = _forma_de_busca(f"{item.get('name', '')} {item.get('sabor') or ''}")
+            # Todas as palavras do que foi dito batem com o item ("esfirra de
+            # carne" tira so a de carne; "esfirras" tira a esfirra).
+            if all(any(w.startswith(p) for w in nome.split()) for p in palavras) \
+                    and item not in tirar:
+                tirar.append(item)
+    return tirar
+
+
+def alternativas_do_sabor(item_pedido: str, quantidade: int = 0) -> list[str]:
+    """Os produtos do cardapio do mesmo tipo do sabor que nao existe.
+
+    "empadas de queijo" -> Empadinha de Frango. Festa (25 ou mais) oferece os
+    sabores de pacote; abaixo disso, os salgados grandes. [] quando o tipo nao
+    existe no cardapio (torta, sanduiche): ai e item fora do cardapio.
+    """
+    try:
+        import facts
+        from agents.conversation import _forma_de_busca
+        palavras = [w for w in _forma_de_busca(item_pedido or "").split()
+                    if w not in ("mini", "grande", "salgado", "salgadinho")]
+        base = palavras[0][:5] if palavras else ""
+        if base in ("past", "pate"):
+            base = "paste"
+        if not base:
+            return []
+        candidatos = [p for p in facts.get()["produtos"]
+                      if p.get("disponivel", True)
+                      and _sem_acento(p["categoria"]) not in ("combos", "bolos e doces", "bebidas")
+                      and _forma_de_busca(p["item"]).split()[0].startswith(base[:4])]
+    except Exception:
+        return []
+    pacote = [p["item"] for p in candidatos if p.get("preco") is None]
+    grandes = [p["item"] for p in candidatos if p.get("preco") is not None
+               and _sem_acento(p["categoria"]) == "salgados grandes"]
+    if quantidade >= 25 and pacote:
+        return list(dict.fromkeys(pacote))
+    if grandes:
+        return list(dict.fromkeys(grandes))
+    return list(dict.fromkeys(pacote))
+
+
+def aviso_de_sabor_inexistente(item_pedido: str, opcoes: list[str]) -> str:
+    """Texto do dono (08/10): avisa, mostra as opcoes e segue o atendimento."""
+    return ("Não temos esse sabor, os disponíveis são:\n"
+            + "\n".join(f"• {o}" for o in opcoes) + "\nQuer trocar por qual? 😊")
+
+
 def _mesmo_item(a: dict, b: dict) -> bool:
     """O mesmo produto da ficha, mesmo com o nome escrito de outro jeito."""
     na, nb = _sem_acento(str(a.get("name"))), _sem_acento(str(b.get("name")))
@@ -275,8 +349,18 @@ def merge(memoria: dict, extraido: dict, novo_da_mensagem: dict | None = None,
 
     itens_novos = (novo_da_mensagem or {}).get("items")
     atuais = [i for i in (memoria.get("items") or []) if isinstance(i, dict)]
+    # "Na verdade tira as esfirras e coloca 25 coxinhas": sai SO o item citado
+    # e o resto do carrinho fica. Antes o "tira" trocava o pedido inteiro e os
+    # 100 pasteis sumiram junto (pedido do dono, 08/10).
+    removidos = _itens_a_tirar(texto, atuais)
+    if removidos:
+        atuais = [i for i in atuais if i not in removidos]
+        memoria["items"] = atuais
+        mudancas.append(f"tirados: {[i.get('name') for i in removidos]}")
+        itens_novos = [n for n in (itens_novos or []) if isinstance(n, dict)
+                       and not any(_mesmo_item(n, r) for r in removidos)]
     if itens_novos and itens_novos != memoria.get("items") and atuais \
-            and not _RX_TROCA_O_PEDIDO.search(_sem_acento(texto)):
+            and (removidos or not _RX_TROCA_O_PEDIDO.search(_sem_acento(texto))):
         # Lista CUMULATIVA (pedido do dono, 07/10): item citado de novo tem a
         # quantidade atualizada, item novo entra, e o que nao foi citado FICA.
         # Antes a mensagem com itens trocava o pedido inteiro: "Sim, ajusta para
@@ -2084,21 +2168,47 @@ def _frase_do_volume(memoria: dict) -> tuple[str, str]:
     # O modelo escrevia "Para 100 salgados sao 4 porcoes de 25 unidades
     # cada! Voce pode escolher ate 4 sabores diferentes e o preparo...".
     _plural = "sabor" if _quantos == 1 else "sabores"
+    # As opcoes ja vem na pergunta, uma embaixo da outra (pedido do dono,
+    # 08/10): o cliente tinha de perguntar "quais sabores voces tem?".
+    _fritos, _assados = _sabores_do_pacote("fritos"), _sabores_do_pacote("assados")
     if _preparo == "misto":
         _frase = (f"Escolha até {_quantos} {_plural} (25 de cada), entre fritos "
-                  f"e assados. Quais você quer? 😊")
+                  f"e assados:\n" + _lista_em_linhas(_fritos, "Fritos")
+                  + "\n" + _lista_em_linhas(_assados, "Assados") + "\nQuais você quer? 😊")
         _extra = (" O cliente JA disse que quer fritos E assados. E PROIBIDO "
                   "dividir o total em metade de cada por conta propria.")
     elif _preparo:
-        _frase = (f"Escolha até {_quantos} {_plural} {_preparo}s (25 de cada). "
-                  f"Quais você quer? 😊")
+        _lista = _fritos if _preparo == "frito" else _assados
+        _frase = (f"Escolha até {_quantos} {_plural} {_preparo}s (25 de cada):\n"
+                  + _lista_em_linhas(_lista) + "\nQuais você quer? 😊")
         _extra = (f" O cliente JA disse que e {_preparo}: e PROIBIDO perguntar o "
                   f"preparo de novo.")
     else:
-        _frase = (f"Escolha até {_quantos} {_plural} (25 de cada). Quais sabores, "
-                  f"e é frito ou assado? 😊")
+        _frase = (f"Escolha até {_quantos} {_plural} (25 de cada):\n"
+                  + _lista_em_linhas(_fritos, "Fritos") + "\n"
+                  + _lista_em_linhas(_assados, "Assados")
+                  + "\nQuais sabores, e é frito ou assado? 😊")
         _extra = ""
-    return _frase, _extra
+    return _frase.replace("\n\n", "\n"), _extra
+
+
+def _sabores_do_pacote(categoria: str) -> list[str]:
+    """Sabores de pacote disponiveis no cardapio ('fritos' ou 'assados')."""
+    try:
+        import facts
+        return [p["item"] for p in facts.get()["produtos"]
+                if _sem_acento(p["categoria"]) == categoria
+                and p.get("preco") is None and p.get("disponivel", True)]
+    except Exception:
+        return []
+
+
+def _lista_em_linhas(nomes: list[str], titulo: str = "") -> str:
+    """Um por linha, para ler no celular (pedido do dono, 08/10)."""
+    if not nomes:
+        return ""
+    linhas = "\n".join(f"• {n}" for n in nomes)
+    return f"{titulo}:\n{linhas}" if titulo else linhas
 
 
 def sabor_de_bebida_pendente(memoria: dict) -> tuple[str, list[str]]:
@@ -2129,12 +2239,13 @@ def pergunta_do_doce(pendente: dict) -> str:
         partes = []
         for nome in pendente.get("opcoes") or []:
             oficial = facts.resolve_unit_price(nome, 1)
-            partes.append(f"{nome} {_brl(oficial['preco_unitario'])}" if oficial else nome)
+            partes.append(f"{nome} — {_brl(oficial['preco_unitario'])}" if oficial else nome)
     except Exception:
         partes = list(pendente.get("opcoes") or [])
     aviso = (f"O {pendente['em_falta']} está em falta hoje! "
              if pendente.get("em_falta") else "")
-    return f"{aviso}Qual docinho você prefere: {_lista_com_ou(partes)}? 🍬"
+    # Um por linha (pedido do dono, 08/10).
+    return f"{aviso}Qual docinho você prefere?\n" + "\n".join(f"• {p}" for p in partes) + " 🍬"
 
 
 def pergunta_do_sabor_da_bebida(memoria: dict) -> str:
@@ -2231,16 +2342,13 @@ def pergunta_bloqueante(memoria: dict, agora=None) -> str:
     if sabor_bebida and not pendentes:
         return sabor_bebida
     if pendentes:
-        partes = []
+        # As opcoes uma embaixo da outra (pedido do dono, 08/10).
+        blocos = []
         for p in pendentes:
             opcoes = (p.get("opcoes") or [])
-            if len(opcoes) > 1:
-                texto = ", ".join(opcoes[:-1]) + " ou " + opcoes[-1]
-            else:
-                texto = opcoes[0] if opcoes else ""
-            partes.append(f"{p.get('qtd')} de {p.get('termo')} ({texto})")
-        # "dos", nao "de os": a frase sai para o cliente.
-        return f"Me confirma o sabor dos {'; '.join(partes)}? 😊"
+            blocos.append(f"{p.get('qtd')} de {p.get('termo')}:\n"
+                          + "\n".join(f"• {o}" for o in opcoes))
+        return "Me confirma o sabor:\n" + "\n".join(blocos) + "\nQual você quer? 😊"
 
     frase = _frase_de_lote(memoria)
     if frase:

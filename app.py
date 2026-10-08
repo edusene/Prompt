@@ -718,6 +718,35 @@ _RX_FRASE_COM_ROBO = _re_mod.compile(r"[^.!?\n]*\brob[oô]s?\b[^.!?\n]*[.!?]?\s*
                                      _re_mod.IGNORECASE)
 
 
+# "Os sabores assados sao: Esfirra de Carne, Enroladinho..., Calzone... e
+# Canudinho de Camarao." -> um por linha (pedido do dono, 08/10: ler no
+# celular). So quando a frase anuncia a lista com ":" e tem 3 itens ou mais.
+_RX_LISTA_NA_LINHA = _re_mod.compile(
+    r"^(?P<cab>[^\n:]{3,90}:)[ \t]*(?P<itens>[^\n:]+?)(?P<fim>[.!]?[ \t]*(?:[😊🍬🥤💛]\s*)?)$",
+    _re_mod.MULTILINE)
+
+
+def _listas_em_linhas(reply: str) -> str:
+    if not reply or _RX_LINHA_DE_RESUMO.search(reply):
+        return reply
+
+    def _troca(m):
+        itens_txt = m.group("itens").strip()
+        if "?" in itens_txt:
+            return m.group(0)
+        partes = [p.strip() for p in _re_mod.split(r",\s*", itens_txt) if p.strip()]
+        if partes:
+            # O ultimo vem com "e"/"ou": "Pao Pizza e Canudinho", "quibe e outros".
+            ultimo = _re_mod.split(r"\s+(?:e|ou)\s+", partes[-1])
+            partes = partes[:-1] + [u.strip() for u in ultimo if u.strip()]
+        if len(partes) < 3 or any(len(p) > 60 for p in partes):
+            return m.group(0)
+        return m.group("cab") + "\n" + "\n".join(f"• {p}" for p in partes) + (
+            (" " + m.group("fim").strip(" .!\t")) if m.group("fim").strip(" .!\t") else "")
+
+    return _RX_LISTA_NA_LINHA.sub(_troca, reply)
+
+
 def _sem_palavra_proibida(reply: str) -> str:
     if not reply:
         return reply
@@ -971,11 +1000,10 @@ def _sabores_de(pergunta: str) -> str:
     so_grande = not so_mini and bool(_re_mod.search(r"\bgrandes?\b|\blanche\b", t))
     linhas = []
     if mini and not so_grande:
-        linhas.append("• Mini (festa): " + " e ".join([", ".join(mini[:-1]), mini[-1]]
-                                                      if len(mini) > 1 else mini))
+        # Um por linha, para ler no celular (pedido do dono, 08/10).
+        linhas.append("Mini (festa):\n" + "\n".join(f"• {n}" for n in mini))
     if grande and not so_mini:
-        linhas.append("• Grande (lanche): " + " e ".join([", ".join(grande[:-1]), grande[-1]]
-                                                          if len(grande) > 1 else grande))
+        linhas.append("Grande (lanche):\n" + "\n".join(f"• {n}" for n in grande))
     if not linhas:
         return ""
     return f"De {termo} temos:\n" + "\n".join(linhas) + " 😊"
@@ -3920,6 +3948,20 @@ def _conferir_etapa_travada(user: str, reply: str, memoria: dict) -> str:
     # a saudacao (teste do dono, 06/10: "2 centos de salgados" sem a pergunta
     # dos sabores).
     ja_cobriu = conversation_memory.etapa_coberta(memoria, corpo)
+    if not ja_cobriu:
+        # Frase que a pergunta do codigo ja diz inteira: "Fazemos de 25 em 25
+        # por sabor!" saia duas vezes seguidas (teste do dono, 08/10).
+        _norm_travada = f" {facts.normalize(travada)} "
+        _sem_repetir = [f for f in _RX_FIM_DE_FRASE.split(corpo)
+                        if f.strip() and f" {facts.normalize(f).strip()} " not in _norm_travada]
+        corpo = " ".join(f.strip() for f in _sem_repetir).strip()
+        # Colada na saudacao ("...da BALBS 💛 Fazemos de 25 em 25 por
+        # sabor!") a frase nao se separa: sai pelo texto literal.
+        for _frase_t in _RX_FIM_DE_FRASE.split(travada):
+            _frase_t = _frase_t.strip()
+            if len(_frase_t) >= 12 and _frase_t.endswith(("!", ".")):
+                corpo = _re_mod.sub(r"\s*" + _re_mod.escape(_frase_t), "", corpo,
+                                    flags=_re_mod.IGNORECASE).strip()
     if len([c for c in corpo if c.isalpha()]) < 12:
         novo = travada
     elif ja_cobriu:
@@ -4738,6 +4780,20 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             _fora = item_fora_do_cardapio(_texto_cliente)
             if not _fora and bolo_fora_do_cardapio(_texto_cliente):
                 _fora = "bolo"
+        # Sabor que nao existe de um salgado que existe ("50 empadas de
+        # queijo"): o dono (08/10) nao quer equipe nem silencio - avisa, mostra
+        # os sabores e segue o atendimento. O resto da mensagem entra na ficha.
+        _sabor_inexistente = None
+        if _fora and _fora != "bolo":
+            _m_qtd = _re_mod.search(r"(\d+)\s+(?:de\s+)?" + _re_mod.escape(
+                conversation_memory._sem_acento(_fora)),
+                conversation_memory._sem_acento(_texto_cliente))
+            _qtd_fora = int(_m_qtd.group(1)) if _m_qtd else 0
+            _alts = conversation_memory.alternativas_do_sabor(_fora, _qtd_fora)
+            if _alts:
+                _sabor_inexistente = {"qtd": _qtd_fora, "termo": _fora, "opcoes": _alts}
+                print(f"[sabor] user={user} sabor inexistente: {_fora} -> opcoes {_alts}")
+                _fora = ""
         if _balcao or _fora:
             _nome_b, _texto_b, _equipe_b = (_balcao or ("fora do cardapio",
                                                         _texto_fora_do_cardapio(_fora), True))
@@ -4773,6 +4829,13 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                 and _re_mod.search(r"gerente|supervisor|atend|human|alguem|alguém|pessoa", matched_kw)):
             print(f"[flush] user={user} '{matched_kw}' num pedido de desconto: sem "
                   f"transferencia (BLOCO 6)")
+            matched_kw = None
+        # "cancela as esfirras" com o pedido aberto e tirar UM item (o merge
+        # faz isso), nao cancelar o pedido com a equipe (dono, 08/10).
+        if (matched_kw and "cancel" in str(matched_kw)
+                and _memoria_balcao.get("items") and not _memoria_balcao.get("pedido_enviado")
+                and conversation_memory._itens_a_tirar(_texto_cliente, _memoria_balcao["items"])):
+            print(f"[flush] user={user} 'cancelar' de um item do pedido aberto: so tira o item")
             matched_kw = None
         if matched_kw:
             print(f"[flush] user={user} keyword de transferência detectada: '{matched_kw}'")
@@ -4890,6 +4953,30 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                   f"{[(i.get('name'), i.get('quantity')) for i in _somados]}")
         _memoria, _mudancas = conversation_memory.merge(_memoria, _extracted, _extracted_fresh,
                                                         texto=text_only)
+        if _sabor_inexistente:
+            _memoria["sabores_pendentes"] = [
+                p for p in (_memoria.get("sabores_pendentes") or [])
+                if p.get("termo") != _sabor_inexistente["termo"]] + [_sabor_inexistente]
+            conversation_memory.capturar_numero_da_casa(_memoria, text_only)
+            _abertura = ""
+            if not _memoria.get("saudacao_feita"):
+                _nome = f", {_memoria['name']}" if _memoria.get("name") else ""
+                _abertura = (f"{horario.saudacao(horario.agora())}{_nome}! "
+                             f"Eu sou a Sandrinha da BALBS 💛 ")
+            _memoria["saudacao_feita"] = True
+            conversation_memory.save(user, _memoria)
+            print(f"[memoria] {user}: sabor inexistente pendente -> {_sabor_inexistente}")
+            _responder_direto(user, items, _abertura + conversation_memory.aviso_de_sabor_inexistente(
+                _sabor_inexistente["termo"], _sabor_inexistente["opcoes"]), _chegada)
+            return
+        # A escolha do sabor ja aqui: a validacao do horario abaixo responde
+        # e encerra a vez, e "troca por empada de frango" se perdia quando o
+        # horario do pedido nao cabia (teste do dono, 08/10).
+        if _memoria.get("sabores_pendentes"):
+            _escolha_cedo = conversation_memory.aplicar_escolha_de_sabor(_memoria, text_only)
+            if _escolha_cedo:
+                conversation_memory.save(user, _memoria)
+                print(f"[memoria] {user}: sabor escolhido -> {'; '.join(_escolha_cedo)}")
 
         # Bairro ou rua na ficha, com itens pedidos, e entrega: ninguem da o
         # proprio endereco para buscar no balcao. Sem isto a conversa travava
@@ -5594,6 +5681,9 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             "Pix) vem do CARDAPIO DIGITAL - o bloco 'CARDAPIO DIGITAL' e a linha "
             "'Expediente' acima, atualizados a cada mensagem. Se algum numero escrito "
             "nas instrucoes do dono for diferente desses dados, VALE O DO CARDAPIO."
+            "\n9.8.1 LISTAS (dono, 08/10): ao listar produtos, sabores ou opcoes, "
+            "UM POR LINHA com '•' - nunca separados por virgula na mesma linha. Ao "
+            "pedir para o cliente escolher sabores, ja mostre as opcoes do cardapio."
             "\n9.9 VOCABULARIO (dono): e terminantemente proibido usar as palavras "
             "'humano', 'atendente humano' ou 'robo'. Refira-se sempre e exclusivamente "
             "como 'equipe'."
@@ -6302,6 +6392,7 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                 _transfer_done = True
 
         reply = _sem_palavra_proibida(reply)
+        reply = _listas_em_linhas(reply)
 
         # Se a IA transferiu, envia a resposta do LLM (knowledge/explicação) e depois a msg de transferência
         if _transfer_done:

@@ -1916,6 +1916,10 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
     msg_lower = re.sub(r"\bcento(?!s\b)[a-z]{1,2}\b", "cento", msg_lower)
     # "DOI CENTO DE SALGADOS" (dois sem o s) virava 1 cento (teste de 06/10).
     msg_lower = re.sub(r"\bdoi\s+(centos?)\b", r"dois \1", msg_lower)
+    # "enroladinhos de salsicha com catupiry" e o ASSADO: o "com" cortava o
+    # nome e sobrava o frito (teste do dono, 08/10 12h39).
+    msg_lower = re.sub(r"\benroladinhos?\s+(?:de\s+salsicha\s+)?com\s+catupiry\b",
+                       "enroladinho assado", msg_lower)
     extracted = {}
 
     # ── Nome ────────────────────────────────────────────────────────────────
@@ -2080,6 +2084,12 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
 
             # Busca produto conhecido
             matched_name = _produto_conhecido(product_name)
+            # Sabor que o cardapio nao tem ("50 empadas de queijo") nao vira
+            # outro produto: virava Empada de Frango grande a R$ 9,00 (teste
+            # do dono, 08/10). Fica de fora e o aviso sai com as opcoes.
+            if matched_name and item_fora_do_cardapio(f"{qty} {product_name}"):
+                extracted.setdefault("sabores_inexistentes", []).append(product_name.strip())
+                continue
 
             if not matched_name and qty > 0:
                 # Palavra que serve a varios sabores. Nao vira item (chutar foi
