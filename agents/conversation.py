@@ -906,6 +906,10 @@ def _forma_de_busca(nome: str) -> str:
     for p in limpo.split():
         if p in _GRAFIAS_DE_PASTEL:
             p = "pastel"
+        elif p in ("paes", "pao"):
+            # "25 paes pizza" virava "pae pizza" e o Pao Pizza sumia do pedido
+            # (testes do dono, 07/10 20h29 e 21h02).
+            p = "pao"
         elif len(p) > 3 and p.endswith("s"):
             p = p[:-1]
         palavras.append(p)
@@ -915,7 +919,9 @@ def _forma_de_busca(nome: str) -> str:
 # "PASTEIS" perdia o "l" no corte do plural ("pastei") e "PASTEID" e como o
 # cliente digitou as 14h37 de 07/10: os dois sumiam do pedido.
 _GRAFIAS_DE_PASTEL = frozenset({"pasteis", "pastei", "pasteid", "pasteiz", "pastes",
-                                "pastels", "pasteu", "pasteus"})
+                                "pastels", "pasteu", "pasteus",
+                                # "100 PATEIS DE QUEIJO" (teste do dono, 07/10 18h39)
+                                "pateis", "patel", "pateu", "pateus", "patels"})
 
 
 _INDICE_PRODUTOS: dict[str, str] | None = None
@@ -1595,7 +1601,8 @@ _NAO_E_PRODUTO = (
     "pagament", "pago", "pagar", "pix", "cartao", "cartoes", "dinheiro", "debito", "credito",
     "troco", "amanha", "hoje", "agora", "retir", "busca", "avenid", "travessa", "esquina",
     "conjunto", "condomin", "residenc", "setor", "manha", "tarde", "noite", "horas", "vezes",
-    "pessoas", "filhos", "irmaos", "amigos", "clientes", "funcionar", "alunos", "criancas")
+    "pessoas", "filhos", "irmaos", "amigos", "clientes", "funcionar", "alunos", "criancas",
+    "pessa", "pesso", "convidad")
 # "salgados de aniversario", "salgado de forno": ocasiao ou preparo, nao sabor.
 _NAO_E_SABOR_DE_SALGADO = {"aniversario", "casamento", "evento", "eventos", "forno",
                            "fritura", "qualidade", "verdade", "voces", "vcs", "tamanho",
@@ -2144,6 +2151,26 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
             if extra["name"] not in ja_vistos:
                 items_found.append(extra)
                 ja_vistos.add(extra["name"])
+
+        # "100 PATEIS DE QUEIJO E 100 DE CARNE": o "de carne" e do mesmo
+        # salgado citado na frase (pastel), e nao duvida entre pastel, rissole,
+        # croquete e esfirra (teste do dono, 07/10 18h39).
+        if sabores_pendentes and items_found:
+            bases = {_forma_de_busca(str(i["name"])).split()[0] for i in items_found}
+            resolvidos = []
+            for p in sabores_pendentes:
+                opcao = [o for o in p.get("opcoes") or []
+                         if _forma_de_busca(o).split()[0] in bases]
+                if len(opcao) == 1:
+                    try:
+                        import facts
+                        oficial = facts.resolve_unit_price(opcao[0], p["qtd"])
+                        preco = oficial["preco_unitario"] if oficial else 0.0
+                    except Exception:
+                        preco = 0.0
+                    items_found.append({"name": opcao[0], "quantity": p["qtd"], "price": preco})
+                    resolvidos.append(p)
+            sabores_pendentes = [p for p in sabores_pendentes if p not in resolvidos]
 
         if sabores_pendentes:
             extracted["sabores_pendentes"] = sabores_pendentes

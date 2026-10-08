@@ -228,7 +228,28 @@ def _e_acompanhamento(nome) -> bool:
     return _categoria_do_item(str(nome or "")) in ("bebidas", "bolos e doces")
 
 
-def merge(memoria: dict, extraido: dict, novo_da_mensagem: dict | None = None) -> tuple[dict, list]:
+# O cliente esta TROCANDO o pedido, e nao somando a ele.
+_RX_TROCA_O_PEDIDO = _re.compile(
+    r"\b(?:na\s+verdade|corrig\w*|troca\w*|em\s+vez|ao\s+inves|no\s+lugar|so\s+quero|quero\s+so"
+    r"|somente|apenas|esquece\w*|tira\w*|retira\w*|mud\w*\s+(?:o\s+)?pedido|refaz\w*)\b")
+
+
+def _mesmo_item(a: dict, b: dict) -> bool:
+    """O mesmo produto da ficha, mesmo com o nome escrito de outro jeito."""
+    na, nb = _sem_acento(str(a.get("name"))), _sem_acento(str(b.get("name")))
+    if na == nb:
+        return True
+    try:
+        import facts
+        oa = (facts.resolve_unit_price(str(a.get("name")), int(a.get("quantity") or 25)) or {})
+        ob = (facts.resolve_unit_price(str(b.get("name")), int(b.get("quantity") or 25)) or {})
+        return bool(oa.get("item_oficial")) and oa.get("item_oficial") == ob.get("item_oficial")
+    except Exception:
+        return False
+
+
+def merge(memoria: dict, extraido: dict, novo_da_mensagem: dict | None = None,
+          texto: str = "") -> tuple[dict, list]:
     """Funde o que foi extraido da mensagem na memoria acumulada.
 
     `extraido` vem da extracao feita ja considerando o que a memoria tem (so
@@ -253,12 +274,32 @@ def merge(memoria: dict, extraido: dict, novo_da_mensagem: dict | None = None) -
             mudancas.append(f"{campo}={novo}")
 
     itens_novos = (novo_da_mensagem or {}).get("items")
-    if itens_novos and itens_novos != memoria.get("items"):
-        # A correcao troca os salgados; a bebida ja pedida fica. "Troca para
-        # 50 coxinhas" nao e "tira o refrigerante".
-        # Vale tambem para bolo e doce.
-        bebidas_antigas = [i for i in (memoria.get("items") or [])
-                           if isinstance(i, dict) and _e_acompanhamento(i.get("name"))]
+    atuais = [i for i in (memoria.get("items") or []) if isinstance(i, dict)]
+    if itens_novos and itens_novos != memoria.get("items") and atuais \
+            and not _RX_TROCA_O_PEDIDO.search(_sem_acento(texto)):
+        # Lista CUMULATIVA (pedido do dono, 07/10): item citado de novo tem a
+        # quantidade atualizada, item novo entra, e o que nao foi citado FICA.
+        # Antes a mensagem com itens trocava o pedido inteiro: "Sim, ajusta para
+        # 50 esfirras" apagou a coxinha, e o Pao Pizza sumiu do espelho final.
+        combinado = [dict(i) for i in atuais]
+        for novo in itens_novos:
+            if not isinstance(novo, dict):
+                continue
+            igual = next((i for i in combinado if _mesmo_item(i, novo)), None)
+            if igual:
+                for campo in ("quantity", "price", "tamanho", "sabor"):
+                    if novo.get(campo) not in (None, "", 0):
+                        igual[campo] = novo[campo]
+            else:
+                combinado.append(dict(novo))
+        if combinado != atuais:
+            memoria["items"] = combinado
+            mudancas.append(f"items={combinado}")
+    elif itens_novos and itens_novos != memoria.get("items"):
+        # Troca dita ("na verdade", "em vez de", "so quero"): os salgados sao
+        # trocados; a bebida ja pedida fica. "Troca para 50 coxinhas" nao e
+        # "tira o refrigerante". Vale tambem para bolo e doce.
+        bebidas_antigas = [i for i in atuais if _e_acompanhamento(i.get("name"))]
         if not any(_e_acompanhamento(i.get("name")) for i in itens_novos if isinstance(i, dict)):
             itens_novos = list(itens_novos) + bebidas_antigas
         memoria["items"] = itens_novos
@@ -1514,7 +1555,8 @@ def pergunta_do_troco(memoria: dict) -> str:
     # cliente mudar os itens.
     total = total_previsto(memoria) or float(memoria.get("total") or 0)
     if total > 0:
-        return f"O total fica {_brl(total)}. Precisa de troco para quanto? 💵"
+        # Texto exato do dono (07/10).
+        return f"O seu pedido com a entrega deu {_brl(total)}. Precisa de troco para quanto? 💵"
     return _PERGUNTA_CURTA["troco_para"]
 
 
@@ -1595,7 +1637,7 @@ def pendencia_de_lote(memoria: dict) -> str:
     )
 
 
-def aplicar_ajuste_de_lote(memoria: dict) -> list[str]:
+def aplicar_ajuste_de_lote(memoria: dict, texto: str = "") -> list[str]:
     """Grava na ficha o ajuste de quantidade que o cliente acabou de aceitar.
 
     Sem isto o aceite morria na conversa. A Sandrinha oferecia "Ajusto para 25
@@ -1628,13 +1670,32 @@ def aplicar_ajuste_de_lote(memoria: dict) -> list[str]:
         return []
 
     por_indice = {q["indice"]: q for q in quebras}
+    # Qual das duas opcoes o cliente escolheu ("pode ser 25", "50 esfirras").
+    # Sem numero ("sim"), vale a mais proxima.
+    numeros = [int(n) for n in _re.findall(r"\d+", texto or "")]
+    escolha = {}
+    for q in quebras:
+        opcoes = [n for n in opcoes_do_lote(q) if n]
+        if len(quebras) == 1:
+            achou = [n for n in numeros if n in opcoes]
+        else:
+            # Qualquer palavra do sabor: "25 salsicha" e o Enroladinho de Salsicha.
+            palavras = [w[:5] for w in _sem_acento(str(q.get("sabor") or "")).split() if len(w) >= 5]
+            achou = [int(m.group(1)) for w in palavras for m in _re.finditer(
+                r"(\d+)\s*(?:un\w*\s+)?(?:de\s+)?" + _re.escape(w), _sem_acento(texto or ""))
+                if int(m.group(1)) in opcoes]
+        if achou:
+            escolha[q["indice"]] = achou[0]
+
     novos, mudancas = [], []
     for i, bruto in enumerate(items):
         it = dict(bruto)
         q = por_indice.get(i)
-        if q and int(it.get("quantity") or 0) != q["sugerida"]:
-            mudancas.append(f"{it.get('name')} {it.get('quantity')} -> {q['sugerida']} un")
-            it["quantity"] = q["sugerida"]
+        alvo = escolha.get(i, q["sugerida"]) if q else None
+        if q and int(it.get("quantity") or 0) != alvo:
+            mudancas.append(f"{it.get('name')} {it.get('quantity')} -> {alvo} un")
+            it["quantity"] = alvo
+            q = dict(q, sugerida=alvo)
             # O preco tem de ser relido: abaixo de 25 o mesmo nome resolvia
             # para o salgado grande avulso (R$ 9,00), e na quantidade de
             # pacote ele vale R$ 0,80.
@@ -1854,12 +1915,36 @@ def _frase_de_lote(memoria: dict) -> str:
         quebras = []
     if not quebras:
         return ""
-    partes = [f"{q['sugerida']} {q['sabor']}" for q in quebras]
-    if len(partes) > 1:
-        lista = ", ".join(partes[:-1]) + " e " + partes[-1]
-    else:
-        lista = partes[0]
-    return f"Fazemos de 25 em 25 por sabor! Ajusto para {lista}? 😊"
+    # As duas quantidades mais proximas, para baixo e para cima (pedido do
+    # dono, 07/10: "40 sugere 25 ou 50"). Abaixo de 25 so ha uma.
+    partes = []
+    for q in quebras:
+        baixo, cima = opcoes_do_lote(q)
+        partes.append(f"{q['qtd']} {q['sabor']}: {baixo} ou {cima}" if baixo
+                      else f"{q['qtd']} {q['sabor']}: {cima}")
+    if len(partes) == 1 and not opcoes_do_lote(quebras[0])[0]:
+        q = quebras[0]
+        return f"Fazemos de 25 em 25 por sabor! Ajusto para {opcoes_do_lote(q)[1]} {q['sabor']}? 😊"
+    if len(partes) == 1:
+        q = quebras[0]
+        baixo, cima = opcoes_do_lote(q)
+        return (f"Fazemos de 25 em 25 por sabor! Para {q['sabor']}, "
+                f"fica {baixo} ou {cima}? 😊")
+    return ("Fazemos de 25 em 25 por sabor! Como fica?\n"
+            + "\n".join(f"• {p}" for p in partes) + " 😊")
+
+
+def opcoes_do_lote(quebra: dict) -> tuple[int, int]:
+    """(para baixo, para cima) no passo do pacote. Para baixo e 0 abaixo de 25."""
+    passo = int(quebra.get("passo") or 25)
+    try:
+        qtd = int(quebra.get("qtd") or 0)
+    except (TypeError, ValueError):
+        qtd = 0
+    if not qtd:
+        return 0, int(quebra.get("sugerida") or passo)
+    baixo = (qtd // passo) * passo
+    return baixo, baixo + passo
 
 
 def etapa_coberta(memoria: dict, reply: str, agora=None) -> bool:
@@ -1964,7 +2049,10 @@ def etapa_coberta(memoria: dict, reply: str, agora=None) -> bool:
             palavra = _sem_acento(str(q["sabor"])).split()[0]
             if palavra not in texto:
                 return False
-            if str(q["sugerida"]) not in texto:
+            # As DUAS opcoes (25 ou 50) - "Ajusto para 50?" so com uma nao
+            # cobre (pedido do dono, 07/10).
+            baixo, cima = opcoes_do_lote(q)
+            if str(cima) not in texto or (baixo and str(baixo) not in texto):
                 return False
         return True
 

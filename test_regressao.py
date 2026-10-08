@@ -740,9 +740,9 @@ _frase_lote = memoria_mod.pergunta_bloqueante(_FICHA_LOTE)
 checa("a pergunta de lote cita TODOS os sabores fora da regra",
       all(t in _frase_lote.lower() for t in ("coxinha", "quibe", "bolinha")),
       _frase_lote)
-checa("e traz o multiplo de 25 mais proximo de cada um",
-      "25 coxinha" in _frase_lote.lower() and "50 bolinha" in _frase_lote.lower(),
-      _frase_lote)
+checa("e traz as duas opcoes de cada um (dono, 07/10: 40 sugere 25 ou 50)",
+      __import__("re").search(r"30 coxinha[^\n]*: 25 ou 50", _frase_lote.lower())
+      and __import__("re").search(r"40 bolinha[^\n]*: 25 ou 50", _frase_lote.lower()), _frase_lote)
 
 # A resposta que pulou a trava e cobrou logistica e reescrita.
 _pulou = ("Para seguir, me confirma:\n• Bairro\n• Endereco (rua e numero)\n"
@@ -1670,7 +1670,7 @@ checa("dinheiro sem troco: o troco falta antes do espelho",
 # 07/10 14h30: o cliente nao sabia o total para pedir troco. 25 coxinhas
 # R$ 20,00 + frete Aponia R$ 8,00 + retorno R$ 2,00.
 checa("a pergunta do troco traz o total",
-      memoria_mod.pedido_de_dados(_F_DIN) == "O total fica R$ 30,00. Precisa de troco para quanto? 💵",
+      memoria_mod.pedido_de_dados(_F_DIN) == "O seu pedido com a entrega deu R$ 30,00. Precisa de troco para quanto? 💵",
       memoria_mod.pedido_de_dados(_F_DIN))
 _F_DIN2 = dict(_F_DIN, bairro="", horario="")
 checa("troco nao entra na lista com outros dados",
@@ -2843,6 +2843,64 @@ _fa = dict(memoria_mod._empty(), items=[{"name": "Coxinha", "quantity": 100}],
            ultimo_pedido_em=__import__("datetime").datetime.now().isoformat(timespec="seconds"))
 checa("acrescentar com pedido aberto nao e acrescimo em pedido feito (balcao)",
       app._resposta_do_balcao("QUERO ACRESCENTAR NO PEDIDO 50 CHURROS", _fa) is None)
+print()
+print("--- Dono 07/10 (noite): lista cumulativa, modulo 25, quanto fica, troco com total")
+_px = _extract_data_from_message("quero 25 coxinhas de frango e 25 pães pizza assados. quanto fica?",
+                                 ConversationState(phone="x")).get("items") or []
+checa("'25 pães pizza' entra no pedido", any(i["name"] == "Pao Pizza" for i in _px), _px)
+_pq = _extract_data_from_message("ola quero 100 pateis de queijo e 100 de carne para retirada",
+                                 ConversationState(phone="x")).get("items") or []
+checa("'100 pateis de queijo e 100 de carne' = 100 + 100 pasteis",
+      sorted(i["name"] for i in _pq) == ["Pastel Carne", "Pastel Queijo"], _pq)
+checa("'100 pessaos' nao e item fora do cardapio",
+      _ifc2("VOCE SABE QUANTOS SALGADINHOS PRECISO PARA 100 PESSAOS ?") == "")
+_fc = dict(memoria_mod._empty(), items=[{"name": "Coxinha", "quantity": 25, "price": 0.8},
+                                        {"name": "Esfirra de Carne", "quantity": 40, "price": 1.2}])
+memoria_mod.merge(_fc, {}, {"items": [{"name": "Esfirra de Carne", "quantity": 50, "price": 1.2}]},
+                  texto="Sim, ajusta para 50 esfirras. Quanto fica tudo com a coxinha?")
+checa("lista cumulativa: ajustar a esfirra nao apaga a coxinha",
+      [(i["name"], i["quantity"]) for i in _fc["items"]] == [("Coxinha", 25), ("Esfirra de Carne", 50)],
+      _fc["items"])
+_fc = dict(memoria_mod._empty(), items=[{"name": "Coxinha", "quantity": 25, "price": 0.8}])
+memoria_mod.merge(_fc, {}, {"items": [{"name": "Pao Pizza", "quantity": 25, "price": 1.2}]},
+                  texto="25 paes pizza")
+checa("lista cumulativa: item novo entra junto", len(_fc["items"]) == 2, _fc["items"])
+_fc = dict(memoria_mod._empty(), items=[{"name": "Coxinha", "quantity": 25, "price": 0.8}])
+memoria_mod.merge(_fc, {}, {"items": [{"name": "Quibe", "quantity": 50, "price": 0.8}]},
+                  texto="na verdade quero 50 kibes")
+checa("'na verdade...' troca o pedido", [i["name"] for i in _fc["items"]] == ["Quibe"], _fc["items"])
+_fl = {"items": [{"name": "Coxinha", "quantity": 25, "price": 0.8},
+                 {"name": "Esfirra de Carne", "quantity": 40, "price": 1.2}]}
+checa("40 esfirras: 'fica 25 ou 50?'", "25 ou 50" in memoria_mod._frase_de_lote(_fl),
+      memoria_mod._frase_de_lote(_fl))
+_fl2 = {"items": [dict(i) for i in _fl["items"]]}
+memoria_mod.aplicar_ajuste_de_lote(_fl2, "pode ser 25")
+checa("'pode ser 25' aplica 25", _fl2["items"][1]["quantity"] == 25, _fl2["items"])
+_fl3 = {"items": [dict(i) for i in _fl["items"]]}
+memoria_mod.aplicar_ajuste_de_lote(_fl3, "sim")
+checa("'sim' aplica a mais proxima (50)", _fl3["items"][1]["quantity"] == 50, _fl3["items"])
+_fq = dict(memoria_mod._empty(), items=[{"name": "Coxinha", "quantity": 25, "price": 0.8},
+                                        {"name": "Bolinha de Queijo", "quantity": 25, "price": 0.8}])
+_qf = app._conferir_quanto_fica("55", "Quero 25 coxinhas e 25 bolinhas. Quanto fica?", "x", _fq)
+checa("'Quanto fica?' com itens: a soma antes de seguir", _qf.startswith("Os itens ficam R$ 40,00"), _qf)
+checa("'quanto e o cento de coxinha?' nao e a soma do pedido",
+      app._conferir_quanto_fica("55", "quanto fica o cento de coxinha?", "x", _fq) == "x")
+_ft = dict(memoria_mod._empty(), items=[{"name": "Coxinha", "quantity": 25, "price": 0.8}],
+           modality="entrega", bairro="Olaria", payment_method="dinheiro")
+checa("troco com o texto do dono e o total (com retorno de R$ 2 no dinheiro)",
+      memoria_mod.pergunta_do_troco(_ft)
+      == "O seu pedido com a entrega deu R$ 34,00. Precisa de troco para quanto? 💵",
+      memoria_mod.pergunta_do_troco(_ft))
+checa("'faltou cobrar a taxa de 2,00' nao e item faltando",
+      app._resposta_do_balcao("FALTOU A SANDRINHA COBRAR A TAXA DE 2,00 REAIS DE RETORNO", {}) is None)
+checa("'NAO' ao espelho pergunta o que alterar",
+      app._RX_SO_NAO.match("nao") and "TEXTO_O_QUE_ALTERAR" in open("app.py", encoding="utf-8").read())
+checa("'qual preco de meio cento?' depois do canudinho: R$ 60,00",
+      "R$ 60,00" in app._conferir_preco_perguntado(
+          "55", "AGORA QUERO SABER QUAL PREÇO DE MEIO CENTO", "x", memoria_mod._empty(),
+          anterior="O cento de Canudinho de Frango sai R$ 120,00."))
+checa("envio usa os valores do codigo (nao o preco do modelo)",
+      "envio com os valores do codigo" in open("app.py", encoding="utf-8").read())
 checa("'amnha' e amanha", horario.resolver_data("amnha") == horario.agora().date()
       + __import__("datetime").timedelta(days=1))
 checa("repergunta mantem a resposta quando o cliente perguntou",
@@ -2872,7 +2930,7 @@ _cf_fx.bruto = lambda forcar=False: _RETRATO_FX
 _F_TROCO = dict(_F_DIN, upsell_feito=True)
 checa("cliente pergunta o total na etapa do troco: o codigo responde",
       app._resposta_total_no_troco("UAI QUANDO E VALR=OR TOTAL", dict(_F_TROCO))
-      == "O total fica R$ 30,00. Precisa de troco para quanto? 💵",
+      == "O seu pedido com a entrega deu R$ 30,00. Precisa de troco para quanto? 💵",
       app._resposta_total_no_troco("UAI QUANDO E VALR=OR TOTAL", dict(_F_TROCO)))
 checa("'quanto fica?' tambem", app._resposta_total_no_troco("quanto fica?", dict(_F_TROCO)) != "")
 checa("valor de troco nao e pergunta de total",

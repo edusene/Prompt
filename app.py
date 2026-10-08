@@ -594,7 +594,10 @@ _RESPOSTAS_DO_BALCAO = (
      "verificar o transporte e te dar uma solução agora.", True),
     ("faltando", _re_mod.compile(
         r"\b(?:veio|vieram|chegou|chegaram|esta|ta)\b.{0,25}\bfaltando\b"
-        r"|\bfaltou\b.{0,30}\b(?:salgad\w*|coxinh\w*|caixa|pedido|unidades?|\d+)\b"
+        # Numero so com produto: "faltou cobrar a taxa de 2,00" nao e item
+        # faltando (teste do dono, 07/10 14h16).
+        r"|\bfaltou\b(?!.{0,30}\b(?:cobrar|taxa|troco|frete)\b).{0,30}"
+        r"\b(?:salgad\w*|coxinh\w*|caixa|pedido|unidades?|\d+\s+(?:salgad|coxinh|past|bolinh|quib|rissol|churr|un))\w*\b"
         r"|\bfaltando\b.{0,30}\b(?:na|no)\s+(?:minha\s+|meu\s+)?(?:caixa|pedido)\b"),
      "Pedimos sinceras desculpas pelo ocorrido! Nossa equipe já está assumindo seu "
      "atendimento aqui para resolver isso imediatamente.", True),
@@ -703,7 +706,7 @@ def _resposta_total_no_troco(texto: str, memoria: dict) -> str:
     if any(c.isdigit() for c in t) or not _RX_PERGUNTA_TOTAL.search(t):
         return ""
     pergunta = conversation_memory.pergunta_do_troco(memoria)
-    return pergunta if pergunta.startswith("O total") else ""
+    return pergunta if "R$" in pergunta else ""
 
 
 # "Humano", "atendente humano" e "robo" sao proibidos pelo dono (04/10): sempre
@@ -1003,6 +1006,54 @@ def _horario_possivel(pergunta: str) -> str:
     if m(abre) <= minutos < m(almoco_ini) or m(almoco_fim) <= minutos < m(fecha):
         return f"Sim! Às {hora_txt} já estamos atendendo. 😊"
     return _texto_do_expediente()
+
+
+# "Quanto fica?", "quanto fica tudo?", "qual o valor total?" com o pedido na
+# ficha. Pergunta do preco DE UM formato ("quanto e o cento de coxinha?") e
+# outra regra (_conferir_preco_perguntado).
+_RX_QUANTO_FICA = _re_mod.compile(
+    r"\bquanto\s+(?:fica|vai\s+ficar|deu|da|sai|vai\s+dar|ficou|e\s+tudo|fica\s+tudo|custa\s+tudo)\b"
+    r"|\b(?:valor|preco)\s+total\b|\bqual\s+(?:e\s+)?(?:o\s+)?total\b|\bquanto\s+(?:e\s+)?tudo\b"
+    r"|\bquando\s+e\s+(?:o\s+)?valor\b")
+_RX_PRECO_DE_UM_FORMATO = _re_mod.compile(
+    r"\b(?:o|um|uma|a)\s+(?:cento|meio\s+cento|porcao|unidade)\s+de\b|\bcada\s+(?:um|uma|unidade)\b")
+
+
+def _valor_do_pedido(memoria: dict) -> str:
+    """'Com a entrega, fica R$ 64,00.' / 'Os itens ficam R$ 50,00.' ou ''."""
+    total = conversation_memory.total_previsto(memoria)
+    if total and memoria.get("modality") == "entrega":
+        return f"Com a entrega, fica {cardapio._brl(total)}."
+    subtotal = conversation_memory.subtotal_dos_salgados(memoria)
+    if subtotal:
+        return f"Os itens ficam {cardapio._brl(subtotal)}."
+    return ""
+
+
+def _conferir_quanto_fica(user: str, pergunta: str, reply: str, memoria: dict) -> str:
+    """Regra do dono (07/10): duvida de preco com itens gravados -> a soma
+    deles ANTES de seguir para o endereco. "25 coxinhas e 25 bolinhas...
+    Quanto fica?" recebia so a oferta do refrigerante."""
+    t = facts.normalize(pergunta or "")
+    if (not t or not memoria.get("items") or not _RX_QUANTO_FICA.search(t)
+            or _RX_PRECO_DE_UM_FORMATO.search(t)):
+        return reply
+    # Quantidade fora do multiplo de 25 ainda vai mudar: o valor sai depois
+    # do ajuste ("Os itens ficam R$ 68,00" com 40 esfirras confundia).
+    if conversation_memory._frase_de_lote(memoria):
+        return reply
+    valor = _valor_do_pedido(memoria)
+    if not valor:
+        return reply
+    seguinte = _proxima_pergunta_do_funil(memoria)
+    if _RX_LINHA_DE_RESUMO.search(seguinte or ""):
+        return seguinte          # o espelho ja traz o total
+    if seguinte and "R$" in seguinte.split("\n")[0]:
+        return seguinte          # a oferta ja vem com o valor ("Fica R$ X nos salgados!")
+    print(f"[preco] user={user} 'quanto fica' com itens na ficha; soma do codigo")
+    if not seguinte:
+        return valor
+    return f"{valor}\n\n{seguinte}" if "\n" in seguinte else f"{valor} {seguinte}"
 
 
 def _conferir_sabores_de(user: str, pergunta: str, reply: str, memoria: dict) -> str:
@@ -2846,7 +2897,10 @@ def _aceitou_a_quantidade(texto: str, memoria: dict) -> bool:
     norm_texto = facts.normalize(texto)
     for q in quebras:
         sabor = facts.normalize(str(q["sabor"])).split()[0] if q.get("sabor") else ""
-        for m in _re_mod.finditer(r"\b" + str(q["sugerida"]) + r"\b\s*(?:un\w*\s+)?(?:de\s+)?([a-z]+(?:\s+[a-z]+)?)?",
+        # Qualquer das duas opcoes oferecidas (25 ou 50), nao so a sugerida.
+        _baixo, _cima = conversation_memory.opcoes_do_lote(q)
+        _opcoes_rx = "|".join(str(n) for n in (_baixo, _cima) if n)
+        for m in _re_mod.finditer(r"\b(?:" + _opcoes_rx + r")\b\s*(?:un\w*\s+)?(?:de\s+)?([a-z]+(?:\s+[a-z]+)?)?",
                                   norm_texto):
             seguinte = (m.group(1) or "").strip()
             # A palavra seguinte sozinha ("salsicha") ou com a proxima
@@ -2860,6 +2914,11 @@ def _aceitou_a_quantidade(texto: str, memoria: dict) -> bool:
             return True
     return False
 
+
+_RX_SO_NAO = _re_mod.compile(
+    r"^(?:nao|n|nao quero|nao esta certo|nao ta certo|nao confirmo|ta errado|esta errado"
+    r"|errado|nao e isso|nao nao)\W*$")
+TEXTO_O_QUE_ALTERAR = "O que você quer alterar no pedido? 😊"
 
 # A mensagem depois do pedido enviado (dinheiro, cartao e retirada).
 FECHAMENTO_CURTO = "Pedido finalizado com sucesso! 💛"
@@ -3666,8 +3725,19 @@ def _conferir_frete_perguntado(user: str, pergunta: str, reply: str,
     return _juntar_antes(f"A taxa de entrega para {frete['bairro']} é {valor}.", limpo)
 
 
+def _produto_da_mensagem(texto: str) -> str:
+    """O unico produto citado numa mensagem (o mais especifico), ou ''."""
+    from agents import conversation as _cv
+    forma = _cv._forma_de_busca(texto or "")
+    casados = [(chave, canon) for chave, canon in _cv._indice_de_produtos().items()
+               if len(chave) >= 6 and _re_mod.search(r"\b" + _re_mod.escape(chave) + r"\b", forma)]
+    achados = {canon for chave, canon in casados
+               if not any(chave != outra and chave in outra for outra, _c in casados)}
+    return achados.pop() if len(achados) == 1 else ""
+
+
 def _conferir_preco_perguntado(user: str, pergunta: str, reply: str,
-                              memoria: dict | None = None) -> str:
+                              memoria: dict | None = None, anterior: str = "") -> str:
     """"Quanto custa o cento de coxinha?" -> o valor da tabela na resposta.
 
     Pergunta de preco deixou de virar pedido na ficha (02/10), e com isso o
@@ -3680,6 +3750,15 @@ def _conferir_preco_perguntado(user: str, pergunta: str, reply: str,
         return reply
     from agents import conversation as _cv
     achados = _cv._PACOTE_POR_EXTENSO.findall(" ".join(pergunta.lower().split()))
+    if not achados and anterior:
+        # "AGORA QUERO SABER QUAL PRECO DE MEIO CENTO" logo depois do preco do
+        # cento de canudinho: o produto e o da mensagem anterior. Ela disse que
+        # meio cento "nao e vendido separadamente" (teste do dono, 07/10 14h48).
+        _fmt = _re_mod.search(r"\b(meio\s+cento|cento\s+e\s+meio|cento|por[cç][aã]o)\b",
+                              pergunta.lower())
+        _prod = _produto_da_mensagem(anterior)
+        if _fmt and _prod:
+            achados = [("", _fmt.group(1), _prod)]
     if len(achados) != 1:
         return reply
     _um, formato, produto = achados[0]
@@ -4809,7 +4888,8 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             _extracted["items"] = _somados
             print(f"[memoria] {user}: acrescimo no pedido aberto -> "
                   f"{[(i.get('name'), i.get('quantity')) for i in _somados]}")
-        _memoria, _mudancas = conversation_memory.merge(_memoria, _extracted, _extracted_fresh)
+        _memoria, _mudancas = conversation_memory.merge(_memoria, _extracted, _extracted_fresh,
+                                                        texto=text_only)
 
         # Bairro ou rua na ficha, com itens pedidos, e entrega: ninguem da o
         # proprio endereco para buscar no balcao. Sem isto a conversa travava
@@ -5076,6 +5156,10 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             # ficava sem resposta (teste do dono, 03/10).
             _fato = _fato_perguntado(text_only)
             _fato_txt = f"{_fato[1]}\n\n" if _fato else ""
+            # "Quanto fica?" junto do pedido, com a loja fechada (07/10 20h29).
+            if (not _fato and _RX_QUANTO_FICA.search(facts.normalize(text_only or ""))
+                    and _valor_do_pedido(_memoria)):
+                _fato_txt = f"{_valor_do_pedido(_memoria)}\n\n"
             _resposta = (
                 f"{horario.saudacao(_agora)}{_nome}! Aqui é a Sandrinha da BALBS.\n\n"
                 f"{_eco}{_fato_txt}"
@@ -5238,7 +5322,7 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                 and ((_ofereceu_ajuste_de_lote(last_assistant_text)
                       and _e_concordancia(text_only))
                      or _aceitou_a_quantidade(text_only, _memoria))):
-            _ajustes = conversation_memory.aplicar_ajuste_de_lote(_memoria)
+            _ajustes = conversation_memory.aplicar_ajuste_de_lote(_memoria, text_only)
             if _ajustes:
                 conversation_memory.save(user, _memoria)
                 print(f"[memoria] {user}: ajuste de lote aceito -> "
@@ -5848,6 +5932,26 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                 horario=_memoria.get("horario", ""),
             )
 
+            # Valores do CODIGO, nao do modelo: ele mandou R$ 0,90 por coxinha
+            # grande (o certo e R$ 9,00) e o pedido Pix foi gravado com R$ 16,50
+            # num espelho de R$ 57,00 - o cliente recebeu a chave com o valor
+            # errado (teste do dono, 07/10 19h48).
+            _num_envio = _numeros_do_pedido(_memoria)
+            if _num_envio:
+                for _campo in ("subtotal", "delivery_fee", "return_fee", "total"):
+                    if _num_envio.get(_campo) is not None:
+                        kwargs[_campo] = _num_envio[_campo]
+                _memoria["total"] = _num_envio.get("total") or _memoria.get("total")
+                for _it in kwargs.get("items") or []:
+                    try:
+                        _of = facts.resolve_unit_price(str(_it.get("name", "")),
+                                                       int(float(_it.get("quantity") or 0)))
+                        if _of:
+                            _it["price"] = _of["preco_unitario"]
+                    except Exception:
+                        pass
+                print(f"[cardápio] envio com os valores do codigo: total={kwargs.get('total')}")
+
             nonlocal _total_enviado
             try:
                 _total_enviado = float(_memoria.get("total") or kwargs.get("total") or 0)
@@ -6251,8 +6355,19 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                     and not _RX_TROCO_INSUFICIENTE.search(facts.normalize(reply or ""))
                     and not _RX_CLIENTE_PERGUNTOU.search(text_only or "")
                     and not conversation_memory.pergunta_bloqueante(_memoria)):
-                reply = conversation_memory._PERGUNTA_CURTA[_so_falta[0]]
+                # O troco sempre com o total do pedido (dono, 07/10): saia
+                # "Precisa de troco para quanto?" sem o valor (21h25).
+                reply = (conversation_memory.pergunta_do_troco(_memoria)
+                         if _so_falta[0] == "troco_para"
+                         else conversation_memory._PERGUNTA_CURTA[_so_falta[0]])
             reply = _conferir_troco_fora_de_hora(user, text_only, reply, _memoria)
+            # "NAO" seco ao espelho: o espelho voltava igual (teste do dono,
+            # 07/10 21h45). O BLOCO 5 manda ajustar o que ele apontar.
+            if (_RX_SO_NAO.match(facts.normalize(text_only or "").strip())
+                    and any(facts.normalize(m) in facts.normalize(last_assistant_text or "")
+                            for m in _MARCAS_DE_RESUMO)):
+                reply = TEXTO_O_QUE_ALTERAR
+                print(f"[espelho] user={user} cliente recusou o espelho; pergunta o que alterar")
             if (_divisao_fechou and not _escolhidos_por_ela
                     and not _RX_LINHA_DE_RESUMO.search(reply or "")
                     and not _RX_TROCO_INSUFICIENTE.search(facts.normalize(reply or ""))
@@ -6292,10 +6407,12 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             reply = _re_mod.sub(r"^\s*😊\s+(?=\w)", "", reply or "")
             if not _RX_LINHA_DE_RESUMO.search(reply or ""):
                 reply = _conferir_frete_perguntado(user, text_only, reply, _memoria)
-                reply = _conferir_preco_perguntado(user, text_only, reply, _memoria)
+                reply = _conferir_preco_perguntado(user, text_only, reply, _memoria,
+                                                   anterior=last_assistant_text)
                 reply = _conferir_ingrediente(user, text_only, reply, _memoria)
                 reply = _conferir_fato_do_dono(user, text_only, reply, _memoria)
                 reply = _conferir_sabores_de(user, text_only, reply, _memoria)
+                reply = _conferir_quanto_fica(user, text_only, reply, _memoria)
                 reply = _conferir_pix_na_entrega(user, text_only, reply)
                 _refri = _conferir_refri_perguntado(user, text_only, reply)
                 if _refri != reply:
