@@ -622,7 +622,18 @@ _RESPOSTAS_DO_BALCAO = (
     ("congelado", _re_mod.compile(
         r"\b(?:vend\w*|tem|tens|fazem|faz|trabalh\w*|quero|queria|encomend\w*|compr\w*)\b"
         r".{0,40}\bcongelad\w*|\bcongelad\w*\b.{0,25}\b(?:pra|para)\s+fritar"),
-     "Congelado trabalhamos apenas com o tamanho mini de festa (R$ 40 o cento).", False),
+     # Texto de venda do dono (08/10): a frase seca nao vendia.
+     "Sim, trabalhamos sim! ❄️\n"
+     "Mini Salgados Congelados – R$ 40 o cento\n"
+     "Salgadinhos prontos para fritar quando você quiser!\n"
+     "Nossos sabores:\n"
+     "• Coxinha\n"
+     "• Bolinha de Queijo\n"
+     "• Risole de Carne\n"
+     "• Presunto e Queijo\n"
+     "• Kibe\n"
+     "💡 Dica: Fritar ainda congelados em óleo bem quente (180°C) até dourar.\n"
+     "Qual sabor ou combinação você gostaria de pedir hoje?", False),
     ("motoboy", _re_mod.compile(
         r"\b(?:motoboy|motoqueiro|entregador|motoca)\b.{0,30}"
         r"\b(?:chegando|chega|vindo|vem|perto|demora|onde)\b"),
@@ -662,6 +673,87 @@ TEXTO_CRISE = ("Compreendo a situação e a sua preocupação. Já direcionei o 
                "com prioridade máxima para a gerência da fábrica assumir a conversa agora mesmo.")
 
 
+# ── Congelados ─────────────────────────────────────────────────────────────
+# Texto de venda do dono (08/10). Os sabores e o preco vem do cardapio digital
+# quando o produto congelado estiver cadastrado la; ate isso, vale a lista do
+# dono. Pedido de congelado sem o produto no cardapio nao tem preco: ia virar
+# o salgado FRITO (R$ 80 o cento no lugar de R$ 40) - a equipe registra.
+_SABORES_CONGELADOS_DO_DONO = ("Coxinha", "Bolinha de Queijo", "Risole de Carne",
+                               "Presunto e Queijo", "Kibe")
+_RX_CONGELADO = _re_mod.compile(r"\bcongelad\w*")
+TEXTO_CONGELADO_PARA_EQUIPE = ("Anotei seu pedido de congelados! ❄️ Vou passar para "
+                               "nossa equipe confirmar e finalizar com você. "
+                               "Um instante, por favor. 💛")
+
+
+def _congelados_do_cardapio() -> list[dict]:
+    """As linhas do cardapio digital que sao de congelado (categoria ou nome)."""
+    try:
+        return [p for p in facts.get()["produtos"] if p.get("disponivel", True)
+                and _RX_CONGELADO.search(facts.normalize(f"{p['categoria']} {p['item']}"))]
+    except Exception:
+        return []
+
+
+def _sem_congelado(nome: str) -> str:
+    return _re_mod.sub(r"\s*\bcongelad[oa]s?\b", "", nome, flags=_re_mod.IGNORECASE).strip()
+
+
+def texto_congelado() -> str:
+    """A oferta de congelado no padrao do dono, com os dados do cardapio."""
+    linhas = _congelados_do_cardapio()
+    sabores = [_sem_congelado(p["item"]) for p in linhas
+               if not cardapio.nome_e_so_formato(p["item"])
+               and facts.normalize(p["item"]) != facts.normalize(p["categoria"])]
+    sabores = [s for s in dict.fromkeys(sabores) if s] or list(_SABORES_CONGELADOS_DO_DONO)
+    cento = next((p["preco"] for p in linhas if p.get("preco")
+                  and cardapio.unidades_do_rotulo(p["item"]) == 100), None)
+    preco = cardapio._brl(cento).replace(",00", "") if cento else "R$ 40"
+    return ("Sim, trabalhamos sim! ❄️\n"
+            f"Mini Salgados Congelados – {preco} o cento\n"
+            "Salgadinhos prontos para fritar quando você quiser!\n"
+            "Nossos sabores:\n"
+            + "".join(f"• {s}\n" for s in sabores)
+            + "💡 Dica: Fritar ainda congelados em óleo bem quente (180°C) até dourar.\n"
+            "Qual sabor ou combinação você gostaria de pedir hoje?")
+
+
+def _versao_congelada(nome: str) -> str:
+    """"Coxinha" -> a linha congelada do cardapio com o mesmo sabor, ou ""."""
+    from agents.conversation import _forma_de_busca
+    palavras = [w[:5] for w in _forma_de_busca(nome).split() if len(w) >= 4]
+    if not palavras:
+        return ""
+    import cardapio_catalogo
+    for p in _congelados_do_cardapio():
+        if cardapio.nome_e_so_formato(p["item"]):
+            continue
+        # Sem o pacote no de-para do pedido (nome no Base44, sabores), o envio
+        # recusa a categoria: ate ligar o de-para, a equipe registra.
+        if p["categoria"] not in cardapio_catalogo.LOTES:
+            continue
+        suas = _forma_de_busca(_sem_congelado(p["item"])).split()
+        if any(w.startswith(palavras[0]) for w in suas):
+            return p["item"]
+    return ""
+
+
+def pedido_de_congelado(texto: str, ultima_do_agente: str) -> bool:
+    """O cliente esta PEDINDO congelado: com a palavra, ou logo depois da oferta.
+
+    "quero 1 cento de coxinha" respondendo ao texto de congelado e congelado;
+    "frito"/"assado" na mensagem desfaz.
+    """
+    t = facts.normalize(texto or "")
+    if _re_mod.search(r"\b(?:frit\w*|assad\w*)\b", t) and not _RX_CONGELADO.search(t):
+        return False
+    if not (_RX_CONGELADO.search(t) or "Mini Salgados Congelados" in (ultima_do_agente or "")):
+        return False
+    itens = _extract_data_from_message((texto or "").lower(),
+                                       ConversationState(phone="")).get("items") or []
+    return bool(itens)
+
+
 def _resposta_do_balcao(texto: str, memoria: dict) -> tuple[str, str, bool] | None:
     """(nome, resposta exata do dono, passa para a equipe) ou None."""
     t = facts.normalize(texto or "")
@@ -681,6 +773,12 @@ def _resposta_do_balcao(texto: str, memoria: dict) -> tuple[str, str, bool] | No
         return "acrescimo", TEXTO_ACRESCENTA, True
     for nome, rx, resposta, equipe in _RESPOSTAS_DO_BALCAO:
         if rx.search(t):
+            if nome == "congelado":
+                # "quero 100 coxinhas congeladas" e PEDIDO, nao pergunta: o
+                # texto de venda saia de novo, em laco (teste de 08/10).
+                if pedido_de_congelado(texto, ""):
+                    continue
+                resposta = texto_congelado()
             return nome, resposta, equipe
     return None
 
@@ -2896,6 +2994,28 @@ def _ofereceu_ajuste_de_lote(texto: str) -> bool:
     return any(facts.normalize(m) in limpo for m in _MARCAS_DE_AJUSTE_DE_LOTE)
 
 
+_RX_TROCOU_O_SABOR = _re_mod.compile(
+    r"\b(?:troca\w*|no\s+lugar|em\s+vez|ao\s+inves|entao|pode\s+ser|prefiro|melhor)\b")
+
+_RX_METADE = _re_mod.compile(
+    r"\bmetade\s+(?:de\s+|da\s+|do\s+)?([a-z ]+?)(?=\s+e\s+(?:a\s+outra\s+)?metade\b|\s*[,.?!]|\s+pode\b|$)")
+
+
+def _sabores_pela_metade(texto: str) -> list[str]:
+    """"metade coxinha e metade bolinha de queijo" -> os dois produtos."""
+    from agents.conversation import _produto_conhecido
+    nomes = []
+    for m in _RX_METADE.finditer(facts.normalize(texto or "")):
+        nome = _produto_conhecido(m.group(1).strip())
+        if nome and nome not in nomes:
+            nomes.append(nome)
+    return nomes
+
+
+# "fica 25 ou 50?", "• 60 coxinha de frango: 50 ou 75".
+_RX_DUAS_OPCOES = _re_mod.compile(r"\b\d+\s+ou\s+\d+\b")
+
+
 def _aceitou_a_quantidade(texto: str, memoria: dict) -> bool:
     """O cliente respondeu dizendo o NUMERO que a Sandrinha ofereceu?
 
@@ -3686,7 +3806,10 @@ _RX_ENTREGA_EM_LUGAR = _re_mod.compile(
     r"\bentrega\w*\s+(?:em|no|na|pro|pra|para\s+o|para\s+a|ate\s+o|ate\s+a)\s+([a-z ]{3,40}?)\s*$")
 _RX_NAO_E_LUGAR = _re_mod.compile(
     r"^(?:hoje|amanha|agora|domingo|sabado|segunda|terca|quarta|quinta|sexta|feriado"
-    r"|madrugada|casa|minha casa|meu bairro|seu bairro|todo|toda|qualquer|rua|r|av|avenida|travessa|alameda|estrada|rodovia|condominio|residencial)\b")
+    r"|madrugada|casa|minha casa|meu bairro|seu bairro|todo|toda|qualquer|rua|r|av|avenida|travessa|alameda|estrada|rodovia|condominio|residencial"
+    # "pago no Pix na entrega pro motoboy": o motoboy virava bairro e saia
+    # "Nao entregamos no seu bairro" (teste do dono, 08/10 21h42).
+    r"|motoboy|motoqueiro|entregador|moto|voce|vc|mim|ele|ela)\b")
 
 
 def _conferir_frete_perguntado(user: str, pergunta: str, reply: str,
@@ -4199,7 +4322,7 @@ def _conferir_pede_texto(user: str, reply: str, memoria: dict) -> str:
 
 _RX_SAUDACAO_SOLTA = _re_mod.compile(
     r"(?:(?:Bom dia|Boa tarde|Boa noite|Ol[áa]|Oi)(?:,\s*[A-ZÀ-Ú][\wÀ-ÿ]*(?:\s+[A-ZÀ-Ú][\wÀ-ÿ]*)?)?\s*!"
-    r"|(?:Eu sou|Aqui é) a Sandrinha da BALBS\s*💛?|Seja muito bem-vindo\(a\)!)\s*")
+    r"|(?:Eu sou|Sou|Aqui é) a Sandrinha da BALBS\s*💛?|Seja muito bem-vindo\(a\)!)\s*")
 
 
 def _conferir_saudacao(reply: str, agora, nome: str = "") -> str:
@@ -4221,11 +4344,13 @@ def _conferir_saudacao(reply: str, agora, nome: str = "") -> str:
     # abertura e esta, uma vez so (varredura de 02/10).
     corpo = _RX_SAUDACAO_SOLTA.sub(" ", corpo)
     corpo = _re_mod.sub(r"[ \t]{2,}", " ", corpo)
+    corpo = _re_mod.sub(r"\n[ \t]+", "\n", corpo)
     corpo = _re_mod.sub(r"\n{3,}", "\n\n", corpo).strip()
     primeiro = (nome or "").strip().split(" ")[0]
     abertura = f"{saudacao}, {primeiro}!" if primeiro else f"{saudacao}!"
     print(f"[formato] primeira resposta sem saudacao; '{abertura}' colocado")
-    return f"{abertura} Aqui é a Sandrinha da BALBS 💛\n\n{corpo}"
+    # A mesma apresentacao das outras portas (08/10: "Aqui e" so em algumas).
+    return f"{abertura} Eu sou a Sandrinha da BALBS 💛\n\n{corpo}"
 
 
 def _conferir_uma_pergunta(user: str, reply: str, memoria: dict | None = None) -> str:
@@ -4555,6 +4680,13 @@ def _confirmou_o_resumo(ultima_do_agente: str, texto_do_cliente: str) -> bool:
     if any(r in palavras or r in limpo for r in _RESSALVAS_NO_ACEITE):
         return False
 
+    # "Pode ser 25 esfirras de carne entao" muda o pedido: o item entra e o
+    # espelho novo vai para o cliente conferir. Fechava direto, com a esfirra
+    # que ele nunca viu no resumo (replay de 08/10 15h45).
+    if any(c.isdigit() for c in limpo) and (_extract_data_from_message(
+            (texto_do_cliente or "").lower(), ConversationState(phone="")).get("items")):
+        return False
+
     return any(a == limpo or a in palavras or f" {a} " in f" {limpo} "
                for a in _ACEITES_DE_PEDIDO)
 
@@ -4816,6 +4948,26 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                                  send_message=False)
             return
 
+        # Pedido de congelado: com o produto no cardapio digital, os itens
+        # viram a versao congelada e seguem o fluxo normal; sem ele, a equipe
+        # registra (nao ha preco no cardapio para cobrar).
+        _congelado_para = {}
+        _ultima_ag = next((m.get("parts", [{}])[0].get("text", "") or ""
+                           for m in reversed(memory.get(user))
+                           if m.get("role") == "assistant"), "")
+        if pedido_de_congelado(_texto_cliente, _ultima_ag):
+            _itens_cong = _extract_data_from_message(
+                _texto_cliente.lower(), ConversationState(phone=user)).get("items") or []
+            _congelado_para = {i["name"]: _versao_congelada(i["name"]) for i in _itens_cong}
+            if not all(_congelado_para.values()):
+                print(f"[congelado] user={user} pedido sem produto congelado no cardapio "
+                      f"({_congelado_para}); equipe registra")
+                _responder_direto(user, items, TEXTO_CONGELADO_PARA_EQUIPE, _chegada)
+                perform_transfer(user, reason=f"pedido de congelado: {_texto_cliente[:120]}",
+                                 send_message=False)
+                return
+            print(f"[congelado] user={user} itens congelados -> {_congelado_para}")
+
         _total_troco = _resposta_total_no_troco(_texto_cliente, _memoria_balcao)
         if _total_troco:
             print(f"[troco] user={user} cliente perguntou o total antes do troco")
@@ -4939,6 +5091,12 @@ def _handle_flush(user: str, items: list[dict]) -> None:
         # Havia pedido aberto ANTES desta mensagem? Decide se "acrescentar" e
         # somar ao pedido em montagem ou mexer num pedido ja fechado.
         _aberto_antes = bool(_memoria.get("items")) and not _memoria.get("pedido_enviado")
+        if _congelado_para:
+            for _lista in (_extracted.get("items") or [], _extracted_fresh.get("items") or []):
+                for _it in _lista:
+                    if isinstance(_it, dict) and _congelado_para.get(_it.get("name")):
+                        _it["name"] = _congelado_para[_it["name"]]
+                        _it.pop("price", None)
         # "QUERO MAIS 50 CHURROS" com o pedido aberto: SOMA ao que ja esta na
         # ficha. O merge le itens novos como correcao e trocava o pedido: as
         # 100 coxinhas e os 50 croquetes sumiram e o pedido fechou so com os
@@ -4999,6 +5157,52 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             if _escolha_cedo:
                 conversation_memory.save(user, _memoria)
                 print(f"[memoria] {user}: sabor escolhido -> {'; '.join(_escolha_cedo)}")
+        # "Entao troca por mais 25 coxinhas": o cliente trocou o sabor que nao
+        # existe por outro item, de fora da lista. A pergunta do palmito
+        # continuava voltando (teste do dono, 08/10 15h41 e 15h44). Depois da
+        # escolha pelo nome: "Pode ser a Empadinha de Frango. Mas tira 25
+        # coxinhas..." escolhe a empadinha, e nao descarta (19h37).
+        _sobrou = [p for p in (_memoria.get("sabores_pendentes") or []) if p.get("inexistente")]
+        if _sobrou and _ja_vieram and _RX_TROCOU_O_SABOR.search(facts.normalize(text_only or "")):
+            _memoria["sabores_pendentes"] = [p for p in _memoria["sabores_pendentes"]
+                                             if p not in _sobrou]
+            conversation_memory.save(user, _memoria)
+            print(f"[memoria] {user}: sabor inexistente trocado por outro item")
+
+        # "Uma porcao de 25, metade coxinha e metade bolinha": a porcao e de um
+        # sabor so. Saia a lista dos 17 sabores com "Escolha ate 1 sabor"
+        # (teste do dono, 08/10 21h04). Propoe 25 de cada, como o ajuste de lote.
+        _proposta = _memoria.get("proposta_metade") or []
+        if _proposta:
+            # So o "sim" aceita; qualquer outra resposta descarta a proposta.
+            # Gravada direto como item, ela sobrava num pedido novo que o
+            # cliente mandou sem aceitar (replay de 08/10 21h10).
+            _memoria["proposta_metade"] = []
+            if _e_concordancia(text_only) and not _re_mod.search(r"\d", text_only or ""):
+                _memoria["items"] = [
+                    {"name": _n, "quantity": 25,
+                     "price": (facts.resolve_unit_price(_n, 25) or {}).get("preco_unitario", 0.0)}
+                    for _n in _proposta]
+                _memoria["volume_pendente"] = 0
+                _memoria["divisao_pendente"] = {}
+                print(f"[memoria] {user}: aceitou 25 de cada -> {_proposta}")
+            conversation_memory.save(user, _memoria)
+        _metades = _sabores_pela_metade(text_only)
+        if (_memoria.get("volume_pendente") == 25 and not _memoria.get("items")
+                and len(_metades) == 2):
+            _memoria["proposta_metade"] = _metades
+            _abertura = ""
+            if not _memoria.get("saudacao_feita"):
+                _nome = f", {_memoria['name']}" if _memoria.get("name") else ""
+                _abertura = (f"{horario.saudacao(horario.agora())}{_nome}! "
+                             f"Eu sou a Sandrinha da BALBS 💛 ")
+            _memoria["saudacao_feita"] = True
+            conversation_memory.save(user, _memoria)
+            print(f"[memoria] {user}: porcao de 25 pela metade -> 25 de cada {_metades}")
+            _responder_direto(user, items, (
+                f"{_abertura}Na porção de 25 é um sabor só! 😊 Posso fazer 25 de "
+                f"{_metades[0]} e 25 de {_metades[1]} (50 no total)?"), _chegada)
+            return
 
         # Bairro ou rua na ficha, com itens pedidos, e entrega: ninguem da o
         # proprio endereco para buscar no balcao. Sem isto a conversa travava
@@ -5206,10 +5410,16 @@ def _handle_flush(user: str, items: list[dict]) -> None:
         # almoco recebia "posso adiantar o seu pedido para as 14h?" - de hoje
         # (teste de 30/09 12h51). O horario, se faltar, o funil pergunta.
         _pedido_outro_dia = False
+        _pedido_dia_fechado = False
         try:
             _dia_ficha = date.fromisoformat(_memoria.get("data_iso") or "")
             _pedido_outro_dia = (_dia_ficha > _agora.date()
                                  and horario.eh_dia_util(_dia_ficha))
+            # "neste domingo" com a loja fechada agora: o aviso generico
+            # oferecia sexta, e o de domingo (logo abaixo) e o que responde o
+            # pedido (teste do dono, 08/10 21h17).
+            _pedido_dia_fechado = (_dia_ficha > _agora.date()
+                                   and not horario.eh_dia_util(_dia_ficha))
         except (TypeError, ValueError):
             _pedido_outro_dia = False
         # O cliente JA disse um horario ("as 15h"): o aviso de AGORA nao se
@@ -5240,7 +5450,7 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                                  or _re_mod.search(r"\b(?:quero|queria|gostaria\s+de)\s+saber\b",
                                                    facts.normalize(text_only or ""))))
         if (not _expediente["aberto"] and not _agendou_valido
-                and not _pedido_outro_dia and not _horario_dado
+                and not _pedido_outro_dia and not _horario_dado and not _pedido_dia_fechado
                 and not _so_pergunta
                 and not _memoria.get("aviso_horario_dado")):
             _memoria["aviso_horario_dado"] = True
@@ -5269,8 +5479,13 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             if (not _fato and _RX_QUANTO_FICA.search(facts.normalize(text_only or ""))
                     and _valor_do_pedido(_memoria)):
                 _fato_txt = f"{_valor_do_pedido(_memoria)}\n\n"
+            # "Pix quando o motoboy chegar" com a loja fechada: a regra do Pix
+            # (BLOCO 6) so saia pelo modelo, e aqui nao ha modelo (08/10 21h21).
+            if _RX_PIX_NA_ENTREGA.search(facts.normalize(text_only or "")):
+                _fato_txt += f"{TEXTO_PIX_NA_ENTREGA}\n\n"
+            # Mesma apresentacao do dia (08/10: "Aqui e a Sandrinha" so a noite).
             _resposta = (
-                f"{horario.saudacao(_agora)}{_nome}! Aqui é a Sandrinha da BALBS.\n\n"
+                f"{horario.saudacao(_agora)}{_nome}! Eu sou a Sandrinha da BALBS 💛\n\n"
                 f"{_eco}{_fato_txt}"
                 f"{_negativas_do_bloco_6(user, text_only, _expediente['mensagem'], _memoria)}"
             )
@@ -5426,6 +5641,23 @@ def _handle_flush(user: str, items: list[dict]) -> None:
         # passa pela traducao do cardapio digital e ignora item bloqueado), a
         # pergunta saia, o "pode ser" nunca era aplicado e ela repetia "Ajusto
         # para 25 Croquete de carne?" quatro vezes (teste do dono, 29/09 15h16).
+        # "Fica 50 ou 75?" -> "SIM": nao diz qual. Escolher a mais proxima
+        # calado foi o erro (teste do dono, 08/10 21h48). A proposta UNICA
+        # ("Ajusto para 50 coxinha e 25 bolinha?") continua aceita no "sim".
+        _pend_lote = (conversation_memory.pendencia_de_lote(_memoria)
+                      or conversation_memory._frase_de_lote(_memoria))
+        # Uma vez so: se o cliente responder "sim" de novo, vale a mais proxima
+        # (o comportamento de antes) - a pergunta nao vira laco.
+        if (_pend_lote and _RX_DUAS_OPCOES.search(last_assistant_text or "")
+                and not (last_assistant_text or "").startswith("Qual das duas opções")
+                and _e_concordancia(text_only)
+                and not _re_mod.search(r"\d", text_only or "")):
+            _travada_lote = conversation_memory.pergunta_bloqueante(_memoria)
+            if _travada_lote:
+                print(f"[memoria] {user}: 'sim' para duas opcoes de lote; pergunta de novo")
+                _responder_direto(user, items, "Qual das duas opções você prefere? 😊\n\n"
+                                  + _travada_lote, _chegada)
+                return
         if ((conversation_memory.pendencia_de_lote(_memoria)
                 or conversation_memory._frase_de_lote(_memoria))
                 and ((_ofereceu_ajuste_de_lote(last_assistant_text)

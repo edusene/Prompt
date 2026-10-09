@@ -971,6 +971,32 @@ def _indice_de_produtos() -> dict:
     return _INDICE_PRODUTOS
 
 
+def _corrigir_grafia(bruto: str) -> str:
+    """"salschisa" -> "salsicha": a palavra do cardapio mais parecida, ou "".
+
+    Conservador de proposito: so palavra de 6 letras ou mais, que nao casou
+    com nada, e com semelhanca alta (0,8). Palavra comum da conversa
+    ("pagamento", "amanha") nao chega perto de nenhum produto.
+    """
+    import difflib
+    palavras = _forma_de_busca(bruto).split()
+    if not palavras:
+        return ""
+    vocabulario = sorted({w for chave in _indice_de_produtos() for w in chave.split()
+                          if len(w) >= 6})
+    trocou = False
+    for i, w in enumerate(palavras):
+        if len(w) < 6 or w in vocabulario:
+            continue
+        perto = difflib.get_close_matches(w, vocabulario, n=2, cutoff=0.8)
+        # Dois candidatos igualmente perto: nao chuta.
+        if perto and (len(perto) == 1 or difflib.SequenceMatcher(None, w, perto[0]).ratio()
+                      > difflib.SequenceMatcher(None, w, perto[1]).ratio()):
+            palavras[i] = perto[0]
+            trocou = True
+    return " ".join(palavras) if trocou else ""
+
+
 def _produto_conhecido(bruto: str) -> str | None:
     """Nome canonico do produto citado, ou None.
 
@@ -1920,6 +1946,12 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
     # nome e sobrava o frito (teste do dono, 08/10 12h39).
     msg_lower = re.sub(r"\benroladinhos?\s+(?:de\s+salsicha\s+)?com\s+catupiry\b",
                        "enroladinho assado", msg_lower)
+    # "6 porcoes de coxinha" sao 150 coxinhas, nao 6 (teste do dono, 08/10
+    # 19h45). "1 porcao de 25 salgadinhos" ja diz as unidades: fica como esta.
+    msg_lower = re.sub(
+        r"\b(\d{1,2}|uma|duas|tres|três)\s+por[cç](?:[aã]o|[oõ]es)\s+de\s+(?!\d)",
+        lambda m: f"{25 * {'uma': 1, 'duas': 2, 'tres': 3, 'três': 3}.get(m.group(1), int(m.group(1)) if m.group(1).isdigit() else 1)} ",
+        msg_lower)
     extracted = {}
 
     # ── Nome ────────────────────────────────────────────────────────────────
@@ -2091,6 +2123,14 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
                 extracted.setdefault("sabores_inexistentes", []).append(product_name.strip())
                 continue
 
+            if not matched_name and qty > 0:
+                # Erro de digitacao ("25 SALSCHISA"): o item sumia do pedido
+                # sem ninguem perguntar (teste do dono, 08/10 21h10).
+                _corrigido = _corrigir_grafia(product_name)
+                if _corrigido:
+                    matched_name = _produto_conhecido(_corrigido)
+                    if matched_name:
+                        product_name = _corrigido
             if not matched_name and qty > 0:
                 # Palavra que serve a varios sabores. Nao vira item (chutar foi
                 # o defeito), mas tambem nao pode sumir: o cliente pediu "30 de

@@ -159,6 +159,19 @@ def lookup_frete(bairro: str) -> dict | None:
             return {"bairro": achados[0]["nome"], "taxa": achados[0]["taxa"],
                     "match": "palavras"}
 
+    # Letras trocadas de lugar ("IGAPARE" por Igarape): a semelhanca da 0,71
+    # e nao passava. Mesmas letras, mesmas duas iniciais, um candidato so
+    # (teste do dono, 08/10 21h49 - frete saiu R$ 0,00).
+    if len(alvo) >= 6:
+        _letras = sorted(alvo.replace(" ", ""))
+        trocados = [b for b in bairros
+                    if any(sorted(normalize(c).replace(" ", "")) == _letras
+                           and normalize(c)[:2] == alvo[:2]
+                           for c in [b["nome"]] + b["aliases"])]
+        if len(trocados) == 1:
+            return {"bairro": trocados[0]["nome"], "taxa": trocados[0]["taxa"],
+                    "match": "letras trocadas"}
+
     melhor, score = None, 0.0
     for b in bairros:
         for candidato in [b["nome"]] + b["aliases"]:

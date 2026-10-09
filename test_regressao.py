@@ -2664,7 +2664,7 @@ _BALCAO = {
         ("Nosso tempo médio de preparo e entrega é de 30 a 40 minutos, mas vou verificar "
          "com a equipe para agilizar.", True),
     "vocês vendem salgado congelado grande pra fritar?":
-        ("Congelado trabalhamos apenas com o tamanho mini de festa (R$ 40 o cento).", False),
+        (next(_t for _n, _rx, _t, _e in app._RESPOSTAS_DO_BALCAO if _n == "congelado"), False),
 }
 for _p, (_txt, _eq) in _BALCAO.items():
     _r = app._resposta_do_balcao(_p, {})
@@ -3001,6 +3001,94 @@ _dup = app._conferir_etapa_travada(
     dict(memoria_mod._empty(), items=[{"name": "Coxinha", "quantity": 50},
                                       {"name": "Empadinha de Frango", "quantity": 30}]))
 checa("'Fazemos de 25 em 25' nao sai duas vezes", _dup.count("Fazemos de 25") == 1, _dup)
+_cong = next(_t for _n, _rx, _t, _e in app._RESPOSTAS_DO_BALCAO if _n == "congelado")
+checa("congelado: texto de venda do dono com os sabores e a dica",
+      _cong.startswith("Sim, trabalhamos sim!") and "R$ 40 o cento" in _cong
+      and "• Kibe" in _cong and "180°C" in _cong)
+print("--- Dono 08/10: congelados")
+checa("'quero 100 coxinhas congeladas' e pedido, nao repete o texto de venda",
+      app.pedido_de_congelado("quero 100 coxinhas congeladas", "")
+      and (app._resposta_do_balcao("quero 100 coxinhas congeladas", {}) or ("",))[0] != "congelado")
+checa("'1 cento de coxinha' depois da oferta de congelado e congelado",
+      app.pedido_de_congelado("quero 1 cento de coxinha", app.texto_congelado()))
+checa("'frita' depois da oferta nao e congelado",
+      not app.pedido_de_congelado("quero 1 cento de coxinha frita", app.texto_congelado()))
+checa("pergunta de congelado continua com o texto de venda",
+      (app._resposta_do_balcao("vocês vendem salgado congelado?", {}) or ("", ""))[1]
+      .startswith("Sim, trabalhamos sim!"))
+checa("sem congelado no de-para do pedido, a equipe registra (nao vira frito)",
+      app._versao_congelada("Coxinha") == "")
+print("--- Dono 08/10 (noite): retirada parcial, porcoes, grafia, bairro, duas opcoes")
+checa("'tira 50 coxinhas' de 100 deixa 50 (16h04)",
+      _tira("tira 50 coxinhas e coloca 25 bolinhas de queijo e 25 kibes",
+            [{"name": "Coxinha", "quantity": 100}])
+      == [("Coxinha", 50), ("Bolinha de Queijo", 25), ("Quibe", 25)],
+      _tira("tira 50 coxinhas e coloca 25 bolinhas de queijo e 25 kibes", [{"name": "Coxinha", "quantity": 100}]))
+checa("'tira 25 coxinhas' de 50 deixa 25 (19h37)",
+      _tira("tira 25 coxinhas e coloca 25 quibes no lugar",
+            [{"name": "Coxinha", "quantity": 50}, {"name": "Empadinha de Frango", "quantity": 25}])
+      == [("Coxinha", 25), ("Empadinha de Frango", 25), ("Quibe", 25)])
+checa("'tira 50 coxinhas' com 50 tira a linha",
+      _tira("tira 50 coxinhas", [{"name": "Coxinha", "quantity": 50}, {"name": "Quibe", "quantity": 25}])
+      == [("Quibe", 25)])
+checa("'tira o bolo de milho' nao volta pelo acompanhamento (15h50)",
+      ("Bolo de Milho", 1) not in _tira("tira o bolo de milho e coloca mais 25 bolinhas de queijo",
+                                        [{"name": "Coxinha", "quantity": 50},
+                                         {"name": "Bolinha de Queijo", "quantity": 25},
+                                         {"name": "Bolo de Milho", "quantity": 1}]))
+checa("pedir bolo de milho continua entrando",
+      ("Bolo de Milho", 1) in _tira("quero tambem um bolo de milho", [{"name": "Coxinha", "quantity": 50}]))
+def _itens_de(t):
+    return [(i["name"], i["quantity"]) for i in
+            _extract_data_from_message(t.lower(), ConversationState(phone="x")).get("items") or []]
+checa("'6 porcoes de coxinha' sao 150 (19h45)",
+      _itens_de("Quero 6 porções de coxinha e 6 porções de quibe, fritos.")
+      == [("Coxinha", 150), ("Quibe", 150)])
+checa("'uma porcao de 25 salgadinhos' continua volume de 25",
+      _extract_data_from_message("quero uma porção de 25 salgadinhos",
+                                 ConversationState(phone="x")).get("volume_pendente") == 25)
+checa("'25 SALSCHISA' nao some do pedido (21h10)",
+      ("Enroladinho de Salsicha", 25) in _itens_de(
+          "QUERO 50 COXINHAS PARA AMANHA A8 HORAS 25 SALSCHISA E 50 QUIBE E 50 ESFIRRAS"))
+from agents.conversation import _corrigir_grafia as _cg
+checa("grafia: palavra comum nao vira produto",
+      all(_cg(w) == "" for w in ("pagamento", "cartao", "amanha", "pessoas", "travesseirinhos",
+                                 "sanduiche", "palmito", "refrigerante")))
+checa("'IGAPARE' e Igarape, com o frete (21h49)",
+      (facts.lookup_frete("IGAPARE") or {}).get("bairro") == "Igarapé")
+_fb = dict(memoria_mod._empty(), items=[{"name": "Coxinha", "quantity": 50}], modality="entrega")
+memoria_mod.capturar_resposta_direta(_fb, "Qual o bairro? 😊", "IGAPARE")
+checa("resposta seca do bairro grava o nome oficial", _fb["bairro"] == "Igarapé", _fb["bairro"])
+_fb2 = dict(memoria_mod._empty(), name="B", items=[{"name": "Coxinha", "quantity": 50}],
+            modality="entrega", endereco="Rua X 10", data_agendada="x", data_iso="2026-10-09",
+            horario="10h", payment_method="pix")
+memoria_mod.capturar_resposta_direta(_fb2, "Qual o bairro? 😊", "Candeias")
+checa("bairro fora da tabela nao entra e a pergunta diz que nao achou",
+      not _fb2["bairro"] and memoria_mod.pedido_de_dados(_fb2).startswith("Não achei o bairro Candeias"))
+checa("'na entrega pro motoboy' nao e bairro (21h42)",
+      app._conferir_frete_perguntado("x", "quero 50 coxinhas pra entregar amanhã às 11h na Rua "
+                                     "Amazonas, sem número, e pago no Pix na entrega pro motoboy.",
+                                     "RESP") == "RESP")
+checa("'50 ou 75' e pergunta de duas opcoes; 'Ajusto para 50...' nao (dia continua igual)",
+      bool(app._RX_DUAS_OPCOES.search("• 60 coxinha de frango: 50 ou 75"))
+      and not app._RX_DUAS_OPCOES.search(
+          "Fazemos de 25 em 25 por sabor! Ajusto para 50 coxinha de frango e 25 bolinha de queijo?"))
+checa("'metade coxinha e metade bolinha' acha os dois sabores (21h04)",
+      app._sabores_pela_metade("uma porção de 25, mas quero metade coxinha e metade bolinha de queijo, pode ser?")
+      == ["Coxinha", "Bolinha de Queijo"])
+from datetime import datetime as _dt0810
+_sd = app._conferir_saudacao("Nosso preço já é direto de fábrica!\n\nSou a Sandrinha da BALBS 💛 Fazemos de 25 em 25 por sabor!",
+                             _dt0810(2026, 10, 8, 21, 37), "Balbino")
+checa("saudacao colocada e a do dia, sem 'Sou a Sandrinha' repetido (21h37)",
+      _sd.startswith("Boa noite, Balbino! Eu sou a Sandrinha da BALBS 💛") and _sd.count("Sandrinha") == 1
+      and "\n Fazemos" not in _sd, _sd)
+_espelho_0810 = "Cliente: Balbino\nItens:\n• 50 un - Coxinha frango — R$ 40,00\n💰 Total: R$ 52,00\nPosso confirmar pra amanhã (sex, 09/10) às 07h40? 💛"
+checa("'Pode ser 25 esfirras' ao resumo nao fecha o pedido (mostra o resumo novo)",
+      not app._confirmou_o_resumo(_espelho_0810, "Pode ser 25 esfirras de carne então."))
+checa("'SIM' e 'pode ser' ao resumo continuam fechando",
+      app._confirmou_o_resumo(_espelho_0810, "SIM") and app._confirmou_o_resumo(_espelho_0810, "pode ser"))
+checa("'troca/entao' com item novo fecha a pergunta do sabor que nao existe (15h41)",
+      bool(app._RX_TROCOU_O_SABOR.search(facts.normalize("Então troca por mais 25 coxinhas, por favor."))))
 checa("'amnha' e amanha", horario.resolver_data("amnha") == horario.agora().date()
       + __import__("datetime").timedelta(days=1))
 checa("repergunta mantem a resposta quando o cliente perguntou",

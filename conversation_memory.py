@@ -63,6 +63,10 @@ def _empty() -> dict:
         "sabores_pendentes": [],
         "modality": "",
         "bairro": "",
+        "bairro_nao_achado": "",
+        # "metade coxinha e metade bolinha" numa porcao de 25: a proposta de 25
+        # de cada, que so vira item com o "sim" do cliente.
+        "proposta_metade": [],
         "endereco": "",
         "referencia": "",
         # O cliente afirmou que a casa nao tem numero. Nao completa o
@@ -240,8 +244,40 @@ _RX_TIRA_ITEM = _re.compile(
     r"|sem|em\s+vez\s+d[eoa]s?|ao\s+inves\s+d[eoa]s?)\s+"
     # "tira SO os quibes" (teste do dono, 08/10 12h39)
     r"(?:(?:so|somente|apenas)\s+)?"
-    r"(?:o\s+|a\s+|os\s+|as\s+|aquel[ea]s?\s+|tod[oa]s\s+(?:os\s+|as\s+)?)?(?:\d+\s+)?(?:de\s+)?"
-    r"([a-z]{4,}(?:\s+de\s+[a-z]{4,})?)")
+    r"(?:o\s+|a\s+|os\s+|as\s+|aquel[ea]s?\s+|tod[oa]s\s+(?:os\s+|as\s+)?)?(?:(?P<qtd>\d+)\s+)?(?:de\s+)?"
+    r"(?P<alvo>[a-z]{4,}(?:\s+de\s+[a-z]{4,})?)")
+
+
+def _tiradas_parciais(texto: str, removidos: list) -> dict:
+    """"tira 25 coxinhas" com 50 na ficha: tira 25, nao a linha inteira.
+
+    {id(item): quantidade a tirar} so quando o numero e MENOR que o da ficha.
+    Antes "tira 50 coxinhas" de um cento apagava as 100 (teste do dono, 08/10
+    16h04 e 19h37).
+    """
+    if not texto or not removidos:
+        return {}
+    try:
+        from agents.conversation import _forma_de_busca
+    except Exception:
+        return {}
+    parciais = {}
+    for m in _RX_TIRA_ITEM.finditer(_sem_acento(texto)):
+        if not m.group("qtd"):
+            continue
+        n = int(m.group("qtd"))
+        palavras = [w[:5] for w in _forma_de_busca(m.group("alvo")).split()
+                    if len(w) >= 4 and w != "de"]
+        for item in removidos:
+            nome = _forma_de_busca(f"{item.get('name', '')} {item.get('sabor') or ''}")
+            try:
+                atual = int(item.get("quantity") or 0)
+            except (TypeError, ValueError):
+                atual = 0
+            if palavras and all(any(w.startswith(p) for w in nome.split()) for p in palavras) \
+                    and 0 < n < atual:
+                parciais[id(item)] = n
+    return parciais
 
 
 def _itens_a_tirar(texto: str, atuais: list) -> list:
@@ -252,7 +288,7 @@ def _itens_a_tirar(texto: str, atuais: list) -> list:
         from agents.conversation import _forma_de_busca
     except Exception:
         return []
-    alvos = [_forma_de_busca(m.group(1)) for m in _RX_TIRA_ITEM.finditer(_sem_acento(texto))]
+    alvos = [_forma_de_busca(m.group("alvo")) for m in _RX_TIRA_ITEM.finditer(_sem_acento(texto))]
     tirar = []
     for alvo in alvos:
         palavras = [w[:5] for w in alvo.split() if len(w) >= 4 and w != "de"]
@@ -284,9 +320,9 @@ def _pede_tirar_produto(texto: str) -> bool:
         verbo = m.group(0).split()[0]
         if not verbo.startswith(("tir", "retir", "remov", "exclu", "cancel")):
             continue
-        if m.group(1).split()[0] in ("tudo", "pedido"):
+        if m.group("alvo").split()[0] in ("tudo", "pedido"):
             continue
-        if _produto_conhecido(m.group(1)):
+        if _produto_conhecido(m.group("alvo")):
             return True
     return False
 
@@ -406,10 +442,18 @@ def merge(memoria: dict, extraido: dict, novo_da_mensagem: dict | None = None,
     # e o resto do carrinho fica. Antes o "tira" trocava o pedido inteiro e os
     # 100 pasteis sumiram junto (pedido do dono, 08/10).
     removidos = _itens_a_tirar(texto, atuais)
+    removidos_inteiros = []
     if removidos:
-        atuais = [i for i in atuais if i not in removidos]
+        parciais = _tiradas_parciais(texto, removidos)
+        for item in removidos:
+            if id(item) in parciais:
+                item["quantity"] = int(item.get("quantity") or 0) - parciais[id(item)]
+                mudancas.append(f"tirados {parciais[id(item)]} de {item.get('name')}")
+        removidos_inteiros = [r for r in removidos if id(r) not in parciais]
+        atuais = [i for i in atuais
+                  if not any(i is r for r in removidos) or id(i) in parciais]
         memoria["items"] = atuais
-        mudancas.append(f"tirados: {[i.get('name') for i in removidos]}")
+        mudancas.append(f"tirados: {[i.get('name') for i in removidos if id(i) not in parciais]}")
         itens_novos = [n for n in (itens_novos or []) if isinstance(n, dict)
                        and not any(_mesmo_item(n, r) for r in removidos)]
     if itens_novos and itens_novos != memoria.get("items") and atuais \
@@ -458,6 +502,10 @@ def merge(memoria: dict, extraido: dict, novo_da_mensagem: dict | None = None,
             memoria["sabores_pendentes"] = [p for p in pendentes if p is not aberta]
             mudancas.append(f"refrigerante -> {bebidas[0]['name']}")
         for b in bebidas:
+            # "tira o bolo de milho": o bolo vem de novo na extracao (a frase
+            # o cita) e voltava para o pedido (teste do dono, 08/10 15h50).
+            if any(_mesmo_item(b, r) for r in removidos_inteiros):
+                continue
             if not any(isinstance(i, dict) and i.get("name") == b["name"] for i in itens):
                 itens.append(dict(b))
                 mudancas.append(f"bebida={b['quantity']} x {b['name']}")
@@ -490,6 +538,8 @@ def merge(memoria: dict, extraido: dict, novo_da_mensagem: dict | None = None,
             memoria["sabores_pendentes"] = [p for p in pendentes if p is not aberta_doce]
             aberta_doce = None
         for d in doces:
+            if any(_mesmo_item(d, r) for r in removidos_inteiros):
+                continue
             if not any(isinstance(i, dict) and i.get("name") == d["name"] for i in itens):
                 itens.append(dict(d))
                 mudancas.append(f"doce={d['quantity']} x {d['name']}")
@@ -621,6 +671,14 @@ def capturar_numero_da_casa(memoria: dict, texto: str) -> str:
     return memoria["endereco"]
 
 
+def _endereco_da_loja() -> str:
+    try:
+        import cardapio
+        return cardapio.endereco_fabrica()
+    except Exception:
+        return "Av. Calama, 5892 - Igarapé"
+
+
 def capturar_resposta_direta(memoria: dict, pergunta_anterior: str, texto: str) -> str:
     """Preenche o campo que a pergunta anterior pediu, a partir da resposta seca.
 
@@ -641,6 +699,21 @@ def capturar_resposta_direta(memoria: dict, pergunta_anterior: str, texto: str) 
         if memoria.get(campo):
             continue
         if any(m in pergunta for m in marcas):
+            if campo == "bairro":
+                # "IGAPARE" entrava cru: o frete saia R$ 0,00 e o resumo sem a
+                # linha do frete (teste do dono, 08/10 21h49). Vale o nome da
+                # tabela; fora dela, a pergunta volta dizendo que nao achou.
+                try:
+                    import facts
+                    achado = facts.lookup_frete(candidato)
+                except Exception:
+                    achado = None
+                if not achado:
+                    memoria["bairro_nao_achado"] = candidato.title()
+                    return ""
+                memoria["bairro_nao_achado"] = ""
+                memoria[campo] = achado["bairro"]
+                return campo
             memoria[campo] = candidato.title()
             return campo
     return ""
@@ -1005,6 +1078,10 @@ def pedido_de_dados(memoria: dict, pendentes: list[str] | None = None) -> str:
                 pass
         if pendentes[0] == "troco_para":
             return pergunta_do_troco(memoria)
+        if pendentes[0] == "bairro" and memoria.get("bairro_nao_achado"):
+            return (f"Não achei o bairro {memoria['bairro_nao_achado']} na nossa lista de "
+                    f"entrega 🤔 Qual é o bairro certinho? Se preferir, a retirada é na "
+                    f"loja ({_endereco_da_loja()}). 💛")
         return _PERGUNTA_CURTA.get(pendentes[0], f"Qual {pendentes[0]}? 😊")
     nada_ainda = not any(memoria.get(c) for c in _DADOS_DE_LOGISTICA)
     linhas = []
