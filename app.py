@@ -908,7 +908,10 @@ _FATOS_DO_DONO = (
     # "Qual horario vcs abrem", "QUAL HORARIO VOCES ABRE DE MANHA", "que hora
     # inicia as entregas" (teste do dono, 05/10) viravam "Qual o seu pedido?".
     (_re_mod.compile(r"\b(?:que\s+horas?|qual\s+(?:e\s+)?(?:o\s+)?horario|horario\s+(?:de|que|voces|vcs)"
-                     r"|ate\s+que\s+horas|abrem?\b|abertura|inicia\w*\s+as\s+entregas"
+                     # "NA SEGUNDA VAI ABRIR?" caia no modelo, que inventou
+                     # "a partir das 08h00" (teste do dono, 09/10 21h20).
+                     r"|ate\s+que\s+horas|abrem?\b|abrir|abrira|abertura|inicia\w*\s+as\s+entregas"
+                     r"|\b(?:vai|vao|estao|esta|vai\s+estar|vao\s+estar)\s+abert[oa]s?\b"
                      r"|fecham?\b|funcionam?\b|madrugada)\b"),
      lambda: horario._hm_txt(horario._turno()[0]).lower(), lambda: _texto_do_expediente()),
     # BLOCO 2 (triagem de tamanho e linha mini festa). Em 1 de 3 rodadas a
@@ -2993,6 +2996,17 @@ def _ofereceu_ajuste_de_lote(texto: str) -> bool:
     limpo = " ".join(facts.normalize(texto or "").split())
     return any(facts.normalize(m) in limpo for m in _MARCAS_DE_AJUSTE_DE_LOTE)
 
+
+_RX_SO_AGRADECIMENTO = _re_mod.compile(
+    r"^\s*(?:muito\s+)?(?:obrigad[oa]|obg|brigad[oa]|valeu|vlw|grat[oa]|agradeco)"
+    r"(?:\s+(?:viu|mesmo|sandrinha|demais|moca))*\s*$")
+
+_RX_RECUSA_ACOMPANHAMENTO = _re_mod.compile(
+    r"^\s*(?:nao|n|nada)\s*(?:obrigad[oa]|valeu|obg)?\s*$"
+    r"|\bnao\s+(?:quero|vou\s+querer|precisa|preciso)\b"
+    r"|\bsem\s+(?:o\s+|os\s+)?(?:doce|docinho|brigadeiro|refri|refrigerante|bebida)"
+    r"|\b(?:so|somente|apenas)\s+(?:os\s+|o\s+)?salgad"
+    r"|\b(?:esquece|deixa\s+(?:pra\s+la|quieto)|dispenso|tira)\b.{0,15}\b(?:doce|docinho|refri|bebida)")
 
 _RX_TROCOU_O_SABOR = _re_mod.compile(
     r"\b(?:troca\w*|no\s+lugar|em\s+vez|ao\s+inves|entao|pode\s+ser|prefiro|melhor)\b")
@@ -5162,6 +5176,17 @@ def _handle_flush(user: str, items: list[dict]) -> None:
         # continuava voltando (teste do dono, 08/10 15h41 e 15h44). Depois da
         # escolha pelo nome: "Pode ser a Empadinha de Frango. Mas tira 25
         # coxinhas..." escolhe a empadinha, e nao descarta (19h37).
+        # "Somente os salgados entao", "nao quero mais doce": a pergunta do
+        # docinho (ou do refrigerante) fecha. Ela voltava a cada mensagem, quatro
+        # vezes seguidas, e o cliente pediu desconto de raiva (teste do dono,
+        # 09/10 21h17). So depois da escolha acima: "nao, quero a bandeja" escolhe.
+        _acomp = [p for p in (_memoria.get("sabores_pendentes") or [])
+                  if p.get("termo") in ("docinho", "refrigerante")]
+        if _acomp and _RX_RECUSA_ACOMPANHAMENTO.search(facts.normalize(text_only or "")):
+            _memoria["sabores_pendentes"] = [p for p in _memoria["sabores_pendentes"]
+                                             if p not in _acomp]
+            conversation_memory.save(user, _memoria)
+            print(f"[memoria] {user}: cliente recusou {[p['termo'] for p in _acomp]}; pergunta fechada")
         _sobrou = [p for p in (_memoria.get("sabores_pendentes") or []) if p.get("inexistente")]
         if _sobrou and _ja_vieram and _RX_TROCOU_O_SABOR.search(facts.normalize(text_only or "")):
             _memoria["sabores_pendentes"] = [p for p in _memoria["sabores_pendentes"]
@@ -5658,6 +5683,16 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                 _responder_direto(user, items, "Qual das duas opções você prefere? 😊\n\n"
                                   + _travada_lote, _chegada)
                 return
+        # "OBRIGADO" ao resumo nao e "sim": o modelo leu como aceite e o pedido
+        # foi para a fabrica sem o cliente confirmar (teste do dono, 09/10
+        # 21h15). Agradecimento puro pergunta de novo, uma frase so.
+        _anterior_n = " ".join(facts.normalize(last_assistant_text or "").split())
+        if (any(facts.normalize(m) in _anterior_n for m in _MARCAS_DE_RESUMO)
+                and _RX_SO_AGRADECIMENTO.match(facts.normalize(text_only or ""))
+                and not _memoria.get("pedido_enviado")):
+            print(f"[resumo] user={user} so agradeceu ao resumo; pede o sim")
+            _responder_direto(user, items, "Por nada! 💛 Posso confirmar o seu pedido?", _chegada)
+            return
         if ((conversation_memory.pendencia_de_lote(_memoria)
                 or conversation_memory._frase_de_lote(_memoria))
                 and ((_ofereceu_ajuste_de_lote(last_assistant_text)

@@ -3089,6 +3089,17 @@ checa("'SIM' e 'pode ser' ao resumo continuam fechando",
       app._confirmou_o_resumo(_espelho_0810, "SIM") and app._confirmou_o_resumo(_espelho_0810, "pode ser"))
 checa("'troca/entao' com item novo fecha a pergunta do sabor que nao existe (15h41)",
       bool(app._RX_TROCOU_O_SABOR.search(facts.normalize("Então troca por mais 25 coxinhas, por favor."))))
+print("--- Dono 09/10: docinho em laco, segunda abre, obrigado ao resumo")
+for _r in ("SOMENTE OS SALGADOS ENTAO", "NAO QUERO MAIS DOCE", "nao", "sem doce", "esquece o docinho"):
+    checa(f"recusa do acompanhamento: {_r!r}", bool(app._RX_RECUSA_ACOMPANHAMENTO.search(facts.normalize(_r))))
+for _r in ("bandeja", "o meio cento", "quero a de 600"):
+    checa(f"escolha nao e recusa: {_r!r}", not app._RX_RECUSA_ACOMPANHAMENTO.search(facts.normalize(_r)))
+_seg = app._fato_perguntado("NA SEGUNDA VAI ABRIR ?")
+checa("'na segunda vai abrir?' responde pelo expediente do codigo (sem 08h00 inventado)",
+      bool(_seg) and _seg[1] == app._texto_do_expediente(), _seg)
+checa("'OBRIGADO' e so agradecimento", bool(app._RX_SO_AGRADECIMENTO.match(facts.normalize("OBRIGADO"))))
+checa("'obrigado, pode confirmar' nao e so agradecimento",
+      not app._RX_SO_AGRADECIMENTO.match(facts.normalize("obrigado, pode confirmar")))
 checa("'amnha' e amanha", horario.resolver_data("amnha") == horario.agora().date()
       + __import__("datetime").timedelta(days=1))
 checa("repergunta mantem a resposta quando o cliente perguntou",
