@@ -479,7 +479,9 @@ def detectar_bairro(message: str) -> str:
     os dois existirem na tabela.
     """
     alvo = facts.normalize(message or "")
-    if not alvo:
+    # "um centro de canudinho" e um cento, nao o bairro Centro (10/10 08h39).
+    alvo = re.sub(r"\b(?:um|uma|meio|dois|duas|tres|\d+)\s+centros?\s+de\b", " ", alvo)
+    if not alvo.strip():
         return ""
     try:
         oficiais = facts.get()["bairros"]
@@ -1946,6 +1948,12 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
     # nome e sobrava o frito (teste do dono, 08/10 12h39).
     msg_lower = re.sub(r"\benroladinhos?\s+(?:de\s+salsicha\s+)?com\s+catupiry\b",
                        "enroladinho assado", msg_lower)
+    # "um centro de canudinho" e um CENTO: o pedido sumia e "Centro" virava o
+    # bairro (teste do dono, 10/10 08h39). So com quantidade antes e "de"
+    # depois - "entrega no centro" continua sendo o bairro.
+    msg_lower = re.sub(r"\b(um|uma|meio|dois|duas|tres|\d+)\s+centros?\s+(?=de\s)",
+                       lambda m: f"{m.group(1)} {'centos' if m.group(1) not in ('um', 'uma', 'meio', '1') else 'cento'} ",
+                       msg_lower)
     # "6 porcoes de coxinha" sao 150 coxinhas, nao 6 (teste do dono, 08/10
     # 19h45). "1 porcao de 25 salgadinhos" ja diz as unidades: fica como esta.
     msg_lower = re.sub(

@@ -392,6 +392,8 @@ def aviso_de_sabor_inexistente(item_pedido: str, opcoes: list[str]) -> str:
     except Exception:
         tipo_existe = True
     esse = "esse sabor" if tipo_existe else "esse item"
+    if _sem_acento(item_pedido or "").startswith("bolo"):
+        esse = "bolo"
     return (f"Não temos {esse} no momento. Nossos {_rotulo_das_opcoes(opcoes)} "
             f"disponíveis são:\n" + "\n".join(f"• {o}" for o in opcoes)
             + "\nQual você prefere? 😊")
@@ -1661,10 +1663,30 @@ def oferta_adicional(agora=None) -> str:
         minuto = agora.hour * 60 + agora.minute
     except Exception:
         return frases[-1]
+    atual = len(frases) - 1
     for i, ((h1, m1), (h2, m2), _padrao) in enumerate(_OFERTAS_POR_HORARIO):
         if h1 * 60 + m1 <= minuto <= h2 * 60 + m2:
+            atual = i
+            break
+    # Produto da frase esgotado no cardapio: "Bolo de Milho quentinho?" com o
+    # bolo em falta, o "sim" do cliente nao virava nada (teste do dono, 10/10
+    # 08h40). Vale a frase de outra faixa com produto disponivel.
+    for i in [atual] + [j for j in range(len(frases)) if j != atual]:
+        if not _oferta_esgotada(frases[i]):
             return frases[i]
-    return frases[-1]
+    return frases[atual]
+
+
+def _oferta_esgotada(frase: str) -> bool:
+    """A frase oferece um produto que esta indisponivel no cardapio hoje?"""
+    try:
+        import facts
+        texto = _sem_acento(frase or "")
+        return any(not p.get("disponivel", True) and len(_sem_acento(p["item"])) >= 6
+                   and _sem_acento(p["item"]) in texto
+                   for p in facts.get()["produtos"])
+    except Exception:
+        return False
 
 
 def e_a_oferta_configurada(reply: str, agora=None) -> bool:
@@ -1852,6 +1874,14 @@ def pendencia_de_lote(memoria: dict) -> str:
     )
 
 
+def quantidade_livre_do_lote(texto: str) -> int:
+    """"100", "100 unidades": numero solto multiplo de 25 (0 se nao for)."""
+    m = _re.fullmatch(r"\s*(?:sao\s+|quero\s+|pode\s+ser\s+)?(\d{2,4})\s*(?:un\w*)?\s*[.!]?\s*",
+                      _sem_acento(texto or ""))
+    n = int(m.group(1)) if m else 0
+    return n if n >= 25 and n % 25 == 0 else 0
+
+
 def aplicar_ajuste_de_lote(memoria: dict, texto: str = "") -> list[str]:
     """Grava na ficha o ajuste de quantidade que o cliente acabou de aceitar.
 
@@ -1901,6 +1931,8 @@ def aplicar_ajuste_de_lote(memoria: dict, texto: str = "") -> list[str]:
                 if int(m.group(1)) in opcoes]
         if achou:
             escolha[q["indice"]] = achou[0]
+        elif len(quebras) == 1 and quantidade_livre_do_lote(texto):
+            escolha[q["indice"]] = quantidade_livre_do_lote(texto)
 
     novos, mudancas = [], []
     for i, bruto in enumerate(items):

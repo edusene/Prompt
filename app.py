@@ -659,6 +659,9 @@ _RX_PEDIDO_JA_FEITO = _re_mod.compile(
     r"|pedido\s+(?:anterior|feito))\b")
 
 TEXTO_MUDA_ENDERECO = "Envie o novo endereço completo aqui, por favor!"
+_RX_MUDA_MODALIDADE = _re_mod.compile(
+    r"\b(?:quero|queria|prefiro|vou\s+querer|resolvi|mud\w*|troc\w*|melhor|pode\s+ser)\b"
+    r".{0,20}?\b(entrega|entregar|retirada|retirar|buscar)\b")
 TEXTO_ACRESCENTA = "PODE SIM QUAL SABOR VOCE QUER"
 
 
@@ -769,6 +772,14 @@ def _resposta_do_balcao(texto: str, memoria: dict) -> tuple[str, str, bool] | No
                                    or conversation_memory.em_pos_pedido(memoria))
     if _RX_MUDA_ENDERECO.search(t) and pedido_feito:
         return "endereco", TEXTO_MUDA_ENDERECO, True
+    # "Quero para entrega resolvi" logo depois de fechar uma retirada: e o
+    # MESMO pedido mudando, nao um pedido novo. Virou um segundo pedido de 100
+    # coxinhas (teste do dono, 10/10 08h45). A equipe ajusta o que ja saiu.
+    _muda = _RX_MUDA_MODALIDADE.search(t)
+    if _muda and pedido_feito and not _re_mod.search(r"\d", t):
+        if _muda.group(1).startswith("entreg"):
+            return "modalidade", TEXTO_MUDA_ENDERECO, True
+        return "modalidade", _DEFAULT_TRANSFER_MESSAGE, True
     if _RX_ACRESCENTA.search(t) and "pedido" in t and pedido_feito:
         return "acrescimo", TEXTO_ACRESCENTA, True
     for nome, rx, resposta, equipe in _RESPOSTAS_DO_BALCAO:
@@ -2997,6 +3008,21 @@ def _ofereceu_ajuste_de_lote(texto: str) -> bool:
     return any(facts.normalize(m) in limpo for m in _MARCAS_DE_AJUSTE_DE_LOTE)
 
 
+def _pede_bolo_sem_estoque(texto: str) -> bool:
+    """"Quero um bolo" sem bolo disponivel no cardapio hoje (10/10 08h47).
+
+    O modelo chamava a equipe; a regra do dono (08/10) e avisar e listar o que
+    tem. "Bolo de milho" fica com o aviso de esgotado de sempre.
+    """
+    if not _re_mod.search(r"\bbolos?\b(?!\s+de\s+milho)", facts.normalize(texto or "")):
+        return False
+    try:
+        return not any(p.get("disponivel", True) and "bolo" in facts.normalize(p["item"])
+                       for p in facts.get()["produtos"])
+    except Exception:
+        return False
+
+
 _RX_SO_AGRADECIMENTO = _re_mod.compile(
     r"^\s*(?:muito\s+)?(?:obrigad[oa]|obg|brigad[oa]|valeu|vlw|grat[oa]|agradeco)"
     r"(?:\s+(?:viu|mesmo|sandrinha|demais|moca))*\s*$")
@@ -3074,6 +3100,10 @@ def _aceitou_a_quantidade(texto: str, memoria: dict) -> bool:
             if outro and sabor and not facts.normalize(outro).startswith(sabor):
                 continue          # e a quantidade de OUTRO produto
             return True
+    # "Ajusto para 25 canudinho?" -> "100": numero solto, multiplo de 25, com
+    # um sabor so quebrado. Era ignorado e a pergunta voltava (10/10 08h42).
+    if len(quebras) == 1 and conversation_memory.quantidade_livre_do_lote(texto):
+        return True
     return False
 
 
@@ -4929,6 +4959,8 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             _fora = item_fora_do_cardapio(_texto_cliente)
             if not _fora and bolo_fora_do_cardapio(_texto_cliente):
                 _fora = "bolo"
+            if not _fora and _pede_bolo_sem_estoque(_texto_cliente):
+                _fora = "bolo"
         # Item fora do cardapio ("50 empadas de queijo", "uma torta"): o dono
         # (08/10) nao quer equipe nem silencio - avisa, lista os sabores da
         # categoria e segue o atendimento. O resto da mensagem entra na ficha.
@@ -4940,7 +4972,10 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             _m_qtd = _re_mod.search(r"(\d+)\s+(?:de\s+)?" + _re_mod.escape(
                 conversation_memory._sem_acento(_fora)),
                 conversation_memory._sem_acento(_texto_cliente))
-            _qtd_fora = int(_m_qtd.group(1)) if _m_qtd else 0
+            # Sem numero ("uma torta", "um bolo"): a troca entra com 1 doce ou
+            # a porcao minima de 25 - com 0 a escolha do cliente se perdia.
+            _qtd_fora = int(_m_qtd.group(1)) if _m_qtd else (
+                1 if conversation_memory._sem_acento(_fora).startswith("bolo") else 25)
             _alts = conversation_memory.alternativas_do_sabor(_fora, _qtd_fora)
             if _alts:
                 _sabor_inexistente = {"qtd": _qtd_fora, "termo": _fora, "opcoes": _alts,

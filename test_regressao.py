@@ -3100,6 +3100,32 @@ checa("'na segunda vai abrir?' responde pelo expediente do codigo (sem 08h00 inv
 checa("'OBRIGADO' e so agradecimento", bool(app._RX_SO_AGRADECIMENTO.match(facts.normalize("OBRIGADO"))))
 checa("'obrigado, pode confirmar' nao e so agradecimento",
       not app._RX_SO_AGRADECIMENTO.match(facts.normalize("obrigado, pode confirmar")))
+print("--- Dono 10/10: centro de canudinho, 100 solto, bolo sem estoque, entrega depois de fechar")
+_ext_c = _extract_data_from_message("boa tarde\nqueria um centro de canudinho de frango",
+                                    ConversationState(phone="x"))
+checa("'um centro de canudinho' e um cento, nao o bairro Centro",
+      [(i["name"], i["quantity"]) for i in _ext_c.get("items") or []] == [("Canudinho de Frango", 100)]
+      and not _ext_c.get("bairro"), _ext_c)
+checa("'entrega no centro' continua sendo o bairro",
+      _extract_data_from_message("entrega no centro", ConversationState(phone="x")).get("bairro") == "Centro")
+checa("'100' e '100 unidades' respondem a pergunta do lote",
+      memoria_mod.quantidade_livre_do_lote("100") == 100
+      and memoria_mod.quantidade_livre_do_lote("100 unidades") == 100
+      and memoria_mod.quantidade_livre_do_lote("30") == 0
+      and memoria_mod.quantidade_livre_do_lote("100 coxinhas") == 0)
+_f_can = dict(memoria_mod._empty(), items=[{"name": "Canudinho de Frango", "quantity": 1}])
+memoria_mod.aplicar_ajuste_de_lote(_f_can, "100")
+checa("'100' a 'Ajusto para 25 canudinho?' grava 100",
+      _f_can["items"][0]["quantity"] == 100, _f_can["items"])
+checa("aviso de bolo: 'Nao temos bolo no momento'",
+      memoria_mod.aviso_de_sabor_inexistente("bolo", ["Pudim (Fatia)"]).startswith("Não temos bolo no momento."))
+import datetime as _dt1010
+_pos = dict(memoria_mod._empty(), ultimo_pedido_em=_dt1010.datetime.now().isoformat(timespec="seconds"))
+checa("'Quero para entrega resolvi' depois de fechar: equipe, sem pedido novo",
+      (app._resposta_do_balcao("Quero para entrega resolvi", _pos) or ("",))[0] == "modalidade")
+checa("'quero para entrega' com o pedido aberto segue o fluxo",
+      app._resposta_do_balcao("Quero para entrega resolvi",
+                              dict(memoria_mod._empty(), items=[{"name": "Coxinha", "quantity": 100}])) is None)
 checa("'amnha' e amanha", horario.resolver_data("amnha") == horario.agora().date()
       + __import__("datetime").timedelta(days=1))
 checa("repergunta mantem a resposta quando o cliente perguntou",
