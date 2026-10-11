@@ -7166,6 +7166,16 @@ def webhook():
             if "statuses" in value:
                 for status in value["statuses"]:
                     print(f"[webhook] status: {status.get('status')} id={status.get('id', '')[:30]}")
+                    # Entrega que falhou: o motivo da Meta (pagamento, limite,
+                    # numero restrito, fora da janela de 24h). Sem isto o log so
+                    # dizia "failed" e as respostas sumiam do WhatsApp sem
+                    # explicacao (11/10 20h20).
+                    if status.get("status") == "failed":
+                        for _err in status.get("errors") or [{}]:
+                            _det = (_err.get("error_data") or {}).get("details", "")
+                            print(f"[webhook] ENTREGA FALHOU para {status.get('recipient_id', '')}: "
+                                  f"codigo={_err.get('code')} titulo={_err.get('title')!r} "
+                                  f"msg={_err.get('message')!r} detalhe={_det!r}", flush=True)
                 continue
 
             # Mensagens recebidas
