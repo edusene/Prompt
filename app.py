@@ -582,6 +582,14 @@ _RX_INGREDIENTE = _re_mod.compile(
 TEXTO_CONFIRMAR_COM_EQUIPE = (
     "Preciso confirmar essa informação com nossa equipe antes de te passar certinho! 😊")
 
+# ── Funil duplo (decisao do Balbino, 12/10) ─────────────────────────────────
+# Trilho 1: o codigo valida produto e multiplo de 25 e o robo conduz o pedido.
+# Trilho 2: qualquer desvio (quantidade quebrada, item fora do cardapio, duvida
+# sem resposta, pedido de desconto, risco/reclamacao) vai para a equipe NA HORA,
+# com esta frase, e o robo para de responder (auto_mode = HUMAN_ATTENDANCE).
+TEXTO_DESARME = "Vou chamar nossa equipe para verificar agora! Um instante."
+HUMAN_ATTENDANCE = 0          # valor de contacts.auto_mode com a equipe atendendo
+
 
 # Respostas do balcao padronizadas pelo dono (04/10), com o texto exato dele.
 # (nome, regex sobre o texto normalizado, resposta, passa para a equipe).
@@ -1014,9 +1022,8 @@ def _conferir_pix_na_entrega(user: str, pergunta: str, reply: str) -> str:
 
 
 def _texto_fora_do_cardapio(item: str) -> str:
-    """Item fora do cardapio fixo: a equipe verifica o dia (dono, 04/10)."""
-    return (f"Vou chamar nossa equipe para verificar a disponibilidade de {item} "
-            f"pra você! Um instante, por favor. 💛")
+    """Item fora do cardapio: desvio, frase de desarme (Balbino, 12/10)."""
+    return TEXTO_DESARME
 
 
 def _assunto_da_equipe(texto: str) -> str | None:
@@ -3661,11 +3668,12 @@ def _ofereceu_acompanhamento(reply: str) -> bool:
 # para atendente humano", e o proprio bloco diz "Pedido insistente de desconto:
 # PROIBIDO TRANSBORDAR PARA SUPORTE". Fiado, desconto e amizade com a gerencia
 # tem resposta pronta da fabrica - nao ha o que um humano decida.
+# Desconto saiu daqui em 12/10: pelo funil duplo do Balbino, pedido de desconto
+# e desvio e vai para a equipe. O fiado continua negado pelo robo.
 _RX_MOTIVO_DO_BLOCO_6 = _re_mod.compile(
-    r"fiad[oa]|desconto|abatiment|cortesia|caderneta|pendura"
+    r"fiad[oa]|caderneta|pendura"
     r"|pagar depois|pagamento posterior|prazo para pagar|sem pagamento"
-    r"|pagamento antecipado|amig[oa] d[oe]|amizade|conhecid[oa] d[oe]"
-    r"|politica de pre[cç]o|negocia[cç][ãa]o de pre[cç]o|valor menor",
+    r"|pagamento antecipado|amizade",
     _re_mod.IGNORECASE)
 
 
@@ -4944,6 +4952,19 @@ def enviar_em_blocos(user: str, texto: str, chegada: float | None = None) -> Non
         _no_painel(send_msg_out_to_panel, user, chunk)
 
 
+def trigger_human_handoff(user: str, items: list[dict], motivo: str,
+                          chegada: float | None = None, texto: str = "") -> None:
+    """Trilho 2 do funil duplo: desvio vai para a equipe na hora.
+
+    Manda a frase de desarme, registra o motivo no painel (mensagem interna) e
+    poe o contato em HUMAN_ATTENDANCE: o robo para de responder e a equipe
+    assume pelo WhatsApp Web (decisao do Balbino, 12/10).
+    """
+    print(f"[transbordo] user={user} desvio -> equipe: {motivo}")
+    _responder_direto(user, items, texto or TEXTO_DESARME, chegada)
+    perform_transfer(user, reason=f"desvio: {motivo}", send_message=False)
+
+
 def _responder_direto(user: str, items: list[dict], texto: str,
                      chegada: float | None = None) -> None:
     """Envia uma resposta decidida em codigo, sem passar pelo LLM.
@@ -5091,27 +5112,14 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                 _fora = "bolo"
             if not _fora and _pede_bolo_sem_estoque(_texto_cliente):
                 _fora = "bolo"
-        # Item fora do cardapio ("50 empadas de queijo", "uma torta"): o dono
-        # (08/10) nao quer equipe nem silencio - avisa, lista os sabores da
-        # categoria e segue o atendimento. O resto da mensagem entra na ficha.
-        # Equipe so se o cliente pedir atendente: ai vale a palavra-chave.
+        # Item fora do cardapio: desvio do funil duplo (Balbino, 12/10). A lista
+        # de opcoes de 08/10 saiu; vai para a equipe com a frase de desarme.
         _sabor_inexistente = None
-        if _fora and _check_transfer_keywords(items):
-            _fora = ""
-        if _fora:
-            _m_qtd = _re_mod.search(r"(\d+)\s+(?:de\s+)?" + _re_mod.escape(
-                conversation_memory._sem_acento(_fora)),
-                conversation_memory._sem_acento(_texto_cliente))
-            # Sem numero ("uma torta", "um bolo"): a troca entra com 1 doce ou
-            # a porcao minima de 25 - com 0 a escolha do cliente se perdia.
-            _qtd_fora = int(_m_qtd.group(1)) if _m_qtd else (
-                1 if conversation_memory._sem_acento(_fora).startswith("bolo") else 25)
-            _alts = conversation_memory.alternativas_do_sabor(_fora, _qtd_fora)
-            if _alts:
-                _sabor_inexistente = {"qtd": _qtd_fora, "termo": _fora, "opcoes": _alts,
-                                      "inexistente": True}
-                print(f"[sabor] user={user} item fora do cardapio: {_fora} -> opcoes {_alts}")
-                _fora = ""
+        # Pedido de desconto: desvio, equipe na hora (Balbino, 12/10). Crise e
+        # risco vem antes (balcao), com o texto proprio deles.
+        if not _balcao and not _fora and _RX_DESCONTO.search(_texto_cliente.lower()):
+            trigger_human_handoff(user, items, "pedido de desconto", _chegada)
+            return
         if _balcao or _fora:
             _nome_b, _texto_b, _equipe_b = (_balcao or ("fora do cardapio",
                                                         _texto_fora_do_cardapio(_fora), True))
@@ -5352,6 +5360,16 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                                              if p not in _acomp]
             conversation_memory.save(user, _memoria)
             print(f"[memoria] {user}: cliente recusou {[p['termo'] for p in _acomp]}; pergunta fechada")
+        # Quantidade que nao fecha em 25 por sabor (Trilho 2, Balbino 12/10). So
+        # depois do tamanho: "20 coxinhas" pode ser salgado grande, por unidade.
+        if (_memoria.get("items") and not _memoria.get("pedido_enviado")
+                and not conversation_memory._itens_ambiguos_detalhe(_memoria)
+                and conversation_memory._frase_de_lote(_memoria)):
+            _quebrados = [f"{i.get('quantity')} {i.get('name')}" for i in _memoria["items"]
+                          if isinstance(i, dict) and int(i.get("quantity") or 0) % 25]
+            trigger_human_handoff(user, items, f"quantidade fora do multiplo de 25: {_quebrados}",
+                                  _chegada)
+            return
         _sobrou = [p for p in (_memoria.get("sabores_pendentes") or []) if p.get("inexistente")]
         if _sobrou and _ja_vieram and _RX_TROCOU_O_SABOR.search(facts.normalize(text_only or "")):
             _memoria["sabores_pendentes"] = [p for p in _memoria["sabores_pendentes"]
@@ -5362,36 +5380,12 @@ def _handle_flush(user: str, items: list[dict]) -> None:
         # "Uma porcao de 25, metade coxinha e metade bolinha": a porcao e de um
         # sabor so. Saia a lista dos 17 sabores com "Escolha ate 1 sabor"
         # (teste do dono, 08/10 21h04). Propoe 25 de cada, como o ajuste de lote.
-        _proposta = _memoria.get("proposta_metade") or []
-        if _proposta:
-            # So o "sim" aceita; qualquer outra resposta descarta a proposta.
-            # Gravada direto como item, ela sobrava num pedido novo que o
-            # cliente mandou sem aceitar (replay de 08/10 21h10).
-            _memoria["proposta_metade"] = []
-            if _e_concordancia(text_only) and not _re_mod.search(r"\d", text_only or ""):
-                _memoria["items"] = [
-                    {"name": _n, "quantity": 25,
-                     "price": (facts.resolve_unit_price(_n, 25) or {}).get("preco_unitario", 0.0)}
-                    for _n in _proposta]
-                _memoria["volume_pendente"] = 0
-                _memoria["divisao_pendente"] = {}
-                print(f"[memoria] {user}: aceitou 25 de cada -> {_proposta}")
-            conversation_memory.save(user, _memoria)
+        # "Uma porcao de 25, metade coxinha e metade bolinha": 12,5 de cada e
+        # quantidade quebrada - desvio, equipe na hora (Balbino, 12/10).
         _metades = _sabores_pela_metade(text_only)
         if (_memoria.get("volume_pendente") == 25 and not _memoria.get("items")
                 and len(_metades) == 2):
-            _memoria["proposta_metade"] = _metades
-            _abertura = ""
-            if not _memoria.get("saudacao_feita"):
-                _nome = f", {_memoria['name']}" if _memoria.get("name") else ""
-                _abertura = (f"{horario.saudacao(horario.agora())}{_nome}! "
-                             f"Eu sou a Sandrinha da BALBS 💛 ")
-            _memoria["saudacao_feita"] = True
-            conversation_memory.save(user, _memoria)
-            print(f"[memoria] {user}: porcao de 25 pela metade -> 25 de cada {_metades}")
-            _responder_direto(user, items, (
-                f"{_abertura}Na porção de 25 é um sabor só! 😊 Posso fazer 25 de "
-                f"{_metades[0]} e 25 de {_metades[1]} (50 no total)?"), _chegada)
+            trigger_human_handoff(user, items, f"porcao de 25 dividida: {_metades}", _chegada)
             return
 
         # Bairro ou rua na ficha, com itens pedidos, e entrega: ninguem da o
@@ -5802,6 +5796,16 @@ def _handle_flush(user: str, items: list[dict]) -> None:
         _minis_ajustados = []
         if (conversation_memory.pendencia_de_item(_memoria)
                 and _escolheu_pacote(text_only)):
+            # "20 coxinhas" -> "MINI": quantidade fora do multiplo de 25 no pacote.
+            # Subia sozinha para 25; pelo funil duplo e desvio (Balbino, 12/10).
+            _quebrados_mini = [f"{i.get('qtd')} {i.get('sabor')}"
+                               for i in conversation_memory._itens_ambiguos_detalhe(_memoria)
+                               if isinstance(i, dict) and int(i.get("qtd") or 0) % 25]
+            if _quebrados_mini:
+                trigger_human_handoff(
+                    user, items, f"quantidade fora do multiplo de 25 (mini): {_quebrados_mini}",
+                    _chegada)
+                return
             _escolha = conversation_memory.aplicar_escolha_de_pacote(_memoria)
             if _escolha:
                 conversation_memory.save(user, _memoria)
@@ -6093,7 +6097,7 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             "\n9.3 FIADO E DESCONTO (BLOCO 6): cliente propondo pagar depois "
             "(\'pago na segunda\', \'acerto no fim do mes\', \'deixa anotado\') recebe "
             "a negativa de fiado NA MESMA resposta. Pedido de desconto ou de "
-            "abatimento no frete recebe a defesa de preco NA MESMA resposta. "
+            "abatimento no frete vai para a equipe: use transfer_to_human. "
             "Ignorar em silencio nao e opcao."
             "\n9.4 UMA PERGUNTA: fora da lista vertical de coleta e do espelho, a "
             "mensagem termina com UMA pergunta objetiva - nunca duas."
@@ -6124,14 +6128,13 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             "no retorno de uma tool. Instagram, site, telefone, nota fiscal, feriado, "
             "nome do dono, ingredientes, oleo, validade, gramas, kit, "
             "parcelamento, vagas de emprego e qualquer outro dado que nao esteja aqui: "
-            "responda 'Preciso confirmar essa informacao com nossa equipe antes de te "
-            "passar certinho! 😊' e nada mais sobre o assunto. NUNCA deduza, estime nem "
+            "use transfer_to_human (a equipe responde) e nada mais sobre o assunto. "
+            "NUNCA deduza, estime nem "
             "'normalmente indicamos'. Pergunta que voce nao entendeu nao e 'sim'. "
             "Produto que nao esta no cardapio (tortas, itens sazonais, sabor que nao "
-            "existe): NAO chame a equipe. Diga 'Nao temos esse sabor no momento', "
-            "liste os sabores disponiveis da mesma categoria do cardapio e pergunte "
-            "qual o cliente prefere, seguindo o atendimento. transfer_to_human so se "
-            "o cliente pedir expressamente para falar com atendente."
+            "existe), quantidade que nao fecha em 25 por sabor, pedido de desconto e "
+            "reclamacao sao DESVIOS: use transfer_to_human na hora, sem tentar "
+            "resolver."
             "\n9.8 FONTE DOS DADOS: produtos, precos, sabores, disponibilidade, taxas de "
             "entrega, horario de atendimento e regras (taxa de retorno, endereco, chave "
             "Pix) vem do CARDAPIO DIGITAL - o bloco 'CARDAPIO DIGITAL' e a linha "
@@ -6214,10 +6217,9 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                 # _transfer_done tivesse sido ligado aqui.
                 print(f"[transbordo] user={user} RECUSADO pelo BLOCO 6: {reason!r}")
                 return (
-                    "TRANSFERENCIA RECUSADA. Fiado, desconto, abatimento de frete e "
-                    "amizade com a gerencia sao resolvidos por voce, com a resposta "
-                    "pronta do BLOCO 6 - e PROIBIDO transbordar para humano por esses "
-                    "motivos. Responda agora ao cliente: negue o que ele pediu com a "
+                    "TRANSFERENCIA RECUSADA. Fiado e pagar depois sao resolvidos por "
+                    "voce, com a resposta pronta do BLOCO 6 - e PROIBIDO transbordar "
+                    "para humano por esse motivo. Responda agora ao cliente: negue o que ele pediu com a "
                     "frase da fabrica, diga o que voce aceita (Pix, cartao ou "
                     "dinheiro) e siga o funil do pedido. Nao diga que vai chamar "
                     "ninguem."
@@ -6987,6 +6989,17 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             _memoria["upsell_feito"] = True
             conversation_memory.save(user, _memoria)
             print(f"[upsell] user={user} oferta adicional feita")
+
+        # Duvida que o cardapio nao responde: desvio (Balbino, 12/10). Saia
+        # "Preciso confirmar com a equipe" e a conversa seguia com o robo.
+        if (reply and not _transfer_done and not _pedido_saiu
+                and "preciso confirmar essa informa" in facts.normalize(reply)):
+            print(f"[transbordo] user={user} desvio -> equipe: duvida sem resposta no cardapio")
+            memory.append(user, "assistant", TEXTO_DESARME)
+            enviar_em_blocos(user, TEXTO_DESARME, _chegada)
+            perform_transfer(user, reason=f"desvio: duvida sem resposta: {text_only[:100]}",
+                             send_message=False)
+            return
 
         memory.append(user, "assistant", reply)
         print(f"[flush] user={user} reply_len={len(reply)}")
@@ -7792,9 +7805,9 @@ def api_set_agent_mode():
 
 _DEFAULT_TRANSFER_MESSAGE = os.getenv(
     "TRANSFER_MESSAGE",
-    # Texto do dono (01/10). O antigo dizia "atendente humano", e a Sandrinha
-    # nunca se apresenta como robo.
-    "Já estou chamando nossa equipe para te atender! Um instante por favor. 💛"
+    # Frase de desarme do Balbino (12/10). A Sandrinha nunca se apresenta
+    # como robo nem fala em "atendente humano".
+    "Vou chamar nossa equipe para verificar agora! Um instante."
 )
 
 

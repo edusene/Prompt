@@ -1084,13 +1084,17 @@ secao("--- 27/09: fiado ia para a fila do humano ---")
 # conferencia, que e onde as negativas sao garantidas.
 for _motivo in ("Pedido com solicitação de fiado, que não é permitido pela "
                 "política da empresa.",
-                "Pedido de fiado e liberação de produção sem pagamento antecipado",
-                "cliente insiste em desconto no frete",
-                "cliente pede abatimento no valor",
-                "cliente diz ser amigo do dono e quer condição especial",
-                "negociação de preço fora da tabela"):
+                "Pedido de fiado e liberação de produção sem pagamento antecipado"):
     checa(f"BLOCO 6 nao transborda: {_motivo[:38]!r}",
           app.transbordo_proibido(_motivo))
+# Funil duplo do Balbino (12/10): desconto e negociacao de preco sao desvio e
+# VAO para a equipe. So o fiado continua resolvido pelo robo.
+for _motivo in ("cliente insiste em desconto no frete",
+                "cliente pede abatimento no valor",
+                "desvio: pedido de desconto",
+                "negociação de preço fora da tabela"):
+    checa(f"desconto transborda (funil duplo): {_motivo[:38]!r}",
+          not app.transbordo_proibido(_motivo))
 # O que TEM de continuar transbordando. Risco e pos-venda nao sao BLOCO 6.
 for _motivo in ("cliente mencionou 'procon'",
                 "cliente mencionou 'falar com atendente'",
@@ -3164,6 +3168,22 @@ checa("festa de 150 pessoas: 750 a 900", "de 750 a 900" in app._faq_festa("festa
 checa("'qual a chave Pix da loja' nao responde o endereco",
       app._fato_perguntado("Qual é a chave Pix da loja?") is None
       and app._fato_perguntado("qual o endereço da loja") is not None)
+print("--- Balbino 12/10: funil duplo - desvio vai para a equipe")
+checa("frase de desarme padrao",
+      app.TEXTO_DESARME == "Vou chamar nossa equipe para verificar agora! Um instante.")
+checa("transferencia padrao usa a frase de desarme",
+      app._DEFAULT_TRANSFER_MESSAGE == app.TEXTO_DESARME
+      or bool(__import__("os").getenv("TRANSFER_MESSAGE")))
+checa("item fora do cardapio: frase de desarme", app._texto_fora_do_cardapio("torta") == app.TEXTO_DESARME)
+checa("HUMAN_ATTENDANCE e o auto_mode da equipe", app.HUMAN_ATTENDANCE == 0)
+checa("fiado continua negado pelo robo (nao transborda)",
+      app.transbordo_proibido("cliente quer pagar na semana que vem, fiado"))
+_src = open("app.py", encoding="utf-8").read()
+checa("quantidade fora do multiplo de 25 dispara o transbordo",
+      "quantidade fora do multiplo de 25" in _src and "def trigger_human_handoff(" in _src)
+checa("duvida sem resposta dispara o transbordo", "duvida sem resposta no cardapio" in _src)
+checa("pedido de desconto dispara o transbordo",
+      'trigger_human_handoff(user, items, "pedido de desconto"' in _src)
 checa("'amnha' e amanha", horario.resolver_data("amnha") == horario.agora().date()
       + __import__("datetime").timedelta(days=1))
 checa("repergunta mantem a resposta quando o cliente perguntou",

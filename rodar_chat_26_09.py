@@ -32,7 +32,8 @@ import memory  # noqa: E402
 
 t_ag._instalar_stubs()
 app.cardapio.em_modo_teste = lambda: False
-app.perform_transfer = lambda p, reason="", send_message=True: True
+_TRANSF = []
+app.perform_transfer = lambda p, reason="", send_message=True: _TRANSF.append(reason) or True
 database.get_contact = lambda phone: {"phone": phone, "name": "Balbino", "auto_mode": 1}
 
 # A hora do teste do dono: sabado, 26/09, 19h20. E ela importa — a oferta
@@ -58,6 +59,7 @@ def conversa(msgs: list) -> list:
     for tentativa in (1, 2, 3):
         t_ag._ficha.clear()
         t_ag._enviadas.clear()
+        _TRANSF.clear()
         app._orders_sent.clear()
         memory._store.pop(t_ag.TELEFONE, None)
         out, limitou = [], False
@@ -85,6 +87,16 @@ def norm(t: str) -> str:
 
 
 # ── as checagens, na lingua da queixa do dono ──────────────────────────────
+def transborda_na_1a(r: list) -> str:
+    """Funil duplo do Balbino (12/10): desvio vai para a equipe na 1a resposta."""
+    if not _TRANSF:
+        return "o desvio nao foi para a equipe"
+    if (r[0] or "").strip() != app.TEXTO_DESARME:
+        return f"a 1a resposta nao foi a frase de desarme: {r[0][:60]!r}"
+    return ""
+
+
+
 def trava_lote(r: list) -> str:
     """A primeira resposta trata do lote e NAO cobra logistica."""
     primeira = r[0]
@@ -223,22 +235,20 @@ CENARIOS = [
      ['Oi, boa tarde! Gostaria de pedir um cento de salgados fritos pra entregar '
       'hoje no bairro Embratel. Quero 30 coxinhas, 30 kibes e 40 bolinhas de queijo. '
       'Vocês entregam?'],
-     [trava_lote, cita_todos_os_sabores("coxinha", "quibe", "bolinha"),
-      sem_vazamento, uma_pergunta]),
+     # Quantidade quebrada (30/30/40): desvio, equipe (12/10).
+     [transborda_na_1a, sem_vazamento]),
 
     ("2. 30 carne / 30 queijo / 40 coxinhas (sabor e lote)",
      ['Oi, quero 100 salgados fritos: 30 de carne, 30 de queijo e 40 coxinhas. '
       'Tem como entregar aqui no Flodoaldo Pontes Pinto?'],
-     [sem_vazamento, uma_pergunta,
-      lambda r: "" if "carne" in norm(r[0]) else "o sabor 'carne' sumiu da resposta"]),
+     # 30 / 30 / 40: quantidade quebrada, equipe (12/10).
+     [transborda_na_1a, sem_vazamento]),
 
     ("3. 15 coxinhas + 10 rissoles + desconto no frete",
      ['Oi, boa tarde! Me vê 15 coxinhas e 10 rissoles de carne pra agora. '
-      'E faz um desconto no frete pra fechar?',
-      'GRANDE',
-      'ENTREGA',
-      'BAIRRO OLARIA, RUA JAMARI 2125. PARA DIA 28.09 AS 19 HORAS. CARTAO'],
-     [defende_preco, upsell, sem_vazamento, uma_pergunta]),
+      'E faz um desconto no frete pra fechar?'],
+     # Pedido de desconto: desvio, equipe (12/10). Depois disso o robo cala.
+     [transborda_na_1a, sem_vazamento]),
 
     ("4. 50 + 50 com troco pra 150 (amnesia de troco + upsell)",
      ['Oi! Quero 50 coxinhas fritas e 50 empadinhas de frango para entregar '
@@ -252,11 +262,9 @@ CENARIOS = [
     ("5. fiado + desconto + rua sem numero",
      ['Oi! Me vê 30 coxinhas e 20 bolinhas de queijo tudo junto pra entregar '
       'segunda às 19h no bairro Olaria, na Rua Jamari. Posso te pagar na '
-      'segunda-feira sem falta? E me dá um desconto no frete pra fechar logo.',
-      'pode ajustar para 25 de cada',
-      'nao quero mais nada',
-      'pago no pix'],
-     [nega_fiado, defende_preco, pede_numero, sem_vazamento, uma_pergunta]),
+      'segunda-feira sem falta? E me dá um desconto no frete pra fechar logo.'],
+     # Desconto (e quantidade quebrada): desvio, equipe (12/10).
+     [transborda_na_1a, sem_vazamento]),
 
     ("6. cento + pix na entrega + troco pra 80 (trava de troco)",
      ['Quero 1 cento de coxinhas fritas pra entregar segunda às 19h30 na Rua '
