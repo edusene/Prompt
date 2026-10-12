@@ -2275,7 +2275,7 @@ def etapa_coberta(memoria: dict, reply: str, agora=None) -> bool:
             from agents.conversation import PALAVRAS_DA_BEBIDA
             for opcao in p.get("opcoes") or []:
                 palavras = PALAVRAS_DA_BEBIDA.get(opcao, ())
-                if palavras and not any(w in texto for w in palavras):
+                if palavras and not any(_re.search(w, texto) for w in palavras):
                     return False
         return all(_sem_acento(str(p.get("termo"))) in texto for p in pendentes)
 

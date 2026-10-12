@@ -89,8 +89,12 @@ problemas = []
 for q in PERGUNTAS:
     respostas = [_uma(q) for _ in range(RODADAS)]
     # Texto exato que o dono deu (balcao, 04/10) nao e invencao.
+    # Idem as perguntas frequentes da lista do dono (11/10): "5 a 6 por pessoa"
+    # passou a ser dado dele.
+    _faq = (app._resposta_de_faq(q) or ("", "", False))[1]
     inventou = [r for r in respostas if r != "[EQUIPE]"
                 and r.strip() not in _TEXTOS_DO_DONO
+                and not (_faq and _faq in r)
                 and _INVENTADO.search(facts.normalize(r))]
     distintas = {_chave(r) for r in respostas}
     marca = "OK "

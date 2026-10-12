@@ -1536,11 +1536,14 @@ _RX_OUTRO_BOLO = re.compile(
 _RX_SALGADO_COM_SABOR = re.compile(
     r"\b(past[ea]\w*|coxinh\w*|rissol\w*|esfi\w*|empad\w*|canudinh\w*|enroladinh\w*"
     r"|croquet\w*|bolinh\w*|quibe\w*|kibe\w*|calzone\w*|quiche\w*|bomba\w*|torta\w*"
-    r"|pao|paes)\s+(?:de|com)\s+([a-z]+)")
+    # "uma torta SALGADA de frango" passava sem aviso (teste do dono, 11/10).
+    r"|pao|paes)\s+(?:salgad[ao]s?\s+|doces?\s+)?(?:de|com)\s+([a-z]+)")
 
-# "coxinha de festa", "pastel de 25": nao e sabor.
+# "coxinha de festa", "pastel de 25": nao e sabor. "O kibe de VOCES leva
+# requeijao?" e pergunta, e virou "sabor que nao existe" (11/10).
 _NAO_E_SABOR = {"festa", "lanche", "mini", "grande", "cento", "porcao", "unidade",
-                "hoje", "amanha", "manha", "tarde", "noite"}
+                "hoje", "amanha", "manha", "tarde", "noite",
+                "voces", "voce", "vcs", "agora", "verdade"}
 
 
 def item_fora_do_cardapio(texto: str) -> str:
@@ -1652,6 +1655,7 @@ PALAVRAS_DA_BEBIDA = {
     BEBIDA_LATA: ("lata", "latinha"),
     BEBIDA_600: ("600",),
     BEBIDA_TUCHAUA: ("tuchaua", "guarana"),
+    BEBIDA_2L: (r"2\s*l(?:t|ts|itros?)?\b", r"dois\s+litros"),
 }
 
 
@@ -1817,7 +1821,10 @@ def e_pergunta_sem_pedido(msg_lower: str) -> bool:
 def _opcoes_de_refrigerante() -> list[str]:
     """Tamanhos que a fabrica tem HOJE (esgotado nao entra na pergunta)."""
     opcoes = []
-    for nome in (BEBIDA_LATA, BEBIDA_600, BEBIDA_TUCHAUA):
+    # O 2L comum entra quando o cardapio tem (11/10: "UMA COCA" -> "2 LT" nao
+    # era opcao, e a pergunta se repetiu). Por ultimo: "guarana 2 litros" casa
+    # antes com o Tuchaua.
+    for nome in (BEBIDA_LATA, BEBIDA_600, BEBIDA_TUCHAUA, BEBIDA_2L):
         try:
             import facts
             if not facts.resolve_unit_price(nome, 1):

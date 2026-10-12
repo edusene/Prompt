@@ -1817,8 +1817,10 @@ checa("saudacao do modelo no meio sai",
 checa("refri de 1 litro: nao temos + opcoes da planilha",
       app._conferir_refri_perguntado("t", "tem refrigerante de 1 litro?", "X").startswith(
           "Não temos refrigerante de 1 litro. Temos Refrigerante Lata"))
-checa("coca 2 litros: em falta",
-      "em falta" in app._conferir_refri_perguntado("t", "tem coca de 2 litros?", "X"))
+# Esgotado em 28/09, de volta ao cardapio em 11/10: a resposta segue o cardapio.
+checa("coca 2 litros: em falta quando esgotado, 'temos sim' quando tem",
+      ("Temos sim" if facts.resolve_unit_price("Refrigerante 2 Litros", 1) else "em falta")
+      in app._conferir_refri_perguntado("t", "tem coca de 2 litros?", "X"))
 checa("'nao temos X, mas temos Y' perde a sugestao",
       app._RX_NAO_TEMOS_MAS.sub(lambda m: m.group(1).rstrip() + ".",
                                 "Não temos salgado de chocolate no cardápio, mas temos churros.")
@@ -3126,6 +3128,42 @@ checa("'Quero para entrega resolvi' depois de fechar: equipe, sem pedido novo",
 checa("'quero para entrega' com o pedido aberto segue o fluxo",
       app._resposta_do_balcao("Quero para entrega resolvi",
                               dict(memoria_mod._empty(), items=[{"name": "Coxinha", "quantity": 100}])) is None)
+print("--- Dono 11/10: perguntas frequentes, kibe de voces, torta salgada, 2 LT, chave Pix")
+from agents.conversation import item_fora_do_cardapio as _ifc1110, _opcoes_de_refrigerante as _opr1110
+checa("'o kibe de voces leva requeijao' nao e sabor inexistente",
+      _ifc1110("O kibe de vocês leva requeijão por dentro") == "")
+checa("'torta salgada de frango' e item fora do cardapio",
+      _ifc1110("me manda também uma torta salgada de frango") == "torta de frango")
+_f2l = dict(memoria_mod._empty(), items=[{"name": "Coxinha", "quantity": 50}],
+            sabores_pendentes=[{"qtd": 1, "termo": "refrigerante", "opcoes": _opr1110()}])
+memoria_mod.aplicar_escolha_de_sabor(_f2l, "2 LT")
+checa("'2 LT' escolhe o refrigerante de 2 litros (quando o cardapio tem)",
+      not facts.resolve_unit_price("Refrigerante 2 Litros", 1)
+      or any(i["name"] == "Refrigerante 2 Litros" for i in _f2l["items"]), _f2l["items"])
+_f2g = dict(memoria_mod._empty(), items=[{"name": "Coxinha", "quantity": 50}],
+            sabores_pendentes=[{"qtd": 1, "termo": "refrigerante", "opcoes": _opr1110()}])
+memoria_mod.aplicar_escolha_de_sabor(_f2g, "guarana 2 litros")
+checa("'guarana 2 litros' continua o Tuchaua",
+      any(i["name"] == "Guaraná Tuchaua 2 Litros" for i in _f2g["items"]), _f2g["items"])
+for _q, _nome in (("O kibe de vocês leva requeijão por dentro", "kibe requeijao"),
+                  ("Esse salgado misto leva o quê?", "misto recheio"),
+                  ("qual a quantidade recomendada para festa de 150 pessoas", "festa pessoas"),
+                  ("Posso pedir porção menor (ex: 25 unidades ou 10 de cada sabor", "porcao menor"),
+                  ("Tem Fanta uva", "sabor de refri"),
+                  ("Qual é a chave Pix da loja?", "chave pix antes"),
+                  ("Vocês emitem nota fiscal?", "nota fiscal"),
+                  ("Vocês fazem entrega?", "faz entrega"),
+                  ("Posso pagar na hora da retirada no balcão?", "pagar no balcao"),
+                  ("O pagamento é 50% adiantado?", "50 por cento")):
+    _rb = app._resposta_do_balcao(_q, {})
+    checa(f"pergunta do dono: {_q[:40]!r} -> {_nome}", bool(_rb) and _rb[0] == _nome, _rb)
+for _q in ("quero 50 coxinhas e uma coca 2 litros", "quero 100 coxinhas, vcs fazem entrega?",
+           "vocês entregam no Olaria?", "quanto fica o frete pro olaria?", "quero 2 fanta laranja lata"):
+    checa(f"pedido/bairro nao vira pergunta frequente: {_q!r}", app._resposta_do_balcao(_q, {}) is None)
+checa("festa de 150 pessoas: 750 a 900", "de 750 a 900" in app._faq_festa("festa de 150 pessoas"))
+checa("'qual a chave Pix da loja' nao responde o endereco",
+      app._fato_perguntado("Qual é a chave Pix da loja?") is None
+      and app._fato_perguntado("qual o endereço da loja") is not None)
 checa("'amnha' e amanha", horario.resolver_data("amnha") == horario.agora().date()
       + __import__("datetime").timedelta(days=1))
 checa("repergunta mantem a resposta quando o cliente perguntou",

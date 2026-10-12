@@ -757,6 +757,136 @@ def pedido_de_congelado(texto: str, ultima_do_agente: str) -> bool:
     return bool(itens)
 
 
+
+# ── Perguntas frequentes com resposta do dono (lista de 11/10) ─────────────
+# So as que nao contradizem o cardapio nem regra anterior do dono. Antes iam
+# para o modelo, que respondia cada vez de um jeito (ou chamava a equipe).
+# (nome, regex sobre o texto normalizado, resposta ou funcao, passa p/ equipe)
+def _faq_festa(t: str) -> str:
+    m = _re_mod.search(r"\b(\d{2,4})\s*(?:pessoas|convidados|adolescentes|criancas|adultos)\b", t)
+    base = "Calculamos em média de 5 a 6 salgadinhos por pessoa!"
+    if not m:
+        return f"{base} Quantos centos vamos garantir para a festa? 😊"
+    n = int(m.group(1))
+    return (f"{base} Para {n} pessoas, dá de {n * 5} a {n * 6} salgadinhos. "
+            f"Quantos centos vamos garantir para a festa? 😊")
+
+
+def _faq_esfirra(t: str) -> str:
+    sabores = sorted({facts.normalize(p["item"]).replace("esfirra de ", "")
+                      for p in facts.get()["produtos"]
+                      if p.get("disponivel", True) and facts.normalize(p["item"]).startswith("esfirra")})
+    if not sabores:
+        return ""
+    lista = sabores[0] if len(sabores) == 1 else ", ".join(sabores[:-1]) + " e " + sabores[-1]
+    return f"Nossas esfirras são de {lista}! Bora pedir quantas? 😊"
+
+
+def _faq_sabor_de_refri(t: str) -> str:
+    sabores = (cardapio.opcoes_de_sabor("Refrigerante Lata")
+               or cardapio.opcoes_de_sabor("Refrigerante 600ml") or [])
+    if not sabores:
+        return ""
+    lista = ", ".join(sabores[:-1]) + " e " + sabores[-1] if len(sabores) > 1 else sabores[0]
+    pedido = _re_mod.search(r"\b(?:fanta|coca|guarana|pepsi|sprite|kuat|soda)\s+([a-z]{3,})", t)
+    if pedido and not any(facts.normalize(pedido.group(0)) in facts.normalize(s) for s in sabores):
+        return (f"{pedido.group(0).title()} não temos no momento. Os sabores de refrigerante "
+                f"são: {lista}. Qual você prefere? 🥤")
+    return f"Os sabores de refrigerante são: {lista}. Qual você prefere? 🥤"
+
+
+_FAQ_DO_DONO = (
+    ("kibe requeijao", _re_mod.compile(r"\b(?:kibe|quibe)s?\b.{0,40}\brequeij"),
+     "Nosso kibe tradicional não leva requeijão! Quantos vamos pedir? 😊", False),
+    ("misto recheio", _re_mod.compile(r"\bmisto\b.{0,30}\b(?:leva|recheio|recheado|o\s+que|que\s+vem|feito)\b"
+                                      r"|\b(?:o\s+que|que)\b.{0,20}\bmisto\b"),
+     "O misto é recheado com queijo e presunto! Quantos você gostaria? 😊", False),
+    ("esfirra sabor", _re_mod.compile(r"\besfi\w*\b.{0,25}\b(?:sabor\w*|de\s+que|qual|quais)\b"
+                                      r"|\b(?:sabor\w*|qual|quais)\b.{0,25}\besfi\w*"),
+     _faq_esfirra, False),
+    ("festa pessoas", _re_mod.compile(r"\b(?:quantos|quantidade|quanto)\b.{0,50}\b(?:pessoas|convidados|adolescentes|criancas)\b"
+                                      r"|\b(?:festa|aniversario|evento)\b.{0,30}\b\d{2,4}\s*(?:pessoas|convidados)\b.{0,40}\b(?:quantos|quantidade|preciso|recomend)"
+                                      r"|\bpor\s+pessoa\b"),
+     _faq_festa, False),
+    ("porcao menor", _re_mod.compile(r"\bporc\w*\s+menor|\bmenos\s+de\s+25\b|\b\d{1,2}\s+de\s+cada\s+sabor\b"
+                                     r"|\bquantidade\s+minima\b|\bminimo\s+de\s+salgad|\bpedido\s+minimo\s+de\s+salgad"),
+     "A quantidade mínima de fábrica é a porção de 25 unidades por sabor! "
+     "Podemos fechar em 25 de cada para você? 😊", False),
+    ("sabor de refri", _re_mod.compile(r"^(?!.*\b\d+\s*(?:x\s*)?(?:coca|fanta|refri|guarana)).*"
+                                       r"(?:\b(?:tem|tens|teria|quais|qual|que)\b.{0,20}\b(?:fanta|coca|pepsi|sprite|kuat|soda)\s+[a-z]{3,}"
+                                       r"|\b(?:quais|que)\s+(?:os\s+)?sabores?\s+de\s+refri\w*"
+                                       r"|\b(?:quais|que)\s+refri\w*\b.{0,20}\b(?:tem|tens|disponiveis|tem\s+ai))"),
+     _faq_sabor_de_refri, False),
+    ("mais vende", _re_mod.compile(r"\bmais\s+(?:vende|vendido|pedido|sai)\b|\bcampe"),
+     "Nossa coxinha de frango e a bolinha de queijo são as campeãs de pedidos! "
+     "Bora pedir uma porção delas? 😊", False),
+    ("feito na hora", _re_mod.compile(r"^(?!.*\bpag)(?:.*\b(?:ja\s+(?:estao|vem|ficam)\s+(?:prontos|fritos|assados))\b)"
+                                      r"|^(?!.*\bpag).*\b(?:fazem|fritam|assam|preparam|feitos?)\b.{0,15}\bna\s+hora\b"),
+     "Preparamos e assamos/fritamos na hora para saírem sempre quentinhos! "
+     "Quais sabores vamos pedir? 😊", False),
+    ("faz entrega", _re_mod.compile(r"^(?!.*\b(?:no|na|em|pro|pra|para\s+o|para\s+a)\s+(?!casa\b)[a-z]{4,}).*"
+                                    r"\b(?:voces|vcs|vc)?\s*(?:fazem|faz|tem|tens|trabalham\s+com)\s+(?:entregas?|delivery|tele\s*entrega)\b"),
+     "Fazemos entrega sim! Qual o seu bairro para eu calcular a taxa? 🛵", False),
+    ("taxa sem bairro", _re_mod.compile(r"^(?!.*\b(?:no|na|em|pro|pra|para\s+o|para\s+a)\s+[a-z]{4,}).*"
+                                        r"\b(?:quanto|qual|valor)\b.{0,25}\b(?:taxa|frete)\b(?:\s+de\s+entrega)?\s*(?:pro|para\s+o|para)?\s*(?:meu\s+endereco|minha\s+casa|aqui)?\s*\??\s*$"),
+     "A taxa depende da localidade! Qual é o seu bairro e rua com número? 🛵", False),
+    ("avisam saida", _re_mod.compile(r"\b(?:avisam|avisa|me\s+avisa|vao\s+avisar|voces\s+avisam)\b.{0,50}\b(?:pronto|sair|saiu|motoboy|sai)\b"),
+     "Avisamos sim! Assim que sair da fábrica você recebe a confirmação por aqui. 💛", False),
+    ("pagar adiantado", _re_mod.compile(r"\b(?:deixar|ja)\b.{0,15}\bpag[oa]\b.{0,40}\b(?:encomenda|futura|antes|agora)\b"),
+     "Pode sim! Vamos fechar os itens e a data para eu gerar seu pedido? 😊", False),
+    ("50 por cento", _re_mod.compile(r"\b50\s*(?:%|por\s*cento)?\s*(?:adiantad|antes|na\s+encomenda)"
+                                     r"|\bmetade\s+(?:adiantad|antes|na\s+encomenda)"),
+     "Para retirada, o pagamento é feito integralmente no balcão da loja ao buscar! "
+     "Bora montar o pedido? 😊", False),
+    ("pagar no balcao", _re_mod.compile(r"\bpag\w*\b.{0,30}\b(?:na\s+(?:hora\s+da\s+)?retirada|no\s+balcao|quando\s+(?:eu\s+)?(?:for\s+)?buscar)\b"),
+     "Pode sim, aceitamos dinheiro, cartão ou Pix direto no balcão! "
+     "Quais itens vamos deixar agendados? 😊", False),
+    ("outra data", _re_mod.compile(r"\b(?:posso|da\s+pra|da\s+para|consigo)\b.{0,15}\bagendar\b.{0,40}\b(?:outra\s+data|outro\s+dia|dia\s+da\s+semana|outra\s+semana)\b"),
+     "Com certeza, agendamos de segunda a sábado! Para qual data e horário você deseja? 😊", False),
+    ("prazo confirmar", _re_mod.compile(r"\b(?:prazo|ate\s+que\s+(?:horas|dia)|antecedencia)\b.{0,40}\b(?:confirmar|encomenda|encomendar|pedir)\b"),
+     "Recomendamos confirmar com antecedência para garantir o horário na produção! "
+     "Qual data você tem em mente? 😊", False),
+    ("chave pix antes", _re_mod.compile(r"\b(?:qual|me\s+passa|manda|envia)\b.{0,15}\bchave\b.{0,10}\bpix\b|\bchave\s+pix\b.{0,15}\?"),
+     "Vou fechar o resumo do seu pedido primeiro para calcular certinho o valor e já te "
+     "passo a chave Pix! Bora fechar os itens? 😊", False),
+    ("pix com erro", _re_mod.compile(r"\bpix\b.{0,40}\b(?:erro|nao\s+(?:vai|foi|funciona|aceita)|invalid)\b|\bcopia\s+e\s+cola\b"),
+     "Vou chamar a equipe agora mesmo para te enviar a chave certinha! Um instante. 💛", True),
+    ("nota fiscal", _re_mod.compile(r"\bnota\s+fiscal\b|\bcupom\s+fiscal\b|\bnf\b|\bnfe\b|\bcupom\b.{0,15}\bcnpj\b"),
+     "Vou acionar nossa equipe para emitir e enviar sua nota! Um instante. 💛", True),
+    ("link travou", _re_mod.compile(r"\b(?:link|cardapio\s+digital|site|aplicativo|app)\b.{0,40}\b(?:travou|trava|erro|nao\s+(?:foi|entrou|finalizou))\b"),
+     "Vou chamar a equipe agora mesmo para verificar no sistema se o seu pedido entrou! "
+     "Um instante. 💛", True),
+    ("pedido junto", _re_mod.compile(r"\bja\s+tenho\s+(?:um\s+)?pedido\b.{0,60}\b(?:junto|outro|mais)\b"),
+     "Como seu pedido já entrou em linha de produção, vou chamar nossa equipe agora para "
+     "verificar se ainda dá tempo de ajustar. Um instante! 💛", True),
+    ("feriado", _re_mod.compile(r"\bferiado\b|\b(?:12|doze)\s+de\s+outubro\b"),
+     "Vou chamar nossa equipe para verificar a escala dessa data para você! Um instante. 💛", True),
+)
+
+
+def _resposta_de_faq(texto: str) -> tuple[str, str, bool] | None:
+    """(nome, resposta do dono, passa p/ equipe) da pergunta frequente, ou None.
+
+    So para PERGUNTA: com item pedido na mensagem, o pedido vem primeiro.
+    "(ex: 25 unidades)" e exemplo, nao pedido.
+    """
+    t = facts.normalize(texto or "")
+    if not t:
+        return None
+    sem_exemplo = _re_mod.sub(r"\(\s*(?:ex|exemplo)\b[^)]*\)?", " ", (texto or "").lower())
+    try:
+        if _extract_data_from_message(sem_exemplo, ConversationState(phone="")).get("items"):
+            return None
+    except Exception:
+        pass
+    for nome, rx, resposta, equipe in _FAQ_DO_DONO:
+        if rx.search(t):
+            texto_r = resposta(t) if callable(resposta) else resposta
+            if texto_r:
+                return nome, texto_r, equipe
+    return None
+
+
 def _resposta_do_balcao(texto: str, memoria: dict) -> tuple[str, str, bool] | None:
     """(nome, resposta exata do dono, passa para a equipe) ou None."""
     t = facts.normalize(texto or "")
@@ -791,7 +921,7 @@ def _resposta_do_balcao(texto: str, memoria: dict) -> tuple[str, str, bool] | No
                     continue
                 resposta = texto_congelado()
             return nome, resposta, equipe
-    return None
+    return _resposta_de_faq(texto)
 
 
 # Etapa do troco: o cliente pergunta quanto deu antes de dizer o troco. O
@@ -907,9 +1037,9 @@ def _conferir_ingrediente(user: str, pergunta: str, reply: str, memoria: dict) -
 # Fatos que o dono deu no prompt: se a pergunta e sobre eles, a resposta tem
 # de trazer o fato - com o texto do dono quando o modelo nao o escreveu.
 _FATOS_DO_DONO = (
-    (_re_mod.compile(r"\b(?:qual|onde|me\s+(?:passa|manda|envia))\b.{0,25}\b(?:endereco|localizacao|loja|fabrica)\b"
+    (_re_mod.compile(r"^(?!.*\bpix\b)(?:.*\b(?:qual|onde|me\s+(?:passa|manda|envia))\b.{0,25}\b(?:endereco|localizacao|loja|fabrica)\b"
                      r"|\bonde\s+(?:fica|ficam|voces\s+ficam|e\s+a\s+loja|retiro|busco)\b"
-                     r"|\b(?:qual|de\s+que|em\s+que)\s+cidade\b|\bde\s+onde\s+(?:voces\s+)?sao\b"),
+                     r"|\b(?:qual|de\s+que|em\s+que)\s+cidade\b|\bde\s+onde\s+(?:voces\s+)?sao\b)"),
      "calama", lambda: f"Nossa loja fica na {cardapio.endereco_fabrica()}! 😊"),
     # "QUANTOTEMPO LEVA PARA CHEGAR", tudo grudado (teste do dono, 03/10).
     (_re_mod.compile(r"^(?!.*\bantecedencia\b).*\b(?:quanto\s*tempo|demora|prazo|tempo\s+de\s+entrega"
