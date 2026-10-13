@@ -5754,11 +5754,59 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             else:
                 _resposta_midia = ("Recebi o comprovante! 💛 A equipe valida o valor "
                                    "quando o pedido fechar. Qual delícia você quer pedir?")
+        # Midia sem texto aproveitavel, com o contexto da conversa (14/10). O
+        # modelo respondia figurinha e documento cada vez de um jeito, e um
+        # documento depois do pedido (o PDF do comprovante) nao silenciava.
+        _pos_pedido = conversation_memory.em_pos_pedido(_memoria) or _memoria.get("pedido_enviado")
+        _so_midia = bool(_textos) and all(
+            t.startswith(("[Figurinha", "[Documento", "[Contato", "[Video", "[Imagem"))
+            for t in _textos) and not any(_texto_da_midia(it).replace(str(it.get("text", "")), "").strip()
+                                          for it in items)
+        _legenda = " ".join(_re_mod.sub(r"^\[[^\]]*\]\s*", "", t) for t in _textos).strip()
+        if _so_midia and not _legenda and _pos_pedido and any(
+                t.startswith(("[Documento", "[Video", "[Imagem")) for t in _textos):
+            # Depois do pedido: PDF/print e comprovante (regra do Balbino:
+            # silencio e conferencia); video costuma ser problema com o
+            # pedido - a equipe ve.
+            if all(t.startswith(("[Documento", "[Imagem")) for t in _textos):
+                print(f"[midia] user={user} arquivo/print depois do pedido: silencio e conferencia")
+                _responder_em_silencio(user, items, "Arquivo ou print recebido depois do "
+                                       "pedido: conferir (comprovante?)")
+                return
+            trigger_human_handoff(user, items, "video depois do pedido", _chegada)
+            return
+        if not _resposta_midia and _so_midia and not _legenda:
+            if all(t.startswith("[Documento") for t in _textos):
+                if _re_mod.search(r"comprovante|pix|pagamento|recibo|transfer",
+                                  facts.normalize(" ".join(_textos))):
+                    _resposta_midia = ("Recebi o comprovante! 💛 A equipe valida o valor "
+                                       "quando o pedido fechar. "
+                                       + (_proxima_pergunta_do_funil(_memoria) if _memoria.get("items")
+                                          else "Qual delícia você quer pedir? 😊"))
+                    if _memoria.get("items") and not _memoria.get("payment_method"):
+                        _memoria["payment_method"] = "pix"
+                        conversation_memory.save(user, _memoria)
+                else:
+                    _resposta_midia = ("Recebi o seu arquivo! 😊 Por aqui eu não consigo abrir "
+                                       "documentos. Pode me escrever ou mandar um áudio com o "
+                                       "seu pedido?")
+            elif all(t.startswith(("[Figurinha", "[Contato")) for t in _textos):
+                # Figurinha ou contato: so continua de onde parou. Um 👍 no
+                # resumo NAO confirma o pedido - a pergunta volta.
+                _anterior_n = facts.normalize(_ultima_ag or "")
+                if any(facts.normalize(mk) in _anterior_n for mk in _MARCAS_DE_RESUMO):
+                    _seguinte = "Posso confirmar o seu pedido? 💛"
+                elif _memoria.get("items"):
+                    _seguinte = _proxima_pergunta_do_funil(_memoria)
+                else:
+                    _seguinte = "Qual delícia você quer pedir? 😊"
+                _resposta_midia = (("Recebi o contato! 😊 " if all(t.startswith("[Contato") for t in _textos)
+                                    else "") + _seguinte)
         if _resposta_midia:
             if not _memoria.get("saudacao_feita"):
                 _nome = f", {_memoria['name']}" if _memoria.get("name") else ""
-                _resposta_midia = (f"{horario.saudacao(horario.agora())}{_nome}! Aqui é a "
-                                   f"Sandrinha da BALBS.\n\n{_resposta_midia}")
+                _resposta_midia = (f"{horario.saudacao(horario.agora())}{_nome}! Eu sou a "
+                                   f"Sandrinha da BALBS 💛\n\n{_resposta_midia}")
                 _memoria["saudacao_feita"] = True
                 conversation_memory.save(user, _memoria)
             print(f"[midia] user={user} resposta em codigo: {_resposta_midia[:60]!r}")
@@ -7469,6 +7517,12 @@ def _extract_body_from_meta_message(msg_data: dict) -> tuple[str, str, str]:
         body = _MEDIA_PLACEHOLDERS[msg_type](msg_data)
         return body, msg_type, wa_media_id
 
+    # Reacao a uma mensagem (👍, ❤️): fica no painel, mas nao vira conversa -
+    # um 👍 no resumo nao e o "sim" do cliente (14/10).
+    if msg_type == "reaction":
+        emoji = (msg_data.get("reaction") or {}).get("emoji", "")
+        return f"[Reação: {emoji}]" if emoji else "[Reação removida]", "reaction", ""
+
     if msg_type == "interactive":
         interactive = msg_data.get("interactive", {})
         itype = interactive.get("type", "")
@@ -7717,7 +7771,7 @@ def webhook():
             # save_message fica acima porque e ele quem faz a deduplicacao (a
             # Meta reentrega o mesmo wamid) e quem devolve o msg_id da midia.
             # Comecar o debounce antes dele processaria a mensagem duas vezes.
-            if not e_pedido_de_reset(body) and not _ja_processada:
+            if not e_pedido_de_reset(body) and not _ja_processada and msg_type != "reaction":
                 # Download de midia em background — antes do CRM, para ter os
                 # 3s inteiros do debounce e chegar pronta em _build_user_parts.
                 if saved and wa_media_id and msg_type != "text":

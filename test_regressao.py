@@ -3257,6 +3257,18 @@ checa("'vou falar com meu marido' nao e pedido de atendente",
 _src_a = open("app.py", encoding="utf-8").read()
 checa("as travas de codigo leem a transcricao do audio",
       '_texto_cliente = " ".join(_texto_da_midia(it) for it in items)' in _src_a)
+print("--- 14/10: outras midias com contexto")
+checa("reacao nao vira mensagem para responder",
+      app._extract_body_from_meta_message({"type": "reaction", "reaction": {"emoji": "x"}})[1] == "reaction")
+_src_m = open("app.py", encoding="utf-8").read()
+checa("reacao nao entra no debounce", 'and not _ja_processada and msg_type != "reaction"' in _src_m)
+checa("figurinha/documento/contato/video depois do pedido tem regra no codigo",
+      "Arquivo ou print recebido depois do" in _src_m and '"video depois do pedido"' in _src_m
+      and "Recebi o seu arquivo!" in _src_m and "Recebi o contato!" in _src_m)
+checa("imagem tambem e lida antes das travas",
+      '_texto_cliente = " ".join(_texto_da_midia(it) for it in items)' in _src_m
+      and _src_m.index('_texto_cliente = " ".join(_texto_da_midia(it)')
+      < _src_m.index("_resposta_do_balcao(_texto_cliente"))
 checa("'amnha' e amanha", horario.resolver_data("amnha") == horario.agora().date()
       + __import__("datetime").timedelta(days=1))
 checa("repergunta mantem a resposta quando o cliente perguntou",
