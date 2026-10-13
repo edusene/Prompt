@@ -3228,6 +3228,35 @@ memoria_mod.aplicar_escolha_de_sabor(_fc, "2 litros")
 _rf = [i for i in _fc["items"] if i["name"] == "Refrigerante 2 Litros"]
 checa("'2 litros' depois de 'uma coca' entra com o sabor Coca",
       bool(_rf) and "coca" in str(_rf[0].get("sabor", "")).lower(), _fc["items"])
+print("--- 14/10: preco de pacote travado no codigo")
+for _q, _esperado in (("Quanto sai meio cento (50 unidades)?", "nos fritos"),
+                      ("Qual é o valor do cento dos fritos tradicionais?", "dos fritos sai"),
+                      ("qual o valor da porção de assados?", "dos assados sai"),
+                      ("Quanto custa o cento de brigadeiros?", "de brigadeiros sai"),
+                      ("quanto custa o cento de coxinha?", "Coxinha frango sai")):
+    _r = app._conferir_preco_perguntado("t", _q, "MODELO")
+    # Porcao de assados entrou no cardapio em 07/10: sem a linha, nao chuta.
+    _tem_porcao_assado = any(p["categoria"] == "Assados" and p["item"].startswith("Porção")
+                             for p in facts.get()["produtos"])
+    if "porção de assados" in _q and not _tem_porcao_assado:
+        checa(f"sem a linha no cardapio, nao chuta: {_q[:40]!r}", _r == "MODELO", _r)
+        continue
+    checa(f"preco do codigo: {_q[:40]!r}", _r != "MODELO" and _esperado in _r, _r)
+checa("pacote: o valor vem do cardapio (R$ do cento de fritos)",
+      app._brl(float(next(p["preco"] for p in facts.get()["produtos"]
+                          if p["categoria"] == "Fritos" and p["item"].startswith("Cento"))))
+      in app._conferir_preco_perguntado("t", "valor do cento dos fritos?", "MODELO")
+      if hasattr(app, "_brl") else True)
+print("--- 14/10: audio passa pelas mesmas travas do texto")
+_aud = [{"text": "[Audio (mensagem de voz)]", "transcricao": "quero falar com um atendente"}]
+checa("pedido de atendente por audio transfere", bool(app._check_transfer_keywords(_aud)))
+checa("'falar com UM atendente' por texto tambem", bool(app._check_transfer_keywords(
+    [{"text": "quero falar com um atendente"}])))
+checa("'vou falar com meu marido' nao e pedido de atendente",
+      not app._check_transfer_keywords([{"text": "vou falar com meu marido e te aviso"}]))
+_src_a = open("app.py", encoding="utf-8").read()
+checa("as travas de codigo leem a transcricao do audio",
+      '_texto_cliente = " ".join(_texto_da_midia(it) for it in items)' in _src_a)
 checa("'amnha' e amanha", horario.resolver_data("amnha") == horario.agora().date()
       + __import__("datetime").timedelta(days=1))
 checa("repergunta mantem a resposta quando o cliente perguntou",

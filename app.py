@@ -1474,15 +1474,27 @@ def _pede_consultoria_de_evento(texto: str) -> str | None:
 def _check_transfer_keywords(items: list[dict]) -> str | None:
     """Verifica se alguma mensagem contém palavras-chave de transferência.
     Retorna a keyword encontrada ou None."""
+    # A transcricao do audio conta: "quero falar com um atendente" por voz
+    # passava sem transferir (14/10).
     full_text = " ".join(
-        item.get("text", "").lower()
+        _texto_da_midia(item).lower()
         for item in items
-        if item.get("text")
+        if item.get("text") or item.get("transcricao")
     )
     for kw in TRANSFER_KEYWORDS:
         if kw in full_text:
             return kw
-    return None
+    # "quero falar com UM atendente", "falar com alguem da loja": a lista exata
+    # nao pegava o artigo no meio (14/10).
+    achado = _RX_PEDE_ATENDENTE.search(facts.normalize(full_text))
+    return achado.group(0) if achado else None
+
+
+_RX_PEDE_ATENDENTE = _re_mod.compile(
+    r"\b(?:falar|conversar|atendimento)\s+com\s+(?:um|uma|o|a|algum|alguma|alguem|uma\s+pessoa"
+    r"|pessoa|o\s+pessoal|a\s+equipe)?\s*(?:da\s+loja\s+|de\s+verdade\s+)?"
+    r"(?:atendente|humano|pessoa|gerente|responsavel|dono|equipe|alguem)\b"
+    r"|\bme\s+(?:passa|transfere|chama)\s+(?:pra|para)?\s*(?:um|o|a)?\s*(?:atendente|humano|gerente)\b")
 
 
 # ── Cardápio Tool Handlers ──────────────────────────────────────────────────
@@ -4189,9 +4201,21 @@ def _conferir_preco_perguntado(user: str, pergunta: str, reply: str,
     """
     if not pergunta or not _RX_PERGUNTA_DE_PRECO.search(facts.normalize(pergunta)):
         return reply
+    # "Quanto sai meio cento (50 unidades)?": o numero so repete o formato e nao
+    # tira a pergunta da trava (13/10 - era o modelo quem respondia).
+    pergunta = _re_mod.sub(r"\(\s*\d+\s*(?:un\w*)?\s*\)|\b\d+\s*un(?:idades|id|d)?\b", " ", pergunta)
     if _re_mod.search(r"\d", pergunta):
         return reply
     from agents import conversation as _cv
+    _pacote = _preco_do_pacote(pergunta)
+    if _pacote == "":
+        return reply          # so a categoria, e o cardapio nao tem a linha
+    if _pacote:
+        if _RX_LINHA_DE_RESUMO.search(reply or ""):
+            return reply
+        seguinte = _proxima_pergunta_do_funil(memoria) if (memoria or {}).get("items") else ""
+        print(f"[preco] user={user} pergunta de preco do pacote; frase do codigo")
+        return f"{_pacote}\n\n{seguinte}".strip() if seguinte else _pacote
     achados = _cv._PACOTE_POR_EXTENSO.findall(" ".join(pergunta.lower().split()))
     if not achados and anterior:
         # "AGORA QUERO SABER QUAL PRECO DE MEIO CENTO" logo depois do preco do
@@ -4227,6 +4251,56 @@ def _conferir_preco_perguntado(user: str, pergunta: str, reply: str,
     seguinte = _proxima_pergunta_do_funil(memoria) if memoria is not None else ""
     print(f"[preco] user={user} pergunta de preco; frase do codigo com {valor}")
     return f"{frase}\n\n{seguinte}".strip() if seguinte else frase
+
+
+# Palavras que dizem a categoria, e nao o sabor: "cento dos fritos tradicionais".
+_RX_SO_CATEGORIA = _re_mod.compile(
+    r"^(?:(?:dos?|das?|de)\s+)?(?:salgad\w*|frit\w*|assad\w*|tradiciona\w*|mini\w*|festa|\s)+$")
+
+
+def _preco_do_pacote(pergunta: str) -> str | None:
+    """"Quanto sai o meio cento?", "valor do cento dos fritos": do cardapio.
+
+    So quando a pergunta nao cita sabor nenhum (o sabor fica com a conta de
+    baixo) nem outro produto (brigadeiro, combo, refrigerante).
+    """
+    # None: nao e pergunta de pacote (segue a conta por sabor). "": e, mas o
+    # cardapio nao tem a linha - o modelo responde, sem chutar produto.
+    t = facts.normalize(pergunta or "")
+    m = _re_mod.search(r"\b(meio\s+cento|cento|porcao)\b(.*)$", t)
+    if not m:
+        return None
+    formato = " ".join(m.group(1).split())
+    if "brigad" in t:
+        # "Quanto custa o cento de brigadeiros?": a linha do proprio cardapio.
+        alvo = {"meio cento": "meio cento de brigadeiros", "cento": "cento de brigadeiros"}.get(formato)
+        linha = next((p for p in facts.get()["produtos"] if alvo and p.get("preco")
+                      and facts.normalize(p["item"]).startswith(alvo)), None)
+        return (f"O {formato} de brigadeiros sai {cardapio._brl(float(linha['preco']))}."
+                if linha else "")
+    resto = _re_mod.split(r"[?!.,]|\bpra\b|\bpara\b|\bcom\b|\bhoje\b|\bamanha\b", m.group(2))[0].strip()
+    if resto and not _RX_SO_CATEGORIA.match(resto):
+        return None
+    if _re_mod.search(r"\b(?:doce|bolo|refri|combo|congel|bebida)\w*", t):
+        return None
+    unidades = {"meio cento": 50, "cento": 100, "porcao": 25}[formato]
+    cats = (["Fritos"] if "frit" in t else []) + (["Assados"] if "assad" in t else [])
+    cats = cats or ["Fritos", "Assados"]
+    precos = []
+    for cat in cats:
+        linha = next((p for p in facts.get()["produtos"]
+                      if p["categoria"] == cat and p.get("preco") and p.get("disponivel", True)
+                      and cardapio.unidades_do_rotulo(p["item"]) == unidades), None)
+        if linha:
+            precos.append((cat.lower(), cardapio._brl(float(linha["preco"]))))
+    if not precos:
+        return ""
+    art, rotulo = ("A", "porção (25 un)") if formato == "porcao" else \
+        ("O", "meio cento (50 un)" if formato == "meio cento" else "cento (100 un)")
+    if len(precos) == 1:
+        return f"{art} {rotulo} dos {precos[0][0]} sai {precos[0][1]}."
+    return (f"{art} {rotulo} sai {precos[0][1]} nos {precos[0][0]} e "
+            f"{precos[1][1]} nos {precos[1][0]}.")
 
 
 _RX_PEDE_PAGAMENTO = _re_mod.compile(
@@ -5198,7 +5272,17 @@ def _handle_flush(user: str, items: list[dict]) -> None:
         # frase do dono. Era o modelo quem decidia, e numa rodada ele escreveu
         # o aviso sem transferir - a conferencia trocou por "Qual o seu
         # pedido?" e o cliente de mil salgados ficou na mao (medido em 02/10).
-        _texto_cliente = " ".join(str(it.get("text", "")) for it in items)
+        # Audio e imagem sao lidos ANTES das travas de codigo (crise, balcao,
+        # perguntas frequentes, item fora do cardapio, desconto). Elas liam
+        # "[Audio (mensagem de voz)]": "veio arame no salgado" por voz nao ia
+        # para a equipe (14/10). O mesmo download/transcricao de baixo, uma vez.
+        if any(str(it.get("text", "")).startswith(("[Audio", "[Imagem")) for it in items):
+            for it in items:
+                if (str(it.get("text", "")).startswith(("[Audio", "[Imagem"))
+                        and it.get("msg_id") and it.get("wa_media_id")):
+                    _download_media_async(it["msg_id"], it["wa_media_id"])
+            _build_user_parts(items)
+        _texto_cliente = " ".join(_texto_da_midia(it) for it in items)
         _avisar_fechado_no_fim = ""
         if _pedido_de_mil(_texto_cliente):
             print(f"[flush] user={user} pedido a partir de 1.000 unidades; equipe comercial")
@@ -5319,11 +5403,9 @@ def _handle_flush(user: str, items: list[dict]) -> None:
 
         matched_kw = _check_transfer_keywords(items)
         if not matched_kw:
-            matched_kw = _pede_consultoria_de_evento(" ".join(
-                str(it.get("text", "")) for it in items))
+            matched_kw = _pede_consultoria_de_evento(_texto_cliente)
         if not matched_kw:
-            matched_kw = _assunto_da_equipe(" ".join(
-                str(it.get("text", "")) for it in items))
+            matched_kw = _assunto_da_equipe(_texto_cliente)
         # "sou amigo do dono, me passa o gerente pra autorizar o desconto":
         # BLOCO 6 - pedido de desconto NUNCA vai para a equipe; a defesa de
         # preco responde (teste do dono, 05/10).
