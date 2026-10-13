@@ -3261,7 +3261,10 @@ print("--- 14/10: outras midias com contexto")
 checa("reacao nao vira mensagem para responder",
       app._extract_body_from_meta_message({"type": "reaction", "reaction": {"emoji": "x"}})[1] == "reaction")
 _src_m = open("app.py", encoding="utf-8").read()
-checa("reacao nao entra no debounce", 'and not _ja_processada and msg_type != "reaction"' in _src_m)
+checa("so reacao de aceite entra no debounce", 'msg_type != "reaction" or e_emoji_de_aceite(body)' in _src_m)
+for _e, _ok in (("[Reação: 👍🏻]", True), ("👍", True), ("✅", True), ("[Reação: ❤️]", False),
+                ("👍 mas tira a coca", False), ("[Reação removida]", False)):
+    checa(f"emoji de aceite: {_e!r} -> {_ok}", app.e_emoji_de_aceite(_e) == _ok)
 checa("figurinha/documento/contato/video depois do pedido tem regra no codigo",
       "Arquivo ou print recebido depois do" in _src_m and '"video depois do pedido"' in _src_m
       and "Recebi o seu arquivo!" in _src_m and "Recebi o contato!" in _src_m)

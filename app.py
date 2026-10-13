@@ -3278,6 +3278,18 @@ def _pergunta_de_preco(texto: str) -> bool:
                 and not _re_mod.search(r"\b(?:quero|queria|vou\s+querer|me\s+ve|manda|separa|faz\s+pra\s+mim)\b", t))
 
 
+_EMOJIS_DE_ACEITE = ("👍", "👌", "✅", "🆗")
+
+
+def e_emoji_de_aceite(texto: str) -> bool:
+    """"[Reação: 👍🏻]" ou "👍" sozinho: o cliente concordando (14/10)."""
+    t = _re_mod.sub(r"^\[Reação:\s*|\]$", "", (texto or "").strip()).strip()
+    # Tom de pele e seletor de variacao nao mudam o sentido.
+    t = _re_mod.sub(r"[\U0001F3FB-\U0001F3FF\uFE0F\s]", "", t)
+    # Sobra so emoji de aceite (um ou varios) e nada mais.
+    return bool(t) and not _re_mod.sub("|".join(map(_re_mod.escape, _EMOJIS_DE_ACEITE)), "", t)
+
+
 _RX_SO_AGRADECIMENTO = _re_mod.compile(
     r"^\s*(?:muito\s+)?(?:obrigad[oa]|obg|brigad[oa]|valeu|vlw|grat[oa]|agradeco)"
     r"(?:\s+(?:viu|mesmo|sandrinha|demais|moca))*\s*$")
@@ -5272,6 +5284,24 @@ def _handle_flush(user: str, items: list[dict]) -> None:
         # frase do dono. Era o modelo quem decidia, e numa rodada ele escreveu
         # o aviso sem transferir - a conferencia trocou por "Qual o seu
         # pedido?" e o cliente de mil salgados ficou na mao (medido em 02/10).
+        # 👍 no resumo e o "sim" do cliente - por reacao ou digitado (14/10). Em
+        # qualquer outra mensagem, a reacao nao pede resposta.
+        if (items and all(str(it.get("text", "")).startswith("[Reação") for it in items)
+                and not all(e_emoji_de_aceite(str(it.get("text", ""))) for it in items)):
+            print(f"[flush] user={user} reacao que nao e aceite: sem resposta")
+            return
+        if items and all(e_emoji_de_aceite(str(it.get("text", ""))) for it in items):
+            _ultima_resumo = next((m.get("parts", [{}])[0].get("text", "") or ""
+                                   for m in reversed(memory.get(user))
+                                   if m.get("role") == "assistant"), "")
+            _anterior_r = " ".join(facts.normalize(_ultima_resumo).split())
+            if any(facts.normalize(mk) in _anterior_r for mk in _MARCAS_DE_RESUMO):
+                print(f"[resumo] user={user} 👍 no resumo: vale como 'sim'")
+                for it in items:
+                    it["text"] = "sim"
+            elif all(str(it.get("text", "")).startswith("[Reação") for it in items):
+                print(f"[flush] user={user} reacao fora do resumo: sem resposta")
+                return
         # Audio e imagem sao lidos ANTES das travas de codigo (crise, balcao,
         # perguntas frequentes, item fora do cardapio, desconto). Elas liam
         # "[Audio (mensagem de voz)]": "veio arame no salgado" por voz nao ia
@@ -7517,8 +7547,8 @@ def _extract_body_from_meta_message(msg_data: dict) -> tuple[str, str, str]:
         body = _MEDIA_PLACEHOLDERS[msg_type](msg_data)
         return body, msg_type, wa_media_id
 
-    # Reacao a uma mensagem (👍, ❤️): fica no painel, mas nao vira conversa -
-    # um 👍 no resumo nao e o "sim" do cliente (14/10).
+    # Reacao a uma mensagem (👍, ❤️): fica no painel. So o 👍 (ou 👌/✅) entra na
+    # conversa - no resumo ele e o "sim" do cliente (Eduardo, 14/10).
     if msg_type == "reaction":
         emoji = (msg_data.get("reaction") or {}).get("emoji", "")
         return f"[Reação: {emoji}]" if emoji else "[Reação removida]", "reaction", ""
@@ -7771,7 +7801,8 @@ def webhook():
             # save_message fica acima porque e ele quem faz a deduplicacao (a
             # Meta reentrega o mesmo wamid) e quem devolve o msg_id da midia.
             # Comecar o debounce antes dele processaria a mensagem duas vezes.
-            if not e_pedido_de_reset(body) and not _ja_processada and msg_type != "reaction":
+            if (not e_pedido_de_reset(body) and not _ja_processada
+                    and (msg_type != "reaction" or e_emoji_de_aceite(body))):
                 # Download de midia em background — antes do CRM, para ter os
                 # 3s inteiros do debounce e chegar pronta em _build_user_parts.
                 if saved and wa_media_id and msg_type != "text":
