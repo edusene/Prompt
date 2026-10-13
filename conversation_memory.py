@@ -1539,7 +1539,17 @@ def aplicar_escolha_de_sabor(memoria: dict, texto: str) -> list[str]:
         if ja:
             ja["quantity"] = int(ja.get("quantity") or 0) + qtd
         else:
-            itens.append({"name": escolhido, "quantity": qtd, "price": preco})
+            novo_item = {"name": escolhido, "quantity": qtd, "price": preco}
+            # "Uma coca" -> "2 litros": a marca dita antes e o sabor do item.
+            if p.get("termo") == "refrigerante" and p.get("marca"):
+                try:
+                    import cardapio_catalogo as _cat
+                    _sab = casar_sabor(p["marca"], _cat.opcoes_do_item(escolhido) or [])
+                    if _sab:
+                        novo_item["sabor"] = _sab
+                except Exception:
+                    pass
+            itens.append(novo_item)
         mudancas.append(f"{p.get('termo')} -> {qtd} x {escolhido}")
     if mudancas:
         memoria["items"] = itens
@@ -2270,7 +2280,7 @@ def etapa_coberta(memoria: dict, reply: str, agora=None) -> bool:
             # Frase fixa: "Qual sabor de refrigerante voce prefere: Guarana
             # Tuchaua ou 600ml ou Lata?" chamava TAMANHO de sabor - o dono
             # leu como se as opcoes do cardapio nao existissem (01/10).
-            if "qual refrigerante voce prefere" not in texto:
+            if "qual refrigerante voce prefere" not in texto and "qual tamanho voce prefere" not in texto:
                 return False
             from agents.conversation import PALAVRAS_DA_BEBIDA
             for opcao in p.get("opcoes") or []:
@@ -2454,6 +2464,10 @@ def aplicar_sabor_de_bebida(memoria: dict, texto: str) -> list[str]:
     return mudancas
 
 
+_MARCAS_DE_REFRI = {"coca": "A Coca-Cola", "fanta": "A Fanta", "pepsi": "A Pepsi",
+                    "sprite": "O Sprite", "kuat": "O Kuat", "soda": "A Soda"}
+
+
 def pergunta_bloqueante(memoria: dict, agora=None) -> str:
     """A pergunta que TEM de sair antes de o funil andar. '' quando nao ha.
 
@@ -2494,6 +2508,21 @@ def pergunta_bloqueante(memoria: dict, agora=None) -> str:
             else (opcoes[0] if opcoes else "")
         aviso = (f"O {refri['em_falta']} está em falta hoje! "
                  if refri.get("em_falta") else "")
+        if refri.get("marca"):
+            # "Uma coca" -> o tamanho, com o preco (13/10: a pergunta generica
+            # se repetia quando o cliente respondia "coca cola" de novo).
+            try:
+                import facts as _f
+                com_preco = []
+                for o in opcoes:
+                    of = _f.resolve_unit_price(o, 1)
+                    com_preco.append(f"{o} ({_brl(of['preco_unitario'])})" if of else o)
+            except Exception:
+                com_preco = list(opcoes)
+            lista = (", ".join(com_preco[:-1]) + " ou " + com_preco[-1]) if len(com_preco) > 1 \
+                else "".join(com_preco)
+            marca = _MARCAS_DE_REFRI.get(refri["marca"].split()[0], refri["marca"].title())
+            return f"{aviso}{marca} temos em: {lista}. Qual tamanho você prefere? 🥤"
         return f"{aviso}Qual refrigerante você prefere: {texto}? 🥤"
 
     doce = next((p for p in pendentes if p.get("termo") == "docinho"), None)

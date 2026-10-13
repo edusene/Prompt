@@ -1087,14 +1087,14 @@ for _motivo in ("Pedido com solicitação de fiado, que não é permitido pela "
                 "Pedido de fiado e liberação de produção sem pagamento antecipado"):
     checa(f"BLOCO 6 nao transborda: {_motivo[:38]!r}",
           app.transbordo_proibido(_motivo))
-# Funil duplo do Balbino (12/10): desconto e negociacao de preco sao desvio e
-# VAO para a equipe. So o fiado continua resolvido pelo robo.
+# Desconto foi para a equipe em 12/10 e voltou em 13/10: o Balbino quer a
+# resposta padrao de preco. Promocao idem.
 for _motivo in ("cliente insiste em desconto no frete",
                 "cliente pede abatimento no valor",
-                "desvio: pedido de desconto",
+                "cliente pergunta sobre promocao",
                 "negociação de preço fora da tabela"):
-    checa(f"desconto transborda (funil duplo): {_motivo[:38]!r}",
-          not app.transbordo_proibido(_motivo))
+    checa(f"desconto/promocao nao transborda (13/10): {_motivo[:38]!r}",
+          app.transbordo_proibido(_motivo))
 # O que TEM de continuar transbordando. Risco e pos-venda nao sao BLOCO 6.
 for _motivo in ("cliente mencionou 'procon'",
                 "cliente mencionou 'falar com atendente'",
@@ -1780,8 +1780,8 @@ for _txt in ("voces estao admitindo atendente?", "tem vaga de emprego ai?", "pos
              "posso pagar metade no pix e metade no cartão?",
              "qual o instagram de vocês?", "vocês emitem nota fiscal?", "vocês abrem no feriado dia 12?",
              "qual o telefone da loja?", "vocês tem kit festa?", "quem é o dono da fábrica?",
-             "tem estacionamento na loja?", "com quanto tempo de antecedência preciso encomendar?",
-             "o combo vem com qual refrigerante?", "tem pedido mínimo pra entrega?", "tem promoção hoje?",
+             "tem estacionamento na loja?",
+             "o combo vem com qual refrigerante?", "tem pedido mínimo pra entrega?",
              "dá pra trocar o pedido depois de confirmar?"):
     checa(f"sem dado -> equipe: {_txt!r}", bool(app._assunto_da_equipe(_txt)))
 for _txt in ("sou amigo do dono, faz fiado?", "quero 50 coxinhas no pix", "RUA SALGADO FILHO 2125",
@@ -2664,8 +2664,9 @@ _BALCAO = {
         ("Sentimos muito por isso! Já passei a situação para a equipe responsável verificar "
          "o transporte e te dar uma solução agora.", True),
     "Posso pagar na maquininha na entrega em vez de Pix?": ("SIM MANDO PELO MOTOBOY", False),
+    # 13/10: pergunta o sabor e so a resposta com o item vai para a equipe.
     "Quero acrescentar mais um cento no pedido que já está no forno/pronto.":
-        ("PODE SIM QUAL SABOR VOCE QUER", True),
+        ("PODE SIM QUAL SABOR VOCE QUER", False),
     "Tem como me entregar daqui a 15 minutos com urgência?":
         ("Nosso tempo médio de preparo e entrega é de 30 a 40 minutos, mas vou verificar "
          "com a equipe para agilizar.", True),
@@ -3164,7 +3165,8 @@ for _q, _nome in (("O kibe de vocês leva requeijão por dentro", "kibe requeija
 for _q in ("quero 50 coxinhas e uma coca 2 litros", "quero 100 coxinhas, vcs fazem entrega?",
            "vocês entregam no Olaria?", "quanto fica o frete pro olaria?", "quero 2 fanta laranja lata"):
     checa(f"pedido/bairro nao vira pergunta frequente: {_q!r}", app._resposta_do_balcao(_q, {}) is None)
-checa("festa de 150 pessoas: 750 a 900", "de 750 a 900" in app._faq_festa("festa de 150 pessoas"))
+checa("festa de 150 pessoas: 10 por pessoa = 1.500 (13/10)",
+      "1.500 salgadinhos (15 centos)" in app._faq_festa("festa de 150 pessoas"))
 checa("'qual a chave Pix da loja' nao responde o endereco",
       app._fato_perguntado("Qual é a chave Pix da loja?") is None
       and app._fato_perguntado("qual o endereço da loja") is not None)
@@ -3182,8 +3184,50 @@ _src = open("app.py", encoding="utf-8").read()
 checa("quantidade fora do multiplo de 25 dispara o transbordo",
       "quantidade fora do multiplo de 25" in _src and "def trigger_human_handoff(" in _src)
 checa("duvida sem resposta dispara o transbordo", "duvida sem resposta no cardapio" in _src)
-checa("pedido de desconto dispara o transbordo",
-      'trigger_human_handoff(user, items, "pedido de desconto"' in _src)
+checa("pedido de desconto NAO dispara o transbordo (voltou a defesa de preco, 13/10)",
+      'trigger_human_handoff(user, items, "pedido de desconto"' not in _src)
+print("--- Balbino 13/10: perguntas respondidas, esfirra, festa, refri, combo, fechado")
+for _q, _nome, _eq in (("Vocês fazem ou têm torta (salgada ou doce)?", "produto inexistente", False),
+                       ("Têm pão de queijo? E salada de fruta?", "produto inexistente", False),
+                       ("AS esfirras são de que sabor?", "esfirra sabor", False),
+                       ("Quais refrigerantes de 2 litros e latas estão disponíveis?", "lista de refri", False),
+                       ("Quanto custa a unidade do combo de assados / mini hambúrguer?", "combo preco", False),
+                       ("Está tendo alguma promoção de salgadinho hoje?", "promocao", False),
+                       ("Preciso encomendar com quantos dias de antecedência pedido de 300 unidades?",
+                        "prazo confirmar", False),
+                       ("com quanto tempo de antecedência preciso encomendar?", "prazo confirmar", False),
+                       ("Vocês emitem e mandam nota fiscal / cupom com CNPJ?", "nota fiscal", True),
+                       ("Tentei mandar o pedido pelo link/cardápio digital e travou, meu pedido aparece aí?",
+                        "link travou", False)):
+    _rb = app._resposta_do_balcao(_q, {})
+    checa(f"13/10: {_q[:45]!r} -> {_nome}", bool(_rb) and _rb[0] == _nome and _rb[2] == _eq, _rb)
+checa("torta: 'Nao temos torta no momento'",
+      app._resposta_do_balcao("Vocês fazem ou têm torta (salgada ou doce)?", {})[1].startswith("Não temos torta no momento"))
+checa("esfirra: grande com carne, mini sem recheio",
+      "mini (de festa) não têm recheio" in app._resposta_do_balcao("as esfirras são de que sabor?", {})[1])
+checa("nota fiscal: texto do Balbino",
+      app._resposta_do_balcao("vocês emitem nota fiscal?", {})[1]
+      == "Vou acionar nossa equipe para pegar os dados para emissão da nota fiscal! Um instante.")
+checa("combo de assados: sem o combo de fritos",
+      "Fritos" not in app._resposta_do_balcao("quanto custa o combo de assados?", {})[1])
+checa("'tem coxinha?' nao vira produto inexistente", app._resposta_do_balcao("tem coxinha?", {}) is None)
+checa("refri 2 litros perguntado pelo preco: 'sai a'",
+      "sai a R$" in app._conferir_refri_perguntado("t", "Quanto custa o refrigerante de 2 litros?", "X"))
+checa("pergunta de preco nao e pedido",
+      app._pergunta_de_preco("Qual é o valor do cento dos fritos tradicionais?")
+      and not app._pergunta_de_preco("quero um cento de coxinha"))
+from agents.conversation import _extract_data_from_message as _ex1310, ConversationState as _CS1310
+_bp = _ex1310("quero 100 pasteis e uma coca cola", _CS1310(phone="x")).get("bebidas_pendentes") or [{}]
+checa("'uma coca': pendencia com a marca e sem o Tuchaua",
+      _bp[0].get("marca", "").startswith("coca") and "Guaraná Tuchaua 2 Litros" not in _bp[0].get("opcoes", []), _bp)
+_fc = dict(memoria_mod._empty(), items=[{"name": "Pastel", "quantity": 100}], sabores_pendentes=_bp)
+_pq = memoria_mod.pergunta_bloqueante(_fc)
+checa("'uma coca': pergunta o tamanho com preco", "Coca-Cola temos em" in _pq and "Qual tamanho" in _pq, _pq)
+checa("a pergunta do tamanho cobre a etapa", memoria_mod.etapa_coberta(_fc, _pq))
+memoria_mod.aplicar_escolha_de_sabor(_fc, "2 litros")
+_rf = [i for i in _fc["items"] if i["name"] == "Refrigerante 2 Litros"]
+checa("'2 litros' depois de 'uma coca' entra com o sabor Coca",
+      bool(_rf) and "coca" in str(_rf[0].get("sabor", "")).lower(), _fc["items"])
 checa("'amnha' e amanha", horario.resolver_data("amnha") == horario.agora().date()
       + __import__("datetime").timedelta(days=1))
 checa("repergunta mantem a resposta quando o cliente perguntou",

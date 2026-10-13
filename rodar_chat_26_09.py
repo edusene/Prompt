@@ -246,9 +246,12 @@ CENARIOS = [
 
     ("3. 15 coxinhas + 10 rissoles + desconto no frete",
      ['Oi, boa tarde! Me vê 15 coxinhas e 10 rissoles de carne pra agora. '
-      'E faz um desconto no frete pra fechar?'],
-     # Pedido de desconto: desvio, equipe (12/10). Depois disso o robo cala.
-     [transborda_na_1a, sem_vazamento]),
+      'E faz um desconto no frete pra fechar?',
+      'GRANDE',
+      'ENTREGA',
+      'BAIRRO OLARIA, RUA JAMARI 2125. PARA DIA 28.09 AS 19 HORAS. CARTAO'],
+     # Desconto voltou a defesa de preco em 13/10 (sem a equipe).
+     [defende_preco, upsell, sem_vazamento, uma_pergunta]),
 
     ("4. 50 + 50 com troco pra 150 (amnesia de troco + upsell)",
      ['Oi! Quero 50 coxinhas fritas e 50 empadinhas de frango para entregar '

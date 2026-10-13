@@ -1687,8 +1687,12 @@ def bebidas_citadas(msg_lower: str) -> tuple[list[dict], list[dict]]:
         elif re.search(r"\b2\s*l\b|\b2\s*lts?\b|\b(?:2|dois)\s*litros?\b", resto):
             nome = BEBIDA_2L
         else:
-            pendentes.append({"qtd": qtd, "termo": "refrigerante",
-                              "opcoes": _opcoes_de_refrigerante()})
+            _marca = "" if marca.startswith("refri") else marca
+            _ops = _opcoes_de_refrigerante()
+            if _marca:
+                _ops = [o for o in _ops if o != BEBIDA_TUCHAUA] or _ops
+            pendentes.append({"qtd": qtd, "termo": "refrigerante", "opcoes": _ops,
+                              "marca": _marca})
             continue
         if any(i["name"] == nome for i in itens):
             continue
