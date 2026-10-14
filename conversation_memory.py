@@ -401,6 +401,10 @@ def aviso_de_sabor_inexistente(item_pedido: str, opcoes: list[str]) -> str:
 
 def _mesmo_item(a: dict, b: dict) -> bool:
     """O mesmo produto da ficha, mesmo com o nome escrito de outro jeito."""
+    # Coxinha GRANDE (lanche) e coxinha mini sao linhas diferentes: "25
+    # coxinhas" depois de "3 coxinha grande" apagava as 3 grandes (14/10).
+    if (a.get("tamanho") == "lanche") != (b.get("tamanho") == "lanche"):
+        return False
     na, nb = _sem_acento(str(a.get("name"))), _sem_acento(str(b.get("name")))
     if na == nb:
         return True

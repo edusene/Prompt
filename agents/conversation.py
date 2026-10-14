@@ -2036,6 +2036,17 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
             # impressos na comanda assim (teste do dono, 25/09). O nome da rua
             # termina onde comeca outro campo do pedido.
             addr = _FIM_DA_RUA.split(addr, maxsplit=1)[0].strip(" ,-")
+            # "Rua Wilmam maia\n5994 Igarape 15/11/2026": a comanda saiu com a
+            # data e o bairro no nome da rua (teste de 14/10).
+            addr = " ".join(addr.split())
+            addr = re.split(r"\s\d{1,2}/\d{1,2}(?:/\d{2,4})?\b|\s(?:as|às)\s+\d",
+                            addr, maxsplit=1, flags=re.IGNORECASE)[0].strip(" ,-")
+            _bairro_msg = detectar_bairro(message)
+            import facts as _fx_end
+            if _bairro_msg:
+                _rx_b = re.compile(r"[\s,-]+" + re.escape(_fx_end.normalize(_bairro_msg)) + r"\s*$")
+                if _rx_b.search(_fx_end.normalize(addr)):
+                    addr = addr[:len(addr) - len(_rx_b.search(_fx_end.normalize(addr)).group(0))].strip(" ,-")
             extracted["endereco"] = addr
         elif _RUA_DEPOIS_DE_ENTREGA.search(message):
             # "PARA ENTREGA NA CALAMA 2025 APONIA": sem "Rua" nada era
@@ -2135,6 +2146,14 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
 
             # Busca produto conhecido
             matched_name = _produto_conhecido(product_name)
+            # "25 bolinha IR 25 coxinhas" (o "e" digitado errado): a bolinha
+            # sumia do pedido (teste de 14/10).
+            _palavras_nome = product_name.split()
+            if not matched_name and len(_palavras_nome) > 1 and len(_palavras_nome[-1]) <= 3:
+                _sem_ultima = " ".join(_palavras_nome[:-1])
+                if _produto_conhecido(_sem_ultima):
+                    product_name = _sem_ultima
+                    matched_name = _produto_conhecido(_sem_ultima)
             # Sabor que o cardapio nao tem ("50 empadas de queijo") nao vira
             # outro produto: virava Empada de Frango grande a R$ 9,00 (teste
             # do dono, 08/10). Fica de fora e o aviso sai com as opcoes.
@@ -2186,11 +2205,17 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
                     pass
                 if not unit_price:
                     unit_price = _PRECO_UNITARIO.get(matched_name, 0.0)
-                items_found.append({
+                _novo_item = {
                     "name": matched_name,
                     "quantity": qty,
                     "price": unit_price,
-                })
+                }
+                # "3 coxinha grande": o tamanho ja veio dito (teste de 14/10 -
+                # ela perguntou "grande ou mini?" duas vezes).
+                if qty < 25 and re.search(r"\b(?:grandes?|lanche)\b", product_name):
+                    _novo_item["tamanho"] = "lanche"
+                    _novo_item["price"] = 0.0
+                items_found.append(_novo_item)
 
         # "1 cento pastel e bolinha", "metade X e metade Y": o volume dividido
         # vale mais do que qualquer leitura parcial do mesmo sabor acima.

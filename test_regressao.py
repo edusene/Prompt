@@ -3272,6 +3272,24 @@ checa("imagem tambem e lida antes das travas",
       '_texto_cliente = " ".join(_texto_da_midia(it) for it in items)' in _src_m
       and _src_m.index('_texto_cliente = " ".join(_texto_da_midia(it)')
       < _src_m.index("_resposta_do_balcao(_texto_cliente"))
+print("--- Balbino 14/10: # reset, coxinha grande, 'ir', endereco em linhas, 'pode ser' a oferta")
+checa("'# reset' com espaco reinicia", app.e_pedido_de_reset("# reset") and app.e_pedido_de_reset("# RESET"))
+_eg = _extract_data_from_message("bom dia gostaria de 3 coxinha grande", ConversationState(phone="x"))
+checa("'3 coxinha grande' ja vem como grande", _eg["items"][0].get("tamanho") == "lanche", _eg["items"])
+_fg = dict(memoria_mod._empty(), items=[{"name": "Coxinha", "quantity": 3, "tamanho": "lanche"}])
+memoria_mod.merge(_fg, {}, _extract_data_from_message("eu quero 25 bolinha ir 25 coxinhas",
+                                                     ConversationState(phone="x")),
+                  texto="Eu quero 25 bolinha ir 25 coxinhas")
+checa("grandes nao somem com as 25 mini, e o 'ir' nao apaga a bolinha",
+      [(i["name"], i["quantity"]) for i in _fg["items"]]
+      == [("Coxinha", 3), ("Bolinha de Queijo", 25), ("Coxinha", 25)], _fg["items"])
+_ee = _extract_data_from_message("Rua Wilmam maia \n5994 Igarapé 15/11/2026\nAs 17:30",
+                                 ConversationState(phone="x"))
+checa("endereco em varias linhas sem data nem bairro", _ee.get("endereco") == "Rua Wilmam maia 5994", _ee.get("endereco"))
+checa("'pode ser' a oferta do 2L: o produto oferecido",
+      app._produtos_da_oferta("Pra acompanhar, que tal um Refrigerante 2L bem gelado? 🥤") == ["Refrigerante 2 Litros"])
+checa("oferta de duas opcoes pergunta qual",
+      len(app._produtos_da_oferta("Pra acompanhar, vai um Refrigerante 2L ou docinhos (Brigadeiro/Beijinho)? 🥤🍬")) == 2)
 checa("'amnha' e amanha", horario.resolver_data("amnha") == horario.agora().date()
       + __import__("datetime").timedelta(days=1))
 checa("repergunta mantem a resposta quando o cliente perguntou",

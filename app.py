@@ -2230,6 +2230,9 @@ def e_pedido_de_reset(texto: str) -> bool:
     if not chave:
         return False
     limpo = (texto or "").strip().lower()
+    # "# reset", "# RESET": o espaco depois do # nao muda o pedido (14/10).
+    if chave.startswith("#"):
+        limpo = _re_mod.sub(r"#\s+", "#", limpo)
     return limpo == chave or chave in limpo.split()
 
 
@@ -3276,6 +3279,21 @@ def _pergunta_de_preco(texto: str) -> bool:
     t = facts.normalize(texto or "")
     return bool(_re_mod.search(r"\b(?:quanto|valor|preco|custa|posso|da\s+pra|pode\s+dividir)\b", t)
                 and not _re_mod.search(r"\b(?:quero|queria|vou\s+querer|me\s+ve|manda|separa|faz\s+pra\s+mim)\b", t))
+
+
+def _produtos_da_oferta(oferta: str) -> list[str]:
+    """Os produtos que a frase de oferta oferece, na ordem em que aparecem."""
+    from agents import conversation as _cv
+    t = facts.normalize(oferta or "")
+    achados = []
+    for rx, nome in ((r"\btuchaua\b", _cv.BEBIDA_TUCHAUA),
+                     (r"\brefrigerante\s+2\s*l|\brefrigerante\s+2\s+litros", _cv.BEBIDA_2L),
+                     (r"\bbolo\s+de\s+milho\b", _cv.BOLO),
+                     (r"\bdocinhos?\b|\bbrigadeiros?\b", "docinhos")):
+        m = _re_mod.search(rx, t)
+        if m:
+            achados.append((m.start(), nome))
+    return [n for _p, n in sorted(achados)]
 
 
 _EMOJIS_DE_ACEITE = ("👍", "👌", "✅", "🆗")
@@ -5647,6 +5665,24 @@ def _handle_flush(user: str, items: list[dict]) -> None:
         # continuava voltando (teste do dono, 08/10 15h41 e 15h44). Depois da
         # escolha pelo nome: "Pode ser a Empadinha de Frango. Mas tira 25
         # coxinhas..." escolhe a empadinha, e nao descarta (19h37).
+        _ofertados = _produtos_da_oferta(_ultima_ag) if _ofereceu_acompanhamento(_ultima_ag) else []
+        if (_ofertados and _memoria.get("items") and _e_concordancia(text_only)
+                and not _extracted_fresh.get("items") and not _extracted_fresh.get("bebidas")
+                and not _extracted_fresh.get("doces")):
+            if len(_ofertados) > 1:
+                print(f"[upsell] user={user} aceitou a oferta de duas opcoes; pergunta qual")
+                _responder_direto(user, items, f"Qual você prefere: {_ofertados[0]} ou "
+                                  f"{_ofertados[1]}? 😊", _chegada)
+                return
+            _nome_of = _ofertados[0]
+            _of = facts.resolve_unit_price(_nome_of, 1)
+            if _of and not any(isinstance(i, dict) and i.get("name") == _nome_of
+                               for i in _memoria["items"]):
+                _memoria["items"] = list(_memoria["items"]) + [
+                    {"name": _nome_of, "quantity": 1, "price": _of["preco_unitario"]}]
+                _memoria["upsell_feito"] = True
+                conversation_memory.save(user, _memoria)
+                print(f"[upsell] user={user} aceitou a oferta -> 1 x {_nome_of}")
         # "Somente os salgados entao", "nao quero mais doce": a pergunta do
         # docinho (ou do refrigerante) fecha. Ela voltava a cada mensagem, quatro
         # vezes seguidas, e o cliente pediu desconto de raiva (teste do dono,
