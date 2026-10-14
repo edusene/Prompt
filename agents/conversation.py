@@ -381,6 +381,9 @@ _ENTREGA_SUBSTANTIVO = re.compile(
     r"(?<!taxa de )(?<!valor da )(?<!preco da )(?<!custo da )"
     r"\bentrega\s+(?:hoje|amanha|depois|pra|para|em|na|no|as|ate|neste|nesse"
     r"|rua|r|av|avenida|travessa|bairro|agora|aqui)\b"
+    # "pra amanha as 15h, entrega, pago no pix": a palavra solta entre
+    # virgulas, ou no fim (simulador do dono, 14/10).
+    r"|(?:^|[,;.]|\d\s*h(?:oras?)?|\d)\s*entrega\s*(?:[,;.!]|$|(?=pag|pix|cartao|dinheiro))"
 )
 
 # Intencao de retirar, dita com verbo: vale mesmo numa frase com pergunta.
@@ -506,6 +509,13 @@ def detectar_bairro(message: str) -> str:
             achado_tabela = facts.lookup_frete(m.group(1))
             if achado_tabela:
                 achado = achado_tabela["bairro"]
+    if not achado and re.fullmatch(r"[a-z ]{4,30}", alvo.strip()) and len(alvo.split()) <= 3:
+        # Resposta seca so com o bairro, digitado errado ("IGAPARE"): a
+        # tabela de frete tolera erro de digitacao. Virava a RUA, e o bairro
+        # era perguntado de novo (simulador do dono, 14/10).
+        achado_tabela = facts.lookup_frete(alvo.strip())
+        if achado_tabela:
+            achado = achado_tabela["bairro"]
     return achado
 
 
@@ -2164,11 +2174,17 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
             if not matched_name and qty > 0:
                 # Erro de digitacao ("25 SALSCHISA"): o item sumia do pedido
                 # sem ninguem perguntar (teste do dono, 08/10 21h10).
-                _corrigido = _corrigir_grafia(product_name)
-                if _corrigido:
-                    matched_name = _produto_conhecido(_corrigido)
-                    if matched_name:
+                # Tambem sem a palavrinha do fim: "25 SALSCHISA i 50 QUIBE"
+                # (o "e" digitado "i") - simulador do dono, 14/10.
+                _tentativas = [product_name]
+                if len(_palavras_nome) > 1 and len(_palavras_nome[-1]) <= 3:
+                    _tentativas.append(" ".join(_palavras_nome[:-1]))
+                for _tentativa in _tentativas:
+                    _corrigido = _corrigir_grafia(_tentativa)
+                    if _corrigido and _produto_conhecido(_corrigido):
+                        matched_name = _produto_conhecido(_corrigido)
                         product_name = _corrigido
+                        break
             if not matched_name and qty > 0:
                 # Palavra que serve a varios sabores. Nao vira item (chutar foi
                 # o defeito), mas tambem nao pode sumir: o cliente pediu "30 de

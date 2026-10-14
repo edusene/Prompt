@@ -375,6 +375,11 @@ def parse_horario(texto: str) -> tuple[int, int] | None:
             minuto = int(minuto_txt or 0)
             if hora <= 23 and minuto <= 59:
                 return _periodo(hora, m.end()), minuto
+    # "ao meio dia", "meio-dia e meia": 12h (simulador do dono, 14/10). Antes
+    # da preposicao solta, e so sem numero de hora na frase.
+    meio_dia = re.search(r"\bmeio[\s-]?dia(\s+e\s+meia)?\b", t)
+    if meio_dia:
+        return 12, 30 if meio_dia.group(1) else 0
     # Por ultimo, e so se nada acima achou: a hora dita so pela preposicao.
     for m in _RX_HORA_POR_PREPOSICAO.finditer(t):
         hora = int(m.group(1))

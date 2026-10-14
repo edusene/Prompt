@@ -983,7 +983,9 @@ def _resposta_de_faq(texto: str) -> tuple[str, str, bool] | None:
             if texto_r:
                 return nome, texto_r, equipe
     from agents.conversation import e_pergunta_sem_pedido
-    if e_pergunta_sem_pedido((texto or "").lower()):
+    # "Voces tem torta", sem o "?", tambem e pergunta (simulador do dono, 14/10).
+    if (e_pergunta_sem_pedido((texto or "").lower())
+            or _re_mod.match(r"^(?:e\s+)?(?:voces|vcs|vc)?\s*(?:tem|tens|teria|fazem|vendem|trabalham)\b", t)):
         inexistente = _faq_produto_inexistente(
             facts.normalize(_re_mod.sub(r"\(.*?\)", " ", texto or "")))
         if inexistente:
@@ -5374,13 +5376,23 @@ def _handle_flush(user: str, items: list[dict]) -> None:
         # Desconto sem pedido montado: a resposta padrao de preco, do codigo
         # (13/10). Com pedido aberto o modelo responde e _conferir_desconto
         # garante a defesa - o espelho continua sendo a ultima pergunta.
-        if (not _balcao and not _fora and not _memoria_balcao.get("items")
+        _ultima_desc = next((m.get("parts", [{}])[0].get("text", "") or ""
+                             for m in reversed(memory.get(user))
+                             if m.get("role") == "assistant"), "")
+        _resumo_aberto = any(facts.normalize(mk) in " ".join(facts.normalize(_ultima_desc).split())
+                             for mk in _MARCAS_DE_RESUMO)
+        if (not _balcao and not _fora
+                and (not _memoria_balcao.get("items") or _resumo_aberto)
                 and _RX_DESCONTO.search(_texto_cliente.lower())
                 and not _extract_data_from_message(_texto_cliente.lower(),
                                                    ConversationState(phone=user)).get("items")):
-            print(f"[bloco6] user={user} pedido de desconto sem pedido: defesa de preco")
-            _responder_direto(user, items, DEFESA_DE_PRECO + " Bora garantir os seus "
-                              "quentinhos assim? 😊", _chegada)
+            # Com o resumo na tela, a pergunta do resumo volta: o "SIM"
+            # seguinte fecha (simulador do dono, 14/10 - mostrava o resumo de
+            # novo e pedia outro "sim").
+            print(f"[bloco6] user={user} pedido de desconto: defesa de preco")
+            _responder_direto(user, items, DEFESA_DE_PRECO + (
+                " Posso confirmar o seu pedido? 💛" if _resumo_aberto
+                else " Bora garantir os seus quentinhos assim? 😊"), _chegada)
             return
         if _fora and not _balcao:
             _fora_aviso = f"Não temos {_fora} no momento. 😊"
