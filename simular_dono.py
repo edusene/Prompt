@@ -147,6 +147,8 @@ PEDIDOS = [
      {"itens": [("coxinha", 50, "")], "horario": "15h", "modalidade": "entrega",
       "pagamento": "pix"}),
     ("IGAPARE", {"bairro": "igarape"}),
+    ("SERIA PARA AMANHA AS 7:30 QUERO UM CENTO COXINHA E MEIO CENTO DE PASTEL E UMA COCA COLA 2 LT",
+     {"itens": [("coxinha", 100, ""), ("pastel", 50, "")], "horario": "07h30"}),
 ]
 
 # Perguntas e o nome da resposta do codigo (balcao / perguntas frequentes).

@@ -252,7 +252,8 @@ def verificar_credencial(chave_candidata: str = "") -> dict:
 
 
 def _brl(value: float) -> str:
-    return ("R$ %.2f" % float(value or 0)).replace(".", ",")
+    # "R$ 1.200,00": o milhar com ponto (saia "R$ 1200,00" - 14/10).
+    return "R$ " + f"{float(value or 0):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
 def _e_linha_de_pacote(linha: dict) -> bool:

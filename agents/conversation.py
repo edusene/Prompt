@@ -1585,7 +1585,7 @@ def item_fora_do_cardapio(texto: str) -> str:
             return f"{base} de {sabor}"
     # "100 MINI SANDUICHE" (teste do dono, 06/10): o "mini" na frente
     # escondia o produto, e ela respondeu com o texto de congelado.
-    for m in _RX_QTD_MINI_E_NOME.finditer(t):
+    for m in list(_RX_QTD_MINI_E_NOME.finditer(t)) + list(_RX_MINI_E_NOME.finditer(t)):
         nome = m.group(1)
         primeira = nome.split()[0]
         if primeira.startswith(_NAO_E_PRODUTO):
@@ -1629,6 +1629,8 @@ def item_fora_do_cardapio(texto: str) -> str:
 
 _RX_SALGADO_DE_SABOR = re.compile(r"\bsalgad\w*\s+(?:de|com)\s+([a-z]+)")
 _RX_QTD_E_NOME = re.compile(r"\b(\d{1,4})\s+([a-z]{5,}(?:\s+de\s+[a-z]{4,})?)")
+# "gostaria do mini hamburgue", sem numero (teste de 14/10 20h11).
+_RX_MINI_E_NOME = re.compile(r"\bminis?\s+([a-z]{5,}(?:\s+de\s+[a-z]{4,})?)")
 _RX_QTD_MINI_E_NOME = re.compile(r"\b\d{1,4}\s+(?:minis?|grandes?)\s+([a-z]{4,}(?:\s+de\s+[a-z]{4,})?)")
 # Palavra depois de um numero que nao e produto (comeco da palavra).
 _NAO_E_PRODUTO = (
@@ -2126,7 +2128,9 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
             r'(?:\s*(?:[,;.!?]|\be\b|\bpra\b|\bpara\b|\bcom\b|\bno\b|\bna\b|\bem\b'
             r'|\bhoje\b|\bamanh[aã]\b|\bàs\b|\bas\b|\bde\s+r\$|r\$'
             r"|(?![a-z\u00e0-\u00ff\s])|$))",
-            msg_lower
+            # Hora ("7:30", "8h", "18 horas") sai so desta leitura de itens: o
+            # minuto "30" virava "30 coxinhas" (teste de 14/10 20h14).
+            re.sub(r"\b\d{1,2}\s*[:h]\s*\d{2}\b|\b\d{1,2}\s*(?:h|hrs?|horas?)\b", " ", msg_lower)
         )
         items_found = []
         sabores_pendentes = []
@@ -2143,7 +2147,7 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
             # "2 centos de coxinha" e VOLUME, nao quantidade: o numero conta
             # centos, nao unidades. Quem trata e _itens_por_extenso, logo
             # abaixo — aqui sairia um pedido de 2 coxinhas.
-            if product_name.startswith("cento"):
+            if product_name.startswith("cento") or re.search(r"\bcentos?\b", product_name):
                 continue
 
             # Remove plural

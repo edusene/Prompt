@@ -1159,6 +1159,11 @@ def _itens_ambiguos_detalhe(memoria: dict) -> list[dict]:
             continue
         if item.get("tamanho"):
             continue          # respondido: fora da pergunta
+        # Doce e bebida nao tem tamanho de salgado (14/10: "Essas 1 porcao de
+        # 25 brigadeiros sao grande ou mini?").
+        if _re.search(r"brigad|doce|bolo|pudim|alfajor|beijinho|refri|suco|coca|guarana",
+                      _sem_acento(nome)):
+            continue
         try:
             import facts
             oficial = facts.resolve_unit_price(nome, qtd)

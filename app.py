@@ -867,17 +867,34 @@ def _faq_esfirra(t: str) -> str:
     return f"Nossas esfirras são de {lista}! Bora pedir quantas? 😊"
 
 
-def _faq_sabor_de_refri(t: str) -> str:
-    sabores = (cardapio.opcoes_de_sabor("Refrigerante Lata")
-               or cardapio.opcoes_de_sabor("Refrigerante 600ml") or [])
+def _tamanho_de_refri(t: str, memoria: dict | None = None) -> str:
+    """O refrigerante de que se fala: o tamanho dito, ou o que esta no pedido."""
+    from agents import conversation as _cv
+    if _re_mod.search(r"\b2\s*(?:l|lt|lts|litros?)\b", t):
+        return _cv.BEBIDA_TUCHAUA if "tuchaua" in t else _cv.BEBIDA_2L
+    if _re_mod.search(r"\blatas?\b|\blatinha", t):
+        return _cv.BEBIDA_LATA
+    if _re_mod.search(r"\b600\b", t):
+        return _cv.BEBIDA_600
+    for item in (memoria or {}).get("items") or []:
+        if isinstance(item, dict) and str(item.get("name", "")).startswith("Refrigerante"):
+            return item["name"]
+    return _cv.BEBIDA_LATA
+
+
+def _faq_sabor_de_refri(t: str, memoria: dict | None = None) -> str:
+    import cardapio_catalogo
+    tamanho = _tamanho_de_refri(t, memoria)
+    sabores = (cardapio_catalogo.opcoes_do_item(tamanho)
+               or cardapio.opcoes_de_sabor("Refrigerante Lata") or [])
     if not sabores:
         return ""
     lista = ", ".join(sabores[:-1]) + " e " + sabores[-1] if len(sabores) > 1 else sabores[0]
     pedido = _re_mod.search(r"\b(?:fanta|coca|guarana|pepsi|sprite|kuat|soda)\s+([a-z]{3,})", t)
     if pedido and not any(facts.normalize(pedido.group(0)) in facts.normalize(s) for s in sabores):
-        return (f"{pedido.group(0).title()} não temos no momento. Os sabores de refrigerante "
+        return (f"{pedido.group(0).title()} não temos no momento. Os sabores do {tamanho} "
                 f"são: {lista}. Qual você prefere? 🥤")
-    return f"Os sabores de refrigerante são: {lista}. Qual você prefere? 🥤"
+    return f"Os sabores do {tamanho} são: {lista}. Qual você prefere? 🥤"
 
 
 _FAQ_DO_DONO = (
@@ -962,7 +979,7 @@ _FAQ_DO_DONO = (
 )
 
 
-def _resposta_de_faq(texto: str) -> tuple[str, str, bool] | None:
+def _resposta_de_faq(texto: str, memoria: dict | None = None) -> tuple[str, str, bool] | None:
     """(nome, resposta do dono, passa p/ equipe) da pergunta frequente, ou None.
 
     So para PERGUNTA: com item pedido na mensagem, o pedido vem primeiro.
@@ -979,7 +996,8 @@ def _resposta_de_faq(texto: str) -> tuple[str, str, bool] | None:
         pass
     for nome, rx, resposta, equipe in _FAQ_DO_DONO:
         if rx.search(t):
-            texto_r = resposta(t) if callable(resposta) else resposta
+            texto_r = ((resposta(t, memoria) if resposta is _faq_sabor_de_refri else resposta(t))
+                       if callable(resposta) else resposta)
             if texto_r:
                 return nome, texto_r, equipe
     from agents.conversation import e_pergunta_sem_pedido
@@ -1027,7 +1045,7 @@ def _resposta_do_balcao(texto: str, memoria: dict) -> tuple[str, str, bool] | No
                     continue
                 resposta = texto_congelado()
             return nome, resposta, equipe
-    return _resposta_de_faq(texto)
+    return _resposta_de_faq(texto, memoria)
 
 
 # Etapa do troco: o cliente pergunta quanto deu antes de dizer o troco. O
@@ -3283,6 +3301,13 @@ def _pergunta_de_preco(texto: str) -> bool:
                 and not _re_mod.search(r"\b(?:quero|queria|vou\s+querer|me\s+ve|manda|separa|faz\s+pra\s+mim)\b", t))
 
 
+def _e_concordancia_ou_quero(texto: str) -> bool:
+    """"sim", "pode ser", "sim quero", "quero": aceite curto."""
+    t = facts.normalize(texto or "").strip()
+    return _e_concordancia(texto) or bool(_re_mod.fullmatch(
+        r"(?:sim\s+)?(?:eu\s+)?(?:quero|vou\s+querer|manda|pode\s+mandar)(?:\s+sim)?", t))
+
+
 def _produtos_da_oferta(oferta: str) -> list[str]:
     """Os produtos que a frase de oferta oferece, na ordem em que aparecem."""
     from agents import conversation as _cv
@@ -4271,6 +4296,19 @@ def _conferir_preco_perguntado(user: str, pergunta: str, reply: str,
         oficial = None
     if not oficial or oficial.get("ambiguo") and unidades < facts.QTD_MINIMA_FESTA:
         return reply
+    # Produto que so existe grande, por unidade (quiche, bomba, saltenha...):
+    # nao tem cento. Era 100 x R$ 12,00 = "R$ 1200,00" (teste de 14/10 20h13).
+    _linha_of = next((p for p in facts.get()["produtos"]
+                      if p["item"] == oficial.get("item_oficial")), None)
+    if _linha_of and facts.normalize(_linha_of["categoria"]) == "salgados grandes":
+        _un = cardapio._brl(float(oficial["preco_unitario"]))
+        _mini = _re_mod.search(r"\bmini\b", facts.normalize(pergunta))
+        frase = ((f"Não temos {_re_mod.search(r'mini\s+[a-z]+', facts.normalize(pergunta)).group(0)} "
+                  f"no momento. " if _mini and _re_mod.search(r"mini\s+[a-z]+", facts.normalize(pergunta))
+                  else "")
+                 + f"O {oficial['item_oficial']} é vendido por unidade: {_un} cada. 😊")
+        print(f"[preco] user={user} produto so por unidade; sem preco de pacote")
+        return frase
     valor = cardapio._brl(round(float(oficial["preco_unitario"]) * unidades, 2))
     rotulo = " ".join(formato.split()).lower()
     frase = (f"{'A' if rotulo.startswith('por') else 'O'} {rotulo} de "
@@ -5677,6 +5715,33 @@ def _handle_flush(user: str, items: list[dict]) -> None:
         # continuava voltando (teste do dono, 08/10 15h41 e 15h44). Depois da
         # escolha pelo nome: "Pode ser a Empadinha de Frango. Mas tira 25
         # coxinhas..." escolhe a empadinha, e nao descarta (19h37).
+        # "Quanto custa o cento de brigadeiros?" -> "SIM QUERO": o doce do preco
+        # entra no pedido (teste de 14/10 20h08 - virou pergunta de tamanho).
+        _doce_do_preco = _re_mod.search(r"\b(bandeja|meio cento|cento) de brigadeiros\b",
+                                        facts.normalize(_ultima_ag or ""))
+        if (_doce_do_preco and _e_concordancia_ou_quero(text_only)
+                and not _extracted_fresh.get("items") and not _extracted_fresh.get("doces")):
+            _doces_q = _extract_data_from_message(f"quero um {_doce_do_preco.group(1)} de brigadeiros",
+                                                  ConversationState(phone=user)).get("doces") or []
+            for _d in _doces_q:
+                if not any(isinstance(i, dict) and i.get("name") == _d["name"]
+                           for i in (_memoria.get("items") or [])):
+                    _memoria["items"] = list(_memoria.get("items") or []) + [dict(_d)]
+                    conversation_memory.save(user, _memoria)
+                    print(f"[memoria] {user}: aceitou o doce do preco -> {_d['name']}")
+        # "...100 churros e uma coca de 2lt, voce tem outros sabores?": com o
+        # refrigerante no pedido, a pergunta e dos sabores DELE (14/10 20h17 -
+        # o modelo respondeu sobre churros).
+        if (_re_mod.search(r"\b(?:outros|quais|que)\s+sabores?\b", facts.normalize(text_only or ""))
+                and any(isinstance(i, dict) and str(i.get("name", "")).startswith("Refrigerante")
+                        for i in (_memoria.get("items") or []))
+                and not _re_mod.search(r"\b(?:salgad|coxinh|past|frit|assad|doce|brigad)\w*",
+                                       facts.normalize(text_only or ""))):
+            _sab = _faq_sabor_de_refri(facts.normalize(text_only or ""), _memoria)
+            if _sab:
+                print(f"[bebida] user={user} pergunta dos sabores do refrigerante do pedido")
+                _responder_direto(user, items, _sab, _chegada)
+                return
         _ofertados = _produtos_da_oferta(_ultima_ag) if _ofereceu_acompanhamento(_ultima_ag) else []
         if (_ofertados and _memoria.get("items") and _e_concordancia(text_only)
                 and not _extracted_fresh.get("items") and not _extracted_fresh.get("bebidas")
