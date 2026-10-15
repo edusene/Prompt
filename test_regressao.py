@@ -1397,13 +1397,17 @@ checa("o 'sim' ao intervalo grava o horario oferecido",
 
 secao("--- 30/09: travas das oscilacoes medidas (medir_oscilacao 6x) ---")
 # 1) Aviso de intervalo repetido pelo modelo num pedido ja agendado (3 de 6).
-checa("prompt sem 'Aviso obrigatorio' depois do aviso dado",
-      "Aviso obrigatorio" not in horario.contexto_para_prompt(
-          datetime(2026, 9, 30, 12, 51), aviso_ja_dado=True)
-      and "JA FOI DADO" in horario.contexto_para_prompt(
-          datetime(2026, 9, 30, 12, 51), aviso_ja_dado=True))
-checa("prompt com 'Aviso obrigatorio' antes do aviso",
-      "Aviso obrigatorio" in horario.contexto_para_prompt(datetime(2026, 9, 30, 12, 51)))
+# Venda 24h (Balbino, 15/10): o prompt nunca manda anunciar o fechamento; so
+# fala do horario se o cliente pedir para agora/hoje ou um horario fechado.
+for _dado in (False, True):
+    _ctx = horario.contexto_para_prompt(datetime(2026, 9, 30, 12, 51), aviso_ja_dado=_dado)
+    checa(f"prompt fechado sem 'Aviso obrigatorio' (aviso dado={_dado})",
+          "Aviso obrigatorio" not in _ctx and "ATENDE 24 HORAS" in _ctx)
+_src_24 = open("app.py", encoding="utf-8").read()
+checa("aviso de fechado do codigo so com pedido para agora/hoje",
+      "and not _so_pergunta and _pediu_agora_ou_hoje" in _src_24)
+checa("aviso de fechado escrito pelo modelo sem pedido de horario sai",
+      "aviso de fechado sem pedido de horario; removido (24h)" in _src_24)
 _agora_original = horario.agora
 horario.agora = lambda: datetime(2026, 9, 30, 12, 51)
 _F_AGENDADO = dict(memoria_mod._empty(), aviso_horario_dado=True, data_iso="2026-10-01",

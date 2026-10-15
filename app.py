@@ -6093,13 +6093,17 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                         and bool(_RX_CLIENTE_PERGUNTOU.search(text_only or "")
                                  or _re_mod.search(r"\b(?:quero|queria|gostaria\s+de)\s+saber\b",
                                                    facts.normalize(text_only or ""))))
-        if (not _expediente["aberto"] and _so_pergunta and not _agendou_valido
-                and not _pedido_outro_dia and not _horario_dado and not _pedido_dia_fechado
-                and not _memoria.get("aviso_horario_dado")):
-            _avisar_fechado_no_fim = _expediente["mensagem"]
+        # Venda 24h (Balbino, 15/10): o horario so aparece quando o cliente
+        # pede um momento em que a loja esta fechada - "pra agora", "hoje" com
+        # a producao encerrada. Pedido sem dia segue o funil, que pergunta o
+        # dia; dia/hora que nao cabe recebe o motivo pela validacao de baixo.
+        _pediu_agora_ou_hoje = (horario.eh_imediato(_memoria.get("horario") or "")
+                                or _memoria.get("data_iso") == _agora.date().isoformat()
+                                or bool(_re_mod.search(r"\b(?:agora|ja\s+ja|imediat\w*|urgente|hoje)\b",
+                                                       facts.normalize(text_only or ""))))
         if (not _expediente["aberto"] and not _agendou_valido
                 and not _pedido_outro_dia and not _horario_dado and not _pedido_dia_fechado
-                and not _so_pergunta
+                and not _so_pergunta and _pediu_agora_ou_hoje
                 and not _memoria.get("aviso_horario_dado")):
             _memoria["aviso_horario_dado"] = True
             if horario.eh_imediato(_memoria.get("horario") or ""):
@@ -7473,6 +7477,21 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                           and len([c for c in f if c.isalpha()]) >= 3]
                 reply = " ".join(_resto + ["Qual o seu pedido? 😊"]).strip()
                 print(f"[funil] user={user} cobrou logistica sem itens; pede o pedido")
+        # Venda 24h: aviso de fechado que o MODELO escreveu sem o cliente ter
+        # pedido para agora/hoje sai da resposta (Balbino, 15/10).
+        if (reply and not _expediente["aberto"] and not _pediu_agora_ou_hoje
+                and not _transfer_done and not _pedido_saiu
+                and not _RX_LINHA_DE_RESUMO.search(reply)
+                and _RX_AVISO_DE_HORARIO.search(reply)):
+            _frases_av = [f for f in _RX_FIM_DE_FRASE.split(reply) if f.strip()]
+            _sem_aviso = " ".join(f.strip() for f in _frases_av
+                                  if not _RX_AVISO_DE_HORARIO.search(f)
+                                  and not _re_mod.search(r"agendad|amanh[aã].{0,40}07h40|a partir das 07h40", f)).strip()
+            if len([c for c in _sem_aviso if c.isalpha()]) < 12:
+                _sem_aviso = (_proxima_pergunta_do_funil(_memoria) if _memoria.get("items")
+                              else "Qual delícia você quer pedir? 😊")
+            reply = _sem_aviso
+            print(f"[expediente] user={user} aviso de fechado sem pedido de horario; removido (24h)")
         # Loja fechada e o cliente perguntou: a resposta sai e o aviso de
         # fechado vem no fim, no lugar da pergunta do funil (13/10).
         if (reply and _avisar_fechado_no_fim and not _transfer_done and not _pedido_saiu

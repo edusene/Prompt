@@ -509,15 +509,17 @@ def contexto_para_prompt(now: datetime | None = None, aviso_ja_dado: bool = Fals
         f"(intervalo {_hm_txt(int_ini)}-{_hm_txt(int_fim)})",
         f"Situacao agora: {'ABERTO' if st['aberto'] else 'FECHADO (' + st['motivo'] + ')'}",
     ]
-    if not st["aberto"] and aviso_ja_dado:
+    if not st["aberto"]:
+        # Venda 24h (Balbino, 15/10): fechado agora nao e assunto, a menos que
+        # o cliente peça para agora/hoje ou um horario fora do expediente.
         linhas.append(
-            "O aviso de horario JA FOI DADO nesta conversa (ou o pedido ja esta "
-            "agendado para um horario valido). E PROIBIDO repeti-lo: siga o pedido.")
-    elif not st["aberto"]:
-        linhas.append(f"Aviso obrigatorio ao cliente: {st['mensagem']}")
+            "VOCE ATENDE 24 HORAS: NAO diga que a loja esta fechada nem que a "
+            "producao encerrou. Responda e siga o pedido normalmente. So fale do "
+            "horario se o cliente pedir para agora, para hoje ou para um horario "
+            "fora do expediente - e ai ofereca o proximo horario disponivel.")
     if not st["aceita_hoje"]:
         linhas.append(
-            "NAO aceite pedido para hoje. Ofereca "
-            f"{formatar_data(st['sugestao_data'], now)}."
+            "Pedido para hoje nao cabe mais: SE o cliente pedir para hoje ou agora, "
+            f"ofereca {formatar_data(st['sugestao_data'], now)}."
         )
     return "\n".join(linhas)
