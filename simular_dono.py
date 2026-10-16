@@ -119,9 +119,11 @@ PEDIDOS = [
                 ("quibe", 25, "")], "horario": "17h"}),
     ("Eu quero 25 bolinhas e 25 coxinhas",
      {"itens": [("bolinha de queijo", 25, ""), ("coxinha", 25, "")]}),
-    ("quero 200 coxinhas e 100 rissoles e 150 churros e 200 pasteis",
-     {"itens": [("churros", 150, ""), ("coxinha", 200, ""), ("pastel", 200, ""),
+    ("quero 200 coxinhas e 100 rissoles e 150 churros e 200 pasteis de carne",
+     {"itens": [("churros", 150, ""), ("coxinha", 200, ""), ("pastel carne", 200, ""),
                 ("rissole de carne", 100, "")]}),
+    # Pastel sem sabor: nao entra como item - pergunta "carne ou queijo?" (15/10).
+    ("Quer um cento de pastel", {"itens": []}),
     ("Bom dia gostaria de 3 coxinha grande",
      {"itens": [("coxinha", 3, "lanche")]}),
     ("Oi, quero 35 coxinhas e 15 kibes pra entregar amanhã às 10h na Rua Duque de Caxias, 1200, "
@@ -147,8 +149,11 @@ PEDIDOS = [
      {"itens": [("coxinha", 50, "")], "horario": "15h", "modalidade": "entrega",
       "pagamento": "pix"}),
     ("IGAPARE", {"bairro": "igarape"}),
-    ("SERIA PARA AMANHA AS 7:30 QUERO UM CENTO COXINHA E MEIO CENTO DE PASTEL E UMA COCA COLA 2 LT",
-     {"itens": [("coxinha", 100, ""), ("pastel", 50, "")], "horario": "07h30"}),
+    ("SERIA PARA AMANHA AS 7:30 QUERO UM CENTO COXINHA E MEIO CENTO DE PASTEL DE QUEIJO E UMA COCA COLA 2 LT",
+     {"itens": [("coxinha", 100, ""), ("pastel queijo", 50, "")], "horario": "07h30"}),
+    ("Quero 3 combos de camarão e 1 cento frito", {"itens": [], "volume": 100}),
+    ("Quero 15 salsicha e 25 coxinhas e 10 salsichas",
+     {"itens": [("coxinha", 25, ""), ("enroladinho de salsicha", 25, "")]}),
 ]
 
 # Perguntas e o nome da resposta do codigo (balcao / perguntas frequentes).

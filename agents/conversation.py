@@ -1616,6 +1616,12 @@ def item_fora_do_cardapio(texto: str) -> str:
         if any(any(w.startswith(raiz) for w in n.split()) for n in nomes):
             continue
         return nome
+    # "50 salgados folhados", "salgado integral": tipo de salgado que a
+    # fabrica nao faz (teste de 15/10 21h01 - listava os sabores).
+    _tipo = re.search(r"\bsalgad\w*\s+(folhad\w*|integra\w*|vegan\w*|vegetarian\w*|fit\b|light\b"
+                      r"|sem\s+gluten|sem\s+lactose)", t)
+    if _tipo:
+        return f"salgados {_tipo.group(1)}"
     # "salgado de chocolate": nenhum produto tem o sabor (bateria de 06/10 -
     # em 1 de 3 rodadas ela disse que chamaria a equipe e nao chamou).
     for m in _RX_SALGADO_DE_SABOR.finditer(t):
@@ -1793,6 +1799,53 @@ def opcoes_de_doce() -> list[str]:
         return [DOCE_BANDEJA, DOCE_MEIO_CENTO, DOCE_CENTO]
 
 
+# "3 combos de camarao", "1 combo mix frango", "2 combo 15 empadinhas".
+_RX_COMBO = re.compile(
+    r"(?:\b(?P<qtd>\d{1,2}|uma?|dois|duas|tr[eê]s)\s+)?\bcombos?\b"
+    # O nome para no " e " do proximo item: "3 combos de camarao e 1 cento
+    # frito" engolia o cento (15/10).
+    r"(?P<resto>(?:\s+(?:de|do|da|com|mix|\d{1,3}|\+))*(?:\s+(?!e\b)[a-zà-ú]+){1,2})")
+_COMBO_POR_PALAVRA = (
+    (r"camar", "Combo Mix Camarão"),
+    (r"empad", "Combo 15 Empadinhas + Coca-Cola Lata"),
+    (r"canud", "Combo 15 Canudinhos + Coca-Cola Lata"),
+    (r"frit|salgadinh|\b50\b", "Combo 50 Salgadinhos Fritos + Refrigerante 1L"),
+    (r"frango", "Combo Mix Frango"),
+)
+
+
+def combos_citados(msg_lower: str) -> tuple[list[dict], str]:
+    """(combos pedidos, mensagem sem eles). O combo e um produto do cardapio
+    vendido por unidade; o nome dele tem numero dentro ("15 empadinhas") que
+    nao pode virar item avulso."""
+    try:
+        import facts
+        nomes = {p["item"] for p in facts.get()["produtos"]
+                 if facts.normalize(p["categoria"]) == "combos" and p.get("disponivel", True)}
+    except Exception:
+        return [], msg_lower
+    if not nomes:
+        return [], msg_lower
+    achados, resto_msg = [], msg_lower
+    for m in _RX_COMBO.finditer(msg_lower):
+        resto = m.group("resto") or ""
+        nome = next((n for rx, n in _COMBO_POR_PALAVRA if re.search(rx, resto) and n in nomes), "")
+        if not nome:
+            continue
+        bruto = (m.group("qtd") or "1").lower()
+        qtd = int(bruto) if bruto.isdigit() else _QTD_POR_EXTENSO.get(bruto, 1)
+        try:
+            import facts
+            oficial = facts.resolve_unit_price(nome, qtd)
+        except Exception:
+            oficial = None
+        if not any(c["name"] == nome for c in achados):
+            achados.append({"name": nome, "quantity": qtd,
+                            "price": oficial["preco_unitario"] if oficial else 0.0})
+        resto_msg = resto_msg.replace(m.group(0), " ")
+    return achados, resto_msg
+
+
 def doces_citados(msg_lower: str) -> tuple[list[dict], list[dict]]:
     """(itens, pendentes) de brigadeiro na mensagem."""
     t = " ".join((msg_lower or "").lower().split())
@@ -1801,7 +1854,9 @@ def doces_citados(msg_lower: str) -> tuple[list[dict], list[dict]]:
         return [], []
     if re.search(r"\b(?:sem|n[aã]o|nada\s+de|nem)\b[^,.;!?\n]{0,18}$", t[:m.start()]):
         return [], []
-    fora = bool(_RX_DOCE_FORA.search(t)) and not re.search(r"\bbrigadeir", t)
+    # Beijinho e mista existem no cardapio digital como SABOR do doce (15/10):
+    # deixaram de ser "em falta". O sabor vai no item (sabor_do_doce).
+    fora = False
     # O formato e o do trecho em que o doce aparece: em "cento e meio de
     # coxinha e brigadeiro" o "meio" e da coxinha.
     trecho = next((s for s in re.split(r",|;|\s+e\s+", t) if _RX_DOCE.search(s)), t)
@@ -1857,6 +1912,10 @@ def _itens_por_extenso(msg_lower: str) -> list[dict]:
     for _um, formato, produto in _PACOTE_POR_EXTENSO.findall(msg_lower):
         unidades = _unidades_do_formato(formato)
         if not unidades:
+            continue
+        # "meio cento de brigadeiro misto" e DOCE: virava Misto de Queijo e
+        # Presunto (15/10). Doce e lido por doces_citados.
+        if re.search(r"brigad|beijinh|docinh|\bdoces?\b", produto):
             continue
         canonico = _produto_conhecido(produto)
         if not canonico:
@@ -2123,6 +2182,10 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
         # nome nem cabia na classe de caracteres. O dono fechou assim um
         # pedido de R$ 94,00 cobrando R$ 54,00. E lookahead, para nao
         # comer o '50' do item seguinte quando o sinal e um digito.
+        # Combos antes dos itens: "2 combo 15 empadinhas" nao e 15 empadinhas.
+        _combos, msg_lower = combos_citados(msg_lower)
+        if _combos:
+            extracted["combos"] = _combos
         item_pattern = re.findall(
             r'(\d+)\s*(?:unidades?|un\.?|pcs\.?)?\s*(de\s+)?([a-záàãâéêíóôõúç\s]+?)'
             r'(?:\s*(?:[,;.!?]|\be\b|\bpra\b|\bpara\b|\bcom\b|\bno\b|\bna\b|\bem\b'
@@ -2289,6 +2352,16 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
         if sabores_pendentes:
             extracted["sabores_pendentes"] = sabores_pendentes
 
+        _somados_msg: list = []
+        for _it in items_found:
+            _igual = next((x for x in _somados_msg if x["name"] == _it["name"]
+                           and x.get("tamanho") == _it.get("tamanho")), None)
+            if _igual:
+                _igual["quantity"] += _it["quantity"]
+            else:
+                _somados_msg.append(dict(_it))
+        items_found = _somados_msg
+
         if items_found:
             extracted["items"] = items_found
         else:
@@ -2334,7 +2407,49 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
         if ref:
             extracted["referencia"] = ref
 
+    # "Cento de pastel", sem o sabor: carne ou queijo? Entrava como carne sem
+    # perguntar (teste de 15/10 16h32).
+    _sem_sabor = [i for i in extracted.get("items") or [] if _e_pastel_sem_sabor(i.get("name"))]
+    if _sem_sabor:
+        extracted["items"] = [i for i in extracted["items"] if i not in _sem_sabor]
+        if not extracted["items"]:
+            extracted.pop("items")
+        extracted["sabores_pendentes"] = list(extracted.get("sabores_pendentes") or []) + [
+            {"qtd": i["quantity"], "termo": "pastel", "opcoes": opcoes_de_pastel()}
+            for i in _sem_sabor]
+
+    # "Bandeja de beijinho", "meio cento misto": o sabor do doce vai junto
+    # (o cardapio digital tem Brigadeiro, Beijinho e Mista).
+    for _d in extracted.get("doces") or []:
+        _d_sabor = sabor_do_doce(msg_lower, _d.get("name", ""))
+        if _d_sabor:
+            _d["sabor"] = _d_sabor
+
     return extracted
+
+
+def _e_pastel_sem_sabor(nome) -> bool:
+    import facts as _fx
+    return _fx.normalize(str(nome or "")) in ("pastel", "pasteis")
+
+
+def opcoes_de_pastel() -> list[str]:
+    import facts as _fx
+    return [p["item"] for p in _fx.get()["produtos"] if p.get("disponivel", True)
+            and p.get("preco") is None and _fx.normalize(p["item"]).startswith("pastel")] \
+        or ["Pastel carne", "Pastel queijo"]
+
+
+def sabor_do_doce(msg_lower: str, nome_doce: str) -> str:
+    """O sabor do doce dito na mensagem, com o nome do cardapio digital."""
+    import facts as _fx
+    t = _fx.normalize(msg_lower or "")
+    bandeja = "bandeja" in _fx.normalize(nome_doce)
+    if re.search(r"\bmist[oa]s?\b|\bmeio a meio\b|\bos dois\b", t):
+        return "Mista (brigadeiro e beijinho)"
+    if re.search(r"\bbeijinhos?\b", t):
+        return "Beijinho" if bandeja else "Mista (brigadeiro e beijinho)"
+    return ""
 
 
 class ConversationManager:

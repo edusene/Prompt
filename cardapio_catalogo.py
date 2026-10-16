@@ -187,6 +187,29 @@ MAPA = {
         "quantidade_teste": 1, "preco_esperado": 65.00,
     },
     # Cadastrado no cardapio digital (com sabores) - antes so existia o Tuchaua.
+    # Combos (15/10): o cardapio digital vende por unidade. Os que pedem sabor
+    # recebem a pergunta "Qual sabor do combo" pelas opcoes do proprio cardapio.
+    "Combo Mix Camarão": {
+        "categoria": "Combos", "nome_base44": "Combo Mix Camarão", "context": "unidade",
+        "quantidade_teste": 1, "preco_esperado": 100.00,
+    },
+    "Combo Mix Frango": {
+        "categoria": "Combos", "nome_base44": "Combo Mix Frango", "context": "unidade",
+        "quantidade_teste": 1, "preco_esperado": 100.00,
+    },
+    "Combo 15 Empadinhas + Coca-Cola Lata": {
+        "categoria": "Combos", "nome_base44": "Combo 15 Empadinhas + Coca-Cola Lata",
+        "context": "unidade", "sabor_fixo": "Empadinha (frango)",
+        "quantidade_teste": 1, "preco_esperado": 24.00,
+    },
+    "Combo 15 Canudinhos + Coca-Cola Lata": {
+        "categoria": "Combos", "nome_base44": "Combo 15 Canudinhos + Coca-Cola Lata",
+        "context": "unidade", "quantidade_teste": 1, "preco_esperado": 24.00,
+    },
+    "Combo 50 Salgadinhos Fritos + Refrigerante 1L": {
+        "categoria": "Combos", "nome_base44": "Combo 50 Salgadinhos Fritos + Refrigerante 1L",
+        "context": "unidade", "quantidade_teste": 1, "preco_esperado": 50.00,
+    },
     "Refrigerante 2 Litros": {
         "categoria": "Bebidas", "nome_base44": "Refrigerante 2 L", "context": "unidade",
         "quantidade_teste": 1, "preco_esperado": 15.00,
@@ -281,7 +304,9 @@ def opcoes_do_item(nome: str) -> list[str]:
     """Sabores que o cardapio digital oferece para a bebida ("Refrigerante
     Lata" -> Coca, Coca zero, ...). [] quando nao ha escolha a fazer."""
     destino = _achar(mapa_efetivo(), nome)
-    if not destino or destino.get("categoria") != "Bebidas":
+    if not destino or destino.get("categoria") not in ("Bebidas", "Combos"):
+        return []
+    if destino.get("sabor_fixo"):
         return []
     try:
         import cardapio

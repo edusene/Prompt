@@ -1224,9 +1224,11 @@ for _frase in ("um cento de salgados fritos pra entregar hoje. quero 30 coxinhas
 _EXTR = _extract_data_from_message(
     "1 cento pastel e bolinha e 1 cento pastel e bolinha pra retirada",
     ConversationState())
+# "pastel" sem sabor vira "carne ou queijo?" (15/10).
 checa("a extracao usa a divisao e marca pedido por volume",
       sorted((i["name"], i["quantity"]) for i in _EXTR.get("items", []))
-      == [("Bolinha de Queijo", 100), ("Pastel", 100)]
+      == [("Bolinha de Queijo", 100)]
+      and [(p["termo"], p["qtd"]) for p in _EXTR.get("sabores_pendentes", [])] == [("pastel", 100)]
       and _EXTR.get("pedido_por_volume") is True, str(_EXTR.get("items")))
 
 _FICHA_VOLUME_OK = dict(memoria_mod._empty(), pedido_por_volume=True, items=[
@@ -1482,10 +1484,10 @@ checa("'Esses sabores' / 'Fritos' nao sao sabor",
       sabores_citados("Esses sabores") == [] and sabores_citados("Fritos") == [])
 _F_DIV = dict(memoria_mod._empty(), volume_pendente=100)
 memoria_mod.aplicar_divisao_do_volume(_F_DIV, "Quero coxinha ,pastel e churros")
-# Texto do dono, reuniao de 01/10.
-checa("3 sabores num cento: pergunta do dono",
+# Cento em 3 sabores: um vai em dobro (Balbino, 15/10; antes o texto de 01/10).
+checa("3 sabores num cento: qual vai em dobro",
       memoria_mod.pergunta_bloqueante(_F_DIV)
-      == "Você quer acrescentar um sabor ou aumentar uma porção dos 3 sabores? 😊",
+      == "Com 3 sabores, fica 50 de um e 25 de cada um dos outros. Qual sabor vai em dobro? 😊",
       memoria_mod.pergunta_bloqueante(_F_DIV)[:70])
 memoria_mod.aplicar_divisao_do_volume(_F_DIV, "Pode colocar mais pastéis")
 checa("'mais pasteis' fecha 25 + 50 + 25",
@@ -1720,9 +1722,9 @@ for _txt in ("quero um cento variado coxinha,churros e bolinha",
           not _e3.get("items") and _e3.get("volume_pendente") == 100, str(_e3))
     _F3 = dict(memoria_mod._empty(), volume_pendente=100)
     memoria_mod.aplicar_divisao_do_volume(_F3, _txt)
-    checa("e sai a pergunta do dono (acrescentar ou aumentar)",
+    checa("e sai a pergunta de qual sabor vai em dobro",
           memoria_mod.pergunta_bloqueante(_F3)
-          == "Você quer acrescentar um sabor ou aumentar uma porção dos 3 sabores? 😊",
+          == "Com 3 sabores, fica 50 de um e 25 de cada um dos outros. Qual sabor vai em dobro? 😊",
           memoria_mod.pergunta_bloqueante(_F3))
 checa("cento em 2 sabores continua dividido",
       [(i["name"], i["quantity"]) for i in _cv_0110._extract_data_from_message(
@@ -1771,8 +1773,10 @@ checa("'cento e meio de coxinha e brigadeiro': o meio e da coxinha",
 _F_DOCE = dict(memoria_mod._empty(), items=[{"name": "Churros", "quantity": 50}],
                sabores_pendentes=_cv_0110.doces_citados("opa quero beijinho")[1])
 _P_DOCE = memoria_mod.pergunta_bloqueante(_F_DOCE)
-checa("beijinho: avisa a falta e oferece os formatos de brigadeiro",
-      _P_DOCE.startswith("O Beijinho está em falta hoje! Qual docinho você prefere?")
+# Beijinho existe no cardapio digital como sabor do doce (15/10): nao e mais
+# "em falta"; a pergunta do formato continua.
+checa("beijinho: pergunta o formato, sem dizer que falta",
+      _P_DOCE.startswith("Qual docinho você prefere?") and "falta" not in _P_DOCE
       and "Meio Cento de Brigadeiros (50 un)" in _P_DOCE, _P_DOCE)
 memoria_mod.aplicar_escolha_de_sabor(_F_DOCE, "meio cento")
 checa("'meio cento' responde a pergunta do doce",
@@ -3294,6 +3298,40 @@ checa("'pode ser' a oferta do 2L: o produto oferecido",
       app._produtos_da_oferta("Pra acompanhar, que tal um Refrigerante 2L bem gelado? 🥤") == ["Refrigerante 2 Litros"])
 checa("oferta de duas opcoes pergunta qual",
       len(app._produtos_da_oferta("Pra acompanhar, vai um Refrigerante 2L ou docinhos (Brigadeiro/Beijinho)? 🥤🍬")) == 2)
+print("--- Balbino 15/10: combos, beijinho, pastel, 3 sabores, numero, folhado, CEP")
+_ec = _extract_data_from_message("Quero 3 combos de camarão e 1 cento frito", ConversationState(phone="x"))
+checa("'3 combos de camarao e 1 cento frito': os combos e o cento",
+      [(c["name"], c["quantity"]) for c in _ec.get("combos") or []] == [("Combo Mix Camarão", 3)]
+      and _ec.get("volume_pendente") == 100, _ec)
+_ee = _extract_data_from_message("quero 2 combo 15 empadinhas", ConversationState(phone="x"))
+checa("'2 combo 15 empadinhas' nao vira 15 empadinhas avulsas",
+      not _ee.get("items") and _ee["combos"][0]["quantity"] == 2, _ee)
+import cardapio_catalogo as _cc1510
+_tr = _cc1510.traduzir([{"name": "Combo Mix Camarão", "quantity": 3}])
+checa("combo vai para o pedido do cardapio digital", _tr[0] and not _tr[1], _tr)
+_fp = _extract_data_from_message("Quer um cento de pastel", ConversationState(phone="x"))
+checa("'cento de pastel' pergunta carne ou queijo",
+      not _fp.get("items") and _fp["sabores_pendentes"][0]["termo"] == "pastel", _fp)
+_fs = _extract_data_from_message("Quero 15 salsicha e 25 coxinhas e 10 salsichas", ConversationState(phone="x"))
+checa("mesmo produto duas vezes na mensagem soma",
+      ("Enroladinho de Salsicha", 25) in [(i["name"], i["quantity"]) for i in _fs["items"]], _fs["items"])
+_fb = _extract_data_from_message("quero uma bandeja de beijinho", ConversationState(phone="x"))
+checa("bandeja de beijinho leva o sabor", _fb["doces"][0].get("sabor") == "Beijinho", _fb)
+_fm = _extract_data_from_message("quero meio cento de brigadeiro misto", ConversationState(phone="x"))
+checa("brigadeiro misto nao vira Misto de Queijo e Presunto",
+      not _fm.get("items") and _fm["doces"][0].get("sabor", "").startswith("Mista"), _fm)
+checa("'Beijinhos tem' responde do cardapio, sem equipe",
+      (app._resposta_do_balcao("Beijinhos tem", {}) or ("", "", True))[0] == "beijinho")
+checa("cento com 3 sabores: qual vai em dobro",
+      "dobro" in (app._resposta_do_balcao("Se eu quiser só 3 tipos no cento tem como", {}) or ("", ""))[1])
+_fn = dict(memoria_mod._empty(), modality="entrega", endereco="Rua Brasília", bairro="Tucumanzal")
+memoria_mod.capturar_numero_da_casa(_fn, "Dia 15, às 14:00, pix, 907")
+checa("numero da casa no fim da lista com hora", _fn["endereco"] == "Rua Brasília, 907", _fn["endereco"])
+from agents.conversation import item_fora_do_cardapio as _ifc1510
+checa("'50 salgados folhados' e tipo que nao existe", _ifc1510("Quero 50 salgados folhados") == "salgados folhados")
+_src_1510 = open("app.py", encoding="utf-8").read()
+checa("CEP no lugar do bairro pede o nome do bairro", "Pelo CEP eu não consigo ver o bairro" in _src_1510)
+checa("modelo prometendo horario: frase removida", "modelo prometeu horario; frase removida" in _src_1510)
 checa("'amnha' e amanha", horario.resolver_data("amnha") == horario.agora().date()
       + __import__("datetime").timedelta(days=1))
 checa("repergunta mantem a resposta quando o cliente perguntou",

@@ -494,6 +494,16 @@ def merge(memoria: dict, extraido: dict, novo_da_mensagem: dict | None = None,
         mudancas.append(f"items={itens_novos}")
 
     fonte = novo_da_mensagem or extraido or {}
+    # Combos somam ao pedido como a bebida (15/10).
+    for _cb in fonte.get("combos") or (extraido or {}).get("combos") or []:
+        _itens_cb = list(memoria.get("items") or [])
+        _igual_cb = next((i for i in _itens_cb if isinstance(i, dict) and i.get("name") == _cb["name"]), None)
+        if _igual_cb:
+            _igual_cb["quantity"] = _cb["quantity"]
+        else:
+            _itens_cb.append(dict(_cb))
+        memoria["items"] = _itens_cb
+        mudancas.append(f"combo={_cb['quantity']} x {_cb['name']}")
     bebidas = fonte.get("bebidas") or (extraido or {}).get("bebidas") or []
     if bebidas:
         itens = list(memoria.get("items") or [])
@@ -560,7 +570,13 @@ def merge(memoria: dict, extraido: dict, novo_da_mensagem: dict | None = None,
 
     sabores_novos = (novo_da_mensagem or {}).get("sabores_pendentes")
     if sabores_novos and sabores_novos != memoria.get("sabores_pendentes"):
-        memoria["sabores_pendentes"] = sabores_novos
+        # A pergunta do refrigerante/docinho aberta nesta mesma mensagem fica:
+        # "100 pasteis e uma coca" perdia a coca quando o pastel virava
+        # pergunta (simulador do dono, 15/10).
+        _termos_novos = {p.get("termo") for p in sabores_novos}
+        _mantidas = [p for p in (memoria.get("sabores_pendentes") or [])
+                     if p.get("termo") in ("refrigerante", "docinho") and p.get("termo") not in _termos_novos]
+        memoria["sabores_pendentes"] = _mantidas + list(sabores_novos)
         mudancas.append(f"sabores_pendentes={[s['termo'] for s in sabores_novos]}")
 
     _volume_novo(memoria, novo_da_mensagem or {}, mudancas)
@@ -600,7 +616,8 @@ _NAO_E_RESPOSTA = {
 # Sem isto o numero ficava solto na conversa e o modelo inventava sentido para
 # ele - leu "45" como quantidade e respondeu com a regra do minimo de 25.
 _NUMERO_DE_OUTRA_COISA = _re.compile(
-    r"\d{1,2}\s*[:h]\s*\d{0,2}\b"                    # 16h, 16:30
+    r"\b(?:as|ate)\s+\d{1,2}\s+\d{2}\b"              # "as 14 00" (14:00 sem os dois pontos)
+    r"|\d{1,2}\s*[:h]\s*\d{0,2}\b"                    # 16h, 16:30
     r"|\b(?:as|ate|apos|depois\s+das)\s+\d{1,2}\b"      # as 16
     r"|\d{1,2}\s*(?:horas?|hrs?|hs)\b"                    # 16 horas
     r"|\d{1,2}\s*/\s*\d{1,2}(?:\s*/\s*\d{2,4})?"   # 26/09/2026
@@ -1393,6 +1410,23 @@ def _itens_da_divisao(volume: int, sabores: list[str], extra_para: str = "",
     return itens
 
 
+def tem_salgado_na_ficha(memoria: dict) -> bool:
+    """Ha salgado no pedido? Combo, bebida e doce nao contam: "3 combos e 1
+    cento frito" tinha o combo na ficha e o cento nunca era dividido nos
+    sabores (simulador do dono, 15/10)."""
+    return any(isinstance(i, dict) and not _re.search(
+        r"^combo|refrigerante|guarana|suco|brigadeir|bolo|pudim|alfajor|empada doce",
+        _sem_acento(str(i.get("name", "")))) for i in memoria.get("items") or [])
+
+
+def _itens_que_nao_sao_salgado(memoria: dict) -> list[dict]:
+    """Combos, bebidas e doces da ficha: a divisao do cento nao os apaga."""
+    return [dict(i) for i in memoria.get("items") or []
+            if isinstance(i, dict) and _re.search(
+                r"^combo|refrigerante|guarana|suco|brigadeir|bolo|pudim|alfajor|empada doce",
+                _sem_acento(str(i.get("name", ""))))]
+
+
 def aplicar_divisao_do_volume(memoria: dict, texto: str) -> list[str]:
     """Volume dito antes ("1 cento") + sabores ditos depois -> itens na ficha.
 
@@ -1418,7 +1452,7 @@ def aplicar_divisao_do_volume(memoria: dict, texto: str) -> list[str]:
         if novos:
             lista = sabores + novos
             if (volume // 25) % len(lista) == 0:
-                memoria["items"] = _itens_da_divisao(volume, lista)
+                memoria["items"] = _itens_que_nao_sao_salgado(memoria) + _itens_da_divisao(volume, lista)
                 memoria["divisao_pendente"] = {}
                 return [f"divisao com sabor novo: {', '.join(f'{i['quantity']} {i['name']}' for i in memoria['items'])}"]
             memoria["divisao_pendente"] = {"volume": volume, "sabores": lista}
@@ -1428,7 +1462,7 @@ def aplicar_divisao_do_volume(memoria: dict, texto: str) -> list[str]:
                                    texto or "")) if sabores else False
         if not (escolhido or so_esses) or not sabores:
             return []
-        memoria["items"] = _itens_da_divisao(volume, sabores, escolhido, so_o_que_fecha=not escolhido)
+        memoria["items"] = _itens_que_nao_sao_salgado(memoria) + _itens_da_divisao(volume, sabores, escolhido, so_o_que_fecha=not escolhido)
         memoria["divisao_pendente"] = {}
         return [f"divisao: {', '.join(f'{i['quantity']} {i['name']}' for i in memoria['items'])}"]
 
@@ -1436,7 +1470,7 @@ def aplicar_divisao_do_volume(memoria: dict, texto: str) -> list[str]:
         volume = int(memoria.get("volume_pendente") or 0)
     except (TypeError, ValueError):
         volume = 0
-    if not volume or memoria.get("items") or not citados or volume % 25:
+    if not volume or tem_salgado_na_ficha(memoria) or not citados or volume % 25:
         return []
     if len(citados) == 1:
         # "todos coxinha", "quero so coxinha": o volume inteiro num sabor. A
@@ -1444,13 +1478,13 @@ def aplicar_divisao_do_volume(memoria: dict, texto: str) -> list[str]:
         # sabores voltava em laco (teste do dono, 06/10: 2 centos de coxinha).
         memoria["volume_pendente"] = 0
         memoria["pedido_por_volume"] = True
-        memoria["items"] = _itens_da_divisao(volume, citados)
+        memoria["items"] = _itens_que_nao_sao_salgado(memoria) + _itens_da_divisao(volume, citados)
         return [f"volume num sabor so: {volume} {citados[0]}"]
     memoria["volume_pendente"] = 0
     # Os itens vem de um total: um total novo depois os divide de novo.
     memoria["pedido_por_volume"] = True
     if (volume // 25) % len(citados) == 0:
-        memoria["items"] = _itens_da_divisao(volume, citados)
+        memoria["items"] = _itens_que_nao_sao_salgado(memoria) + _itens_da_divisao(volume, citados)
         return [f"volume dividido: {', '.join(f'{i['quantity']} {i['name']}' for i in memoria['items'])}"]
     memoria["divisao_pendente"] = {"volume": volume, "sabores": citados}
     return [f"divisao pendente: {volume} em {citados}"]
@@ -1462,7 +1496,15 @@ def pendencia_de_divisao(memoria: dict) -> str:
     sabores = pendente.get("sabores") or []
     if not sabores:
         return ""
-    # Texto do dono (reuniao de 01/10), curto: sem a conta escrita por extenso.
+    # Sobra UMA porcao (cento em 3 sabores): um sabor vai em dobro (Balbino,
+    # 15/10). Mais de uma: o texto do dono de 01/10.
+    try:
+        volume = int(pendente.get("volume") or 0)
+    except (TypeError, ValueError):
+        volume = 0
+    if volume and volume // 25 - len(sabores) == 1:
+        return (f"Com {len(sabores)} sabores, fica {50} de um e 25 de cada um dos outros. "
+                f"Qual sabor vai em dobro? 😊")
     return (f"Você quer acrescentar um sabor ou aumentar uma porção dos "
             f"{len(sabores)} sabores? 😊")
 
@@ -2342,7 +2384,7 @@ def _frase_do_volume(memoria: dict) -> tuple[str, str]:
         _volume = int(memoria.get("volume_pendente") or 0)
     except (TypeError, ValueError):
         _volume = 0
-    if not _volume or memoria.get("items") or memoria.get("divisao_pendente"):
+    if not _volume or tem_salgado_na_ficha(memoria) or memoria.get("divisao_pendente"):
         return "", ""
     _quantos = max(1, _volume // 25)
     _preparo = (memoria.get("preparo_pendente") or "").strip()
