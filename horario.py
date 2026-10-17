@@ -401,10 +401,30 @@ def formatar_horario(hora: int, minuto: int) -> str:
     return f"{hora:02d}h{minuto:02d}" if minuto else f"{hora}h"
 
 
+def antecedencia_minutos(unidades: int) -> int:
+    """Antecedencia minima pela quantidade de salgados (Balbino, 17/10).
+
+    Menos de 300: 40 minutos. De 300 a 500: 1 hora. Acima de 500 (ate 1.000):
+    3 horas. A partir de 1.000 o pedido ja vai para a equipe comercial.
+    """
+    if unidades <= 0:
+        return 0
+    if unidades < 300:
+        return 40
+    if unidades <= 500:
+        return 60
+    return 180
+
+
+def texto_da_antecedencia(minutos: int) -> str:
+    return {40: "40 minutos", 60: "1 hora", 180: "3 horas"}.get(minutos, f"{minutos} minutos")
+
+
 def validar_agendamento(
     data_pedido: date | None,
     horario_texto: str,
     now: datetime | None = None,
+    unidades: int = 0,
 ) -> tuple[bool, str, date | None, str]:
     """Checa se data + horario cabem no expediente.
 
@@ -436,6 +456,9 @@ def validar_agendamento(
             return False, "Falta o horario do pedido.", None, "horario"
         st = status(now)
         if st["aberto"]:
+            # "Pra agora" com muito salgado: a antecedencia vale (17/10).
+            if antecedencia_minutos(unidades) > 40:
+                return _sem_antecedencia(unidades, now, now.date())
             return True, "", None, ""
         return False, st["mensagem"], st.get("sugestao_data"), "horario"
 
@@ -485,7 +508,34 @@ def validar_agendamento(
             "Qual outro horário fica bom? 😊"
         ), None, "horario"
 
+    # Antecedencia pela quantidade (Balbino, 17/10): pedido de hoje precisa
+    # de 40 min (menos de 300), 1 h (300 a 500) ou 3 h (acima de 500).
+    if (data_pedido == now.date() and unidades
+            and minuto_pedido < _minutos(now.hour, now.minute) + antecedencia_minutos(unidades)):
+        return _sem_antecedencia(unidades, now, data_pedido)
+
     return True, "", None, ""
+
+
+def _sem_antecedencia(unidades: int, now: datetime, dia: date) -> tuple[bool, str, date | None, str]:
+    """Recusa por antecedencia, com o primeiro horario que da."""
+    lead = antecedencia_minutos(unidades)
+    cedo = _minutos(now.hour, now.minute) + lead
+    cedo = ((cedo + 9) // 10) * 10                     # arredonda para cima, de 10 em 10
+    abertura, int_ini, int_fim, fechamento = _turno(dia)
+    if _minutos(*int_ini) <= cedo <= _minutos(*int_fim):
+        cedo = _minutos(*int_fim) + 1
+    if cedo > _minutos(*fechamento):
+        amanha = proximo_dia_util(dia + timedelta(days=1))
+        return False, (
+            f"Para {unidades} salgados precisamos de {texto_da_antecedencia(lead)} de "
+            f"antecedência, e hoje já não dá tempo! Posso deixar para "
+            f"{formatar_data(amanha, now)}? 😊"
+        ), amanha, "data"
+    return False, (
+        f"Para {unidades} salgados precisamos de {texto_da_antecedencia(lead)} de "
+        f"antecedência! Pode ser a partir das {formatar_horario(cedo // 60, cedo % 60)}? 😊"
+    ), None, "horario"
 
 
 def contexto_para_prompt(now: datetime | None = None, aviso_ja_dado: bool = False) -> str:

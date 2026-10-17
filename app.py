@@ -798,6 +798,33 @@ def _faq_beijinho(t: str) -> str:
             f"(brigadeiro e beijinho). Qual você prefere?")
 
 
+def _faq_antecedencia(t: str) -> str:
+    """Antecedencia pela quantidade (Balbino, 17/10)."""
+    m = _re_mod.search(r"\b(\d{2,4})\s*(?:unidades|un|salgad\w*|salgadinh\w*|coxinhas?|pecas)?\b", t)
+    n = int(m.group(1)) if m else 0
+    if 0 < n < 1000:
+        lead = horario.texto_da_antecedencia(horario.antecedencia_minutos(n))
+        return (f"Para {n} salgados, precisamos de pelo menos {lead} de antecedência! 😊 "
+                f"Para qual dia e horário você quer?")
+    return ("Precisamos de antecedência conforme a quantidade: menos de 300 salgados, "
+            "40 minutos; de 300 a 500, 1 hora; acima de 500, 3 horas. 😊 "
+            "Para qual dia e horário você quer?")
+
+
+def _faq_refri_festa(t: str, pessoas: int = 0) -> str:
+    """Refrigerante para festa: 400 ml por pessoa (Balbino, 17/10)."""
+    m = _re_mod.search(r"\b(\d{2,4})\s*(?:pessoas|convidados|adolescentes|criancas|adultos)\b", t)
+    n = int(m.group(1)) if m else pessoas
+    base = "Calculamos em média 400 ml de refrigerante por pessoa!"
+    if not n:
+        return f"{base} Para quantas pessoas é a festa? 🥤"
+    litros = n * 0.4
+    garrafas = int(-(-litros // 2))
+    litros_txt = f"{litros:.1f}".rstrip("0").rstrip(".").replace(".", ",")
+    return (f"{base} Para {n} pessoas, são {litros_txt} litros: {garrafas} refrigerantes "
+            f"de 2 litros. 🥤")
+
+
 def _faq_lista_de_refri(t: str) -> str:
     """"Quais refrigerantes tem?": tamanhos com preco e sabores, do cardapio."""
     from agents.conversation import _opcoes_de_refrigerante
@@ -983,8 +1010,7 @@ _FAQ_DO_DONO = (
     # Antecedencia de qualquer quantidade: responde e segue o pedido (13/10).
     ("prazo confirmar", _re_mod.compile(r"\b(?:prazo|ate\s+que\s+(?:horas|dia))\b.{0,40}\b(?:confirmar|encomend\w*|pedir|pedido)\b"
                                         r"|\bantecedencia\b|\bquantos\s+dias\s+antes\b|\bcom\s+quanto\s+tempo\s+antes\b"),
-     "Recomendamos confirmar com antecedência para garantir o horário na produção! "
-     "Qual data você tem em mente? 😊", False),
+     lambda t: _faq_antecedencia(t), False),
     ("chave pix antes", _re_mod.compile(r"\b(?:qual|me\s+passa|manda|envia)\b.{0,15}\bchave\b.{0,10}\bpix\b|\bchave\s+pix\b.{0,15}\?"),
      "Vou fechar o resumo do seu pedido primeiro para calcular certinho o valor e já te "
      "passo a chave Pix! Bora fechar os itens? 😊", False),
@@ -3303,6 +3329,22 @@ def _ofereceu_ajuste_de_lote(texto: str) -> bool:
     return any(facts.normalize(m) in limpo for m in _MARCAS_DE_AJUSTE_DE_LOTE)
 
 
+def _salgados_da_ficha(memoria: dict) -> int:
+    """Quantos salgados tem o pedido - a antecedencia depende disso (17/10)."""
+    total = 0
+    for item in (memoria or {}).get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        if _re_mod.search(r"refri|suco|guarana|coca|brigad|bolo|pudim|alfajor|doce|combo",
+                          facts.normalize(str(item.get("name", "")))):
+            continue
+        try:
+            total += int(float(item.get("quantity") or 0))
+        except (TypeError, ValueError):
+            pass
+    return total
+
+
 def _pede_bolo_sem_estoque(texto: str) -> bool:
     """"Quero um bolo" sem bolo disponivel no cardapio hoje (10/10 08h47).
 
@@ -5428,6 +5470,23 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             _responder_direto(user, items, "Pelo CEP eu não consigo ver o bairro 😅 "
                               "Qual é o nome do bairro?", _chegada)
             return
+        _tn_refri = facts.normalize(_texto_cliente or "")
+        if (_re_mod.search(r"\b(?:quantos?|quantidade|quanto)\b.{0,40}\brefri\w*"
+                           r"|\brefri\w*\b.{0,40}\b(?:quantos?|quanto|preciso|tenho\s+que|devo)\b", _tn_refri)
+                and not _extract_data_from_message(_texto_cliente.lower(),
+                                                   ConversationState(phone=user)).get("bebidas")):
+            _pessoas = 0
+            for _m_ant in reversed(memory.get(user)[-8:]):
+                if _m_ant.get("role") != "user":
+                    continue
+                _achou_p = _re_mod.search(r"\b(\d{2,4})\s*(?:pessoas|convidados|adolescentes|criancas)",
+                                          facts.normalize(_m_ant.get("parts", [{}])[0].get("text", "") or ""))
+                if _achou_p:
+                    _pessoas = int(_achou_p.group(1))
+                    break
+            print(f"[faq] user={user} refrigerante para festa (pessoas={_pessoas})")
+            _responder_direto(user, items, _faq_refri_festa(_tn_refri, _pessoas), _chegada)
+            return
         _balcao = _resposta_do_balcao(_texto_cliente, _memoria_balcao)
         _fora = ""
         if not _balcao:
@@ -6134,7 +6193,7 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             try:
                 _ok_ag, _, _, _ = horario.validar_agendamento(
                     date.fromisoformat(_memoria["data_iso"]),
-                    _memoria["horario"], _agora,
+                    _memoria["horario"], _agora, unidades=_salgados_da_ficha(_memoria),
                 )
                 _agendou_valido = bool(_ok_ag)
             except (TypeError, ValueError):
@@ -6267,7 +6326,7 @@ def _handle_flush(user: str, items: list[dict]) -> None:
         if _memoria.get("data_iso") and (_memoria.get("horario") or _dia_fechado):
             _ok, _motivo, _sugestao, _campo_invalido = horario.validar_agendamento(
                 date.fromisoformat(_memoria["data_iso"]), _memoria["horario"], _agora
-            )
+            , unidades=_salgados_da_ficha(_memoria))
             if not _ok and _motivo and not _motivo.startswith("Falta"):
                 # Limpa so o campo que nao cabe, para o agente reperguntar esse
                 # e nao a ficha inteira. Quem diz qual campo e a validacao: ler

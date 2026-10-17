@@ -3342,6 +3342,19 @@ checa("lista de refrigerantes separa os sabores por tamanho",
 _src_c = open("app.py", encoding="utf-8").read()
 checa("'2 combos' sem dizer qual pergunta qual", "Qual combo você quer?" in _src_c)
 checa("combo_pendente esta no esquema da ficha", "combo_pendente" in memoria_mod._empty())
+print("--- Balbino 17/10: antecedencia por quantidade e refrigerante por pessoa")
+from datetime import date as _d1710, datetime as _dt1710
+_n1710 = _dt1710(2026, 10, 15, 15, 0)
+for _u, _h, _ok in ((100, "15h20", False), (100, "15h40", True), (400, "15h30", False),
+                    (400, "16h", True), (800, "17h", False), (800, "18h", True)):
+    checa(f"antecedencia: {_u} salgados as {_h} -> {'ok' if _ok else 'recusa'}",
+          horario.validar_agendamento(_d1710(2026, 10, 15), _h, _n1710, unidades=_u)[0] == _ok)
+checa("400 pra agora pede 1 hora", "1 hora" in horario.validar_agendamento(
+    _d1710(2026, 10, 15), horario.HORARIO_IMEDIATO, _n1710, unidades=400)[1])
+checa("refrigerante para festa: 400 ml por pessoa",
+      "20 refrigerantes de 2 litros" in app._faq_refri_festa("quantos refri", 100))
+checa("pergunta de antecedencia com a quantidade",
+      "40 minutos" in app._resposta_do_balcao("antecedencia para pedido de 100 unidades?", {})[1])
 checa("'amnha' e amanha", horario.resolver_data("amnha") == horario.agora().date()
       + __import__("datetime").timedelta(days=1))
 checa("repergunta mantem a resposta quando o cliente perguntou",
