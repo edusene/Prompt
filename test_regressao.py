@@ -3332,6 +3332,16 @@ checa("'50 salgados folhados' e tipo que nao existe", _ifc1510("Quero 50 salgado
 _src_1510 = open("app.py", encoding="utf-8").read()
 checa("CEP no lugar do bairro pede o nome do bairro", "Pelo CEP eu não consigo ver o bairro" in _src_1510)
 checa("modelo prometendo horario: frase removida", "modelo prometeu horario; frase removida" in _src_1510)
+print("--- Balbino 16/10: 2 combos, 25 SAL, refrigerantes por tamanho")
+_ps = _extract_data_from_message("MARAVILHA 50 COX E 25 SAL E 25 BOLINHA", ConversationState(phone="x"))
+checa("'25 SAL' pergunta '25 de salsicha'",
+      [p["termo"] for p in _ps.get("sabores_pendentes") or []] == ["salsicha"], _ps.get("sabores_pendentes"))
+_lr = app._faq_lista_de_refri("")
+checa("lista de refrigerantes separa os sabores por tamanho",
+      "2 Litros:" in _lr and "Lata:" in _lr, _lr)
+_src_c = open("app.py", encoding="utf-8").read()
+checa("'2 combos' sem dizer qual pergunta qual", "Qual combo você quer?" in _src_c)
+checa("combo_pendente esta no esquema da ficha", "combo_pendente" in memoria_mod._empty())
 checa("'amnha' e amanha", horario.resolver_data("amnha") == horario.agora().date()
       + __import__("datetime").timedelta(days=1))
 checa("repergunta mantem a resposta quando o cliente perguntou",

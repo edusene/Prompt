@@ -67,6 +67,8 @@ def _empty() -> dict:
         # "metade coxinha e metade bolinha" numa porcao de 25: a proposta de 25
         # de cada, que so vira item com o "sim" do cliente.
         "proposta_metade": [],
+        # "2 combos" sem dizer qual (16/10): quantos combos faltam escolher.
+        "combo_pendente": 0,
         "endereco": "",
         "referencia": "",
         # O cliente afirmou que a casa nao tem numero. Nao completa o

@@ -1799,6 +1799,11 @@ def opcoes_de_doce() -> list[str]:
         return [DOCE_BANDEJA, DOCE_MEIO_CENTO, DOCE_CENTO]
 
 
+# Abreviacoes do cliente: "50 COX E 25 SAL E 25 BOLINHA" (16/10).
+_ABREVIACOES = {"sal": "salsicha", "cox": "coxinha", "bol": "bolinha", "pas": "pastel",
+                "esf": "esfirra", "emp": "empadinha", "enr": "enroladinho"}
+
+
 # "3 combos de camarao", "1 combo mix frango", "2 combo 15 empadinhas".
 _RX_COMBO = re.compile(
     r"(?:\b(?P<qtd>\d{1,2}|uma?|dois|duas|tr[eê]s)\s+)?\bcombos?\b"
@@ -2267,7 +2272,9 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
                 elif opcoes:
                     sabores_pendentes.append({
                         "qtd": qty,
-                        "termo": product_name.strip(),
+                        # "25 SAL" -> "25 de salsicha": o cliente nao entendeu
+                        # "25 de sal" (teste de 16/10 20h22).
+                        "termo": _ABREVIACOES.get(product_name.strip(), product_name.strip()),
                         "opcoes": opcoes,
                     })
                     continue

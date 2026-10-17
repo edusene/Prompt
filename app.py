@@ -805,13 +805,18 @@ def _faq_lista_de_refri(t: str) -> str:
     for nome in _opcoes_de_refrigerante():
         oficial = facts.resolve_unit_price(nome, 1)
         tamanhos.append(f"{nome} ({cardapio._brl(oficial['preco_unitario'])})" if oficial else nome)
-    sabores = (cardapio.opcoes_de_sabor("Refrigerante Lata")
-               or cardapio.opcoes_de_sabor("Refrigerante 600ml") or [])
+    import cardapio_catalogo
     junta = lambda xs: ", ".join(xs[:-1]) + " e " + xs[-1] if len(xs) > 1 else "".join(xs)
     texto = f"Temos {junta(tamanhos)}."
-    if sabores:
-        texto += f" Sabores: {junta(sabores)}."
-    return texto + " Qual você prefere? 🥤"
+    # Sabores por tamanho: a lata e o 2L nao tem os mesmos (16/10 20h25).
+    grupos = {}
+    for nome in _opcoes_de_refrigerante():
+        sab = tuple(cardapio_catalogo.opcoes_do_item(nome) or [])
+        if sab:
+            grupos.setdefault(sab, []).append(nome.replace("Refrigerante ", ""))
+    for sab, nomes in grupos.items():
+        texto += f"\n{junta(nomes)}: {junta(list(sab))}."
+    return texto + "\nQual você prefere? 🥤"
 
 
 def _faq_combo(t: str) -> str:
@@ -5770,6 +5775,70 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             if _sab:
                 print(f"[bebida] user={user} pergunta dos sabores do refrigerante do pedido")
                 _responder_direto(user, items, _sab, _chegada)
+                return
+        _novos_itens = [n for n in (_extracted_fresh.get("items") or []) if isinstance(n, dict)]
+        _pend_sab = [p for p in (_memoria.get("sabores_pendentes") or [])
+                     if p.get("termo") not in ("docinho", "refrigerante") and not p.get("inexistente")]
+        _respondidas = [p for p in _pend_sab if any(
+            conversation_memory._mesmo_item(n, {"name": o, "quantity": n.get("quantity")})
+            for n in _novos_itens for o in (p.get("opcoes") or []))]
+        if _respondidas:
+            _memoria["sabores_pendentes"] = [p for p in _memoria["sabores_pendentes"]
+                                             if p not in _respondidas]
+            conversation_memory.save(user, _memoria)
+            print(f"[memoria] {user}: sabor ja respondido na mensagem -> pergunta fechada "
+                  f"{[p['termo'] for p in _respondidas]}")
+
+        # "2 COMBOS" sem dizer qual: pergunta qual, com as opcoes do cardapio;
+        # "UM DE FRANGO E UM DE CAMARAO" responde (teste de 16/10 20h15 - o
+        # pedido ficava vazio e ela perguntava "Qual o seu pedido?" 4 vezes).
+        from agents import conversation as _cvc
+        _tn = facts.normalize(text_only or "")
+        _combos_ditos = _extracted_fresh.get("combos") or []
+        if _memoria.get("combo_pendente") and not _combos_ditos:
+            _escolhidos = []
+            for _m in _re_mod.finditer(r"(?:\b(\d{1,2}|um|uma|dois|duas|tres)\s+(?:combos?\s+)?(?:de\s+|do\s+|da\s+|mix\s+)?)?"
+                                       r"\b(camar\w*|frango|empad\w*|canud\w*|frit\w*|salgadinh\w*)", _tn):
+                _nome_cb = next((n for rx, n in _cvc._COMBO_POR_PALAVRA if _re_mod.search(rx, _m.group(2))), "")
+                if _nome_cb and not any(c["name"] == _nome_cb for c in _escolhidos):
+                    _q = _m.group(1) or ""
+                    _q = int(_q) if _q.isdigit() else _cvc._QTD_POR_EXTENSO.get(_q, 0)
+                    _escolhidos.append({"name": _nome_cb, "quantity": _q})
+            if _escolhidos:
+                _total_cb = int(_memoria.get("combo_pendente") or 0)
+                _sem_qtd = [c for c in _escolhidos if not c["quantity"]]
+                if _sem_qtd:
+                    _resto_cb = max(1, _total_cb - sum(c["quantity"] for c in _escolhidos))
+                    for c in _sem_qtd:
+                        c["quantity"] = max(1, _resto_cb // len(_sem_qtd))
+                for c in _escolhidos:
+                    _of = facts.resolve_unit_price(c["name"], c["quantity"])
+                    c["price"] = _of["preco_unitario"] if _of else 0.0
+                    if not any(isinstance(i, dict) and i.get("name") == c["name"]
+                               for i in (_memoria.get("items") or [])):
+                        _memoria["items"] = list(_memoria.get("items") or []) + [c]
+                _memoria["combo_pendente"] = 0
+                conversation_memory.save(user, _memoria)
+                print(f"[memoria] {user}: combos escolhidos -> {[(c['name'], c['quantity']) for c in _escolhidos]}")
+        _pede_combo = _re_mod.search(r"\b(\d{1,2}|um|uma|dois|duas|tres)\s+combos?\b(?!\s+(?:de|do|da|mix|\d|com))", _tn)
+        if _pede_combo and not _combos_ditos and not _memoria.get("combo_pendente"):
+            _q = _pede_combo.group(1)
+            _memoria["combo_pendente"] = int(_q) if _q.isdigit() else _cvc._QTD_POR_EXTENSO.get(_q, 1)
+            conversation_memory.save(user, _memoria)
+            _lista_cb = [p for p in facts.get()["produtos"]
+                         if facts.normalize(p["categoria"]) == "combos" and p.get("disponivel", True)]
+            if _lista_cb:
+                _abertura = ""
+                if not _memoria.get("saudacao_feita"):
+                    _nome = f", {_memoria['name']}" if _memoria.get("name") else ""
+                    _abertura = (f"{horario.saudacao(horario.agora())}{_nome}! "
+                                 f"Eu sou a Sandrinha da BALBS 💛\n\n")
+                    _memoria["saudacao_feita"] = True
+                    conversation_memory.save(user, _memoria)
+                print(f"[memoria] {user}: {_memoria['combo_pendente']} combo(s) sem dizer qual; pergunta")
+                _responder_direto(user, items, _abertura + "Qual combo você quer?\n" + "\n".join(
+                    f"• {p['item']} — {cardapio._brl(p['preco'])}" for p in _lista_cb if p.get("preco"))
+                    + "\nPode me dizer quantos de cada 😊", _chegada)
                 return
         _ofertados = _produtos_da_oferta(_ultima_ag) if _ofereceu_acompanhamento(_ultima_ag) else []
         if (_ofertados and _memoria.get("items") and _e_concordancia(text_only)
