@@ -3338,7 +3338,8 @@ checa("numero da casa no fim da lista com hora", _fn["endereco"] == "Rua Brasíl
 from agents.conversation import item_fora_do_cardapio as _ifc1510
 checa("'50 salgados folhados' e tipo que nao existe", _ifc1510("Quero 50 salgados folhados") == "salgados folhados")
 _src_1510 = open("app.py", encoding="utf-8").read()
-checa("CEP no lugar do bairro pede o nome do bairro", "Pelo CEP eu não consigo ver o bairro" in _src_1510)
+# 18/10: o CEP agora e consultado; so o que nao deu para usar pede o endereco.
+checa("CEP que nao deu para usar pede o endereco", "Não encontrei esse CEP" in _src_1510)
 checa("modelo prometendo horario: frase removida", "modelo prometeu horario; frase removida" in _src_1510)
 print("--- Balbino 16/10: 2 combos, 25 SAL, refrigerantes por tamanho")
 _ps = _extract_data_from_message("MARAVILHA 50 COX E 25 SAL E 25 BOLINHA", ConversationState(phone="x"))
@@ -3410,6 +3411,40 @@ _esp17 = "Itens: ...\nPosso confirmar pra segunda (19/10) às 20h? 💛"
 checa("'UAI !' no espelho nao fecha o pedido", app._espelho_sem_aceite(_esp17, "UAI !"))
 checa("'sim' e 'pose sim' no espelho fecham",
       not app._espelho_sem_aceite(_esp17, "sim") and not app._espelho_sem_aceite(_esp17, "POSE SIM"))
+
+# ── CEP (18/10): rua e bairro pelo CEP. Cache pre-carregado: sem internet ───
+import cep as _cep_t  # noqa: E402
+_cep_t._CACHE.update({
+    "76804120": {"rua": "Rua Afonso Pena", "bairro": "Nossa Senhora das Graças",
+                 "cidade": "Porto Velho", "uf": "RO"},
+    "76824272": {"rua": "Avenida Calama", "bairro": "Igarapé", "cidade": "Porto Velho", "uf": "RO"},
+    "76899999": {"rua": "Rua Inventada", "bairro": "Bairro Que Nao Existe",
+                 "cidade": "Porto Velho", "uf": "RO"},
+    "01310100": {"rua": "Avenida Paulista", "bairro": "Bela Vista", "cidade": "São Paulo", "uf": "SP"},
+})
+_ec1 = _extract_data_from_message("76804-120", ConversationState(phone="x"))
+checa("CEP sozinho: rua, bairro da tabela e entrega",
+      _ec1.get("endereco") == "Rua Afonso Pena" and _ec1.get("bairro") == "Nossa Senhora das Graças"
+      and _ec1.get("modality") == "entrega", _ec1)
+_ec2 = _extract_data_from_message("quero 50 coxinhas pra entrega, cep 76824-272, casa 120",
+                                  ConversationState(phone="x"))
+checa("CEP com o numero da casa e o pedido junto",
+      _ec2.get("endereco") == "Avenida Calama, 120" and _ec2.get("bairro") == "Igarapé"
+      and [(i["name"], i["quantity"]) for i in _ec2.get("items") or []] == [("Coxinha", 50)], _ec2)
+checa("CEP de outra cidade nao preenche nada",
+      not _extract_data_from_message("CEP 01310-100", ConversationState(phone="x")).get("endereco"))
+checa("telefone nao e CEP", _cep_t.cep_na_mensagem("meu numero e 99876-5432") == "")
+_mc = memoria_mod._empty()
+memoria_mod.merge(_mc, {}, _extract_data_from_message("76899999", ConversationState(phone="x")))
+checa("bairro do CEP fora da tabela: a pergunta diz que nao achou",
+      _mc.get("bairro_nao_achado") == "Bairro Que Nao Existe" and not _mc.get("bairro"), _mc)
+_mn = memoria_mod._empty()
+_mn.update({"modality": "entrega", "endereco": "Rua Afonso Pena", "bairro": "Nossa Senhora das Graças"})
+checa("o CEP nao vira o numero da casa", memoria_mod.capturar_numero_da_casa(_mn, "76804-120") == "")
+memoria_mod.merge(_mn, {}, {"endereco": "Rua Afonso Pena"})
+_mn["endereco"] = "Rua Afonso Pena, 45"
+memoria_mod.merge(_mn, {}, {"endereco": "Rua Afonso Pena"})
+checa("o mesmo CEP de novo nao apaga o numero", _mn["endereco"] == "Rua Afonso Pena, 45", _mn)
 checa("'amnha' e amanha", horario.resolver_data("amnha") == horario.agora().date()
       + __import__("datetime").timedelta(days=1))
 checa("repergunta mantem a resposta quando o cliente perguntou",

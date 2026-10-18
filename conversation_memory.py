@@ -439,8 +439,19 @@ def merge(memoria: dict, extraido: dict, novo_da_mensagem: dict | None = None,
             memoria[campo] = valor
             mudancas.append(f"{campo}={valor}")
 
+    # CEP com bairro fora da tabela de frete (18/10): a pergunta do bairro
+    # diz que nao achou, como no bairro digitado.
+    _bairro_cep = ((novo_da_mensagem or {}).get("bairro_do_cep")
+                   or (extraido or {}).get("bairro_do_cep"))
+    if _bairro_cep and not memoria.get("bairro"):
+        memoria["bairro_nao_achado"] = str(_bairro_cep).title()
+
     for campo in _CAMPOS_REVISAVEIS:
         novo = (novo_da_mensagem or {}).get(campo)
+        # O mesmo CEP mandado de novo traz so a rua: nao apaga o numero ja dito.
+        if (campo == "endereco" and novo and memoria.get(campo)
+                and str(memoria[campo]).lower().startswith(str(novo).lower())):
+            continue
         if novo and memoria.get(campo) and novo != memoria[campo]:
             print(f"[memoria] {campo}: '{memoria[campo]}' -> '{novo}' (cliente corrigiu)")
             memoria[campo] = novo
@@ -682,7 +693,9 @@ def capturar_numero_da_casa(memoria: dict, texto: str) -> str:
     if not bruto or len(bruto) > 120:
         return ""
 
-    norm = _normalizar_sem_acento(bruto)
+    # O CEP nao e o numero da casa: "76804-120" virava "Rua X, 76804" (18/10).
+    import cep as _cep_mod
+    norm = _normalizar_sem_acento(_cep_mod.tirar_cep(bruto))
     endereco = str(memoria.get("endereco") or "").strip()
     if _SEM_NUMERO_ACEITO.search(norm):
         # Nao completa o endereco: marca que nao ha numero, e a pendencia

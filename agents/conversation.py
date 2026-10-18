@@ -2071,6 +2071,19 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
     Retorna dict com os dados extraidos que devem ser aplicados ao state.
     """
     message = numeros_por_extenso(message or "")
+    # CEP: consulta a rua e o bairro, e os digitos saem do texto - "76804-120"
+    # nao pode virar 120 salgados nem o numero da casa (18/10).
+    import cep as _cep_mod
+    _cep_dito = _cep_mod.cep_na_mensagem(message)
+    _dados_cep = None
+    if _cep_dito:
+        _dados_cep = _cep_mod.buscar(_cep_dito)
+        if not _cep_mod.e_da_cidade(_dados_cep):
+            _dados_cep = None
+        message = _cep_mod.tirar_cep(message)
+        extracted_cep = _cep_dito
+    else:
+        extracted_cep = ""
     msg_lower = message.lower().strip()
     # "um centoQu frito misto de coxinha e bolinha" (teste do dono, 05/10):
     # letra a mais grudada no "cento" apagava o pedido inteiro.
@@ -2096,6 +2109,8 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
         lambda m: f"{25 * {'uma': 1, 'duas': 2, 'tres': 3, 'três': 3}.get(m.group(1), int(m.group(1)) if m.group(1).isdigit() else 1)} ",
         msg_lower)
     extracted = {}
+    if extracted_cep:
+        extracted["cep"] = extracted_cep
 
     # ── Nome ────────────────────────────────────────────────────────────────
     # "sou a Ana" nao era reconhecido — so "sou o". O resultado era perguntar o
@@ -2204,8 +2219,29 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
             if solto and not _NAO_E_RUA.search(message.lower()):
                 extracted["endereco"] = " ".join(message.strip().split())
 
+    # ── CEP (18/10): rua e bairro pelo CEP; o numero da casa vem depois ─────
+    if _dados_cep:
+        import facts as _fx_cep
+        # Quem manda o CEP quer entrega.
+        if not state.modality and not extracted.get("modality"):
+            extracted["modality"] = "entrega"
+        if not state.endereco and not extracted.get("endereco") and _dados_cep.get("rua"):
+            _num_cep = re.search(r"\b(?:n|n[º°o]|numero|num|casa)\s*\.?\s*(\d{1,5}[a-z]?)\b",
+                                 _horario_norm(message))
+            extracted["endereco"] = (f"{_dados_cep['rua']}, {_num_cep.group(1)}" if _num_cep
+                                     else _dados_cep["rua"])
+        _bairro_cep = _dados_cep.get("bairro") or ""
+        _oficial_cep = detectar_bairro(_bairro_cep) or (
+            (_fx_cep.lookup_frete(_bairro_cep) or {}).get("bairro", "") if _bairro_cep else "")
+        if not state.bairro and _oficial_cep:
+            extracted["bairro"] = _oficial_cep
+        elif not state.bairro and _bairro_cep:
+            # Bairro do CEP fora da tabela de frete: guarda o nome, e quem
+            # decide o que fazer e o fluxo de bairro nao encontrado.
+            extracted["bairro_do_cep"] = _bairro_cep
+
     # ── Bairro ──────────────────────────────────────────────────────────────
-    if not state.bairro:
+    if not state.bairro and not extracted.get("bairro"):
         bairro = detectar_bairro(message)
         if bairro:
             extracted["bairro"] = bairro

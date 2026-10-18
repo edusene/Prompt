@@ -5511,12 +5511,26 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                                       _chegada, texto=f"Anotado: {_o_que} para acrescentar! "
                                                       f"{TEXTO_DESARME}")
                 return
-        # CEP no lugar do bairro (15/10: "Esse nao parece ser um bairro").
-        if _re_mod.fullmatch(r"\s*\d{5}-?\d{3}\s*", _texto_cliente or ""):
-            print(f"[endereco] user={user} mandou CEP; pede o nome do bairro")
-            _responder_direto(user, items, "Pelo CEP eu não consigo ver o bairro 😅 "
-                              "Qual é o nome do bairro?", _chegada)
-            return
+        # CEP (18/10): a rua e o bairro saem da consulta, na extracao, e o
+        # fluxo segue pedindo o numero da casa. So responde aqui o CEP que nao
+        # deu para usar: nao existe, e de outra cidade ou a consulta caiu.
+        _cep_so = _re_mod.fullmatch(r"\s*(?:cep\s*:?\s*)?(\d{2}\.?\d{3}-?\d{3})\s*", _texto_cliente or "",
+                                    _re_mod.IGNORECASE)
+        if _cep_so:
+            import cep as _cep_mod
+            _dados_cep = _cep_mod.buscar(_cep_so.group(1))
+            if not _dados_cep or not _dados_cep.get("rua"):
+                print(f"[endereco] user={user} CEP sem resultado: {_cep_so.group(1)}")
+                _responder_direto(user, items, "Não encontrei esse CEP 😅 Me passa o nome da "
+                                  "rua, o número e o bairro?", _chegada)
+                return
+            if not _cep_mod.e_da_cidade(_dados_cep):
+                print(f"[endereco] user={user} CEP de outra cidade: {_dados_cep}")
+                _responder_direto(user, items, f"Esse CEP é de {_dados_cep['cidade']}/"
+                                  f"{_dados_cep['uf']} 😅 Entregamos em Porto Velho. "
+                                  "Qual é o endereço da entrega?", _chegada)
+                return
+            print(f"[endereco] user={user} CEP {_cep_so.group(1)} -> {_dados_cep}")
         _tn_refri = facts.normalize(_texto_cliente or "")
         if (_re_mod.search(r"\b(?:quantos?|quantidade|quanto)\b.{0,40}\brefri\w*"
                            r"|\brefri\w*\b.{0,40}\b(?:quantos?|quanto|preciso|tenho\s+que|devo)\b", _tn_refri)
