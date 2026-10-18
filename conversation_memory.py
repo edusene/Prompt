@@ -1078,6 +1078,9 @@ _PERGUNTA_CURTA = {
     "troco_para": "Precisa de troco para quanto? 💵",
 }
 
+# Rua e bairro saem do CEP (cep.py): so falta o numero da casa.
+DICA_DO_CEP = "📮 Se preferir, pode me enviar só o CEP e o número da casa!"
+
 _DADOS_DE_LOGISTICA = ("bairro", "endereco", "data_agendada", "horario", "payment_method")
 
 
@@ -1122,6 +1125,8 @@ def pedido_de_dados(memoria: dict, pendentes: list[str] | None = None) -> str:
             return (f"Não achei o bairro {memoria['bairro_nao_achado']} na nossa lista de "
                     f"entrega 🤔 Qual é o bairro certinho? Se preferir, a retirada é na "
                     f"loja ({_endereco_da_loja()}). 💛")
+        if pendentes[0] in ("bairro", "endereco"):
+            return f"{_PERGUNTA_CURTA[pendentes[0]]}\n\n{DICA_DO_CEP}"
         return _PERGUNTA_CURTA.get(pendentes[0], f"Qual {pendentes[0]}? 😊")
     nada_ainda = not any(memoria.get(c) for c in _DADOS_DE_LOGISTICA)
     linhas = []
@@ -1131,7 +1136,11 @@ def pedido_de_dados(memoria: dict, pendentes: list[str] | None = None) -> str:
         else:
             linhas.append(_ITEM_DA_LISTA.get(campo, _ROTULOS.get(campo, campo)))
     cabecalho = "Informe:" if nada_ainda else "Faltam essas informações:"
-    return cabecalho + "\n" + "\n".join(f"- {l}" for l in linhas)
+    texto = cabecalho + "\n" + "\n".join(f"- {l}" for l in linhas)
+    # O cliente fica sabendo que o CEP basta (Eduardo, 18/10).
+    if "bairro" in pendentes or "endereco" in pendentes:
+        texto += f"\n\n{DICA_DO_CEP}"
+    return texto
 
 
 def _itens_ambiguos(memoria: dict) -> list[str]:

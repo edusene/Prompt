@@ -1533,11 +1533,13 @@ _F_ENT = dict(memoria_mod._empty(), name="Balbino", modality="entrega", upsell_f
               items=[{"name": "Coxinha", "quantity": 50}])
 checa("nada informado: 'Informe:' com Rua e Numero separados",
       memoria_mod.pedido_de_dados(_F_ENT) == "Informe:\n- Bairro\n- Rua\n- Número\n"
-      "- Data do pedido\n- Horário desejado\n- Forma de pagamento (Pix, Cartão ou Dinheiro)",
+      "- Data do pedido\n- Horário desejado\n- Forma de pagamento (Pix, Cartão ou Dinheiro)"
+      "\n\n" + memoria_mod.DICA_DO_CEP,
       memoria_mod.pedido_de_dados(_F_ENT))
 checa("parte informada: 'Faltam essas informacoes:' com 'Rua e numero'",
       memoria_mod.pedido_de_dados(dict(_F_ENT, bairro="Olaria")) == "Faltam essas informações:\n"
-      "- Rua e número\n- Data do pedido\n- Horário desejado\n- Forma de pagamento (Pix, Cartão ou Dinheiro)")
+      "- Rua e número\n- Data do pedido\n- Horário desejado\n- Forma de pagamento (Pix, Cartão ou Dinheiro)"
+      "\n\n" + memoria_mod.DICA_DO_CEP)
 checa("um dado so: pergunta curta",
       memoria_mod.pedido_de_dados(dict(_F_ENT, bairro="Olaria", endereco="Rua X 10",
                                        data_agendada="hoje", data_iso="2026-10-01",
