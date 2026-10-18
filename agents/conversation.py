@@ -389,7 +389,10 @@ _ENTREGA_SUBSTANTIVO = re.compile(
 # Intencao de retirar, dita com verbo: vale mesmo numa frase com pergunta.
 _RETIRADA_EXPLICITA = re.compile(
     r"\bretirar\b"
-    r"|\b(?:vou|posso|prefiro|quero|queria)\s+(?:retirar|buscar|pegar)\b"
+    r"|\b(?:vou|posso|prefiro|quero|queria|resolvi|melhor|vamos)\s+(?:retirar|buscar|pegar)\b"
+    # "OPA RESOLVI PEGAR NA LOJA" (teste do dono, 17/10): o espelho voltava
+    # com a entrega e o frete.
+    r"|\b(?:peg|busc|retir)\w*\s+(?:ai\s+|la\s+)?na\s+loja\b"
     r"|\beu\s+busco\b"
     r"|\beu\s+pego\b"
     r"|\bna\s+fabrica\b"
@@ -514,6 +517,12 @@ def detectar_bairro(message: str) -> str:
         # tabela de frete tolera erro de digitacao. Virava a RUA, e o bairro
         # era perguntado de novo (simulador do dono, 14/10).
         achado_tabela = facts.lookup_frete(alvo.strip())
+        # Uma palavra so, que e o comeco de um bairro de varias ("RONALDO" ->
+        # Ronaldo Aragao), e nome de gente: respondia "informe seu nome" e
+        # trocou o bairro e o frete do pedido (teste do dono, 17/10).
+        if (achado_tabela and len(alvo.split()) == 1
+                and len(facts.normalize(achado_tabela["bairro"]).split()) > 1):
+            achado_tabela = None
         if achado_tabela:
             achado = achado_tabela["bairro"]
     return achado
@@ -1231,7 +1240,7 @@ def preparo_dito(msg_lower: str) -> str:
 _RX_VOLUME_DIVIDIDO = re.compile(
     r"\b(?:(?:uma?|1)\s+)?(?P<formato>por[cç][aã]o|meio\s+cento|cento\s+e\s+meio|"
     r"(?:dois|duas|tr[eê]s|quatro|\d{1,2})\s+centos?|cento)\b"
-    r"|\b(?P<numero>\d{2,3})\s+(?:salgad\w*|unidades?)\b",
+    r"|\b(?P<numero>\d{2,3})\s+(?:salgad\w*|unidades?|variad\w*|sortid\w*|misturad\w*)\b",
     re.IGNORECASE)
 
 # Onde a lista de sabores acaba: logistica, outro numero ou fim de frase.
@@ -1477,10 +1486,27 @@ def itens_divididos(msg_lower: str, quebrados: list | None = None) -> list[dict]
         for parte in re.split(r"\s*(?:,|\be\b|\+|/|\bmetade\b)\s*", trecho):
             parte = _RX_ANTES_DO_SABOR.sub("", parte.strip()).strip()
             if parte and not _RX_SO_GENERICO.match(parte):
-                partes.append(parte)
+                # "coxinha bolinha e churros", sem virgula: cada palavra e um
+                # sabor quando todas sao (17/10).
+                # "CHIRROS" digitado errado: a palavra corrigida (17/10).
+                _palavras = [w if _produto_conhecido(w) else (_corrigir_grafia(w) or w)
+                             for w in parte.split()]
+                _cada = [_produto_conhecido(w) for w in _palavras]
+                # So separa quando cada palavra e o NOME do produto ("bolinha" ->
+                # Bolinha de Queijo), nao um adjetivo: "coxinha frita" casava
+                # "frita" com a Mini Saltenha Frita.
+                _nome_principal = all(
+                    c and _forma_de_busca(c).split()[0].startswith(_forma_de_busca(w)[:4])
+                    for w, c in zip(_palavras, _cada))
+                if (len(_palavras) > 1 and all(_cada) and len(set(_cada)) == len(_cada)
+                        and _nome_principal):
+                    partes.extend(_palavras)
+                else:
+                    partes.append(parte)
         if len(partes) < 2 or not unidades:
             continue
-        sabores = [_produto_conhecido(p) for p in partes]
+        sabores = [_produto_conhecido(p) or _produto_conhecido(_corrigir_grafia(p) or "")
+                   for p in partes]
         if not all(sabores) or len(set(sabores)) != len(sabores):
             continue
         cada = unidades // len(sabores)
@@ -1611,6 +1637,10 @@ def item_fora_do_cardapio(texto: str) -> str:
         if " de " not in nome and not primeira.endswith("s"):
             continue
         if _produto_conhecido(nome) or _produto_conhecido(primeira) or sabores_possiveis(primeira):
+            continue
+        # "500 SALASICHAS": erro de digitacao de produto que existe (17/10).
+        _corr = _corrigir_grafia(primeira)
+        if _corr and _produto_conhecido(_corr):
             continue
         raiz = _forma_de_busca(primeira)[:5]
         if any(any(w.startswith(raiz) for w in n.split()) for n in nomes):
@@ -1851,6 +1881,22 @@ def combos_citados(msg_lower: str) -> tuple[list[dict], str]:
     return achados, resto_msg
 
 
+_PALAVRAS_DE_DOCE = ("brigadeiro", "brigadeiros", "beijinho", "beijinhos", "docinho", "docinhos")
+
+
+def corrigir_digitacao_do_doce(texto: str) -> str:
+    """"brigaeiro", "brigadeior", "beijnho" -> a palavra certa do doce."""
+    import difflib
+
+    def _troca(m):
+        w = m.group(0)
+        if len(w) < 7 or w in _PALAVRAS_DE_DOCE or w[0] not in "bd":
+            return w
+        perto = difflib.get_close_matches(w, _PALAVRAS_DE_DOCE, n=1, cutoff=0.82)
+        return perto[0] if perto else w
+    return re.sub(r"[a-záàãâéêíóôõúç]+", _troca, texto or "")
+
+
 def doces_citados(msg_lower: str) -> tuple[list[dict], list[dict]]:
     """(itens, pendentes) de brigadeiro na mensagem."""
     t = " ".join((msg_lower or "").lower().split())
@@ -2031,6 +2077,8 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
     msg_lower = re.sub(r"\bcento(?!s\b)[a-z]{1,2}\b", "cento", msg_lower)
     # "DOI CENTO DE SALGADOS" (dois sem o s) virava 1 cento (teste de 06/10).
     msg_lower = re.sub(r"\bdoi\s+(centos?)\b", r"dois \1", msg_lower)
+    # "QURO UM BRIGAEIRO" (teste do dono, 17/10): o doce sumia do pedido.
+    msg_lower = corrigir_digitacao_do_doce(msg_lower)
     # "enroladinhos de salsicha com catupiry" e o ASSADO: o "com" cortava o
     # nome e sobrava o frito (teste do dono, 08/10 12h39).
     msg_lower = re.sub(r"\benroladinhos?\s+(?:de\s+salsicha\s+)?com\s+catupiry\b",
@@ -2198,7 +2246,11 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
             r"|(?![a-z\u00e0-\u00ff\s])|$))",
             # Hora ("7:30", "8h", "18 horas") sai so desta leitura de itens: o
             # minuto "30" virava "30 coxinhas" (teste de 14/10 20h14).
-            re.sub(r"\b\d{1,2}\s*[:h]\s*\d{2}\b|\b\d{1,2}\s*(?:h|hrs?|horas?)\b", " ", msg_lower)
+            # "25 BOLINHA RETIRADA PAGAMENTO NO PIX": a palavra do funil
+            # encerra o nome - "bolinha retirada" sumia do pedido (17/10).
+            re.sub(r"\b(?:retirad[ao]s?|retirar|entregas?|entregar|pagamento|pix|cartao|cartão"
+                   r"|dinheiro|buscar)\b", ",",
+                   re.sub(r"\b\d{1,2}\s*[:h]\s*\d{2}\b|\b\d{1,2}\s*(?:h|hrs?|horas?)\b", " ", msg_lower))
         )
         items_found = []
         sabores_pendentes = []

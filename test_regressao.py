@@ -659,7 +659,10 @@ _19H20 = datetime(2026, 9, 26, 19, 20, 0)
 _ok_h, _msg_h, _sug_h, _campo_h = horario.validar_agendamento(
     date(2026, 9, 26), "19h", _19H20)
 checa("horario de hoje que passou e recusado", not _ok_h)
-checa("o campo invalido e o HORARIO, nao a data", _campo_h == "horario")
+# 17/10: hoje que passou oferece o MESMO horario no proximo dia util; o
+# campo e a data (o horario dito fica) e o dia oferecido volta na sugestao.
+checa("hoje que passou oferece o mesmo horario no proximo dia",
+      _campo_h == "data" and _sug_h is not None and "às 19h" in _msg_h, (_campo_h, _msg_h))
 for _texto, _campo_esperado in (("21h", "horario"), ("7h", "horario"),
                                 ("12h30", "horario")):
     _o, _m, _s, _c = horario.validar_agendamento(date(2026, 9, 28), _texto, _19H20)
@@ -2919,10 +2922,15 @@ checa("envio usa os valores do codigo (nao o preco do modelo)",
 print()
 print("--- Dono 08/10: opcoes na pergunta dos sabores, listas uma por linha")
 _fv8 = memoria_mod._frase_do_volume({"volume_pendente": 100, "preparo_pendente": "assado"})[0]
-checa("'Escolha ate 4 sabores assados' ja traz as opcoes, uma por linha",
-      _fv8.startswith("Escolha até 4 sabores assados (25 de cada):\n• ")
-      and "\n• Pão Pizza" in _fv8 and _fv8.endswith("Quais você quer? 😊"), _fv8)
-_fv8f = memoria_mod._frase_do_volume({"volume_pendente": 200, "preparo_pendente": "frito"})[0]
+# 17/10: pergunta o sabor; a lista inteira so quando o cliente pede.
+checa("volume sem sabor pergunta qual (sem a lista)",
+      _fv8 == "Quais sabores assados você quer? Pode escolher até 4 sabores (25 de cada). 😊", _fv8)
+_fv8l = memoria_mod._frase_do_volume({"volume_pendente": 100, "preparo_pendente": "assado",
+                                      "mostrar_sabores": True})[0]
+checa("pedida a lista, ela vem um por linha",
+      _fv8l.startswith("Escolha até 4 sabores assados (25 de cada):\n• ") and "\n• Pão Pizza" in _fv8l, _fv8l)
+_fv8f = memoria_mod._frase_do_volume({"volume_pendente": 200, "preparo_pendente": "frito",
+                                      "mostrar_sabores": True})[0]
 checa("fritos: so os fritos do cardapio", "• Coxinha frango" in _fv8f and "Esfirra" not in _fv8f, _fv8f)
 _lst = app._listas_em_linhas("Os sabores assados são: Esfirra de Carne, Pão Pizza e Canudinho de Camarão.")
 checa("lista do modelo com virgulas vira uma por linha",
@@ -3353,8 +3361,55 @@ checa("400 pra agora pede 1 hora", "1 hora" in horario.validar_agendamento(
     _d1710(2026, 10, 15), horario.HORARIO_IMEDIATO, _n1710, unidades=400)[1])
 checa("refrigerante para festa: 400 ml por pessoa",
       "20 refrigerantes de 2 litros" in app._faq_refri_festa("quantos refri", 100))
-checa("pergunta de antecedencia com a quantidade",
-      "40 minutos" in app._resposta_do_balcao("antecedencia para pedido de 100 unidades?", {})[1])
+checa("antecedencia ate 5 centos: no mesmo dia",
+      "De 1 a 5 centos fazemos no mesmo dia" in app._resposta_do_balcao(
+          "antecedencia para pedido de 100 unidades?", {})[1])
+checa("antecedencia de mais de 500: equipe",
+      app._resposta_do_balcao("antecedencia para 800 salgados?", {})[2] is True)
+checa("'8 da manha' e 8h", horario.parse_horario("QUERO ENTREGA PARA 8 DA MANHA") == (8, 0))
+_ex_var = _extract_data_from_message("MOÇA EU PEDI 100 VARIADOS SENDO COXINHA ,BOLINHA E CHURROS",
+                                     ConversationState(phone="x"))
+checa("'100 variados sendo coxinha, bolinha e churros' e o cento em 3 sabores (nao 100 coxinhas)",
+      _ex_var.get("volume_pendente") == 100 and not _ex_var.get("items"), _ex_var)
+
+# ── Teste do Balbino de 17/10 (chat) ────────────────────────────────────────
+from agents.conversation import detectar_bairro as _db17, detectar_modalidade as _dm17  # noqa: E402
+from agents.conversation import item_fora_do_cardapio as _fora17  # noqa: E402
+checa("'RONALDO' (o nome) nao vira o bairro Ronaldo Aragao", _db17("RONALDO") == "")
+checa("'IGAPARE' seco continua sendo o bairro", _db17("IGAPARE") == "Igarapé")
+checa("'OPA RESOLVI PEGAR NA LOJA' e retirada", _dm17("OPA RESOLVI PEGAR NA LOJA") == "retirada")
+checa("'500 SALASICHAS' nao e item fora do cardapio",
+      _fora17("500 COXINHAS E 500 SALASICHAS") == "")
+_ex17 = _extract_data_from_message(
+    "quero somente 50 coxinhas e 25 salsicha e 25 bolinha retirada pagamento no pix",
+    ConversationState(phone="x"))
+checa("'25 bolinha retirada' guarda a bolinha",
+      sorted(i["quantity"] for i in _ex17.get("items") or []) == [25, 25, 50], _ex17.get("items"))
+_ex17c = _extract_data_from_message("quero 100 salgadinhos coxinha bolinha e chirros",
+                                    ConversationState(phone="x"))
+checa("'coxinha bolinha e chirros' e o cento em 3 sabores",
+      _ex17c.get("volume_pendente") == 100 and not _ex17c.get("items"), _ex17c)
+checa("'QURO UM BRIGAEIRO' e o brigadeiro",
+      bool(_extract_data_from_message("quro um brigaeiro", ConversationState(phone="x"))
+           .get("doces_pendentes")))
+checa("'QURO' e aceite curto", app._e_concordancia_ou_quero("QURO"))
+checa("'AQUI NO BRASIL E 19:21' nao e o horario do pedido",
+      horario.parse_horario("HOJE E SABADO EM QUAL PAIS AQUI NO BRASIL E 19:21") is None)
+checa("'HOE AS 20 HORAS' e hoje", horario.resolver_data("HOE AS 20 HORAS") == horario.agora().date())
+checa("aviso de atraso tem resposta simples, sem equipe",
+      app._resposta_do_balcao("TENHO UMA ENCOMENDA PARA PEGAR AS 20 HORAS MAS VOU DEMORAR UNS 10 MINUTINHOS",
+                              {})[:1] == ("atraso",)
+      and app._resposta_do_balcao("EU JA FIZ O PEDIDO SO ESTOU AVISANDO QUE VOU DMEORAR", {})[0] == "atraso")
+checa("'vai demorar muito?' nao e aviso de atraso",
+      (app._resposta_do_balcao("vai demorar muito?", {}) or ("",))[0] != "atraso")
+checa("'SEGUNDA QUERO MAIS NAO' e desistencia",
+      bool(app._RX_DESISTENCIA.search(facts.normalize("SEGUNDA QUERO MAIS NAO"))))
+checa("'nao quero mais nada' nao e desistencia",
+      not app._RX_DESISTENCIA.search(facts.normalize("nao quero mais nada")))
+_esp17 = "Itens: ...\nPosso confirmar pra segunda (19/10) às 20h? 💛"
+checa("'UAI !' no espelho nao fecha o pedido", app._espelho_sem_aceite(_esp17, "UAI !"))
+checa("'sim' e 'pose sim' no espelho fecham",
+      not app._espelho_sem_aceite(_esp17, "sim") and not app._espelho_sem_aceite(_esp17, "POSE SIM"))
 checa("'amnha' e amanha", horario.resolver_data("amnha") == horario.agora().date()
       + __import__("datetime").timedelta(days=1))
 checa("repergunta mantem a resposta quando o cliente perguntou",

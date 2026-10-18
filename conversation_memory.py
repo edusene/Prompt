@@ -69,6 +69,8 @@ def _empty() -> dict:
         "proposta_metade": [],
         # "2 combos" sem dizer qual (16/10): quantos combos faltam escolher.
         "combo_pendente": 0,
+        # O cliente pediu a lista dos sabores (17/10): so ai ela vai inteira.
+        "mostrar_sabores": False,
         "endereco": "",
         "referencia": "",
         # O cliente afirmou que a casa nao tem numero. Nao completa o
@@ -2397,6 +2399,24 @@ def _frase_do_volume(memoria: dict) -> tuple[str, str]:
     # As opcoes ja vem na pergunta, uma embaixo da outra (pedido do dono,
     # 08/10): o cliente tinha de perguntar "quais sabores voces tem?".
     _fritos, _assados = _sabores_do_pacote("fritos"), _sabores_do_pacote("assados")
+    # A lista inteira so quando o cliente pede os sabores (Balbino, 17/10:
+    # "pergunta qual sabor; se perguntar quais tem, ai manda a lista").
+    if not memoria.get("mostrar_sabores"):
+        if _preparo == "misto":
+            _frase = (f"Quais sabores você quer? Pode escolher até {_quantos} {_plural}, "
+                      f"entre fritos e assados (25 de cada). 😊")
+            _extra = (" O cliente JA disse que quer fritos E assados. E PROIBIDO "
+                      "dividir o total em metade de cada por conta propria.")
+        elif _preparo:
+            _frase = (f"Quais sabores {_preparo}s você quer? Pode escolher até {_quantos} "
+                      f"{_plural} (25 de cada). 😊")
+            _extra = (f" O cliente JA disse que e {_preparo}: e PROIBIDO perguntar o "
+                      f"preparo de novo.")
+        else:
+            _frase = (f"Quais sabores você quer, e é frito ou assado? Pode escolher até "
+                      f"{_quantos} {_plural} (25 de cada). 😊")
+            _extra = ""
+        return _frase, _extra
     if _preparo == "misto":
         _frase = (f"Escolha até {_quantos} {_plural} (25 de cada), entre fritos "
                   f"e assados:\n" + _lista_em_linhas(_fritos, "Fritos")

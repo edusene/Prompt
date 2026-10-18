@@ -243,6 +243,8 @@ def resolver_data(texto: str, now: datetime | None = None) -> date | None:
     now = now or agora()
     hoje = now.date()
     t = _norm(texto)
+    # "HOE AS 20 HORAS" (teste do dono, 17/10): o dia nao entrava.
+    t = re.sub(r"\b(?:hoe|hje|hj|hojr|hoej)\b", "hoje", t)
     # "HOJE NAO" e a recusa da oferta de acompanhamento, nao uma data. Lido
     # como "hoje", trocava o "amanha as 20h" que o cliente ja tinha dado e ele
     # ouvia que o horario de hoje ja tinha passado (teste do dono, 28/09 20h10).
@@ -349,6 +351,12 @@ _RX_HORA_POR_PREPOSICAO = re.compile(
 def parse_horario(texto: str) -> tuple[int, int] | None:
     """'18h', '18:30', 'as 8h15', '18 horas', '19,50' -> (hora, minuto)."""
     t = _norm(texto)
+    # "AQUI NO BRASIL E 19:21", "agora sao 19h": o cliente dizendo a hora de
+    # AGORA, nao a do pedido. Virava o horario do pedido e ela respondia que
+    # ja tinha passado (teste do dono, 17/10).
+    t = re.sub(r"\b(?:agora|aqui(?:\s+n[oa]\s+\w+)?|ja)\s+(?:sao|e|eh|ta|esta)\s+(?:as\s+)?"
+               r"\d{1,2}\s*(?:[:h]\s*\d{2}|h(?:oras?)?)\b"
+               r"|\b(?:sao|e)\s+\d{1,2}\s*[:h]\s*\d{2}\s+agora\b", " ", t)
     moldes = [_RX_HORA]
     if not _RX_DINHEIRO.search(t) and not _RX_ENDERECO_NA_FRASE.search(t):
         moldes.append(_RX_HORA_VIRGULA)
@@ -375,6 +383,14 @@ def parse_horario(texto: str) -> tuple[int, int] | None:
             minuto = int(minuto_txt or 0)
             if hora <= 23 and minuto <= 59:
                 return _periodo(hora, m.end()), minuto
+    # "PARA 8 DA MANHA", "7 da noite": a hora pelo periodo do dia (17/10).
+    periodo = re.search(r"\b(\d{1,2})\s*(?:h(?:oras?)?\s*)?d[ae]\s+(manha|tarde|noite)\b", t)
+    if periodo:
+        h = int(periodo.group(1))
+        if periodo.group(2) in ("tarde", "noite") and h < 12:
+            h += 12
+        if 0 <= h <= 23:
+            return h, 0
     # "ao meio dia", "meio-dia e meia": 12h (simulador do dono, 14/10). Antes
     # da preposicao solta, e so sem numero de hora na frase.
     meio_dia = re.search(r"\bmeio[\s-]?dia(\s+e\s+meia)?\b", t)
@@ -503,10 +519,12 @@ def validar_agendamento(
 
     # Horario de hoje que ja passou nao e agendamento, e pedido perdido.
     if data_pedido == now.date() and minuto_pedido <= _minutos(now.hour, now.minute):
+        amanha = proximo_dia_util(data_pedido + timedelta(days=1))
         return False, (
             f"Esse horário de hoje já passou (agora são {now.strftime('%Hh%M')})! "
-            "Qual outro horário fica bom? 😊"
-        ), None, "horario"
+            f"Posso deixar para {formatar_data(amanha, now)}, às "
+            f"{formatar_horario(*hm)}? 😊"
+        ), amanha, "data"
 
     # Antecedencia pela quantidade (Balbino, 17/10): pedido de hoje precisa
     # de 40 min (menos de 300), 1 h (300 a 500) ou 3 h (acima de 500).

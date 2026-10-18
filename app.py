@@ -612,6 +612,14 @@ _RESPOSTAS_DO_BALCAO = (
         r"\bcancel\w*\s+(?:o\s+|meu\s+|a\s+|minha\s+|esse\s+|essa\s+)?(?:pedido|compra|encomenda)\b"
         r"|\b(?:pedido|compra|encomenda)\b.{0,20}\bcancel\w*|^\s*(?:quero\s+)?cancel\w*\s*$"),
      "Já estou acionando a equipe para atender sobre o cancelamento.", True),
+    # "Tenho encomenda para as 20h, mas vou demorar uns 10 minutinhos": aviso
+    # de atraso do cliente. Recebia "Qual o seu pedido?" e depois o texto de
+    # crise da gerencia (teste do dono, 17/10). Vem antes da urgencia.
+    ("atraso", _re_mod.compile(
+        r"\b(?:vou|vamos|devo|vo)\s+(?:me\s+)?(?:demor\w*|dmeor\w*|demro\w*|atras\w*"
+        r"|chegar\s+(?:atrasad\w*|mais\s+tarde|um\s+pouco\s+depois|depois))"
+        r"|\b(?:me|mim)\s+(?:esper\w*|aguard\w*)\b|\b(?:estou|to|tou)\s+atrasad\w*"),
+     "Sem problemas! Vamos te aguardar. 💛", False),
     ("comprovante", _re_mod.compile(
         r"\bcomprovante\b.{0,60}\b(?:confirm\w*|receb\w*|chegou|viu|olhou)"
         r"|\b(?:confirm\w*|receb\w*)\b.{0,30}\bcomprovante\b"),
@@ -653,6 +661,12 @@ _RESPOSTAS_DO_BALCAO = (
         r".*\bmaquin\w*"),
      "SIM MANDO PELO MOTOBOY", False),
 )
+
+_TEXTO_CANCELAMENTO = "Já estou acionando a equipe para atender sobre o cancelamento."
+# "quero mais nao", "nao quero mais", "desisto", "deixa pra la" (17/10).
+_RX_DESISTENCIA = _re_mod.compile(
+    r"\bquero\s+mais\s+nao\b|\bnao\s+quero\s+mais\s*(?:nao)?\s*$|\bnao\s+quero\s+mais\s+(?:o\s+)?pedido\b"
+    r"|\bdesist\w*|\bdeixa\s+(?:pra|para)\s+la\b|\besquece\s+(?:o\s+pedido|tudo)\b")
 
 # 4 e 9 so valem para pedido ja feito: no meio do funil, mudar o endereco e
 # corrigir um dado, e "mais um cento" e pedido.
@@ -799,16 +813,22 @@ def _faq_beijinho(t: str) -> str:
 
 
 def _faq_antecedencia(t: str) -> str:
-    """Antecedencia pela quantidade (Balbino, 17/10)."""
+    """Antecedencia (Balbino, 17/10): de 1 a 5 centos sai no mesmo dia;
+    acima de 500 quem combina e a equipe (_resposta_de_faq transfere)."""
+    return ("De 1 a 5 centos fazemos no mesmo dia! 😊 Para entrega ou retirada? "
+            "Qual o dia e horário?")
+
+
+def _qtd_na_pergunta(t: str) -> int:
     m = _re_mod.search(r"\b(\d{2,4})\s*(?:unidades|un|salgad\w*|salgadinh\w*|coxinhas?|pecas)?\b", t)
-    n = int(m.group(1)) if m else 0
-    if 0 < n < 1000:
-        lead = horario.texto_da_antecedencia(horario.antecedencia_minutos(n))
-        return (f"Para {n} salgados, precisamos de pelo menos {lead} de antecedência! 😊 "
-                f"Para qual dia e horário você quer?")
-    return ("Precisamos de antecedência conforme a quantidade: menos de 300 salgados, "
-            "40 minutos; de 300 a 500, 1 hora; acima de 500, 3 horas. 😊 "
-            "Para qual dia e horário você quer?")
+    if m:
+        return int(m.group(1))
+    m = _re_mod.search(r"\b(\d|dois|duas|tres|quatro|cinco|seis|sete|oito|nove|dez)\s+centos?\b", t)
+    if m:
+        n = {"dois": 2, "duas": 2, "tres": 3, "quatro": 4, "cinco": 5, "seis": 6, "sete": 7,
+             "oito": 8, "nove": 9, "dez": 10}.get(m.group(1)) or int(m.group(1))
+        return n * 100
+    return 0
 
 
 def _faq_refri_festa(t: str, pessoas: int = 0) -> str:
@@ -1047,6 +1067,9 @@ def _resposta_de_faq(texto: str, memoria: dict | None = None) -> tuple[str, str,
         pass
     for nome, rx, resposta, equipe in _FAQ_DO_DONO:
         if rx.search(t):
+            # Antecedencia de mais de 500 salgados: a equipe (17/10).
+            if nome == "prazo confirmar" and _qtd_na_pergunta(t) > 500:
+                return "acima de 500", TEXTO_DESARME, True
             texto_r = ((resposta(t, memoria) if resposta is _faq_sabor_de_refri else resposta(t))
                        if callable(resposta) else resposta)
             if texto_r:
@@ -3372,7 +3395,7 @@ def _e_concordancia_ou_quero(texto: str) -> bool:
     """"sim", "pode ser", "sim quero", "quero": aceite curto."""
     t = facts.normalize(texto or "").strip()
     return _e_concordancia(texto) or bool(_re_mod.fullmatch(
-        r"(?:sim\s+)?(?:eu\s+)?(?:quero|vou\s+querer|manda|pode\s+mandar)(?:\s+sim)?", t))
+        r"(?:sim\s+)?(?:eu\s+)?(?:quero|quro|qero|vou\s+querer|manda|pode\s+mandar)(?:\s+sim)?", t))
 
 
 def _produtos_da_oferta(oferta: str) -> list[str]:
@@ -5096,6 +5119,7 @@ _ACEITES_DE_PEDIDO = (
     "beleza", "blz", "manda ver", "manda", "ta bom", "tudo certo", "certo",
     "isso", "isso mesmo", "ok", "okay", "bora", "aceito", "perfeito", "otimo",
     "combinado", "positivo", "exato", "correto", "pode mandar", "pode fechar",
+    "show", "top", "certinho", "aham", "uhum", "joia", "demorou", "s",
 )
 
 # Se aparecer qualquer uma destas, NAO e aceite limpo: o cliente esta mexendo
@@ -5189,6 +5213,29 @@ def _confirmou_o_resumo(ultima_do_agente: str, texto_do_cliente: str) -> bool:
 
     return any(a == limpo or a in palavras or f" {a} " in f" {limpo} "
                for a in _ACEITES_DE_PEDIDO)
+
+
+TEXTO_PEDE_CONFIRMACAO = "Posso confirmar o seu pedido? 💛"
+
+
+def _espelho_sem_aceite(ultima_do_agente: str, texto_do_cliente: str) -> bool:
+    """O espelho esta na tela e a resposta NAO tem aceite nenhum?
+
+    "UAI !" fechou um pedido (teste do dono, 17/10): o modelo tomou a
+    interjeicao por "sim". Sem uma palavra de aceite, o pedido nao sai.
+    """
+    anterior = " ".join(facts.normalize(ultima_do_agente or "").split())
+    if not any(facts.normalize(m) in anterior for m in _MARCAS_DE_RESUMO):
+        return False
+    limpo = " ".join(facts.normalize(texto_do_cliente or "").split())
+    if not limpo:
+        return False
+    if _RX_DESISTENCIA.search(limpo):
+        return True
+    if _e_concordancia(texto_do_cliente) or "confirm" in limpo:
+        return False
+    palavras = limpo.split()
+    return not any(a in palavras or f" {a} " in f" {limpo} " for a in _ACEITES_DE_PEDIDO)
 
 
 def _pausa_digitacao(indice: int, chunk: str) -> float:
@@ -5488,6 +5535,18 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             _responder_direto(user, items, _faq_refri_festa(_tn_refri, _pessoas), _chegada)
             return
         _balcao = _resposta_do_balcao(_texto_cliente, _memoria_balcao)
+        # "SEGUNDA QUERO MAIS NAO": o cliente desistiu (teste do dono, 17/10 -
+        # virou espelho para segunda e o pedido fechou). Depois da oferta de
+        # acompanhamento ou do "mais alguma coisa", e so o "nao, obrigado".
+        if not _balcao and _RX_DESISTENCIA.search(facts.normalize(_texto_cliente or "")):
+            _ultima_dsst = next((m.get("parts", [{}])[0].get("text", "") or ""
+                                 for m in reversed(memory.get(user))
+                                 if m.get("role") == "assistant"), "")
+            if not (_ofereceu_acompanhamento(_ultima_dsst)
+                    or _re_mod.search(r"\b(?:mais\s+alguma|algo\s+mais|mais\s+algum|deseja\s+mais)\b",
+                                      facts.normalize(_ultima_dsst))):
+                print(f"[balcao] user={user} cliente desistiu do pedido")
+                _balcao = ("cancelamento", _TEXTO_CANCELAMENTO, True)
         _fora = ""
         if not _balcao:
             from agents.conversation import item_fora_do_cardapio, bolo_fora_do_cardapio
@@ -5835,6 +5894,13 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                 print(f"[bebida] user={user} pergunta dos sabores do refrigerante do pedido")
                 _responder_direto(user, items, _sab, _chegada)
                 return
+        # "Quais sabores tem?" com o volume em aberto: agora a lista vai (17/10).
+        if (_memoria.get("volume_pendente") and not _memoria.get("mostrar_sabores")
+                and _re_mod.search(r"\b(?:quais|que|qual|tem\s+quais|mostra|manda)\b.{0,20}\b(?:sabores?|opcoes|tem)\b"
+                                   r"|\bsabores?\s+(?:tem|voces|que\s+tem)",
+                                   facts.normalize(text_only or ""))):
+            _memoria["mostrar_sabores"] = True
+            conversation_memory.save(user, _memoria)
         _novos_itens = [n for n in (_extracted_fresh.get("items") or []) if isinstance(n, dict)]
         _pend_sab = [p for p in (_memoria.get("sabores_pendentes") or [])
                      if p.get("termo") not in ("docinho", "refrigerante") and not p.get("inexistente")]
@@ -5928,6 +5994,11 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                                              if p not in _acomp]
             conversation_memory.save(user, _memoria)
             print(f"[memoria] {user}: cliente recusou {[p['termo'] for p in _acomp]}; pergunta fechada")
+        _total_salgados = max(_salgados_da_ficha(_memoria), int(_memoria.get("volume_pendente") or 0))
+        if _total_salgados > 500 and not _memoria.get("pedido_enviado"):
+            trigger_human_handoff(user, items, f"pedido acima de 500 salgados ({_total_salgados})",
+                                  _chegada)
+            return
         # Quantidade que nao fecha em 25 por sabor (Trilho 2, Balbino 12/10). So
         # depois do tamanho: "20 coxinhas" pode ser salgado grande, por unidade.
         if (_memoria.get("items") and not _memoria.get("pedido_enviado")
@@ -6806,6 +6877,8 @@ def _handle_flush(user: str, items: list[dict]) -> None:
         # isto o modelo chamava calculate_order de novo e reapresentava o MESMO
         # resumo, obrigando o cliente a confirmar duas vezes.
         _aceitou_o_resumo = _confirmou_o_resumo(last_assistant_text, text_only)
+        _sem_aceite_no_espelho = (not _aceitou_o_resumo
+                                  and _espelho_sem_aceite(last_assistant_text, text_only))
         if _aceitou_o_resumo:
             print(f"[flush] user={user} cliente confirmou o resumo - fechamento obrigatorio")
             dynamic_prompt += (
@@ -7020,6 +7093,11 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             return resultado
 
         def _send_handler(**kwargs) -> str:
+            # O cliente nao aceitou o espelho ("UAI !"): nada sai (17/10).
+            if _sem_aceite_no_espelho:
+                print(f"[espelho] user={user} send_order barrado: sem aceite do cliente")
+                return ("ERRO: o cliente NAO confirmou o resumo. O pedido NAO foi enviado. "
+                        f"Responda apenas: {TEXTO_PEDE_CONFIRMACAO}")
             # Campos que nao dependem do modelo lembrar de preencher.
             # whatsapp_message_id e a chave de idempotencia do cardapio: com ela,
             # reenviar o mesmo pedido nunca cria duplicata. Deixar isso a cargo
@@ -7353,7 +7431,11 @@ def _handle_flush(user: str, items: list[dict]) -> None:
         # a forma de pagamento). Aqui ele mentiu: nao existia pedido. Com a
         # ficha completa, o codigo torna a frase verdadeira em vez de deixar o
         # cliente ir embora achando que pediu.
+        if _sem_aceite_no_espelho and not _pedido_saiu and _parece_fechamento(reply):
+            print(f"[espelho] user={user} modelo fechou sem aceite; pergunta de novo")
+            reply = TEXTO_PEDE_CONFIRMACAO
         if ((_aceitou_o_resumo or _parece_fechamento(reply))
+                and not _sem_aceite_no_espelho
                 and not _pedido_saiu and not _pedido_nao_entrou
                 and not _transfer_done):
             # Antes de transferir, TENTA ENVIAR. A ficha tem tudo o que o
