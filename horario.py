@@ -535,6 +535,19 @@ def validar_agendamento(
     return True, "", None, ""
 
 
+def horario_oferecido(mensagem: str) -> str:
+    """O horario que a recusa ofereceu ao cliente ('16h', '07h40'), ou ''.
+
+    "Pode ser a partir das 16h?" -> "SIM" nao virava horario: o "sim" se
+    perdia e, duas mensagens depois, ela perguntava "Qual horario?" de novo
+    (correcao estrutural do Balbino, 19/10: resposta valida grava o campo).
+    """
+    m = (re.search(r"Pode ser (?:a partir das|às) (\d{1,2}h(?:\d{2})?)", mensagem or "")
+         or re.search(r"só começa às (\d{1,2}h\d{2})! Pode ser a partir desse horário",
+                      mensagem or ""))
+    return m.group(1) if m else ""
+
+
 def _sem_antecedencia(unidades: int, now: datetime, dia: date) -> tuple[bool, str, date | None, str]:
     """Recusa por antecedencia, com o primeiro horario que da."""
     lead = antecedencia_minutos(unidades)

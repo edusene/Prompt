@@ -71,6 +71,9 @@ def _empty() -> dict:
         "combo_pendente": 0,
         # O cliente pediu a lista dos sabores (17/10): so ai ela vai inteira.
         "mostrar_sabores": False,
+        # "Quantas unidades de X?" depois do "sim" ao convite (19/10): o
+        # numero da proxima mensagem e desse produto.
+        "produto_em_foco": "",
         "endereco": "",
         "referencia": "",
         # O cliente afirmou que a casa nao tem numero. Nao completa o

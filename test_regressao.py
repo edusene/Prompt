@@ -3447,6 +3447,35 @@ memoria_mod.merge(_mn, {}, {"endereco": "Rua Afonso Pena"})
 _mn["endereco"] = "Rua Afonso Pena, 45"
 memoria_mod.merge(_mn, {}, {"endereco": "Rua Afonso Pena"})
 checa("o mesmo CEP de novo nao apaga o numero", _mn["endereco"] == "Rua Afonso Pena, 45", _mn)
+
+# ── Correcao estrutural (19/10): resposta valida grava o campo e segue ──────
+checa("horario oferecido na abertura", horario.horario_oferecido(
+    "A gente só começa às 07h40! Pode ser a partir desse horário? 😊") == "07h40")
+checa("horario oferecido no intervalo", horario.horario_oferecido(
+    "Das 12h01 às 13h59 estamos no intervalo de almoço! Pode ser às 14h ou prefere antes das 12h? 😊") == "14h")
+checa("horario oferecido pela antecedencia", horario.horario_oferecido(
+    "Para 400 salgados precisamos de 1 hora de antecedência! Pode ser a partir das 16h? 😊") == "16h")
+checa("oferta de dia nao tem horario oferecido", horario.horario_oferecido(
+    "Aos domingos a gente não abre! Posso deixar para segunda-feira (19/10)? 😊") == "")
+checa("a recusa de horario guarda o horario oferecido",
+      '_memoria["horario_proposto"] = horario.horario_oferecido(_motivo)' in open("app.py", encoding="utf-8").read())
+checa("produto do convite: um so",
+      app._produto_do_convite("A porcao de Esfirra de Carne sai R$ 30,00.\n\nQual o seu pedido? 😊")
+      == "Esfirra de Carne")
+checa("produto do convite: dois produtos nao contam",
+      app._produto_do_convite("Temos coxinha e bolinha. Qual o seu pedido?") == "")
+checa("quantidade sozinha", [bool(app._RX_SO_QUANTIDADE.fullmatch(facts.normalize(t)))
+                             for t in ("50", "50 unidades", "meio cento", "quero 75", "50 coxinhas")]
+      == [True, True, True, True, False])
+_s19 = app._RX_SAUDACAO_DA_CONVERSA.match("Boa tarde, Balbino! Eu sou a Sandrinha da BALBS 💛 Pra acompanhar?")
+checa("regras: a saudacao e separada do resto",
+      _s19 and _s19.group(0).strip() == "Boa tarde, Balbino! Eu sou a Sandrinha da BALBS 💛")
+checa("regras: sem saudacao nao saem", not app._RX_SAUDACAO_DA_CONVERSA.match("Qual o seu pedido? 😊"))
+app._REGRAS_ENVIADAS.pop("5519x", None)
+checa("regras: uma vez por conversa",
+      app._regras_ainda_nao_enviadas("5519x") and not app._regras_ainda_nao_enviadas("5519x"))
+checa("regras: texto com 25 em 25, CEP e horario",
+      all(x in app.texto_regras_do_pedido() for x in ("25 em 25", "CEP", "segunda a sábado", "5 centos")))
 checa("'amnha' e amanha", horario.resolver_data("amnha") == horario.agora().date()
       + __import__("datetime").timedelta(days=1))
 checa("repergunta mantem a resposta quando o cliente perguntou",

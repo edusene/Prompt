@@ -228,6 +228,24 @@ CONVERSAS = [
     ("'500 coxinhas e 500 salasichas': equipe", TARDE,
      ["500 COXINHAS E 500 SALASICHAS"],
      {"fecha": False, "equipe": True, "nao_contem": ["Não temos"]}),
+    # ── Correcao estrutural (19/10): "sim" a oferta grava e segue ──
+    ("abertura: 'a partir das 07h40?' SIM grava o horario", TARDE,
+     ["QUERO 50 COXINHAS PARA AMANHA AS 7 HORAS RETIRADA", "PODE SIM", "NAO", "SIM"],
+     {"espelho": [("Coxinha", 50)], "fecha": True, "equipe": False,
+      "contem": ["07h40", "Como fazer seu pedido"], "nao_contem": ["Qual horário"]}),
+    ("intervalo: 'pode ser as 14h?' SIM grava o horario", TARDE,
+     ["QUERO 50 COXINHAS PARA AMANHA AS 13 HORAS RETIRADA", "SIM", "NAO", "SIM"],
+     {"espelho": [("Coxinha", 50)], "fecha": True, "equipe": False, "nao_contem": ["Qual horário"]}),
+    ("antecedencia: 'a partir das 16h?' SIM grava o horario", TARDE,
+     ["QUERO 400 SALGADOS SENDO 200 COXINHAS E 200 BOLINHAS PARA HOJE AS 15:30 RETIRADA",
+      "SIM", "NAO", "SIM"],
+     {"espelho": [("Coxinha", 200), ("Bolinha", 200)], "fecha": True, "equipe": False,
+      "nao_contem": ["Qual horário"]}),
+    ("preco e SIM: pergunta a quantidade, e o numero vira o item", TARDE,
+     ["QUANTO CUSTA A PORCAO DE ESFIRRA DE CARNE?", "SIM", "50", "NAO",
+      "AMANHA AS 10 HORAS RETIRADA", "SIM"],
+     {"espelho": [("Esfirra", 50)], "fecha": True, "equipe": False,
+      "contem": ["Quantas unidades de"]}),
     # ── CEP (18/10) ──
     ("CEP no lugar do endereco: rua e bairro pelo CEP, pede o numero", TARDE,
      ["QUERO 50 COXINHAS PARA AMANHA AS 10 HORAS ENTREGA PAGAMENTO PIX", "NAO",
@@ -255,6 +273,7 @@ def _rodar(msgs: list[str], quando: datetime) -> tuple[list[str], list[str]]:
     t_ag._ficha.clear()
     memory._store.pop(t_ag.TELEFONE, None)
     app._orders_sent.clear()
+    app._REGRAS_ENVIADAS.clear()      # conversa nova: as regras saem de novo
     _TRANSF.clear()
     respostas = []
     for m in msgs:

@@ -668,6 +668,45 @@ _RX_DESISTENCIA = _re_mod.compile(
     r"\bquero\s+mais\s+nao\b|\bnao\s+quero\s+mais\s*(?:nao)?\s*$|\bnao\s+quero\s+mais\s+(?:o\s+)?pedido\b"
     r"|\bdesist\w*|\bdeixa\s+(?:pra|para)\s+la\b|\besquece\s+(?:o\s+pedido|tudo)\b")
 
+# Convite ao pedido depois de falar de um produto ("A porcao de Esfirra de
+# Carne sai R$ 30,00. Qual o seu pedido?", "Bora pedir quantas?").
+_RX_CONVITE_AO_PEDIDO = _re_mod.compile(
+    r"\bbora\s+pedir\b|\bqual\s+o\s+seu\s+pedido\b|\bquer\s+que\s+eu\s+(?:ja\s+)?anote\b"
+    r"|\bquantas?\s+(?:voce\s+)?(?:quer|vai\s+querer)\b")
+
+
+def _produto_do_convite(texto: str) -> str:
+    """O unico produto de que a mensagem fala ('Esfirra de Carne', 'esfirra'), ou ''."""
+    norm = facts.normalize(texto or "")
+    try:
+        nomes = {p["item"] for p in facts.get()["produtos"] if p.get("disponivel", True)}
+    except Exception:
+        return ""
+    achados = {n for n in nomes
+               if _re_mod.search(rf"\b{_re_mod.escape(facts.normalize(n))}\b", norm)}
+    achados = {a for a in achados
+               if not any(a != b and facts.normalize(a) in facts.normalize(b) for b in achados)}
+    # As familias citadas ("coxinha", "bolinha"): duas ou mais e nao ha um
+    # produto so de que se fala.
+    # Palavra de formato ("porcao", "cento", "bandeja") nao e familia.
+    cabecas = {facts.normalize(n).split()[0] for n in nomes
+               if facts.normalize(n) and len(facts.normalize(n).split()[0]) >= 5} - {
+        "porcao", "cento", "bandeja", "combo", "salgadinhos"}
+    citadas = {c for c in cabecas if _re_mod.search(rf"\b{c}s?\b", norm)}
+    if len(citadas) > 1 or len(achados) > 1:
+        return ""
+    if achados:
+        return achados.pop()
+    # So o nome da familia ("Nossas esfirras sao..."): quem decide o sabor ou
+    # o tamanho e o fluxo normal, com o pedido em maos.
+    return citadas.pop() if citadas else ""
+
+
+_RX_SO_QUANTIDADE = _re_mod.compile(
+    r"\s*(?:(?:quero|manda|pode\s+ser|vou\s+querer|sim)\s*,?\s*)?"
+    r"(?P<qtd>\d{1,4}\s*(?:un|unidades?|pecas?)?|(?:um\s+|meio\s+|dois\s+|duas\s+|\d\s+)?centos?"
+    r"(?:\s+e\s+meio)?|uma?\s+porcao|\d\s+porcoes)\s*[.!]*\s*")
+
 # 4 e 9 so valem para pedido ja feito: no meio do funil, mudar o endereco e
 # corrigir um dado, e "mais um cento" e pedido.
 _RX_MUDA_ENDERECO = _re_mod.compile(
@@ -5293,6 +5332,44 @@ def _marcar_conversa_lida(user: str) -> None:
     print(f"[flush] user={user} conv={conv['id']} marcada como lida (agente respondeu)")
 
 
+# ── Regras do pedido no inicio da conversa (19/10) ──────────────────────────
+# Para o cliente ja mandar o pedido certo e menos conversas irem para a equipe.
+# Sai logo depois da saudacao, que acontece uma vez por conversa: a marca de
+# "ja enviei" fica aqui, e nao na ficha, porque a ficha e regravada inteira
+# no fim do atendimento e apagaria a marca.
+_RX_SAUDACAO_DA_CONVERSA = _re_mod.compile(
+    r"\s*(?:Bom dia|Boa tarde|Boa noite)\b[^!\n]{0,40}!"
+    r"(?:[ \t]*(?:Eu\s+sou|Sou|Aqui\s+[ée])\s+a\s+Sandrinha\s+da\s+BALBS[ \t]*(?:💛)?[.!]?)?[ \t]*")
+_REGRAS_ENVIADAS: dict[str, float] = {}
+
+
+def texto_regras_do_pedido() -> str:
+    abre, int_ini, int_fim, fecha = horario._turno()
+
+    def _h(hm):
+        return f"{hm[0]:02d}h" if not hm[1] else horario._hm_txt(hm)
+    return (
+        "📋 *Como fazer seu pedido:*\n"
+        "• Salgados de festa: de 25 em 25 unidades por sabor (o cento sai em até 4 sabores)\n"
+        "• Diga os sabores e a quantidade de cada um\n"
+        "• Entrega ou retirada, com o dia e o horário\n"
+        "• Na entrega: rua, número e bairro (ou só o CEP e o número)\n"
+        "• Pagamento: Pix, cartão ou dinheiro\n"
+        f"⏰ Produção de segunda a sábado, das {_h(abre)} às {int_ini[0]:02d}h "
+        f"e das {int_fim[0] + 1:02d}h às {_h(fecha)}. "
+        "Até 5 centos fazemos no mesmo dia!"
+    )
+
+
+def _regras_ainda_nao_enviadas(user: str) -> bool:
+    agora = time.monotonic()
+    ultima = _REGRAS_ENVIADAS.get(user)
+    if ultima is not None and agora - ultima < conversation_memory.HORAS_ATE_NOVA_SESSAO * 3600:
+        return False
+    _REGRAS_ENVIADAS[user] = agora
+    return True
+
+
 def enviar_em_blocos(user: str, texto: str, chegada: float | None = None) -> None:
     """Envia a resposta ja dividida, com o ritmo de digitacao, e espelha no painel.
 
@@ -5300,6 +5377,13 @@ def enviar_em_blocos(user: str, texto: str, chegada: float | None = None) -> Non
     ele a primeira mensagem respeita o piso de RESPOSTA_MIN_SEG.
     """
     chunks = split_reply(texto) or ([texto] if texto else [])
+    # Regras do pedido logo depois da saudacao, uma vez por conversa (19/10).
+    _saud = _RX_SAUDACAO_DA_CONVERSA.match(texto or "")
+    if _saud and _regras_ainda_nao_enviadas(user):
+        _resto = texto[_saud.end():].strip()
+        chunks = ([_saud.group(0).strip(), texto_regras_do_pedido()]
+                  + (split_reply(_resto) or ([_resto] if _resto else [])))
+        print(f"[regras] user={user} regras do pedido enviadas apos a saudacao")
     for indice, chunk in enumerate(chunks):
         pausa = _pausa_digitacao(indice, chunk)
         if pausa > 0:
@@ -5497,6 +5581,21 @@ def _handle_flush(user: str, items: list[dict]) -> None:
         # item fora do cardapio fixo (equipe verifica a disponibilidade do
         # dia). Antes das palavras-chave: "cancelar" tem texto proprio agora.
         _memoria_balcao = conversation_memory.load(user)
+        # Resposta a "Quantas unidades de X voce quer?": o numero sozinho e o
+        # item X (19/10). Vale uma mensagem so; depois o produto sai de foco.
+        if _memoria_balcao.get("produto_em_foco"):
+            _foco_q = _memoria_balcao["produto_em_foco"]
+            _memoria_balcao["produto_em_foco"] = ""
+            conversation_memory.save(user, _memoria_balcao)
+            _q = _RX_SO_QUANTIDADE.fullmatch(facts.normalize(_texto_cliente or ""))
+            if (_q and len(items) == 1
+                    and not str(items[0].get("text", "")).startswith("[")):
+                _qtd_q = _q.group("qtd").strip()
+                items[0]["text"] = (f"{_qtd_q} {_foco_q}" if _qtd_q[0].isdigit()
+                                    and not _re_mod.search(r"cento|porc", _qtd_q)
+                                    else f"{_qtd_q} de {_foco_q}")
+                _texto_cliente = items[0]["text"]
+                print(f"[funil] user={user} quantidade do produto em foco -> {_texto_cliente!r}")
         # Resposta ao "PODE SIM QUAL SABOR VOCE QUER" do acrescimo: o que
         # acrescentar vai para a equipe, que confere se ainda da tempo.
         if _memoria_balcao.get("acrescimo_aberto"):
@@ -5561,6 +5660,25 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                                       facts.normalize(_ultima_dsst))):
                 print(f"[balcao] user={user} cliente desistiu do pedido")
                 _balcao = ("cancelamento", _TEXTO_CANCELAMENTO, True)
+        # "SIM" ao convite depois de falar de UM produto ("A porcao de Esfirra
+        # de Carne sai R$ 30,00. Qual o seu pedido?"): grava o produto e segue
+        # para a quantidade. Antes o "sim" recebia "Qual o seu pedido?" de novo
+        # (correcao estrutural do Balbino, 19/10).
+        if (not _balcao and not _memoria_balcao.get("items")
+                and not _memoria_balcao.get("volume_pendente")
+                and _e_concordancia_ou_quero(_texto_cliente)):
+            _ult_convite = next((m.get("parts", [{}])[0].get("text", "") or ""
+                                 for m in reversed(memory.get(user))
+                                 if m.get("role") == "assistant"), "")
+            _foco = (_produto_do_convite(_ult_convite)
+                     if _RX_CONVITE_AO_PEDIDO.search(facts.normalize(_ult_convite)) else "")
+            if _foco:
+                _memoria_balcao["produto_em_foco"] = _foco
+                conversation_memory.save(user, _memoria_balcao)
+                print(f"[funil] user={user} 'sim' ao convite: produto em foco = {_foco}")
+                _responder_direto(user, items, f"Quantas unidades de {_foco} você quer? "
+                                  "Fazemos de 25 em 25 por sabor! 😊", _chegada)
+                return
         _fora = ""
         if not _balcao:
             from agents.conversation import item_fora_do_cardapio, bolo_fora_do_cardapio
@@ -6090,8 +6208,14 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                     conversation_memory.save(user, _memoria)
                     print(f"[memoria] {user}: cliente aceitou o dia oferecido "
                           f"-> {_memoria['data_agendada']}")
-        # O horario oferecido pelo aviso do intervalo, aceito com um "sim".
+        # O horario oferecido (aviso do intervalo, abertura, antecedencia),
+        # aceito com um "sim" dado A oferta: o "sim" a outra pergunta nao
+        # agenda o horario sem o cliente saber.
+        _ultima_oferta_h = next((m.get("parts", [{}])[0].get("text", "") or ""
+                                 for m in reversed(memory.get(user))
+                                 if m.get("role") == "assistant"), "")
         if (_memoria.get("horario_proposto") and not _memoria.get("horario")
+                and _memoria["horario_proposto"] in _ultima_oferta_h
                 and _e_concordancia(text_only)):
             _memoria["horario"] = _memoria["horario_proposto"]
             print(f"[memoria] {user}: cliente aceitou o horario oferecido "
@@ -6423,10 +6547,12 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                 # 26/09 19h21).
                 if _campo_invalido == "horario":
                     _memoria["horario"] = ""
-                    # Sem horario proposto de proposito: depois de "A gente so
-                    # comeca as 08h00!", o "pode" do cliente e sobre o pedido,
-                    # nao necessariamente sobre as 08h00 - ela pergunta o
-                    # horario (decisao do usuario, 02/10).
+                    # O horario que a recusa ofereceu ("Pode ser a partir das
+                    # 16h?"), para o "sim" seguinte gravar e o funil seguir
+                    # (correcao estrutural do Balbino, 19/10). Valia a decisao
+                    # de 02/10 de nao guardar: o "sim" se perdia e ela
+                    # perguntava "Qual horario?" de novo.
+                    _memoria["horario_proposto"] = horario.horario_oferecido(_motivo)
                 else:
                     _memoria["data_iso"] = ""
                     _memoria["data_agendada"] = ""
