@@ -5347,12 +5347,12 @@ def texto_regras_do_pedido() -> str:
     """So o que leva a conversa para a equipe e o cliente consegue evitar
     (Eduardo, 19/10). Endereco, pagamento e horario ela mesma cobra."""
     return (
-        "📋 *Para o seu pedido sair rapidinho por aqui:*\n"
-        "• Os salgados de festa vão de 25 em 25 por sabor (25, 50, 75, 100...). "
-        "Ex.: 50 coxinhas e 25 bolinhas\n"
-        "• Pedidos de até 500 salgados eu fecho com você aqui mesmo\n"
-        "• Confira o resumo antes de confirmar: depois de confirmado, mudanças "
-        "passam pela nossa equipe"
+        "💡 *Algumas dicas para o seu pedido sair rapidinho:*\n"
+        "• Nossos salgados de festa são preparados de 25 em 25 por sabor "
+        "(25, 50, 75, 100...), por exemplo: 50 coxinhas e 25 bolinhas\n"
+        "• Pedidos de até 500 salgados podem ser finalizados aqui mesmo, comigo\n"
+        "• Vale conferir o resumo com calma antes de confirmar, porque depois "
+        "as alterações ficam com a nossa equipe 💛"
     )
 
 

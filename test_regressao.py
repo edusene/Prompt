@@ -3475,7 +3475,7 @@ app._REGRAS_ENVIADAS.pop("5519x", None)
 checa("regras: uma vez por conversa",
       app._regras_ainda_nao_enviadas("5519x") and not app._regras_ainda_nao_enviadas("5519x"))
 checa("regras: so o que leva para a equipe (25 em 25, ate 500, mudanca depois de confirmar)",
-      all(x in app.texto_regras_do_pedido() for x in ("25 em 25", "500 salgados", "Confira o resumo"))
+      all(x in app.texto_regras_do_pedido() for x in ("25 em 25", "500 salgados", "conferir o resumo"))
       and not any(x in app.texto_regras_do_pedido() for x in ("CEP", "Pagamento", "Produção")))
 checa("'amnha' e amanha", horario.resolver_data("amnha") == horario.agora().date()
       + __import__("datetime").timedelta(days=1))
