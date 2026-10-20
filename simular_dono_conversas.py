@@ -232,7 +232,7 @@ CONVERSAS = [
     ("abertura: 'a partir das 07h40?' SIM grava o horario", TARDE,
      ["QUERO 50 COXINHAS PARA AMANHA AS 7 HORAS RETIRADA", "PODE SIM", "NAO", "SIM"],
      {"espelho": [("Coxinha", 50)], "fecha": True, "equipe": False,
-      "contem": ["07h40", "para o seu pedido sair rapidinho"], "nao_contem": ["Qual horário"]}),
+      "contem": ["07h40", "Uma dica:* se o seu pedido for de salgadinhos de festa"], "nao_contem": ["Qual horário"]}),
     ("intervalo: 'pode ser as 14h?' SIM grava o horario", TARDE,
      ["QUERO 50 COXINHAS PARA AMANHA AS 13 HORAS RETIRADA", "SIM", "NAO", "SIM"],
      {"espelho": [("Coxinha", 50)], "fecha": True, "equipe": False, "nao_contem": ["Qual horário"]}),
@@ -288,6 +288,7 @@ def _rodar(msgs: list[str], quando: datetime) -> tuple[list[str], list[str]]:
             # ficha e o historico, que e o que ele faz com a conversa.
             t_ag._ficha.clear()
             memory._store.pop(t_ag.TELEFONE, None)
+            app._REGRAS_ENVIADAS.pop(t_ag.TELEFONE, None)
             r = "(reset)"
         else:
             with contextlib.redirect_stdout(io.StringIO()) as buf:

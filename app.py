@@ -2393,6 +2393,8 @@ def perform_reset(phone: str, origem: str = "cliente", avisar: bool = True) -> N
     # Um pedido reenviado depois do reset nao pode ser barrado como duplicata.
     for chave in [k for k in _orders_sent if k.startswith(f"{phone}:")]:
         _orders_sent.discard(chave)
+    # Conversa nova: a dica do inicio sai de novo.
+    _REGRAS_ENVIADAS.pop(phone, None)
 
     database.save_message(
         conversation_id=conv["id"],
@@ -2428,13 +2430,9 @@ def perform_reset(phone: str, origem: str = "cliente", avisar: bool = True) -> N
             msg_type="text",
         )
         database.update_conversation(conv["id"], last_message_at=database.agora_utc())
-        # A saudacao acabou de sair: a Sandrinha nao repete na proxima mensagem.
-        try:
-            ficha = conversation_memory.load(phone)
-            ficha["saudacao_feita"] = True
-            conversation_memory.save(phone, ficha)
-        except Exception as e:
-            print(f"[reset] WARN nao marcou saudacao de {phone}: {e}")
+        # A saudacao NAO e marcada como feita: depois do reset a conversa e de
+        # cliente novo - "Olá, bom dia" recebia so "Qual o seu pedido? 😊", sem
+        # cumprimento e sem a dica do inicio (teste de 20/10 8h46).
     else:
         print(f"[reset] WARN falha ao confirmar reset p/ {phone}: {res.get('error')}")
 
@@ -5347,18 +5345,15 @@ PERGUNTA_DO_PEDIDO_NAS_DICAS = "Qual vai ser o seu pedido? 😊"
 
 
 def texto_regras_do_pedido(com_pergunta: bool = False) -> str:
-    """So o que leva a conversa para a equipe e o cliente consegue evitar
-    (Eduardo, 19/10). Endereco, pagamento e horario ela mesma cobra.
+    """Uma dica so, a regra dos 25 por sabor (Eduardo, 20/10). Endereco,
+    pagamento e horario ela mesma cobra.
 
     `com_pergunta`: termina perguntando o pedido - so quando o resto da
     resposta nao traz pergunta nenhuma, para nao sair duas de uma vez.
     """
     texto = (
-        "💡 *Dicas para o seu pedido sair rapidinho:*\n"
-        "• Salgados de festa de 25 em 25 por sabor (ex.: 50 coxinhas e 25 bolinhas)\n"
-        "• Até 500 salgados, finalizo aqui mesmo com você\n"
-        "• Confira o resumo com calma: depois de confirmado, as alterações ficam "
-        "com a nossa equipe 💛"
+        "💡 *Uma dica:* se o seu pedido for de salgadinhos de festa, fazemos "
+        "de 25 em 25 por sabor (ex.: 50 coxinhas e 25 bolinhas)."
     )
     return f"{texto}\n\n{PERGUNTA_DO_PEDIDO_NAS_DICAS}" if com_pergunta else texto
 

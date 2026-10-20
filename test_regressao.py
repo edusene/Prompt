@@ -3474,9 +3474,9 @@ checa("regras: sem saudacao nao saem", not app._RX_SAUDACAO_DA_CONVERSA.match("Q
 app._REGRAS_ENVIADAS.pop("5519x", None)
 checa("regras: uma vez por conversa",
       app._regras_ainda_nao_enviadas("5519x") and not app._regras_ainda_nao_enviadas("5519x"))
-checa("regras: so o que leva para a equipe (25 em 25, ate 500, mudanca depois de confirmar)",
-      all(x in app.texto_regras_do_pedido() for x in ("25 em 25", "500 salgados", "Confira o resumo"))
-      and not any(x in app.texto_regras_do_pedido() for x in ("CEP", "Pagamento", "Produção")))
+checa("regras: uma dica so, a dos 25 em 25 nos salgadinhos de festa",
+      all(x in app.texto_regras_do_pedido() for x in ("Uma dica", "salgadinhos de festa", "25 em 25"))
+      and not any(x in app.texto_regras_do_pedido() for x in ("500 salgados", "Confira o resumo", "CEP")))
 checa("dicas: pergunta o pedido so quando o resto nao pergunta nada",
       app.texto_regras_do_pedido(com_pergunta=True).endswith(app.PERGUNTA_DO_PEDIDO_NAS_DICAS)
       and "?" not in app.texto_regras_do_pedido())
