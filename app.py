@@ -5343,17 +5343,24 @@ _RX_SAUDACAO_DA_CONVERSA = _re_mod.compile(
 _REGRAS_ENVIADAS: dict[str, float] = {}
 
 
-def texto_regras_do_pedido() -> str:
+PERGUNTA_DO_PEDIDO_NAS_DICAS = "Qual vai ser o seu pedido? 😊"
+
+
+def texto_regras_do_pedido(com_pergunta: bool = False) -> str:
     """So o que leva a conversa para a equipe e o cliente consegue evitar
-    (Eduardo, 19/10). Endereco, pagamento e horario ela mesma cobra."""
-    return (
-        "💡 *Algumas dicas para o seu pedido sair rapidinho:*\n"
-        "• Nossos salgados de festa são preparados de 25 em 25 por sabor "
-        "(25, 50, 75, 100...), por exemplo: 50 coxinhas e 25 bolinhas\n"
-        "• Pedidos de até 500 salgados podem ser finalizados aqui mesmo, comigo\n"
-        "• Vale conferir o resumo com calma antes de confirmar, porque depois "
-        "as alterações ficam com a nossa equipe 💛"
+    (Eduardo, 19/10). Endereco, pagamento e horario ela mesma cobra.
+
+    `com_pergunta`: termina perguntando o pedido - so quando o resto da
+    resposta nao traz pergunta nenhuma, para nao sair duas de uma vez.
+    """
+    texto = (
+        "💡 *Dicas para o seu pedido sair rapidinho:*\n"
+        "• Salgados de festa de 25 em 25 por sabor (ex.: 50 coxinhas e 25 bolinhas)\n"
+        "• Até 500 salgados, finalizo aqui mesmo com você\n"
+        "• Confira o resumo com calma: depois de confirmado, as alterações ficam "
+        "com a nossa equipe 💛"
     )
+    return f"{texto}\n\n{PERGUNTA_DO_PEDIDO_NAS_DICAS}" if com_pergunta else texto
 
 
 def _regras_ainda_nao_enviadas(user: str) -> bool:
@@ -5376,7 +5383,7 @@ def enviar_em_blocos(user: str, texto: str, chegada: float | None = None) -> Non
     _saud = _RX_SAUDACAO_DA_CONVERSA.match(texto or "")
     if _saud and _regras_ainda_nao_enviadas(user):
         _resto = texto[_saud.end():].strip()
-        chunks = ([_saud.group(0).strip(), texto_regras_do_pedido()]
+        chunks = ([_saud.group(0).strip(), texto_regras_do_pedido(com_pergunta="?" not in _resto)]
                   + (split_reply(_resto) or ([_resto] if _resto else [])))
         print(f"[regras] user={user} regras do pedido enviadas apos a saudacao")
     for indice, chunk in enumerate(chunks):
