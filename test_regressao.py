@@ -3474,8 +3474,9 @@ checa("regras: sem saudacao nao saem", not app._RX_SAUDACAO_DA_CONVERSA.match("Q
 app._REGRAS_ENVIADAS.pop("5519x", None)
 checa("regras: uma vez por conversa",
       app._regras_ainda_nao_enviadas("5519x") and not app._regras_ainda_nao_enviadas("5519x"))
-checa("regras: texto com 25 em 25, CEP e horario",
-      all(x in app.texto_regras_do_pedido() for x in ("25 em 25", "CEP", "segunda a sábado", "5 centos")))
+checa("regras: so o que leva para a equipe (25 em 25, ate 500, mudanca depois de confirmar)",
+      all(x in app.texto_regras_do_pedido() for x in ("25 em 25", "500 salgados", "Confira o resumo"))
+      and not any(x in app.texto_regras_do_pedido() for x in ("CEP", "Pagamento", "Produção")))
 checa("'amnha' e amanha", horario.resolver_data("amnha") == horario.agora().date()
       + __import__("datetime").timedelta(days=1))
 checa("repergunta mantem a resposta quando o cliente perguntou",

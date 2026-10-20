@@ -232,7 +232,7 @@ CONVERSAS = [
     ("abertura: 'a partir das 07h40?' SIM grava o horario", TARDE,
      ["QUERO 50 COXINHAS PARA AMANHA AS 7 HORAS RETIRADA", "PODE SIM", "NAO", "SIM"],
      {"espelho": [("Coxinha", 50)], "fecha": True, "equipe": False,
-      "contem": ["07h40", "Como fazer seu pedido"], "nao_contem": ["Qual horário"]}),
+      "contem": ["07h40", "Para o seu pedido sair rapidinho"], "nao_contem": ["Qual horário"]}),
     ("intervalo: 'pode ser as 14h?' SIM grava o horario", TARDE,
      ["QUERO 50 COXINHAS PARA AMANHA AS 13 HORAS RETIRADA", "SIM", "NAO", "SIM"],
      {"espelho": [("Coxinha", 50)], "fecha": True, "equipe": False, "nao_contem": ["Qual horário"]}),

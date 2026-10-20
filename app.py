@@ -5344,20 +5344,15 @@ _REGRAS_ENVIADAS: dict[str, float] = {}
 
 
 def texto_regras_do_pedido() -> str:
-    abre, int_ini, int_fim, fecha = horario._turno()
-
-    def _h(hm):
-        return f"{hm[0]:02d}h" if not hm[1] else horario._hm_txt(hm)
+    """So o que leva a conversa para a equipe e o cliente consegue evitar
+    (Eduardo, 19/10). Endereco, pagamento e horario ela mesma cobra."""
     return (
-        "📋 *Como fazer seu pedido:*\n"
-        "• Salgados de festa: de 25 em 25 unidades por sabor (o cento sai em até 4 sabores)\n"
-        "• Diga os sabores e a quantidade de cada um\n"
-        "• Entrega ou retirada, com o dia e o horário\n"
-        "• Na entrega: rua, número e bairro (ou só o CEP e o número)\n"
-        "• Pagamento: Pix, cartão ou dinheiro\n"
-        f"⏰ Produção de segunda a sábado, das {_h(abre)} às {int_ini[0]:02d}h "
-        f"e das {int_fim[0] + 1:02d}h às {_h(fecha)}. "
-        "Até 5 centos fazemos no mesmo dia!"
+        "📋 *Para o seu pedido sair rapidinho por aqui:*\n"
+        "• Os salgados de festa vão de 25 em 25 por sabor (25, 50, 75, 100...). "
+        "Ex.: 50 coxinhas e 25 bolinhas\n"
+        "• Pedidos de até 500 salgados eu fecho com você aqui mesmo\n"
+        "• Confira o resumo antes de confirmar: depois de confirmado, mudanças "
+        "passam pela nossa equipe"
     )
 
 
