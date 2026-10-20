@@ -1,9 +1,10 @@
 """
 config_dono.py — O que o dono ajusta pelo painel, por cima do padrao do codigo.
 
-Duas coisas moram aqui: as frases da oferta de acompanhamento (uma por faixa de
-horario) e os produtos que ele liga ao cardapio digital (produto novo ou item
-que estava bloqueado). As duas ficam na tabela `settings` como JSON.
+Tres coisas moram aqui: as frases da oferta de acompanhamento (uma por faixa de
+horario), o aviso do inicio da conversa e os produtos que ele liga ao cardapio
+digital (produto novo ou item que estava bloqueado). Todas ficam na tabela
+`settings` como JSON.
 
 A regra e uma so: o codigo continua sendo o PADRAO. Setting ausente, vazio ou
 com JSON quebrado devolve exatamente o que o codigo faria sem este modulo - a
@@ -96,6 +97,46 @@ def salvar_ofertas(frases: list) -> None:
     frases = [(f or "").strip() for f in (frases or [])][:FAIXAS_DE_OFERTA]
     frases += [""] * (FAIXAS_DE_OFERTA - len(frases))
     database.set_setting(CHAVE_OFERTAS, json.dumps(frases, ensure_ascii=False))
+    invalidar()
+
+
+# ── Aviso do inicio da conversa ─────────────────────────────────────────────
+# Sai logo depois da saudacao, uma vez por conversa. A pergunta do fim e um
+# campo separado porque so entra quando o resto da resposta nao pergunta nada.
+
+CHAVE_AVISO_INICIO = "aviso_inicio"
+MAX_CARACTERES_AVISO = 500
+MAX_CARACTERES_PERGUNTA_DO_AVISO = 120
+
+
+def aviso_inicio() -> dict:
+    """{"aviso", "pergunta"} do dono. '' onde vale o padrao."""
+    valor = _ler_json(CHAVE_AVISO_INICIO)
+    if not isinstance(valor, dict):
+        valor = {}
+    return {campo: str(valor.get(campo) or "").strip() if isinstance(valor.get(campo), str) else ""
+            for campo in ("aviso", "pergunta")}
+
+
+def validar_aviso_inicio(aviso: str, pergunta: str) -> str:
+    """Motivo da recusa, ou '' quando pode ser gravado. Vazio = padrao."""
+    aviso = (aviso or "").strip()
+    pergunta = (pergunta or "").strip()
+    if len(aviso) > MAX_CARACTERES_AVISO:
+        return f"o aviso passa de {MAX_CARACTERES_AVISO} caracteres"
+    if "?" in aviso:
+        return "o aviso não pode ter pergunta: ela vai no campo da pergunta do fim"
+    if len(pergunta) > MAX_CARACTERES_PERGUNTA_DO_AVISO:
+        return f"a pergunta passa de {MAX_CARACTERES_PERGUNTA_DO_AVISO} caracteres"
+    if pergunta and "?" not in pergunta:
+        return "a pergunta do fim precisa ter '?'"
+    return ""
+
+
+def salvar_aviso_inicio(aviso: str, pergunta: str) -> None:
+    database.set_setting(CHAVE_AVISO_INICIO, json.dumps(
+        {"aviso": (aviso or "").strip(), "pergunta": (pergunta or "").strip()},
+        ensure_ascii=False))
     invalidar()
 
 

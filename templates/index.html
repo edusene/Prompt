@@ -688,6 +688,35 @@
                     </div>
                 </div>
 
+                <div class="wa-card wa-config-card" style="margin-top:20px">
+                    <div class="wa-config-header" onclick="toggleDonoCard('aviso')" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center">
+                        <div>
+                            <h3 style="margin:0">Aviso do início da conversa</h3>
+                            <p class="muted" style="font-size:12px;margin:4px 0 0 0">Sai logo depois da saudação, uma vez por conversa. A pergunta do fim só entra quando a Sandrinha não estiver perguntando outra coisa. Deixe em branco para usar o texto padrão.</p>
+                        </div>
+                        <svg id="dono-aviso-arrow" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" style="transition:transform .2s;flex-shrink:0"><polyline points="6 9 12 15 18 9"/></svg>
+                    </div>
+                    <div id="dono-aviso-body" style="display:none;overflow:hidden">
+                        <div style="margin-top:12px">
+                            <div class="muted" style="font-size:12px;margin-bottom:4px">Aviso (use *texto* para negrito e Enter para quebrar a linha)</div>
+                            <div style="display:flex;gap:8px;align-items:flex-start">
+                                <textarea id="dono-aviso-texto" class="wa-config-input" rows="4" style="flex:1;resize:vertical"></textarea>
+                                <button type="button" class="btn-secondary btn-sm" onclick="document.getElementById('dono-aviso-texto').value=''">Usar padrão</button>
+                            </div>
+                        </div>
+                        <div style="margin-top:10px">
+                            <div class="muted" style="font-size:12px;margin-bottom:4px">Pergunta do fim</div>
+                            <div style="display:flex;gap:8px;align-items:flex-start">
+                                <input id="dono-aviso-pergunta" class="wa-config-input" style="flex:1">
+                                <button type="button" class="btn-secondary btn-sm" onclick="document.getElementById('dono-aviso-pergunta').value=''">Usar padrão</button>
+                            </div>
+                        </div>
+                        <div class="wa-config-actions" style="margin-top:8px">
+                            <button type="button" class="btn-primary" onclick="salvarAvisoInicio(event)">Salvar aviso</button>
+                        </div>
+                    </div>
+                </div>
+
             </div>
         </main>
     </div>

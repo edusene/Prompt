@@ -3475,11 +3475,33 @@ app._REGRAS_ENVIADAS.pop("5519x", None)
 checa("regras: uma vez por conversa",
       app._regras_ainda_nao_enviadas("5519x") and not app._regras_ainda_nao_enviadas("5519x"))
 checa("regras: uma dica so, a dos 25 em 25 nos salgadinhos de festa",
-      all(x in app.texto_regras_do_pedido() for x in ("Uma dica", "salgadinhos de festa", "25 em 25"))
+      all(x in app.texto_regras_do_pedido() for x in ("ATENÇÃO", "Salgados de festa", "25 em 25", "Não fracionamos"))
       and not any(x in app.texto_regras_do_pedido() for x in ("500 salgados", "Confira o resumo", "CEP")))
 checa("dicas: pergunta o pedido so quando o resto nao pergunta nada",
       app.texto_regras_do_pedido(com_pergunta=True).endswith(app.PERGUNTA_DO_PEDIDO_NAS_DICAS)
       and "?" not in app.texto_regras_do_pedido())
+import config_dono as _cd20
+checa("aviso do painel: validacao",
+      [_cd20.validar_aviso_inicio(a, p) == "" for a, p in (
+          ("", ""), ("🚨 *AVISO:*\nSo de 25 em 25!", "O que vai ser? 💛"),
+          ("Vai querer?", ""), ("Aviso", "sem interrogacao"), ("x" * 501, ""))]
+      == [True, True, False, False, False])
+_aviso_orig = _cd20.aviso_inicio
+_cd20.aviso_inicio = lambda: {"aviso": "", "pergunta": ""}
+checa("aviso do painel: em branco vale o padrao",
+      app.texto_regras_do_pedido(True)
+      == f"{app.AVISO_DO_INICIO_PADRAO} {app.PERGUNTA_DO_PEDIDO_NAS_DICAS}")
+_cd20.aviso_inicio = lambda: {"aviso": "AVISO DO DONO", "pergunta": "E ai? 💛"}
+checa("aviso do painel: o texto do dono substitui o padrao",
+      app.texto_regras_do_pedido(True) == "AVISO DO DONO E ai? 💛"
+      and app.texto_regras_do_pedido() == "AVISO DO DONO")
+_cd20.aviso_inicio = _aviso_orig
+checa("aviso: so a pergunta generica do pedido da lugar a do aviso",
+      [app._so_pergunta_generica_do_pedido(t) for t in (
+          "Quais delícias vamos pedir hoje?", "Qual o seu pedido? 😊",
+          "Pode ser a partir das 07h40?", "Qual horário você quer retirar?",
+          "Quais sabores você vai querer?", "A porção sai R$ 30,00. Qual o seu pedido?")]
+      == [True, True, False, False, False, False])
 checa("'amnha' e amanha", horario.resolver_data("amnha") == horario.agora().date()
       + __import__("datetime").timedelta(days=1))
 checa("repergunta mantem a resposta quando o cliente perguntou",

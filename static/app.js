@@ -3366,6 +3366,26 @@ async function loadDonoAjustes() {
                 </div>
             </div>`).join('');
     }
+    const aviso = await api('/api/settings/aviso-inicio');
+    const avisoTexto = document.getElementById('dono-aviso-texto');
+    const avisoPergunta = document.getElementById('dono-aviso-pergunta');
+    if (aviso && avisoTexto && avisoPergunta) {
+        avisoTexto.placeholder = aviso.aviso_padrao || '';
+        avisoTexto.value = aviso.aviso || '';
+        avisoPergunta.placeholder = aviso.pergunta_padrao || '';
+        avisoPergunta.value = aviso.pergunta || '';
+    }
+}
+
+async function salvarAvisoInicio(ev) {
+    const btn = ev && ev.currentTarget;
+    const aviso = (document.getElementById('dono-aviso-texto') || {}).value || '';
+    const pergunta = (document.getElementById('dono-aviso-pergunta') || {}).value || '';
+    setBtnLoading(btn, true, 'Salvando...');
+    const res = await api('/api/settings/aviso-inicio', { method: 'PUT', body: JSON.stringify({ aviso, pergunta }) });
+    setBtnLoading(btn, false);
+    if (res && res.ok) toast('Aviso salvo. Onde ficou em branco vale o texto padrão.', 'success');
+    else toast((res && res.error) || 'Erro ao salvar o aviso', 'error');
 }
 
 async function salvarOfertas(ev) {

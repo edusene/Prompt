@@ -5341,21 +5341,42 @@ _RX_SAUDACAO_DA_CONVERSA = _re_mod.compile(
 _REGRAS_ENVIADAS: dict[str, float] = {}
 
 
-PERGUNTA_DO_PEDIDO_NAS_DICAS = "Qual vai ser o seu pedido? 😊"
+PERGUNTA_DO_PEDIDO_NAS_DICAS = "Quais você vai querer hoje? 💛"
+_RX_PERGUNTA_GENERICA_DO_PEDIDO = _re_mod.compile(
+    r"(?:qual|quais|o que)(?: (?:a|as|o|os|e|sao|vai|ser|seria|vamos|voce|vc|gostaria|deseja|"
+    r"de|delicias|itens|salgados|seu|sua|hoje|entao|pedir|pedido|querer))*"
+    r" (?:pedir|pedido|querer)(?: (?:hoje|entao|para hoje))?")
+
+
+def _so_pergunta_generica_do_pedido(texto: str) -> bool:
+    """Uma frase so, a pergunta, e generica ("Quais delicias vamos pedir hoje?")."""
+    return bool(_re_mod.fullmatch(r"[^.!?\n]+\?[^\w]*", texto.strip())
+                and _RX_PERGUNTA_GENERICA_DO_PEDIDO.fullmatch(facts.normalize(texto)))
+
+
+AVISO_DO_INICIO_PADRAO = (
+    "🚨 *ATENÇÃO:*\n"
+    "Salgados de festa apenas de 25 em 25 por sabor (ex: 25, 50, 75)! "
+    "Não fracionamos os sabores."
+)
 
 
 def texto_regras_do_pedido(com_pergunta: bool = False) -> str:
     """Uma dica so, a regra dos 25 por sabor (Eduardo, 20/10). Endereco,
-    pagamento e horario ela mesma cobra.
+    pagamento e horario ela mesma cobra. O dono troca o aviso e a pergunta
+    pelo painel; em branco vale o padrao daqui.
 
     `com_pergunta`: termina perguntando o pedido - so quando o resto da
     resposta nao traz pergunta nenhuma, para nao sair duas de uma vez.
     """
-    texto = (
-        "💡 *Uma dica:* se o seu pedido for de salgadinhos de festa, fazemos "
-        "de 25 em 25 por sabor (ex.: 50 coxinhas e 25 bolinhas)."
-    )
-    return f"{texto}\n\n{PERGUNTA_DO_PEDIDO_NAS_DICAS}" if com_pergunta else texto
+    try:
+        do_dono = config_dono.aviso_inicio()
+    except Exception as e:
+        print(f"[config] aviso do inicio ilegivel, usando o padrao: {e}")
+        do_dono = {}
+    texto = do_dono.get("aviso") or AVISO_DO_INICIO_PADRAO
+    pergunta = do_dono.get("pergunta") or PERGUNTA_DO_PEDIDO_NAS_DICAS
+    return f"{texto} {pergunta}" if com_pergunta else texto
 
 
 def _regras_ainda_nao_enviadas(user: str) -> bool:
@@ -5378,7 +5399,11 @@ def enviar_em_blocos(user: str, texto: str, chegada: float | None = None) -> Non
     _saud = _RX_SAUDACAO_DA_CONVERSA.match(texto or "")
     if _saud and _regras_ainda_nao_enviadas(user):
         _resto = texto[_saud.end():].strip()
-        chunks = ([_saud.group(0).strip(), texto_regras_do_pedido(com_pergunta="?" not in _resto)]
+        # So a pergunta generica do pedido ("Quais delicias vamos pedir
+        # hoje?"): fica a do aviso, que termina com ela (Eduardo, 20/10).
+        if _so_pergunta_generica_do_pedido(_resto):
+            _resto = ""
+        chunks =([_saud.group(0).strip(), texto_regras_do_pedido(com_pergunta="?" not in _resto)]
                   + (split_reply(_resto) or ([_resto] if _resto else [])))
         print(f"[regras] user={user} regras do pedido enviadas apos a saudacao")
     for indice, chunk in enumerate(chunks):
@@ -8783,6 +8808,32 @@ def api_set_ofertas():
             return jsonify({"error": f"Faixa {i + 1}: {motivo}"}), 400
     config_dono.salvar_ofertas([f if isinstance(f, str) else "" for f in frases])
     print(f"[config] frases da oferta atualizadas pelo painel")
+    return jsonify({"ok": True})
+
+
+@app.get("/api/settings/aviso-inicio")
+@login_required
+def api_get_aviso_inicio():
+    do_dono = config_dono.aviso_inicio()
+    return jsonify({
+        "aviso": do_dono["aviso"],
+        "pergunta": do_dono["pergunta"],
+        "aviso_padrao": AVISO_DO_INICIO_PADRAO,
+        "pergunta_padrao": PERGUNTA_DO_PEDIDO_NAS_DICAS,
+    })
+
+
+@app.put("/api/settings/aviso-inicio")
+@login_required
+def api_set_aviso_inicio():
+    data = request.get_json(silent=True) or {}
+    aviso = data.get("aviso") if isinstance(data.get("aviso"), str) else ""
+    pergunta = data.get("pergunta") if isinstance(data.get("pergunta"), str) else ""
+    motivo = config_dono.validar_aviso_inicio(aviso, pergunta)
+    if motivo:
+        return jsonify({"error": motivo[0].upper() + motivo[1:]}), 400
+    config_dono.salvar_aviso_inicio(aviso, pergunta)
+    print(f"[config] aviso do inicio atualizado pelo painel")
     return jsonify({"ok": True})
 
 
