@@ -1030,6 +1030,11 @@ def _produto_conhecido(bruto: str) -> str | None:
     alvo = _forma_de_busca(bruto)
     if len(alvo) < 3:
         return None
+    # Preparo sozinho nao e produto: "3 centos assados" achava "assado" dentro
+    # da chave "enroladinho assado" e o pedido saia com 300 Enroladinhos de
+    # salsicha com Catupiry, sabor que a cliente nunca disse (teste de 22/10).
+    if alvo in ("assado", "assada", "frito", "frita", "salgado", "salgadinho"):
+        return None
 
     indice = _indice_de_produtos()
     if alvo in indice:
@@ -1912,6 +1917,12 @@ def doces_citados(msg_lower: str) -> tuple[list[dict], list[dict]]:
     # coxinha e brigadeiro" o "meio" e da coxinha.
     trecho = next((s for s in re.split(r",|;|\s+e\s+", t) if _RX_DOCE.search(s)), t)
     formato, qtd = formato_do_doce(trecho)
+    # "meio cento de brigadeiro e meio cento de beijinho" sao 100 docinhos: o
+    # cento misto (beijinho puro so na bandeja). Virava UM meio cento (teste de
+    # 22/10).
+    if (re.search(r"\bmeio\s+cento\s+(?:de\s+|do\s+)?brigad", t)
+            and re.search(r"\bmeio\s+cento\s+(?:de\s+|do\s+)?beijinh", t)):
+        formato, qtd = DOCE_CENTO, 1
     if formato and not fora:
         try:
             import facts

@@ -3657,6 +3657,45 @@ _va.horas, _va.ultima_mensagem_ao_cliente = _va_horas, _va_ultima
 checa("volta: a ficha guarda o contexto da retomada",
       "contexto_retomada" in memoria_mod._empty())
 
+# ── Teste da Thayline (22/10): os 5 graves ──
+_ult_beij = ("Temos sim! 😊 A Bandeja com 16 un (R$ 20,80) sai de beijinho, brigadeiro ou mista. "
+             "No meio cento e no cento, dá para pedir mista (brigadeiro e beijinho). Qual você prefere?")
+checa("22/10 doce: 'cento misto' depois do beijinho e o doce misto",
+      app._doce_misto_do_contexto("pode ser o cento misto", _ult_beij) == "pode ser o cento de brigadeiro misto"
+      and app._doce_misto_do_contexto("pode ser o cento misto", "Qual sabor de pastel?") == ""
+      and app._doce_misto_do_contexto("pode ser o cento misto", "Dinheiro para quanto?", True)
+      == "pode ser o cento de brigadeiro misto"
+      and app._doce_misto_do_contexto("25 misto 25 croquete", _ult_beij) == "")
+_d22 = _extract_data_from_message("teria como adcionar meio cento de brigadeiro e meio cento de beijinho",
+                                  ConversationState(phone="t")).get("doces") or []
+checa("22/10 doce: meio cento de brigadeiro + meio cento de beijinho = cento misto",
+      [(d["name"], d.get("sabor")) for d in _d22]
+      == [("Cento de Brigadeiros (100 un)", "Mista (brigadeiro e beijinho)")], str(_d22))
+checa("22/10 doce: docinho com beijinho fica na resposta fixa (o modelo chamava a equipe)",
+      (app._resposta_de_faq("teria como adcionar meio cento de brigadeiro e meio cento de beijinho", {})
+       or ("",))[0] == "beijinho"
+      and app._resposta_de_faq("beijinho tem?", {})[0] == "beijinho")
+_m22 = memoria_mod._empty(); _m22["payment_method"] = "dinheiro"
+checa("22/10 troco: 'cento misto' nao e troco de R$ 100",
+      memoria_mod.capturar_troco(_m22, "Precisa de troco para quanto?", "pode ser o cento misto") == ""
+      and memoria_mod.capturar_troco(_m22, "Precisa de troco para quanto?", "190,00") == "190.00")
+checa("22/10 sabor: 'assados' sozinho nao e Enroladinho de salsicha com Catupiry",
+      (_extract_data_from_message("teria como fazer pra agora 3 centos assados",
+                                  ConversationState(phone="t")).get("items") or []) == []
+      and _extract_data_from_message("teria como fazer pra agora 3 centos assados",
+                                     ConversationState(phone="t")).get("volume_pendente") == 300
+      and _itens("25 enroladinho assado") == [(25, "Enroladinho de salsicha com Catupiry")])
+_esp22 = ("Cliente: Thayline\n📅 Data: 23/10/2026\nItens:\n• 3 un - Refrigerante 2 Litros (Coca cola) — R$ 45,00\n"
+          "• 1 un - Cento de Brigadeiros (100 un) — R$ 140,00\n💰 Total: R$ 685,00\n💳 Pgt: Balcão\n"
+          "Posso confirmar pra amanhã (sex, 23/10) às 18h30? 💛")
+checa("22/10 confirmacao: o resumo nao e oferta de acompanhamento",
+      not app._ofereceu_acompanhamento(_esp22) and app._confirmou_o_resumo(_esp22, "isso pode sim")
+      and app._ofereceu_acompanhamento("Pra acompanhar, vai um Refrigerante 2L ou docinhos (Brigadeiro/Beijinho)? 🥤🍬"))
+checa("22/10 'disponiveis'/'orcamentos' nao sao produto",
+      app._resposta_de_faq("quais sabores vc tem disponiveis?", {}) is None
+      and app._resposta_de_faq("vcs fazem orçamentos?", {}) is None
+      and app._resposta_de_faq("vcs tem mini hamburgues", {})[0] == "produto inexistente")
+
 print()
 print("=" * 78)
 print("FALHAS:", _falhas or "nenhuma")

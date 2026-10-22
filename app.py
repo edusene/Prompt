@@ -958,10 +958,16 @@ _NAO_E_PRODUTO_PERGUNTADO = _re_mod.compile(
     r"|refri|bebida|opc|sabor|congel|pedido|horario|vaga|desconto|troco|pix|cartao|dinheiro|nota"
     r"|como|quanto|qual|quais|algum|alguma|outro|outra|mais|lugar|taxa|frete|minimo|porcao|cento"
     r"|brigad|bolo|churro|coxinh|pastel|past|rissol|quib|kib|esfirr|empad|canud|calzon|enrolad"
-    r"|croquet|misto|bolinh|pao\s+pizza|tuchaua|coca|fanta|pepsi|guarana|suco)")
+    r"|croquet|misto|bolinh|pao\s+pizza|tuchaua|coca|fanta|pepsi|guarana|suco"
+    # "quais sabores vc tem disponiveis?" virou "Nao temos disponiveis no
+    # momento", e "vcs fazem orcamentos?", "Nao temos orcamentos" (22/10).
+    r"|disponiv|orcament|encomend|servic|festa|evento|kit)")
 
 
 def _faq_produto_inexistente(t: str) -> str:
+    # "Quais/qual/o que voces tem?" pede a lista, nao um produto.
+    if _re_mod.match(r"\W*(?:e\s+)?(?:quais|qual|que|o\s+que)\b", t):
+        return ""
     m = None
     for m in _RX_PERGUNTA_DE_PRODUTO.finditer(t):
         pass
@@ -1114,6 +1120,26 @@ _FAQ_DO_DONO = (
 )
 
 
+def _doce_misto_do_contexto(texto: str, ultima_do_agente: str, tem_doce: bool = False) -> str:
+    """"pode ser o cento misto" vira "pode ser o cento de brigadeiro misto"
+    quando a mensagem anterior falou de docinho. '' = nao mexe.
+
+    So com o formato dito (bandeja, meio cento, cento): sem ele nao ha como
+    saber qual doce, e o fluxo pergunta.
+    """
+    t = facts.normalize(texto or "")
+    ult = facts.normalize(ultima_do_agente or "")
+    if not _re_mod.search(r"\bmist[oa]s?\b", t):
+        return ""
+    if _re_mod.search(r"brigad|beijinh|docinh|\bdoces?\b|queijo|presunto|salgad", t):
+        return ""
+    if not (tem_doce or _re_mod.search(r"brigadeiro e beijinho|beijinho|docinho|brigadeiros", ult)):
+        return ""
+    if not _re_mod.search(r"\b(?:bandejas?|meio\s+cento|centos?)\b", t):
+        return ""
+    return _re_mod.sub(r"\bmist[oa]s?\b", "de brigadeiro misto", t, count=1)
+
+
 # "mas quantos minutos?", "e quanto tempo?": so vale logo depois da resposta da
 # antecedencia (o fluxo confere a mensagem anterior).
 _RX_QUANTO_TEMPO_SOLTO = _re_mod.compile(
@@ -1132,6 +1158,9 @@ def _resposta_de_faq(texto: str, memoria: dict | None = None) -> tuple[str, str,
         return None
     sem_exemplo = _re_mod.sub(r"\(\s*(?:ex|exemplo)\b[^)]*\)?", " ", (texto or "").lower())
     try:
+        # Docinho com beijinho continua na resposta do beijinho (fixa): solto
+        # para o modelo, ele chamava a equipe "para verificar o beijinho" (22/10).
+        # O "cento misto" da resposta seguinte e lido por _doce_misto_do_contexto.
         if _extract_data_from_message(sem_exemplo, ConversationState(phone="")).get("items"):
             return None
     except Exception:
@@ -4070,6 +4099,12 @@ def _ofereceu_acompanhamento(reply: str) -> bool:
     """
     if not reply:
         return False
+    # O resumo do pedido lista "Refrigerante 2 Litros" e "Cento de Brigadeiros"
+    # e passava por oferta: o "isso pode sim" ao resumo virava "Qual você
+    # prefere: Refrigerante 2 Litros ou docinhos?", tres vezes, e o pedido de
+    # R$ 685 nunca fechou (teste de 22/10).
+    if _RX_LINHA_DE_RESUMO.search(reply):
+        return False
     return (bool(_RX_OFERECEU_ACOMPANHAMENTO.search(reply))
             or conversation_memory.e_a_oferta_configurada(reply))
 
@@ -5727,6 +5762,21 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                                     else f"{_qtd_q} de {_foco_q}")
                 _texto_cliente = items[0]["text"]
                 print(f"[funil] user={user} quantidade do produto em foco -> {_texto_cliente!r}")
+        # "pode ser o cento misto" logo depois de falar de brigadeiro/beijinho
+        # e o DOCE misto: virava 100 Misto de Queijo e Presunto e o total do
+        # troco saia R$ 185, R$ 325, R$ 7.185 (teste de 22/10).
+        if len(items) == 1 and not str(items[0].get("text", "")).startswith("["):
+            _ult_doce = next((m.get("parts", [{}])[0].get("text", "") or ""
+                              for m in reversed(memory.get(user))
+                              if m.get("role") == "assistant"), "")
+            _doce_ctx = _doce_misto_do_contexto(
+                _texto_cliente, _ult_doce,
+                any(_re_mod.search(r"brigad", facts.normalize(str(i.get("name", ""))))
+                    for i in _memoria_balcao.get("items") or [] if isinstance(i, dict)))
+            if _doce_ctx:
+                items[0]["text"] = _doce_ctx
+                _texto_cliente = _doce_ctx
+                print(f"[doce] user={user} 'misto' depois de falar de docinho -> {_doce_ctx!r}")
         # Resposta ao "PODE SIM QUAL SABOR VOCE QUER" do acrescimo: o que
         # acrescentar vai para a equipe, que confere se ainda da tempo.
         if _memoria_balcao.get("acrescimo_aberto"):
@@ -8004,6 +8054,26 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             _memoria["upsell_feito"] = True
             conversation_memory.save(user, _memoria)
             print(f"[upsell] user={user} oferta adicional feita")
+
+        # Depois da chave Pix o modelo respondeu "ok" com "Silencio para
+        # conferência da equipe." (a instrucao do prompt, escrita para o
+        # cliente) e "ja mando o comprovante" com "Comprovante recebido!" sem
+        # arquivo nenhum (teste de 22/10). Comprovante de verdade (imagem/PDF)
+        # e tratado antes, em codigo, com o silencio da regra do dono.
+        if reply and not _RX_LINHA_DE_RESUMO.search(reply):
+            _rn = facts.normalize(reply)
+            _vazou_instrucao = bool(_re_mod.search(
+                r"\bsilencio\b|\bsilencie\b|conferencia (?:da equipe|humana)", _rn))
+            _comprovante_sem_arquivo = ("comprovante recebido" in _rn
+                                        and not any(str(it.get("text", "")).startswith(("[Imagem", "[Documento"))
+                                                    for it in items))
+            if _vazou_instrucao or _comprovante_sem_arquivo:
+                _fala_do_comprovante = _re_mod.search(r"comprovante|pix|pag", facts.normalize(text_only))
+                reply = ("Combinado! 💛 Assim que você mandar o comprovante, a nossa equipe confere."
+                         if _fala_do_comprovante
+                         else "Combinado! 💛 Qualquer coisa, estamos por aqui.")
+                print(f"[pos-pedido] user={user} resposta do modelo sobre conferencia/comprovante "
+                      f"trocada (vazou instrucao={_vazou_instrucao})")
 
         # "Prazer, Balbino!" no meio da conversa (15/10) e o modelo prometendo
         # horario ("Sim, consigo entregar as 12h" no intervalo, 15/10 12h01):

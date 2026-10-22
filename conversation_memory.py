@@ -779,6 +779,12 @@ _EXTENSO_DE_TROCO = {
     "mil": 1000,
 }
 
+# Resposta que e pedido, e nao dinheiro (sobre o texto sem acento): "cento"
+# seguido de produto/sabor, ou produto citado. "cento e cinquenta" passa.
+_RX_CARA_DE_PEDIDO = _re.compile(
+    r"\b(?:meio\s+)?centos?\s+(?:de|do|da|mist[oa]s?|frit\w*|assad\w*|[a-z]{4,})\b"
+    r"|\b(?:brigad|beijinh|docinh|salgad|coxinh|bolinh|refri|coca|guarana|esfirr|pastel|pasteis)\w*")
+
 # Resposta que e endereco, e nao dinheiro (sobre o texto sem acento).
 _RX_CARA_DE_ENDERECO = _re.compile(
     r"\b(rua|av|avenida|travessa|tv|alameda|estrada|rodovia|bairro|quadra"
@@ -927,6 +933,10 @@ def capturar_troco(memoria: dict, pergunta_anterior: str, texto: str) -> str:
     # cima disto.
     if not cliente_falou_troco and (_RX_CARA_DE_ENDERECO.search(limpo)
                                     or _RX_NUMERO_DE_CASA.search(texto)):
+        return ""
+    # Pedido nao e troco: "pode ser o cento misto" virou troco de R$ 100
+    # ("cento" por extenso) e o pedido saiu com outro total (teste de 22/10).
+    if not cliente_falou_troco and _RX_CARA_DE_PEDIDO.search(limpo):
         return ""
 
     # "tenho troco" / "vou precisar de troco" nao sao negativa; "nao preciso de
