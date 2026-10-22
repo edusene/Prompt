@@ -130,6 +130,10 @@ def _empty() -> dict:
         # "coxinha, pastel e churros"): {"volume": 100, "sabores": [...]}.
         # Enquanto existir, a pergunta e "a porcao a mais fica com qual sabor?".
         "divisao_pendente": {},
+        # A conversa acabou de voltar da fila humana (volta_automatica): a
+        # instrucao com o que a equipe tratou, para a PRIMEIRA resposta do
+        # modelo. Usada uma vez e apagada.
+        "contexto_retomada": "",
         "updated_at": "",
     }
 

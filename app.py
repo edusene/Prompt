@@ -39,6 +39,7 @@ import meta
 import cardapio
 import config_dono
 import horario
+import volta_automatica
 import parse_knowledge
 import scheduler as crm_scheduler
 from agents.conversation import _extract_data_from_message, ConversationState
@@ -2320,6 +2321,7 @@ def perform_transfer(phone: str, reason: str = "", send_message: bool = True) ->
     # Busca ou cria conversa
     conv = database.get_or_create_conversation(phone)
     database.update_conversation(conv["id"], transferred_at=now)
+    volta_automatica.esquecer_avaliacao(phone)   # transferencia nova, prazo novo
 
     reason_log = f" Motivo: {reason}" if reason else ""
     print(f"[transfer] user={phone} transferido para humano.{reason_log}")
@@ -2368,6 +2370,80 @@ def perform_transfer(phone: str, reason: str = "", send_message: bool = True) ->
         "transferred_at": now,
     })
 
+    return True
+
+
+# ── Volta automatica da fila humana ───────────────────────────────────────────
+
+def _tentar_volta_automatica(user: str, items: list[dict], contact: dict,
+                             chegada: float | None = None) -> bool:
+    """A conversa em modo humano volta para a Sandrinha? True = segue o fluxo.
+
+    Regras em volta_automatica.py. Aqui so o efeito: devolver a conversa (com a
+    ficha limpa e o contexto do que a equipe tratou), avisar que a equipe vai
+    continuar, ou deixar quieta.
+    """
+    try:
+        conv = database.get_or_create_conversation(user)
+        if not volta_automatica.prazo_vencido(user, conv):
+            print(f"[flush] user={user} modo=humano, ignorando agente")
+            return False
+        texto = " ".join((it.get("text") or "").strip() for it in items).strip()
+        leitura = volta_automatica.classificar(
+            volta_automatica.conversa_para_ler(user, conv["transferred_at"]), texto)
+    except Exception as e:
+        print(f"[volta] user={user} ERRO ao avaliar a volta: {e}")
+        return False
+    if not leitura:
+        volta_automatica.marcar_avaliada(user)
+        return False
+    acao = volta_automatica.decidir(leitura)
+    horas_txt = f"{volta_automatica.horas():g}h"
+    print(f"[volta] user={user} {acao}: {leitura}")
+
+    def _nota(corpo: str) -> None:
+        database.save_message(conversation_id=conv["id"], phone=user, direction="internal",
+                              body=corpo, sender="system", msg_type="system")
+
+    if acao == "fica":
+        volta_automatica.marcar_avaliada(user)
+        _nota(f"Cliente escreveu depois de {horas_txt} sem resposta da equipe — "
+              f"{leitura['assunto']} pendente, continua com a equipe. {leitura['resumo']}")
+        return False
+    if acao == "avisa":
+        volta_automatica.marcar_avaliada(user)
+        _nota(f"Cliente voltou ao assunto depois de {horas_txt} sem resposta da equipe "
+              f"— avisado que a equipe continua. {leitura['resumo']}")
+        _responder_direto(user, items, volta_automatica.TEXTO_EQUIPE_VAI_CONTINUAR, chegada)
+        return False
+
+    # Volta: modo do bot, ficha so com os dados do cliente, historico relido do
+    # banco (as mensagens que a equipe mandou pelo painel nao estao na memoria
+    # do processo) e o contexto para a primeira resposta.
+    volta_automatica.esquecer_avaliacao(user)
+    database.update_contact(contact["id"], auto_mode=1)
+    database.update_conversation(conv["id"], transferred_at=None)
+    contact["auto_mode"] = 1
+    _nota(f"Agente reativado automaticamente após {horas_txt} sem resposta da equipe — "
+          f"assunto: {leitura['assunto']}, {leitura['situacao']}. {leitura['resumo']}")
+    ficha = conversation_memory._so_dados_do_cliente(conversation_memory.load(user))
+    ficha["saudacao_feita"] = True
+    ficha["contexto_retomada"] = volta_automatica.diretiva_da_retomada(leitura)
+    conversation_memory.save(user, ficha)
+    with memory._lock:
+        memory._store.pop(user, None)
+    events.emit("conversation_updated", {"conversation_id": conv["id"], "auto_mode": 1,
+                                         "transferred": False})
+    # So agradeceu ou cumprimentou: resposta de codigo, sem o modelo reler o
+    # que a equipe fechou e anunciar o fechamento de novo.
+    _cumprimento = volta_automatica.resposta_ao_cumprimento(
+        leitura, " ".join((it.get("text") or "") for it in items), horario.saudacao(horario.agora()))
+    if _cumprimento:
+        ficha["contexto_retomada"] = ""
+        conversation_memory.save(user, ficha)
+        print(f"[volta] user={user} cliente so cumprimentou; resposta de codigo")
+        _responder_direto(user, items, _cumprimento, chegada)
+        return False
     return True
 
 
@@ -2427,6 +2503,7 @@ def perform_reset(phone: str, origem: str = "cliente", avisar: bool = True) -> N
         _orders_sent.discard(chave)
     # Conversa nova: a dica do inicio sai de novo.
     _REGRAS_ENVIADAS.pop(phone, None)
+    volta_automatica.esquecer_avaliacao(phone)
 
     database.save_message(
         conversation_id=conv["id"],
@@ -5561,8 +5638,8 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             return
 
         contact = database.get_contact(user)
-        if contact and not contact["auto_mode"]:
-            print(f"[flush] user={user} modo=humano, ignorando agente")
+        if (contact and not contact["auto_mode"]
+                and not _tentar_volta_automatica(user, items, contact, _chegada)):
             return
         if not contact:
             print(f"[flush] user={user} sem contato no banco (auto_mode=1 por padrao)")
@@ -7083,6 +7160,13 @@ def _handle_flush(user: str, items: list[dict]) -> None:
 
         # Depois da ficha de proposito: e a ultima linha que o modelo le.
         dynamic_prompt += _diretiva_saudacao
+        # Primeira resposta depois da volta da fila humana: o que a equipe
+        # tratou. Uma vez so.
+        if _memoria.get("contexto_retomada"):
+            dynamic_prompt += _memoria["contexto_retomada"]
+            _memoria["contexto_retomada"] = ""
+            conversation_memory.save(user, _memoria)
+            print(f"[volta] user={user} contexto da equipe no prompt")
 
         # Cliente aceitou o espelho: a unica acao valida agora e fechar. Sem
         # isto o modelo chamava calculate_order de novo e reapresentava o MESMO
@@ -8829,6 +8913,25 @@ def api_set_transfer_message():
         return jsonify({"error": "transfer_message não pode ser vazio"}), 400
     database.set_setting("transfer_message", msg)
     return jsonify({"ok": True, "transfer_message": msg})
+
+
+@app.get("/api/settings/volta-automatica")
+@login_required
+def api_get_volta_automatica():
+    return jsonify({"horas": volta_automatica.horas(), "padrao": volta_automatica.HORAS_PADRAO})
+
+
+@app.put("/api/settings/volta-automatica")
+@login_required
+def api_set_volta_automatica():
+    data = request.get_json(silent=True) or {}
+    motivo = volta_automatica.validar_horas(data.get("horas"))
+    if motivo:
+        return jsonify({"error": motivo[0].upper() + motivo[1:]}), 400
+    horas = float(str(data["horas"]).strip().replace(",", "."))
+    database.set_setting(volta_automatica.CHAVE_HORAS, f"{horas:g}")
+    print(f"[config] volta automatica da fila humana: {horas:g}h")
+    return jsonify({"ok": True, "horas": horas})
 
 
 # ── O que o dono ajusta pelo painel (config_dono) ────────────────────────────

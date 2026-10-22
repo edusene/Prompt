@@ -433,6 +433,15 @@
                             <div class="wa-config-actions" style="margin-top:8px">
                                 <button type="button" class="btn-primary" onclick="saveTransferMessage()">Salvar Mensagem</button>
                             </div>
+                            <div style="margin-top:16px">
+                                <div style="font-weight:600;font-size:13px">Volta automática para a Sandrinha</div>
+                                <p class="muted" style="font-size:12px;margin:4px 0 8px 0">Horas sem nenhuma mensagem da equipe ao cliente até a conversa poder voltar para a Sandrinha. Ela só volta quando o cliente escrever de novo, depois de ler o que foi tratado: reclamação não resolvida continua com a equipe. Use 0 para desligar.</p>
+                                <div style="display:flex;gap:8px;align-items:center">
+                                    <input id="wa-volta-horas" type="number" min="0" max="72" step="0.5" class="wa-config-input" style="width:110px">
+                                    <span class="muted" style="font-size:12px">horas</span>
+                                    <button type="button" class="btn-primary" onclick="saveVoltaAutomatica(event)">Salvar tempo</button>
+                                </div>
+                            </div>
                         </div>
                     </div>
 

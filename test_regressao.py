@@ -3616,6 +3616,47 @@ checa("porcao de 25 assados no catalogo de hoje",
 _cf_fx.bruto = lambda forcar=False: _RETRATO_FX
 facts.invalidate()
 
+# ── Volta automatica da fila humana (22/10) ──
+import volta_automatica as _va
+from datetime import datetime as _dtva, timedelta as _tdva
+checa("volta: decisao pela leitura da conversa",
+      [_va.decidir({"assunto": a, "situacao": s, "mensagem_nova": n}) for a, s, n in (
+          ("reclamacao", "pendente", "assunto_novo"),
+          ("reclamacao", "resolvido", "continua_assunto"),
+          ("pedido", "pendente", "continua_assunto"),
+          ("pedido", "pendente", "assunto_novo"),
+          ("duvida", "resolvido", "cumprimento"))]
+      == ["fica", "volta", "avisa", "volta", "volta"])
+checa("volta: leitura ilegivel nao conta",
+      _va.normalizar({"assunto": "x", "situacao": "talvez", "mensagem_nova": "cumprimento"}) is None
+      and _va.normalizar({"assunto": "inventado", "situacao": "pendente",
+                          "mensagem_nova": "assunto_novo", "resumo": "a  b"})
+      == {"assunto": "outro", "situacao": "pendente", "mensagem_nova": "assunto_novo", "resumo": "a b"})
+checa("volta: horas do painel",
+      [_va.validar_horas(v) == "" for v in ("4", "0", "2,5", "-1", "100", "abc")]
+      == [True, True, True, False, False, False])
+_va_horas, _va_ultima = _va.horas, _va.ultima_mensagem_ao_cliente
+_va.horas = lambda: 4.0
+_va_agora = _dtva(2026, 10, 22, 20, 0)
+_va.ultima_mensagem_ao_cliente = lambda p, d: _va_agora - _tdva(hours=1)
+checa("volta: equipe respondeu ha 1h -> nao volta",
+      not _va.prazo_vencido("55va", {"transferred_at": "2026-10-22T10:00:00"}, _va_agora))
+_va.ultima_mensagem_ao_cliente = lambda p, d: _va_agora - _tdva(hours=5)
+checa("volta: 5h sem mensagem ao cliente -> pode voltar",
+      _va.prazo_vencido("55va", {"transferred_at": "2026-10-22T10:00:00"}, _va_agora))
+checa("volta: assumida pelo painel (sem transferred_at) nao volta",
+      not _va.prazo_vencido("55va", {"transferred_at": None}, _va_agora))
+_va.marcar_avaliada("55va")
+checa("volta: avaliada e mantida, so reavalia depois de outro prazo",
+      not _va.prazo_vencido("55va", {"transferred_at": "2026-10-22T10:00:00"}, _va_agora))
+_va.esquecer_avaliacao("55va")
+_va.horas = lambda: 0.0
+checa("volta: 0 horas desliga",
+      not _va.prazo_vencido("55va", {"transferred_at": "2026-10-22T10:00:00"}, _va_agora))
+_va.horas, _va.ultima_mensagem_ao_cliente = _va_horas, _va_ultima
+checa("volta: a ficha guarda o contexto da retomada",
+      "contexto_retomada" in memoria_mod._empty())
+
 print()
 print("=" * 78)
 print("FALHAS:", _falhas or "nenhuma")

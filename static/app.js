@@ -2346,6 +2346,19 @@ async function loadTransferMessage() {
     if (!data) return;
     const textarea = document.getElementById('wa-transfer-msg');
     if (textarea) textarea.value = data.transfer_message || '';
+    const volta = await api('/api/settings/volta-automatica');
+    const horas = document.getElementById('wa-volta-horas');
+    if (volta && horas) horas.value = volta.horas;
+}
+
+async function saveVoltaAutomatica(ev) {
+    const btn = ev && ev.currentTarget;
+    const horas = (document.getElementById('wa-volta-horas') || {}).value || '';
+    setBtnLoading(btn, true, 'Salvando...');
+    const res = await api('/api/settings/volta-automatica', { method: 'PUT', body: JSON.stringify({ horas }) });
+    setBtnLoading(btn, false);
+    if (res && res.ok) toast(res.horas ? `Volta automática depois de ${res.horas}h sem resposta da equipe` : 'Volta automática desligada', 'success');
+    else toast((res && res.error) || 'Erro ao salvar o tempo', 'error');
 }
 
 async function saveTransferMessage() {
