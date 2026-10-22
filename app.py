@@ -73,8 +73,17 @@ def _get_conversation_manager():
 # anterior e respondida nao se perdem: o buffer.py as enfileira por cliente.
 BUFFER_SECONDS = 0.0
 PORT = int(os.getenv("PORT", "5000"))
-SECRET_KEY = os.getenv("SECRET_KEY", "troque_esta_chave_secreta_aleatoria")
+# Repositorio publico (22/10): a chave de exemplo assinaria sessao de qualquer
+# um. Sem SECRET_KEY no ambiente, uma aleatoria - o login cai a cada reinicio,
+# mas ninguem forja sessao.
+SECRET_KEY = os.getenv("SECRET_KEY", "").strip()
+if not SECRET_KEY or SECRET_KEY == "troque_esta_chave_secreta_aleatoria":
+    import secrets as _secrets
+    SECRET_KEY = _secrets.token_hex(32)
+    print("[config] ATENCAO: SECRET_KEY ausente ou igual ao exemplo - usando uma aleatoria")
 DATAFY_WEBHOOK_SECRET = os.getenv("DATAFY_WEBHOOK_SECRET", "")
+if not DATAFY_WEBHOOK_SECRET:
+    print("[config] ATENCAO: DATAFY_WEBHOOK_SECRET ausente - o webhook aceita mensagem sem assinatura")
 
 _BASE_PROMPT = os.getenv(
     "SYSTEM_PROMPT",
@@ -8257,7 +8266,13 @@ def webhook():
     timestamp = request.headers.get("x-datafy-timestamp", "")
     raw_body = request.get_data(as_text=True)
 
-    if DATAFY_WEBHOOK_SECRET and signature and timestamp:
+    # Com o segredo configurado, mensagem sem assinatura e recusada: antes ela
+    # passava direto, e qualquer um podia fazer a Sandrinha responder (e mandar
+    # pedido ao cardapio) para qualquer numero (revisao de seguranca, 22/10).
+    if DATAFY_WEBHOOK_SECRET and not (signature and timestamp):
+        print("[webhook] Sem assinatura (Datafy) - recusado")
+        return "Forbidden", 401
+    if DATAFY_WEBHOOK_SECRET:
         expected = "sha256=" + hmac.new(
             DATAFY_WEBHOOK_SECRET.encode("utf-8"),
             f"{timestamp}.{raw_body}".encode("utf-8"),
