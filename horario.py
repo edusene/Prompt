@@ -331,7 +331,9 @@ _RX_ENDERECO_NA_FRASE = re.compile(
 # "13 hors", "13 hrs", "13 hr": digitado as pressas no celular (teste de
 # 01/10: "as 13 hors retirada" ficou sem horario e a Sandrinha perguntou a hora
 # que o cliente tinha acabado de dar). As formas longas vem antes do "h" solto.
-_RX_HORA = re.compile(r"(?<!\d)(\d{1,2})\s*(?:horas?|hors?|hrs?|h|:)\s*(\d{2})?\b")
+# "9 hras" e "9 hs" tambem (teste de 21/10: "amanha as 9 hras" ficou sem
+# horario): "h" e ate 4 letras de "horas" em qualquer ordem.
+_RX_HORA = re.compile(r"(?<!\d)(\d{1,2})\s*(?:h[oras]{0,4}|:)\s*(\d{2})?\b")
 
 # A virgula e como se escreve hora aqui ("19,50"), mas EXIGE os dois digitos de
 # minuto: sem isso "45, amanha as 16h" casava "45," como hora, 45 nao e hora

@@ -3480,6 +3480,16 @@ checa("regras: uma dica so, a dos 25 em 25 nos salgadinhos de festa",
 checa("dicas: pergunta o pedido so quando o resto nao pergunta nada",
       app.texto_regras_do_pedido(com_pergunta=True).endswith(app.PERGUNTA_DO_PEDIDO_NAS_DICAS)
       and "?" not in app.texto_regras_do_pedido())
+checa("'9 hras' e 9h (teste de 21/10)",
+      [horario.parse_horario(t) for t in ("amanha as 9 hras tem como", "9 hs", "13 hors", "9 horario")]
+      == [(9, 0), (9, 0), (13, 0), None])
+checa("antecedencia: tempo pela quantidade, sem pedir o dia de novo com pedido aberto",
+      app._faq_antecedencia("mas quantos minutos", {"items": [{"name": "Coxinha frango", "quantity": 500}]})
+      == "De 1 a 5 centos fazemos no mesmo dia! 😊 Para 500 salgadinhos, precisamos de 1 hora de antecedência.")
+checa("antecedencia: 'mas quantos minutos?' e pergunta solta de tempo",
+      [bool(app._RX_QUANTO_TEMPO_SOLTO.fullmatch(t)) for t in (
+          "mas quantos minutos", "e quanto tempo", "quanto tempo demora a entrega")]
+      == [True, True, False])
 import config_dono as _cd20
 checa("aviso do painel: validacao",
       [_cd20.validar_aviso_inicio(a, p) == "" for a, p in (

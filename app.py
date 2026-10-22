@@ -851,11 +851,26 @@ def _faq_beijinho(t: str) -> str:
             f"(brigadeiro e beijinho). Qual você prefere?")
 
 
-def _faq_antecedencia(t: str) -> str:
+def _faq_antecedencia(t: str, memoria: dict | None = None) -> str:
     """Antecedencia (Balbino, 17/10): de 1 a 5 centos sai no mesmo dia;
-    acima de 500 quem combina e a equipe (_resposta_de_faq transfere)."""
-    return ("De 1 a 5 centos fazemos no mesmo dia! 😊 Para entrega ou retirada? "
-            "Qual o dia e horário?")
+    acima de 500 quem combina e a equipe (_resposta_de_faq transfere).
+
+    Diz o tempo da tabela (horario.antecedencia_minutos) pela quantidade da
+    pergunta ou do pedido aberto - "mas quantos minutos?" ficava sem resposta
+    (teste de 21/10). Com pedido aberto a pergunta do fim e a do funil, que o
+    fluxo poe; sem pedido, a de sempre.
+    """
+    qtd = _qtd_na_pergunta(t) or _salgados_da_ficha(memoria or {})
+    if qtd:
+        prazo = (f"Para {qtd} salgadinhos, precisamos de "
+                 f"{horario.texto_da_antecedencia(horario.antecedencia_minutos(qtd))} de antecedência.")
+    else:
+        prazo = ("Precisamos de 40 minutos de antecedência para menos de 300 salgadinhos, "
+                 "e de 1 hora de 300 a 500.")
+    resposta = f"De 1 a 5 centos fazemos no mesmo dia! 😊 {prazo}"
+    if (memoria or {}).get("items"):
+        return resposta
+    return f"{resposta} Para entrega ou retirada? Qual o dia e horário?"
 
 
 def _qtd_na_pergunta(t: str) -> int:
@@ -1069,7 +1084,7 @@ _FAQ_DO_DONO = (
     # Antecedencia de qualquer quantidade: responde e segue o pedido (13/10).
     ("prazo confirmar", _re_mod.compile(r"\b(?:prazo|ate\s+que\s+(?:horas|dia))\b.{0,40}\b(?:confirmar|encomend\w*|pedir|pedido)\b"
                                         r"|\bantecedencia\b|\bquantos\s+dias\s+antes\b|\bcom\s+quanto\s+tempo\s+antes\b"),
-     lambda t: _faq_antecedencia(t), False),
+     _faq_antecedencia, False),
     ("chave pix antes", _re_mod.compile(r"\b(?:qual|me\s+passa|manda|envia)\b.{0,15}\bchave\b.{0,10}\bpix\b|\bchave\s+pix\b.{0,15}\?"),
      "Vou fechar o resumo do seu pedido primeiro para calcular certinho o valor e já te "
      "passo a chave Pix! Bora fechar os itens? 😊", False),
@@ -1087,6 +1102,13 @@ _FAQ_DO_DONO = (
     ("feriado", _re_mod.compile(r"\bferiado\b|\b(?:12|doze)\s+de\s+outubro\b"),
      "Vou chamar nossa equipe para verificar a escala dessa data para você! Um instante. 💛", True),
 )
+
+
+# "mas quantos minutos?", "e quanto tempo?": so vale logo depois da resposta da
+# antecedencia (o fluxo confere a mensagem anterior).
+_RX_QUANTO_TEMPO_SOLTO = _re_mod.compile(
+    r"(?:(?:mas|e|ta|tah|ok|certo|entendi)\s+)*(?:quant[oa]s?\s+(?:minutos|horas|tempo)"
+    r"|quanto\s+tempo|em\s+minutos)(?:\s+(?:entao|antes|exatamente|mais\s+ou\s+menos))*")
 
 
 def _resposta_de_faq(texto: str, memoria: dict | None = None) -> tuple[str, str, bool] | None:
@@ -1109,7 +1131,8 @@ def _resposta_de_faq(texto: str, memoria: dict | None = None) -> tuple[str, str,
             # Antecedencia de mais de 500 salgados: a equipe (17/10).
             if nome == "prazo confirmar" and _qtd_na_pergunta(t) > 500:
                 return "acima de 500", TEXTO_DESARME, True
-            texto_r = ((resposta(t, memoria) if resposta is _faq_sabor_de_refri else resposta(t))
+            texto_r = ((resposta(t, memoria) if resposta in (_faq_sabor_de_refri, _faq_antecedencia)
+                        else resposta(t))
                        if callable(resposta) else resposta)
             if texto_r:
                 return nome, texto_r, equipe
@@ -5084,7 +5107,7 @@ _CONCORDANCIAS = {
 # interessa e se o que sobra e um "sim".
 _SO_HORARIO = _re_mod.compile(
     r'\b(?:as|às|ás|para|pra|pro|ao|meio\s*dia|manha|manhã|tarde|noite'
-    r'|\d{1,2}(?::\d{2})?\s*(?:h|hs|hrs|horas?)?)\b',
+    r'|\d{1,2}(?::\d{2})?\s*(?:h[oras]{0,4})?)\b',
     _re_mod.IGNORECASE | _re_mod.UNICODE,
 )
 
@@ -5670,6 +5693,16 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             _responder_direto(user, items, _faq_refri_festa(_tn_refri, _pessoas), _chegada)
             return
         _balcao = _resposta_do_balcao(_texto_cliente, _memoria_balcao)
+        # "mas quantos minutos?" logo depois da resposta da antecedencia: a
+        # mesma pergunta, com a quantidade do pedido (teste de 21/10 - voltava
+        # o resumo inteiro sem responder).
+        if not _balcao and _RX_QUANTO_TEMPO_SOLTO.fullmatch(facts.normalize(_texto_cliente or "")):
+            _ultima_pz = next((m.get("parts", [{}])[0].get("text", "") or ""
+                               for m in reversed(memory.get(user))
+                               if m.get("role") == "assistant"), "")
+            if _re_mod.search(r"mesmo dia|antecedencia", facts.normalize(_ultima_pz)):
+                _balcao = ("prazo confirmar",
+                           _faq_antecedencia(facts.normalize(_texto_cliente), _memoria_balcao), False)
         # "SEGUNDA QUERO MAIS NAO": o cliente desistiu (teste do dono, 17/10 -
         # virou espelho para segunda e o pedido fechou). Depois da oferta de
         # acompanhamento ou do "mais alguma coisa", e so o "nao, obrigado".
@@ -5771,6 +5804,13 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                 if _ext_pz.get("volume_pendente"):
                     _memoria_balcao["volume_pendente"] = _ext_pz["volume_pendente"]
                     conversation_memory.save(user, _memoria_balcao)
+                # Pedido aberto: segue de onde parou. Com o resumo na tela, a
+                # pergunta do resumo - pedia "entrega ou retirada? Qual o dia e
+                # horario?" com tudo ja dito (teste de 21/10).
+                if _memoria_balcao.get("items") and not _memoria_balcao.get("pedido_enviado"):
+                    _seguinte_pz = (TEXTO_PEDE_CONFIRMACAO if _resumo_aberto
+                                    else _proxima_pergunta_do_funil(_memoria_balcao))
+                    _texto_b = f"{_texto_b}\n\n{_seguinte_pz}".strip()
             print(f"[balcao] user={user} resposta padrao do dono: {_nome_b}"
                   f"{' (' + _fora + ')' if _fora else ''}")
             _responder_direto(user, items, _texto_b, _chegada)

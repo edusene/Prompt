@@ -228,6 +228,13 @@ CONVERSAS = [
     ("'500 coxinhas e 500 salasichas': equipe", TARDE,
      ["500 COXINHAS E 500 SALASICHAS"],
      {"fecha": False, "equipe": True, "nao_contem": ["Não temos"]}),
+    # ── Teste de 21/10: "9 hras" e a antecedencia com o resumo na tela ──
+    ("'as 9 hras' grava; antecedencia volta a pergunta do resumo", datetime(2026, 10, 21, 21, 45),
+     ["quero 500 salgadinhos para amanha as 9 hras tem como", "Tudo de coxinha de frango",
+      "Não", "Retirada", "quanto tempo preciso pedir com antecedencia para pedir 500 salgadinhos?",
+      "mas quantos minutos?", "sim"],
+     {"espelho": [("Coxinha", 500)], "fecha": True, "equipe": False,
+      "contem": ["1 hora de antecedência"], "nao_contem": ["Qual horário", "Qual o dia e horário"]}),
     # ── Correcao estrutural (19/10): "sim" a oferta grava e segue ──
     ("abertura: 'a partir das 07h40?' SIM grava o horario", TARDE,
      ["QUERO 50 COXINHAS PARA AMANHA AS 7 HORAS RETIRADA", "PODE SIM", "NAO", "SIM"],

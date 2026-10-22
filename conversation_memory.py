@@ -637,7 +637,7 @@ _NUMERO_DE_OUTRA_COISA = _re.compile(
     r"\b(?:as|ate)\s+\d{1,2}\s+\d{2}\b"              # "as 14 00" (14:00 sem os dois pontos)
     r"|\d{1,2}\s*[:h]\s*\d{0,2}\b"                    # 16h, 16:30
     r"|\b(?:as|ate|apos|depois\s+das)\s+\d{1,2}\b"      # as 16
-    r"|\d{1,2}\s*(?:horas?|hrs?|hs)\b"                    # 16 horas
+    r"|\d{1,2}\s*h[oras]{0,4}\b"                         # 16 horas, 16 hras
     r"|\d{1,2}\s*/\s*\d{1,2}(?:\s*/\s*\d{2,4})?"   # 26/09/2026
     r"|\bdia\s+\d{1,2}\b"                                # dia 26
     r"|\d{1,2}\s+de\s+\w+"                              # 26 de setembro
