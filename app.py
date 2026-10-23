@@ -3417,6 +3417,35 @@ def _pede_bolo_sem_estoque(texto: str) -> bool:
         return False
 
 
+def _pergunta_da_quantidade(foco: str) -> str:
+    """"Quantas unidades de X?": o '25 em 25' so vale para salgado de festa (23/10)."""
+    try:
+        avulso = "(Unidade)" in ((facts.resolve_unit_price(foco, 1) or {}).get("base") or "")
+    except Exception:
+        avulso = False
+    return f"Quantas unidades de {foco} você quer? " + (
+        "😊" if avulso else "Fazemos de 25 em 25 por sabor! 😊")
+
+
+def _pergunta_de_disponibilidade(texto: str) -> bool:
+    """"Vcs tem bolo de milho?": o cliente perguntou se TEM, nao recusou oferta.
+
+    A resposta sobre o produto parecia oferta de acompanhamento e virava
+    "Tudo bem! Quer pedir outra coisa?" (Thayline, 23/10).
+    """
+    if "?" in (texto or ""):
+        return True
+    return bool(_re_mod.match(r"\s*(?:(?:voces|vcs|vc|voce)\s+)?(?:tem|tens|vende\w*|fazem|faz)\b",
+                              facts.normalize(texto or "")))
+
+
+def _referencia_lista_ausente(reply: str) -> bool:
+    """"Quer escolher algum desses?" sozinha: a cliente nao tem lista nenhuma (23/10)."""
+    return bool(_re_mod.fullmatch(
+        r"\W*(?:(?:quer|gostaria\s+de|deseja)\s+)?(?:escolher\s+)?(?:algum|alguma)\s+"
+        r"(?:desses|dessas|destes|destas)\W*", facts.normalize(reply or "")))
+
+
 def _pergunta_de_preco(texto: str) -> bool:
     """"Qual o valor do cento dos fritos?", "quanto sai meio cento?": pergunta,
     nao pedido - o volume dela nao entra na ficha (13/10)."""
@@ -5822,8 +5851,7 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                 _memoria_balcao["produto_em_foco"] = _foco
                 conversation_memory.save(user, _memoria_balcao)
                 print(f"[funil] user={user} 'sim' ao convite: produto em foco = {_foco}")
-                _responder_direto(user, items, f"Quantas unidades de {_foco} você quer? "
-                                  "Fazemos de 25 em 25 por sabor! 😊", _chegada)
+                _responder_direto(user, items, _pergunta_da_quantidade(_foco), _chegada)
                 return
         _fora = ""
         if not _balcao:
@@ -8101,9 +8129,13 @@ def _handle_flush(user: str, items: list[dict]) -> None:
         if (reply and not _memoria.get("items") and not _memoria.get("volume_pendente")
                 and not _memoria.get("sabores_pendentes") and not _memoria.get("combo_pendente")
                 and not conversation_memory.pergunta_bloqueante(_memoria)
+                and not _pergunta_de_disponibilidade(_texto_cliente)
                 and _ofereceu_acompanhamento(reply)):
             reply = "Tudo bem! 😊 Quer pedir outra coisa?"
             print(f"[upsell] user={user} oferta sem itens no pedido; trocada")
+        if reply and _referencia_lista_ausente(reply):
+            reply = "Qual delícia você quer pedir? 😊"
+            print(f"[lista] user={user} 'algum desses' sem lista na mensagem; trocada")
 
         # "Prazer, Balbino!" no meio da conversa (15/10) e o modelo prometendo
         # horario ("Sim, consigo entregar as 12h" no intervalo, 15/10 12h01):

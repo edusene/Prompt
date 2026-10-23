@@ -604,9 +604,17 @@ def merge(memoria: dict, extraido: dict, novo_da_mensagem: dict | None = None,
             # o cita) e voltava para o pedido (teste do dono, 08/10 15h50).
             if any(_mesmo_item(b, r) for r in removidos_inteiros):
                 continue
-            if not any(isinstance(i, dict) and i.get("name") == b["name"] for i in itens):
+            igual = next((i for i in itens if isinstance(i, dict) and i.get("name") == b["name"]), None)
+            if igual is None:
                 itens.append(dict(b))
                 mudancas.append(f"bebida={b['quantity']} x {b['name']}")
+            elif (int(b.get("quantity") or 1) > 1 and b["quantity"] != igual.get("quantity")
+                  and not _re.search(r"\b(?:mais|acrescent\w*|adicion\w*|inclu\w*)\b",
+                                     _sem_acento(texto or ""))):
+                # "3 coca cola 2litros" com o refri ja na ficha: a quantidade
+                # dita vale. Ficava 1 e o resumo cobrava uma so (Thayline, 23/10).
+                igual["quantity"] = int(b["quantity"])
+                mudancas.append(f"bebida -> {b['quantity']} x {b['name']}")
         memoria["items"] = itens
     sem_tamanho = fonte.get("bebidas_pendentes") or (extraido or {}).get("bebidas_pendentes") or []
     if sem_tamanho and not any(_e_bebida(i.get("name")) for i in memoria.get("items") or []
@@ -1698,6 +1706,12 @@ def _opcao_pela_palavra_propria(pendente: dict, limpo: str) -> str:
     so daquela opcao (nao o termo do cliente, nem palavra comum a outra) e
     tem de ser uma opcao so - "pastel ou rissole" nao escolhe nada.
     """
+    citadas = _opcoes_pela_palavra_propria(pendente, limpo)
+    return citadas[0] if len(citadas) == 1 else ""
+
+
+def _opcoes_pela_palavra_propria(pendente: dict, limpo: str) -> list[str]:
+    """Todas as opcoes citadas pela palavra que so cada uma tem."""
     opcoes = pendente.get("opcoes") or []
     termo = set(_sem_acento(pendente.get("termo") or "").split())
     palavras = {o: {w for w in _sem_acento(o).split() if len(w) >= 4} - termo
@@ -1709,7 +1723,7 @@ def _opcao_pela_palavra_propria(pendente: dict, limpo: str) -> str:
             if _re.search(r"\b" + _re.escape(w[:5]), limpo):
                 citadas.append(opcao)
                 break
-    return citadas[0] if len(citadas) == 1 else ""
+    return citadas
 
 
 def aplicar_escolha_de_sabor(memoria: dict, texto: str) -> list[str]:
@@ -1733,6 +1747,31 @@ def aplicar_escolha_de_sabor(memoria: dict, texto: str) -> list[str]:
                 break
         if not escolhido and p.get("termo") not in ("docinho", "refrigerante"):
             escolhido = _opcao_pela_palavra_propria(p, limpo)
+            divididas = ([] if escolhido or _re.search(r"\bou\b", limpo)
+                         else _opcoes_pela_palavra_propria(p, limpo))
+            try:
+                _qtd_div = int(p.get("qtd") or 0)
+            except (TypeError, ValueError):
+                _qtd_div = 0
+            if len(divididas) > 1 and _qtd_div and _qtd_div % (25 * len(divididas)) == 0:
+                # "carne e queijo pode ser assim" ao meio cento de pastel: o
+                # volume se divide por igual. Ela perguntava o sabor de novo
+                # (Thayline, 23/10).
+                parte = _qtd_div // len(divididas)
+                for opcao in divididas:
+                    try:
+                        import facts
+                        preco = (facts.resolve_unit_price(opcao, parte) or {}).get("preco_unitario", 0.0)
+                    except Exception:
+                        preco = 0.0
+                    ja = next((i for i in itens if isinstance(i, dict)
+                               and _sem_acento(str(i.get("name"))) == _sem_acento(opcao)), None)
+                    if ja:
+                        ja["quantity"] = int(ja.get("quantity") or 0) + parte
+                    else:
+                        itens.append({"name": opcao, "quantity": parte, "price": preco})
+                    mudancas.append(f"{p.get('termo')} -> {parte} x {opcao}")
+                continue
         _qtd_doce = 0
         if not escolhido and p.get("termo") == "docinho":
             # "bandeja", "o meio cento", "2 bandejas": o formato pelo nome curto.

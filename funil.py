@@ -101,7 +101,9 @@ _RX_DESISTENCIA = _re_mod.compile(
 # Carne sai R$ 30,00. Qual o seu pedido?", "Bora pedir quantas?").
 _RX_CONVITE_AO_PEDIDO = _re_mod.compile(
     r"\bbora\s+pedir\b|\bqual\s+o\s+seu\s+pedido\b|\bquer\s+que\s+eu\s+(?:ja\s+)?anote\b"
-    r"|\bquantas?\s+(?:voce\s+)?(?:quer|vai\s+querer)\b")
+    r"|\bquantas?\s+(?:voce\s+)?(?:quer|vai\s+querer)\b"
+    # "Tem sim, Alfajor por R$ 4,00. Qual delicia voce quer pedir?" (23/10).
+    r"|\bqual\s+delicia\s+voce\s+quer\s+pedir\b")
 
 
 def _produto_do_convite(texto: str) -> str:
@@ -132,7 +134,7 @@ def _produto_do_convite(texto: str) -> str:
 
 
 _RX_SO_QUANTIDADE = _re_mod.compile(
-    r"\s*(?:(?:quero|manda|pode\s+ser|vou\s+querer|sim)\s*,?\s*)?"
+    r"\s*(?:(?:quero|manda|pode\s+ser|poderia\s+ser|vou\s+querer|sim)\s*,?\s*)?"
     r"(?P<qtd>\d{1,4}\s*(?:un|unidades?|pecas?)?|(?:um\s+|meio\s+|dois\s+|duas\s+|\d\s+)?centos?"
     r"(?:\s+e\s+meio)?|uma?\s+porcao|\d\s+porcoes)\s*[.!]*\s*")
 

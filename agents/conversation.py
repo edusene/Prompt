@@ -298,6 +298,12 @@ _PRODUTOS_GRANDES = {
     "quiche": "Quiche de Frango",
     "quiche de frango": "Quiche de Frango",
     "quiche de carne de sol": "Quiche de Carne de Sol",
+    # "1 cento de mini quiche" virava 100 Quiches de Frango a R$ 12,00 e a falta
+    # da mini so aparecia no fim (Thayline, 23/10).
+    # shortcut: no cardapio "Mini quiches (Unidade) = R$ 150,00" parece ser a
+    # caixa com um cento; confirmar com o dono antes de a mini voltar ao estoque.
+    "mini quiche": "Mini quiches",
+    "mini quiches": "Mini quiches",
     "saltenha": "Saltenha Assada",
     "saltenha assada": "Saltenha Assada",
     "saltenha frita": "Saltenha Frita",
@@ -1178,6 +1184,7 @@ def volume_sem_sabor(msg_lower: str) -> int:
     a ficha ficava vazia. A regra do dono (25/09) pede resposta especifica:
     oferecer ate Total/25 sabores e perguntar o preparo.
     """
+    achados = []
     for _um, formato, produto in _PACOTE_POR_EXTENSO.findall(msg_lower):
         unidades = _unidades_do_formato(formato)
         # "meio cento de brigadeiro" e doce, com formato proprio - nao e volume
@@ -1185,7 +1192,16 @@ def volume_sem_sabor(msg_lower: str) -> int:
         if _RX_DOCE.search(produto or ""):
             continue
         if unidades and not _produto_conhecido(produto):
-            return unidades
+            achados.append((unidades, produto or ""))
+    if achados:
+        # "1 cento e meio de frito e 1 cento e meio assados": um volume por
+        # preparo, e o total e a soma. Saia 150 e ela oferecia 6 sabores para
+        # 300 salgados (teste da Thayline, 23/10).
+        preparos = {"frito" if _RX_FRITO.search(p) else "assado" if _RX_ASSADO.search(p) else ""
+                    for _, p in achados}
+        if len(achados) > 1 and preparos == {"frito", "assado"}:
+            return sum(u for u, _ in achados)
+        return achados[0][0]
     # "500 salgados", "200 salgadinhos": o total em numero. No teste de 01/10
     # nao era lido como volume e o modelo inventou a conta ("10 sabores fritos
     # e 10 assados" para 20 porcoes). Acima de 1.000 quem atende e a equipe
@@ -1537,8 +1553,11 @@ def itens_divididos(msg_lower: str, quebrados: list | None = None) -> list[dict]
                 _nome_principal = all(
                     c and _forma_de_busca(c).split()[0].startswith(_forma_de_busca(w)[:4])
                     for w, c in zip(_palavras, _cada))
+                # O trecho inteiro ja e um produto ("mini quiche"): nao parte em
+                # "mini" + "quiche", que dividia o cento com a Quiche de Frango (23/10).
+                _inteira = _forma_de_busca(parte) in _indice_de_produtos()
                 if (len(_palavras) > 1 and all(_cada) and len(set(_cada)) == len(_cada)
-                        and _nome_principal):
+                        and _nome_principal and not _inteira):
                     partes.extend(_palavras)
                 else:
                     partes.append(parte)
@@ -1580,7 +1599,7 @@ def itens_divididos(msg_lower: str, quebrados: list | None = None) -> list[dict]
 # sumiam do pedido e o espelho saia sem elas (teste do dono, 28/09 20h08).
 _RX_BEBIDA = re.compile(
     r"(?:\b(?P<qtd>\d{1,2}|uma?|duas|dois|tr[eê]s)\s+)?"
-    r"\b(?P<marca>coca(?:[\s-]*cola)?|refri(?:gerante)?s?|guaran[aá]s?|tuchaua"
+    r"\b(?P<marca>coca(?:[\s-]*colas?|s)?|refri(?:gerante)?s?|guaran[aá]s?|tuchaua"
     r"|fanta|sprite|pepsi|kuat|soda)\b"
     r"(?P<resto>[^,.;!?\n]{0,30})",
     re.IGNORECASE)
@@ -1596,6 +1615,12 @@ BEBIDA_TUCHAUA = "Guaraná Tuchaua 2 Litros"
 BOLO = "Bolo de Milho"
 _RX_BOLO = re.compile(
     r"(?:\b(?P<qtd>\d{1,2}|uma?|dois|duas|tr[eê]s)\s+)?\bbolos?\b(?:\s+de\s+milho)?",
+    re.IGNORECASE)
+# Alfajor e doce por unidade: "6 unidades de alfajor" nao era item de nada e o
+# pedido nunca entrava (Thayline, 23/10).
+ALFAJOR = "Alfajor"
+_RX_ALFAJOR = re.compile(
+    r"(?:\b(?P<qtd>\d{1,2}|uma?|dois|duas|tr[eê]s)\s+(?:unidades?\s+(?:de\s+)?)?)?\balfajor(?:es)?\b",
     re.IGNORECASE)
 
 # O unico bolo da fabrica e o de milho. "Bolo" sozinho ("um bolo", resposta a
@@ -1767,7 +1792,8 @@ def bebidas_citadas(msg_lower: str) -> tuple[list[dict], list[dict]]:
         qtd = int(bruto_qtd) if bruto_qtd.isdigit() else _QTD_POR_EXTENSO.get(bruto_qtd, 1)
         if not 0 < qtd <= 20:
             continue
-        marca = m.group("marca").lower()
+        # "3 cocas": sem o plural a marca nao casa com o sabor (23/10).
+        marca = re.sub(r"^(coca(?:[\s-]*cola)?)s$", r"\1", m.group("marca").lower())
         resto = (m.group("resto") or "").lower()
         if re.search(r"\blat(?:a|inha)s?\b", resto):
             nome = BEBIDA_LATA
@@ -1822,6 +1848,21 @@ def bebidas_citadas(msg_lower: str) -> tuple[list[dict], list[dict]]:
             oficial = None
         if oficial:
             itens.append({"name": BOLO, "quantity": qtd, "price": oficial["preco_unitario"]})
+    for m in _RX_ALFAJOR.finditer(msg_lower or ""):
+        if re.search(r"\b(?:sem|n[aã]o|nada\s+de|nem)\b[^,.;!?\n]{0,18}$",
+                     (msg_lower or "")[:m.start()]):
+            continue
+        bruto_qtd = (m.group("qtd") or "").lower()
+        qtd = int(bruto_qtd) if bruto_qtd.isdigit() else _QTD_POR_EXTENSO.get(bruto_qtd, 1)
+        if not 0 < qtd <= 50 or any(i["name"] == ALFAJOR for i in itens):
+            continue
+        try:
+            import facts
+            oficial = facts.resolve_unit_price(ALFAJOR, qtd)
+        except Exception:
+            oficial = None
+        if oficial:
+            itens.append({"name": ALFAJOR, "quantity": qtd, "price": oficial["preco_unitario"]})
     return itens, pendentes[:1]
 
 

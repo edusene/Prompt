@@ -3875,6 +3875,76 @@ try:
 finally:
     app.DATAFY_WEBHOOK_SECRET = _segredo_original
 
+secao("--- 23/10 (tarde): teste da Thayline ---")
+from agents.conversation import volume_sem_sabor as _vss23  # noqa: E402
+checa("'1 cento e meio de frito e 1 cento e meio assados' e 300",
+      _vss23("eu quero  1 cento e meio de frito e 1 cento e meio assados") == 300,
+      _vss23("eu quero  1 cento e meio de frito e 1 cento e meio assados"))
+checa("'2 centos de frito e 1 cento assado' e 300",
+      _vss23("2 centos de frito e 1 cento assado") == 300)
+checa("um preparo so continua sendo o primeiro volume",
+      _vss23("1 cento e meio de fritos") == 150 and _vss23("1 cento frito ou meio cento?") == 100)
+_beb23 = _extract_data_from_message("pode ser 3 cocas de 2litros", ConversationState(phone="t")).get("bebidas")
+checa("'3 cocas de 2litros' e bebida (o plural nao some)",
+      _beb23 == [{"name": "Refrigerante 2 Litros", "quantity": 3, "price": 15.0}], _beb23)
+_mc23 = dict(memoria_mod._empty(), items=[{"name": "Coxinha", "quantity": 25, "price": 0.8},
+                                         {"name": "Refrigerante 2 Litros", "quantity": 1, "price": 15.0}])
+_ec23 = _extract_data_from_message("3 coca cola 2litros", ConversationState(phone="t"))
+memoria_mod.merge(_mc23, _ec23, _ec23, texto="3 coca cola 2litros")
+checa("'3 coca cola 2litros' com 1 refri na ficha vira 3",
+      [i["quantity"] for i in _mc23["items"] if i["name"] == "Refrigerante 2 Litros"] == [3], _mc23["items"])
+_ec23b = _extract_data_from_message("coca cola", ConversationState(phone="t"))
+memoria_mod.merge(_mc23, _ec23b, _ec23b, texto="coca cola")
+checa("bebida sem numero nao desfaz a quantidade dita",
+      [i["quantity"] for i in _mc23["items"] if i["name"] == "Refrigerante 2 Litros"] == [3], _mc23["items"])
+_alf23 = _extract_data_from_message("6 unidades de alfajor", ConversationState(phone="t")).get("bebidas")
+checa("'6 unidades de alfajor' entra no pedido",
+      _alf23 == [{"name": "Alfajor", "quantity": 6, "price": 4.0}], _alf23)
+checa("'6 alfajores' e 'sem alfajor'",
+      (_extract_data_from_message("6 alfajores", ConversationState(phone="t")).get("bebidas") or [{}])[0].get("quantity") == 6
+      and not _extract_data_from_message("sem alfajor", ConversationState(phone="t")).get("bebidas"))
+checa("'Qual delícia você quer pedir?' com um produto e convite",
+      bool(app._RX_CONVITE_AO_PEDIDO.search(facts.normalize(
+          "Tem sim, Alfajor por R$ 4,00 a unidade. Qual delícia você quer pedir?"))))
+checa("'poderia ser 6 unidades' e quantidade sozinha",
+      bool(app._RX_SO_QUANTIDADE.fullmatch(facts.normalize("poderia ser 6 unidades"))))
+checa("produto por unidade nao ouve '25 em 25'",
+      "25 em 25" not in app._pergunta_da_quantidade("Alfajor")
+      and "25 em 25" in app._pergunta_da_quantidade("Esfirra de Carne"))
+checa("pergunta de disponibilidade nao e recusa de oferta",
+      [app._pergunta_de_disponibilidade(t) for t in
+       ("vcs tem bolo de milho?", "tem bolo de milho", "nao obrigada so o cento de mini quiche msm")]
+      == [True, True, False])
+_mq23 = memoria_mod._empty()
+_emq23 = _extract_data_from_message("tem como eu encomenda 1 cento de mini quiche", ConversationState(phone="t"))
+memoria_mod.merge(_mq23, _emq23, _emq23, texto="tem como eu encomenda 1 cento de mini quiche")
+checa("'mini quiche' e Mini quiches, nao Quiche de Frango",
+      [i["name"] for i in _mq23["items"]] == ["Mini quiches"], _mq23["items"])
+checa("mini quiche em falta e avisada no primeiro turno",
+      memoria_mod.pergunta_bloqueante(_mq23).startswith("O sabor Mini quiches está em falta"),
+      memoria_mod.pergunta_bloqueante(_mq23)[:80])
+checa("'quiche' sozinha continua Quiche de Frango",
+      _produto_conhecido("quiche") == "Quiche de Frango")
+def _pastel_pendente23():
+    return dict(memoria_mod._empty(), sabores_pendentes=[
+        {"qtd": 50, "termo": "pastel", "opcoes": ["Pastel carne", "Pastel queijo"]}])
+_pp23 = _pastel_pendente23()
+memoria_mod.aplicar_escolha_de_sabor(_pp23, "carne e queijo pode ser assim")
+checa("'carne e queijo pode ser assim' ao meio cento de pastel: 25 de cada",
+      sorted((i["name"], i["quantity"]) for i in _pp23["items"])
+      == [("Pastel carne", 25), ("Pastel queijo", 25)] and not _pp23["sabores_pendentes"], _pp23["items"])
+_pp23b = _pastel_pendente23()
+memoria_mod.aplicar_escolha_de_sabor(_pp23b, "carne ou queijo?")
+checa("'carne ou queijo?' nao escolhe nada", not _pp23b["items"] and _pp23b["sabores_pendentes"])
+_pp23c = _pastel_pendente23()
+memoria_mod.aplicar_escolha_de_sabor(_pp23c, "de carne")
+checa("um sabor so leva o meio cento inteiro",
+      [(i["name"], i["quantity"]) for i in _pp23c["items"]] == [("Pastel carne", 50)])
+checa("'Quer escolher algum desses?' sem lista e trocada",
+      [app._referencia_lista_ausente(t) for t in
+       ("Quer escolher algum desses?", "Temos coxinha e quibe, quer algum desses?",
+        "Temos:\n• Coxinha\n• Quibe\nQuer escolher algum desses?")] == [True, False, False])
+
 print()
 print("=" * 78)
 print("FALHAS:", _falhas or "nenhuma")
