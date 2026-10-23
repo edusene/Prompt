@@ -26,7 +26,7 @@ Detalhes operacionais e exemplos de regra estão em `README.md`, seção 11.
 
 ## Fontes de verdade
 
-- **Preços e produtos:** cardápio digital (Base44), cópia interna usada para cobrar. A planilha foi removida em 02/10/2026 e não é mais fonte. O README ainda cita a planilha em alguns trechos; esse texto está desatualizado.
+- **Preços e produtos:** cardápio digital (Base44), cópia interna usada para cobrar. A planilha foi removida em 02/10/2026 e não é mais fonte. O código e partes históricas do README ainda dizem "planilha" para a tabela de produtos do cardápio digital.
 - **Regras de frete, horário e FAQ:** `facts.py` e `horario.py`, e a base de conhecimento (`knowledge_rag.py`).
 - **Comportamento do agente:** prompts em `prompts/*.md` e os blocos guardados no banco, editáveis pelo painel.
 
@@ -41,7 +41,8 @@ Detalhes operacionais e exemplos de regra estão em `README.md`, seção 11.
 
 Cobre o agente, o webhook, o painel e os scripts de teste e simulação. Não cobre o cardápio digital nem o cadastro na Meta/Datafy, que são sistemas externos.
 
-## Pendências de documentação (não corrigidas aqui)
+## Operação
 
-- README: modo de operação (Meta Cloud direta ou Coexistence), modelo padrão e referência à planilha precisam ser confirmados pelo dono.
-- README cita `verificar_catalogo.py`, que não está no repositório.
+- WhatsApp em modo Coexistence, via Datafy (`TESTES_SANDRINHA.md`).
+- Banco: Supabase (PostgreSQL).
+- Modelo: `OPENAI_MODEL`, padrão do código `gpt-4.1-mini`.

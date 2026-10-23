@@ -51,19 +51,33 @@ Legenda: **Validado** = executado e observado. **Configurado** = instalado, não
 - Gerado localmente, ignorado pelo git: `graphify-out/`.
 - Nada foi commitado, enviado ou publicado.
 
-## Divergências do README (a confirmar com o dono)
+## Divergências do README (corrigidas em 23/10/2026)
 
-- Modo de operação: Meta Cloud direta ou Coexistence.
-- Modelo padrão: README diz `gpt-4o-mini`.
-- Planilha: citada no README, mas removida como fonte em 02/10/2026.
-- `verificar_catalogo.py`: citado no README, ausente do repositório.
+- Modo Coexistence: adicionado, com base em `TESTES_SANDRINHA.md`.
+- Modelo padrão: `gpt-4o-mini` trocado pelo padrão do código, `gpt-4.1-mini` (`llm.py`). O valor real no Render não foi verificado.
+- Planilha: instruções de ação atualizadas; nota no topo explica o termo nos trechos históricos.
+- `verificar_catalogo.py`: trocado por `conferir_cardapio.py` na instrução; o trecho histórico diz que foi removido.
 
 ## Pendências de código (propostas, não aplicadas)
 
-1. `app.py` (mais de 10 mil linhas), `database.py`, `conversation_memory.py`, `test_regressao.py`: divisão por responsabilidade, fora do setup.
+1. `app.py`: divisão em andamento, ver "Divisão do app.py" abaixo. `database.py`, `conversation_memory.py` e `test_regressao.py` continuam grandes.
 2. Achados S1, S2 e S3 da revisão de segurança de 23/10/2026: corrigidos e testados no mesmo dia (`docs/quality.md`).
 
 A asserção fraca de `test_regressao.py` foi corrigida em 23/10/2026.
+
+## Divisão do app.py
+
+Feito em 23/10/2026: "Funil duplo" foi para `funil.py` e "Congelados" para `congelados.py`, somando 232 linhas. As linhas foram copiadas idênticas, conferidas por script contra o original, e o `app.py` reimporta os 24 nomes. Resultado: bateria com 1126 OK (mesmo total de antes), `simular_dono.py` com 369 variações sem falha e o gate do ruff passando.
+
+Regras para a próxima seção. Só mova uma seção que cumpra todas:
+
+1. Não usa nenhuma função ou variável definida em outra parte do `app.py`, para não criar import circular.
+2. Não tem rota Flask: mover muda o nome do endpoint e o `url_for`.
+3. Nenhum teste substitui seus nomes (`app.X = ...`). Se substituísse, o teste deixaria de afetar o código movido.
+4. Nenhum teste procura texto dela com `open("app.py").read()`.
+5. Tem nomes cobertos pela bateria.
+
+Candidatas que cumprem 1 a 3 (medido com AST): "Tools deterministicas", "Cardápio Tools" e "Helpers". "Cardápio Tool Handlers" também cumpre, mas não tem teste: cubra antes de mover. O handler de mensagens (linhas 2400 a 8200) depende de dezenas de nomes do próprio `app.py` e exige outra estratégia.
 
 ## Decisões em aberto
 

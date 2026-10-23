@@ -22,6 +22,7 @@ Visão de módulos e do fluxo de mensagem. Detalhe de função: `graphify-out/gr
 | Memória e estado | `conversation_memory.py`, `memory.py` | Histórico e estado do pedido |
 | Cardápio digital | `cardapio.py`, `cardapio_catalogo.py`, `cardapio_fonte.py`, `conferir_cardapio.py`, `verificar_credencial.py` | Produtos, preços e envio de pedido ao cardápio digital |
 | Regras de negócio | `facts.py`, `horario.py`, `cep.py`, `config_dono.py` | Frete, expediente, CEP e configurações do dono |
+| Funil e congelados | `funil.py`, `congelados.py` | Respostas do balcão, desistência, crise, textos de transferência; oferta e pedido de congelado. Saíram do `app.py` em 23/10; `app.py` reexporta os nomes |
 | Conhecimento | `knowledge_rag.py`, `parse_knowledge.py`, `knowledge_repair.py`, `reindex_knowledge.py` | Base de conhecimento com embeddings |
 | Banco | `db.py` (conexão e SQL genérico), `database.py` (esquema e operações) | SQLite ou PostgreSQL |
 | Gateway | `meta.py` | Envio pela Datafy/Meta Cloud |
@@ -42,6 +43,6 @@ Visão de módulos e do fluxo de mensagem. Detalhe de função: `graphify-out/gr
 
 ## Pontos de atenção
 
-- `app.py` tem mais de 10 mil linhas. Divisão em módulos é proposta separada, não parte do setup.
+- `app.py` tem cerca de 10.570 linhas. A divisão é feita aos poucos (ver `docs/setup.md`, "Divisão do app.py").
 - O painel grava segredos no `.env` a partir de requisição HTTP. Revisar na análise de segurança.
 - Chamadas ao modelo e ao cardápio digital têm custo ou efeito externo. Não as dispare em testes sem autorização.

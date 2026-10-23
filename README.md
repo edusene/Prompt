@@ -1,8 +1,12 @@
 # WhatsApp AI Agent + CRM Panel — Datafy API + OpenAI
 
-> **Documentação para agentes e desenvolvedores:** `AGENTS.md` (instruções e comandos), `PRODUCT.md` (produto e regras), `docs/architecture.md`, `docs/onboarding.md`, `docs/quality.md` e `docs/setup.md`. Este README mantém a configuração de implantação. Algumas partes podem estar desatualizadas; as divergências conhecidas estão em `docs/setup.md`.
+> **Documentação para agentes e desenvolvedores:** `AGENTS.md` (instruções e comandos), `PRODUCT.md` (produto e regras), `docs/architecture.md`, `docs/onboarding.md`, `docs/quality.md` e `docs/setup.md`. Este README mantém a configuração de implantação.
+>
+> **Planilha:** até 02/10/2026 os preços vinham de uma planilha. Hoje a única fonte é o cardápio digital (cópia interna do Base44). Onde este README e o código ainda dizem "planilha", leia "tabela de produtos do cardápio digital".
 
 Agente de IA no WhatsApp com painel CRM completo. Usa a [Datafy API](https://app.datafyapi.com.br) como gateway oficial para a Meta Cloud API, e OpenAI como LLM. Mensagens sao agrupadas via debounce e respostas chegam divididas em multiplas mensagens.
+
+O numero opera em modo **Coexistence** (app WhatsApp Business e API no mesmo numero). Nesse modo a Meta nao entrega ao sistema o que sai do WhatsApp para computador: teste sempre pelo celular (`TESTES_SANDRINHA.md`).
 
 ---
 
@@ -49,7 +53,7 @@ Edite `.env` e preencha:
 | `META_API_VERSION` | Versao do Graph API (padrao: `v21.0`) |
 | `WEBHOOK_VERIFY_TOKEN` | Token secreto para verificacao do webhook |
 | `OPENAI_API_KEY` | Chave da OpenAI |
-| `OPENAI_MODEL` | Modelo OpenAI (padrao: `gpt-4o-mini`) |
+| `OPENAI_MODEL` | Modelo OpenAI (padrao do codigo: `gpt-4.1-mini`, em `llm.py`) |
 | `OPENAI_TEMPERATURE` | Temperatura do modelo (padrao: `0.0`) |
 | `BUFFER_SECONDS` | Segundos de debounce (padrao: `3`) |
 | `MAX_HISTORY` | Maximo de mensagens no historico (padrao: `40`) |
@@ -130,7 +134,7 @@ sempre. Tudo fica na tabela `settings` (`config_dono.py`).
 | O que | Onde | Observacao |
 |---|---|---|
 | Frase da oferta de acompanhamento | "Frases da oferta" | Uma por faixa de horario; precisa ser pergunta. Os horarios das faixas sao fixos |
-| Produto novo | "Produtos do cardapio digital" → Ligar produto | Cadastre antes na planilha e no cardapio digital |
+| Produto novo | "Produtos do cardapio digital" → Ligar produto | Cadastre antes no cardapio digital |
 | Reativar item bloqueado (ex.: croquete de carne) | Mesmo cartao → Liberar | Idem: o item precisa existir no cardapio digital |
 
 **Salvar produto sempre testa antes.** O teste confere se o nome esta na
@@ -139,9 +143,9 @@ tem) e manda um `calculateOrder` — que so calcula, nao cria pedido — para ve
 o cardapio digital aceita e entende o MESMO produto. Qualquer falha impede a
 gravacao e mostra o motivo.
 
-O que ainda nao e pelo painel: preco (vem do cardapio digital, e a planilha tem
-de acompanhar — `python verificar_catalogo.py` compara) e os horarios das faixas
-da oferta.
+O que ainda nao e pelo painel: preco (vem do cardapio digital —
+`python conferir_cardapio.py` mostra o que a Sandrinha le e onde a copia interna
+diverge da pagina publica) e os horarios das faixas da oferta.
 
 ---
 
@@ -237,7 +241,7 @@ Meta envia webhooks para notificacoes:
 | `META_API_VERSION` | `v21.0` |
 | `WEBHOOK_VERIFY_TOKEN` | Token secreto |
 | `OPENAI_API_KEY` | Chave OpenAI |
-| `OPENAI_MODEL` | `gpt-4o-mini` |
+| `OPENAI_MODEL` | `gpt-4.1-mini` (padrao do codigo; confira o valor no Render) |
 | `OPENAI_TEMPERATURE` | `0.0` |
 | `CARDAPIO_API_URL` | `https://balbs-cardapio.base44.app` (apelido ASCII de `CARDÁPIO_API_URL`) |
 | `BALBS_AGENTE_API_KEY` | Chave do cardapio digital |
@@ -324,7 +328,7 @@ API discordar da tabela, a tabela vence e a divergencia fica no log.
 ### Conferir a credencial do cardapio
 
 `createOrderFromAgent` exige `x-api-key`; `calculateOrder` nao. Por isso o
-`verificar_catalogo.py` passava mesmo com a chave errada — ele so chama o
+antigo `verificar_catalogo.py` (ja removido) passava mesmo com a chave errada — ele so chama o
 endpoint publico, e esta escrito no docstring dele. Resultado: a primeira vez
 que se descobria que a chave nao servia era quando o pedido de um cliente real
 falhava, depois de ele ja ter confirmado.
