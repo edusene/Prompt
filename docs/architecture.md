@@ -30,7 +30,7 @@ Visão de módulos e do fluxo de mensagem. Detalhe de função: `graphify-out/gr
 
 ## Persistência
 
-- Em uso: PostgreSQL com pgvector (`DB_DRIVER=postgresql`, `DATABASE_URL`). Migração descrita em `SUPABASE_MIGRATION.md`.
+- Em uso: Supabase, PostgreSQL com pgvector (`DB_DRIVER=postgresql`, `DATABASE_URL`). Migração descrita em `SUPABASE_MIGRATION.md`.
 - O padrão do código ainda é SQLite (`DB_PATH`, padrão `whatsapp.db`), mas `init_db` falha nele: o esquema usa `SERIAL` e `DEFAULT NOW()`, que só existem no PostgreSQL (`sqlite3.OperationalError: near "(": syntax error`, verificado em 23/10/2026). Consertar é mudança de banco, ainda não decidida.
 - Tabelas principais: `conversations`, `messages`, `contacts`, `conversation_states`, `cardapio_orders`, `knowledge`, `knowledge_files`, `settings`, `crm_follow_ups`, `crm_logs`, `templates`, `tasks`, `tags`.
 - `settings` guarda configurações editáveis pelo painel. O painel também regrava o `.env` com os valores enviados (`_write_env_file` em `app.py`).

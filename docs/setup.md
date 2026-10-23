@@ -20,7 +20,7 @@ Legenda: **Validado** = executado e observado. **Configurado** = instalado, não
 | README | Preservado | Não reescrito | Divergências registradas, não corrigidas |
 | Superpowers (brainstorming, planejamento, revisão) | Configurado | Plugin `superpowers@claude-plugins-official` v7.0.0, escopo usuário, habilitado | Instalado; carregamento em sessão nova pendente |
 | Graphify | Validado (CLI) | `graphifyy` 0.9.95 via `uv tool install` (isolado); skill `graphify` em `~/.claude/skills/` via `graphify install --platform claude` (sem `--project`, sem hook) | `graphify extract --code-only` e `query` funcionaram; `.graphifyignore` no projeto; `graphify-out/` no `.gitignore` |
-| Context7 | Pendente (autenticação) | Plugin `context7@claude-plugins-official` habilitado; MCP `plugin:context7:context7` aparece como "Needs authentication" | Condição: autenticar o MCP pelo fluxo do cliente (`/mcp`) com a conta do usuário. Credencial fica fora do repositório. Consulta real pendente |
+| Context7 | Validado | Plugin `context7@claude-plugins-official`, autenticado pelo `/mcp` com a conta do usuário (credencial fora do repositório) | Consulta real em 23/10/2026: `/websites/flask_palletsprojects_en_stable`, padrões de `SESSION_COOKIE_SECURE` (False) e `HTTPONLY` (True) |
 | Ponytail | Configurado | Plugin `ponytail@ponytail` v5.3.2 | Opções `webhookUrl`, `webhookToken`, `ledger`, `sendNames` deixadas vazias: enviariam dados para fora |
 | Caveman | Configurado | Plugin `caveman@caveman` v4.0.1 | Aviso do instalador: pacotes de yarn/pnpm não instalados. Efeito pendente de verificação |
 | differential-review | Validado (carregada) | Skill do projeto em `.claude/skills/differential-review/` (Trail of Bits, `main`). Conteúdo ignorado pelo git; `skills-lock.json` versionado com origem e hash | Aparece na lista de skills após reinício. Reinstalar: `npx --yes skills@latest add https://github.com/trailofbits/skills/tree/main/plugins/differential-review --skill differential-review --agent claude-code --yes` |
@@ -29,8 +29,8 @@ Legenda: **Validado** = executado e observado. **Configurado** = instalado, não
 | Revisão de segurança (prompt 13) | Validado (execução) | Procedimento em `docs/prompts/security-review.md` | Executada em 23/10/2026, modo repositório, só leitura. 3 achados, relatório privado fora do repositório |
 | Gates de qualidade Python | Validado | `ruff.toml` com E9, F63, F7, F82 (zero violações hoje), via `uvx ruff@0.9.10` | Passa no projeto; reprova arquivo descartável com nome indefinido. Demais regras só medidas |
 | RTK | Validado (hook ativo) | `rtk.exe` 1.0.1 do release oficial (SHA-256 conferido com `checksums.txt`) em `~/.local/bin`; `rtk init -g --auto-patch`: hook `PreToolUse` (Bash) no `settings.json`, `~/.claude/RTK.md` e `@RTK.md` no `CLAUDE.md` global | `rtk git status` funciona; `rtk hook claude` reescreve `git status` para `rtk git status`. Na mesma sessão, `ls` já saiu no formato compacto do RTK. Desfazer: `rtk init -g --uninstall` |
-| agent-browser | Pendente (não funcional) | npm global 0.39.2 (Apache-2.0); `postinstall` revisado e rodado (baixa o binário nativo do repositório oficial); usa o Chrome do sistema com perfil temporário | `agent-browser open` em página local travou 3 vezes (mais de 90 s, sem saída). Condição: investigar o daemon no Windows antes de usar |
-| chrome-devtools-mcp | Não instalado | Plugin oficial disponível | Alternativa ao agent-browser para o painel. Não instalado para não duplicar sem antes saber por que o agent-browser travou |
+| agent-browser | Validado | npm global 0.39.2 (Apache-2.0); `postinstall` revisado e rodado (baixa o binário nativo do repositório oficial); usa o Chrome do sistema em headless, perfil temporário | `agent-browser doctor`: 7 pass. Abre página local em 1 s e validou o S2. Os travamentos iniciais vieram de rodar antes do binário nativo; se voltar, rodar `agent-browser doctor --fix` e `agent-browser close --all` |
+| chrome-devtools-mcp | Não aplicável por ora | Plugin oficial disponível | O agent-browser cobre automação e console do painel. Instalar só se faltar perfil de rede ou de performance |
 | Hooks do cliente | Não aplicável | Nenhum criado | Sem necessidade comprovada; o instalador do Graphify não criou hook |
 | Sentry | Não aplicável | Não adotado | Não há serviço escolhido nem organização autorizada |
 | gh-fix-ci | Não aplicável | — | Não há GitHub Actions; `gh` não está instalado |
@@ -61,15 +61,13 @@ Legenda: **Validado** = executado e observado. **Configurado** = instalado, não
 ## Pendências de código (propostas, não aplicadas)
 
 1. `app.py` (mais de 10 mil linhas), `database.py`, `conversation_memory.py`, `test_regressao.py`: divisão por responsabilidade, fora do setup.
-2. Achados S1, S2 e S3 da revisão de segurança de 23/10/2026 (`docs/quality.md`): correção exige instrução separada.
+2. Achados S1, S2 e S3 da revisão de segurança de 23/10/2026: corrigidos e testados no mesmo dia (`docs/quality.md`).
 
 A asserção fraca de `test_regressao.py` foi corrigida em 23/10/2026.
 
 ## Decisões em aberto
 
-- S3: confirmar no Render que `DATAFY_WEBHOOK_SECRET` existe; depois, fazer o webhook falhar fechado.
-- SQLite quebrado: consertar o esquema para os dois bancos ou tirar o SQLite como padrão. É mudança de banco.
-- agent-browser travando no Windows: investigar ou trocar pelo chrome-devtools-mcp.
+- Banco: o dono usa Supabase (PostgreSQL). O caminho SQLite do código continua quebrado e não é usado. Removê-lo ou consertá-lo é limpeza futura, não urgente.
 - Se o dono quiser CI ou Sentry, são decisões separadas.
 
 ## Mudanças de máquina feitas pelo setup

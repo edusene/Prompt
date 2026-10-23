@@ -62,8 +62,8 @@ Procedimento reutilizável em `docs/prompts/security-review.md`. Executado em 23
 Achados:
 
 - **S1 (média), corrigido em 23/10/2026:** `POST /api/whatsapp/config` gravava no `.env` valores com quebra de linha, o que injetava qualquer chave (até `ADMIN_PASSWORD`). Agora recusa com 400 valores com `\n`, CR ou NUL. Teste em `test_regressao.py` ("revisao S1"): reproduzido falhando antes, passando depois, com o gravador do `.env` substituído por stub.
-- **S2 (baixa a média), corrigido em 23/10/2026:** `toast()`, `toastLoading()` e `toastDone()` montavam HTML sem escape. Agora usam `esc(message)`. Verificado no Node extraindo as funções do `app.js` antigo (tag `<img>` crua) e do novo (escapada). Não verificado em navegador.
-- **S3 (baixa, depende de configuração), não corrigido:** sem `DATAFY_WEBHOOK_SECRET`, o webhook aceita mensagem sem assinatura. Exigir sempre derrubaria o atendimento se o segredo faltar no Render. Próximo passo: o dono confirma no painel do Render que a variável existe; depois, mudar para falhar fechado.
+- **S2 (baixa a média), corrigido em 23/10/2026:** `toast()`, `toastLoading()` e `toastDone()` montavam HTML sem escape. Agora usam `esc(message)`. Verificado no Chrome headless (agent-browser) com `toast('<img src=x onerror=...>')`: no `app.js` antigo o script rodou; no novo não rodou e o texto aparece literal.
+- **S3 (baixa), corrigido em 23/10/2026:** sem `DATAFY_WEBHOOK_SECRET`, o webhook aceitava mensagem sem assinatura. O dono confirmou que o segredo existe no Render; agora, sem ele, o webhook responde 503. Teste na bateria ("revisao S3"): 200 antes, 503 depois; com segredo e sem assinatura continua 401.
 
 Achado de operação, não de segurança: o app não inicializa em SQLite (ver `docs/architecture.md`).
 
