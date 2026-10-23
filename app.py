@@ -84,7 +84,7 @@ if not SECRET_KEY or SECRET_KEY == "troque_esta_chave_secreta_aleatoria":
     print("[config] ATENCAO: SECRET_KEY ausente ou igual ao exemplo - usando uma aleatoria")
 DATAFY_WEBHOOK_SECRET = os.getenv("DATAFY_WEBHOOK_SECRET", "")
 if not DATAFY_WEBHOOK_SECRET:
-    print("[config] ATENCAO: DATAFY_WEBHOOK_SECRET ausente - o webhook aceita mensagem sem assinatura")
+    print("[config] ATENCAO: DATAFY_WEBHOOK_SECRET ausente - o webhook recusa todas as mensagens (503)")
 
 _BASE_PROMPT = os.getenv(
     "SYSTEM_PROMPT",
@@ -8671,6 +8671,10 @@ def webhook():
     # Com o segredo configurado, mensagem sem assinatura e recusada: antes ela
     # passava direto, e qualquer um podia fazer a Sandrinha responder (e mandar
     # pedido ao cardapio) para qualquer numero (revisao de seguranca, 22/10).
+    # Sem o segredo nao ha como provar que veio da Datafy: recusa tudo (S3, 23/10).
+    if not DATAFY_WEBHOOK_SECRET:
+        print("[webhook] DATAFY_WEBHOOK_SECRET ausente - recusado")
+        return "Service Unavailable", 503
     if DATAFY_WEBHOOK_SECRET and not (signature and timestamp):
         print("[webhook] Sem assinatura (Datafy) - recusado")
         return "Forbidden", 401

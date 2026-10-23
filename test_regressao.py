@@ -3862,6 +3862,19 @@ finally:
     else:
         os.environ[_chave_env] = _env_antes
 
+secao("--- 23/10: webhook sem segredo configurado recusa tudo (revisao S3) ---")
+_segredo_original = app.DATAFY_WEBHOOK_SECRET
+try:
+    _cliente_wh = app.app.test_client()
+    app.DATAFY_WEBHOOK_SECRET = ""
+    _resp = _cliente_wh.post("/webhook", json={})
+    checa("sem DATAFY_WEBHOOK_SECRET o webhook responde 503", _resp.status_code == 503, str(_resp.status_code))
+    app.DATAFY_WEBHOOK_SECRET = "segredo-de-teste"
+    _resp = _cliente_wh.post("/webhook", json={})
+    checa("com segredo e sem assinatura continua 401", _resp.status_code == 401, str(_resp.status_code))
+finally:
+    app.DATAFY_WEBHOOK_SECRET = _segredo_original
+
 print()
 print("=" * 78)
 print("FALHAS:", _falhas or "nenhuma")
