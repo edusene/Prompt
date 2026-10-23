@@ -3717,6 +3717,19 @@ checa("22/10 sabores somando menos que o total: pergunta o que falta",
 _mv22["items"].append({"name": "Quibe", "quantity": 75})
 checa("22/10 sabores completando o total: nada falta", memoria_mod.falta_para_o_volume(_mv22) == 0)
 
+# Pedido real de 22/10 (WhatsApp): o modelo mandou o sabor colado no nome e o
+# cardapio digital recusou o pedido pronto.
+_env22 = app._separar_sabor_do_nome(
+    [{"name": "Coxinha frango", "price": 0.8, "quantity": 50},
+     {"name": "Cento de Brigadeiros (100 un) (Mista (brigadeiro e beijinho))", "price": 140.0, "quantity": 1}], [])
+checa("22/10 envio: o sabor colado no nome vira o campo sabor",
+      _env22[1] == {"name": "Cento de Brigadeiros (100 un)", "price": 140.0, "quantity": 1,
+                    "sabor": "Mista (brigadeiro e beijinho)"}
+      and app._nome_sem_sabor("Cento de Brigadeiros (100 un)") == ("Cento de Brigadeiros (100 un)", ""))
+import cardapio_catalogo as _cc22
+checa("22/10 envio: o cento misto passa pelo de-para do cardapio digital",
+      not _cc22.traduzir(_env22)[1], str(_cc22.traduzir(_env22)))
+
 print()
 print("=" * 78)
 print("FALHAS:", _falhas or "nenhuma")

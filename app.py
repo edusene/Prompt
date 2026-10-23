@@ -2673,6 +2673,44 @@ def _numeros_do_pedido(memoria: dict) -> dict:
     return resultado if resultado.get("success") else {}
 
 
+_RX_SUFIXO_ENTRE_PARENTESES = _re_mod.compile(r"\s*\(((?:[^()]|\([^()]*\))*)\)\s*$")
+
+
+def _nome_sem_sabor(nome: str) -> tuple[str, str]:
+    """("Cento de Brigadeiros (100 un)", "Mista (brigadeiro e beijinho)") de
+    "Cento de Brigadeiros (100 un) (Mista (brigadeiro e beijinho))". O "(100
+    un)" e do nome; o que vem depois e sabor."""
+    nome = str(nome or "").strip()
+    m = _RX_SUFIXO_ENTRE_PARENTESES.search(nome)
+    if not m or _re_mod.fullmatch(r"\s*\d+\s*un\.?\s*", m.group(1)):
+        return nome, ""
+    return nome[:m.start()].strip(), m.group(1).strip()
+
+
+def _separar_sabor_do_nome(itens: list, itens_ficha: list) -> list:
+    """O modelo manda o item como esta no resumo, com o sabor colado no nome.
+
+    "Cento de Brigadeiros (100 un) (Mista (brigadeiro e beijinho))" foi
+    recusado pelo cardapio digital ("sem equivalente conferido") e o pedido
+    pronto foi para a equipe (teste de 22/10). Os mesmos itens da ficha: vale a
+    ficha, que guarda o sabor separado. Senao, o sufixo vira o sabor.
+    """
+    itens = [dict(i) for i in (itens or []) if isinstance(i, dict)]
+    ficha = [dict(i) for i in (itens_ficha or []) if isinstance(i, dict)]
+
+    def _base(i):
+        return facts.normalize(_nome_sem_sabor(i.get("name", ""))[0])
+    if ficha and itens and sorted(map(_base, itens)) == sorted(map(_base, ficha)):
+        return ficha
+    saida = []
+    for i in itens:
+        base, sabor = _nome_sem_sabor(i.get("name", ""))
+        if sabor and not str(i.get("sabor") or "").strip():
+            i = dict(i, name=base, sabor=sabor)
+        saida.append(i)
+    return saida
+
+
 def _com_sabor_da_ficha(itens: list, memoria: dict) -> list:
     """Poe nos itens do modelo o sabor de bebida que esta na ficha.
 
@@ -7431,6 +7469,7 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                       f"({[i.get('name') for i in (items or [])]}); usando os da ficha")
                 _itens = _memoria["items"]
 
+            _itens = _separar_sabor_do_nome(_itens, _memoria.get("items") or [])
             _itens = _quantidade_da_ficha(_itens, _memoria)
             _itens = _com_sabor_da_ficha(_itens, _memoria)
 
@@ -7541,7 +7580,7 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                       f"{[i.get('name') for i in _itens_modelo]} -> usando a ficha "
                       f"{[i.get('name') for i in _itens_ficha]}")
                 _itens_modelo = _itens_ficha
-            kwargs["items"] = _itens_modelo or _itens_ficha
+            kwargs["items"] = _separar_sabor_do_nome(_itens_modelo or _itens_ficha, _itens_ficha)
             kwargs["items"] = _com_sabor_da_ficha(kwargs["items"], _memoria)
 
             # Troco: a API nao tem campo change_for, entao ele vai na observacao
