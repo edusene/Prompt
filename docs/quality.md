@@ -26,22 +26,15 @@ Não há pytest, ruff, CI nem gate configurados. Nenhum gate foi adotado nesta e
 | E702 multiple-statements | 7 | não | |
 | F541 f-string sem placeholder | 7 | sim | |
 | E401, E731 | 2 + 1 | sim | |
-| F821 undefined-name | 1 | não | Ver abaixo |
+| F821 undefined-name | 1 | não | Corrigido em 23/10/2026, ver abaixo |
 
-Regra proposta, não aplicada: manter as violações como medição. Antes de qualquer gate, reduzir F821 e F401, depois decidir sobre E402 (pode exigir reorganizar imports de `app.py`).
+Regra proposta, não aplicada: manter as violações como medição. Antes de qualquer gate, reduzir F401, depois decidir sobre E402 (pode exigir reorganizar imports de `app.py`).
 
-## Defeito encontrado na bateria
+## Defeito corrigido na bateria (23/10/2026)
 
-`test_regressao.py:1764` usa `os` sem importá-lo:
+A checagem "mensagem padrao de transferencia sem 'atendente humano'" usava `os` sem importá-lo e testava `"TRANSFER_MESSAGE" in os.environ`. Com a mensagem padrão sem "humano", o `or` curto-circuitava e a checagem passava sem testar nada. Com "humano", a bateria quebrava com `NameError` em vez de reprovar.
 
-```python
-checa("mensagem padrao de transferencia sem 'atendente humano'",
-      "humano" not in app._DEFAULT_TRANSFER_MESSAGE.lower() or "TRANSFER_MESSAGE" in os.environ)
-```
-
-Como `or` faz curto-circuito, o `os` só é avaliado quando a mensagem padrão contém "humano". Hoje ela não contém, então a checagem passa sem nunca testar o `os.environ`. Ou seja, é uma asserção fraca, não uma falha.
-
-Correção proposta, pendente de aprovação: definir o que a checagem deve garantir e reescrevê-la para falhar quando a mensagem padrão contiver "humano" sem override por ambiente. Antes, reproduzir com a mensagem contendo "humano".
+Correção: `import os` no topo de `test_regressao.py` e a condição passou a usar `bool(os.getenv("TRANSFER_MESSAGE"))`, a mesma regra da checagem de `TEXTO_DESARME`. Verificado por mutação: mensagem com "humano" e sem override reprova; com override, passa. A bateria segue sem falhas.
 
 ## Harness: linha de base do fixture
 
@@ -55,11 +48,15 @@ Nenhuma instrução de trabalho foi alterada com base nesse resultado, porque n�
 
 ## Revisão de segurança
 
-Procedimento reutilizável em `docs/prompts/security-review.md`. Não foi executado nesta etapa. Pontos já identificados para essa revisão:
+Procedimento reutilizável em `docs/prompts/security-review.md`. Executado em 23/10/2026 em modo repositório, só leitura. O relatório é privado e fica fora do repositório.
 
-- O painel grava valores no `.env` a partir de requisição HTTP (`_write_env_file` em `app.py`). Verificar autenticação, validação de chaves e exposição de segredos.
-- Webhook: confirmar a verificação de assinatura com `DATAFY_WEBHOOK_SECRET` e o tratamento de repetição.
-- Chamadas a sistemas externos (cardápio digital) com chave em banco ou ambiente.
+Achados, nenhum corrigido ainda:
+
+- **S1 (média):** `_write_env_file` não remove quebras de linha do valor. Com sessão do painel, um valor multilinha injeta qualquer chave no `.env`.
+- **S2 (baixa a média):** `toast()` em `static/app.js` monta HTML sem escape e recebe nomes de arquivo enviados pelo painel.
+- **S3 (baixa, depende de configuração):** sem `DATAFY_WEBHOOK_SECRET`, o webhook aceita mensagem sem assinatura.
+
+Sem achado no escopo lido: SQL com f-string (colunas de listas fixas), autenticação das rotas `/api/*` e login.
 
 ## Grafo
 

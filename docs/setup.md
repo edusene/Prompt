@@ -26,7 +26,7 @@ Legenda: **Validado** = executado e observado. **Configurado** = instalado, não
 | differential-review | Configurado | Skill do projeto em `.claude/skills/differential-review/` (Trail of Bits, `main`), lock em `skills-lock.json` | Conteúdo revisado: só Markdown, sem scripts nem rede |
 | supabase-postgres-best-practices | Reaproveitado | Já existia em `~/.claude/skills/`; não duplicado | Plugin `supabase@supabase-agent-skills` já estava instalado e desabilitado; não alterado |
 | Harness2 (adaptação nativa, prompt 15) | Validado (smoke) | Procedimento em `docs/prompts/harness-improvement.md` | Linha de base do fixture: 5 de 7 checks, como esperado. Casos com agente não rodados |
-| Revisão de segurança (prompt 13) | Configurado | Procedimento em `docs/prompts/security-review.md` | Não executada nesta etapa |
+| Revisão de segurança (prompt 13) | Validado (execução) | Procedimento em `docs/prompts/security-review.md` | Executada em 23/10/2026, modo repositório, só leitura. 3 achados, relatório privado fora do repositório |
 | Gates de qualidade Python | Medido | Sem alteração de regra | 102 violações de ruff padrão; F821 em `test_regressao.py:1764` documentado |
 | RTK | Pendente | Não instalado | `brew` não existe neste Windows. Condição: aprovar o método de instalação e o efeito em comandos (RTK intercepta saída do shell) |
 | agent-browser | Pendente | Não instalado | Requer `npm` global. Condição: aprovar a instalação global e o uso local para o painel |
@@ -60,9 +60,10 @@ Legenda: **Validado** = executado e observado. **Configurado** = instalado, não
 
 ## Pendências de código (propostas, não aplicadas)
 
-1. `test_regressao.py:1764`: asserção fraca com `os` não importado. Ver `docs/quality.md`.
-2. `app.py` (mais de 10 mil linhas), `database.py`, `conversation_memory.py`, `test_regressao.py`: divisão por responsabilidade, fora do setup.
-3. Painel grava segredos no `.env` a partir de HTTP: revisão de segurança.
+1. `app.py` (mais de 10 mil linhas), `database.py`, `conversation_memory.py`, `test_regressao.py`: divisão por responsabilidade, fora do setup.
+2. Achados S1, S2 e S3 da revisão de segurança de 23/10/2026 (`docs/quality.md`): correção exige instrução separada.
+
+A asserção fraca de `test_regressao.py` foi corrigida em 23/10/2026.
 
 ## Decisões em aberto
 

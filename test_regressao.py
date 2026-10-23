@@ -12,6 +12,7 @@ conversa original.
     python test_regressao.py
 """
 
+import os
 import sys
 
 from dotenv import load_dotenv
@@ -1761,7 +1762,7 @@ checa("aviso de transferencia ja dado nao repete",
       bool(app._RX_JA_AVISOU_TRANSFERENCIA.search(app.facts.normalize(
           "Vou te transferir agora para a nossa equipe comercial te atender! Um instante. 💛"))))
 checa("mensagem padrao de transferencia sem 'atendente humano'",
-      "humano" not in app._DEFAULT_TRANSFER_MESSAGE.lower() or "TRANSFER_MESSAGE" in os.environ)
+      "humano" not in app._DEFAULT_TRANSFER_MESSAGE.lower() or bool(os.getenv("TRANSFER_MESSAGE")))
 checa("'BAIRRO SAO BOSCO' e o Sao Joao Bosco da tabela",
       _cv_0110.detectar_bairro("RUA LEONILDO DE SA 2125 BAIRRO SAO BOSCO") == "São João Bosco",
       _cv_0110.detectar_bairro("RUA LEONILDO DE SA 2125 BAIRRO SAO BOSCO"))
