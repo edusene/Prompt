@@ -10423,6 +10423,10 @@ def api_whatsapp_config_post():
             val = str(data[key]).strip()
             if val.startswith("*" * 4):
                 continue
+            # Quebra de linha no valor vira outra chave no .env, ate ADMIN_PASSWORD
+            # (revisao de seguranca S1, 23/10). Nada e gravado se um campo vier assim.
+            if any(c in val for c in ("\n", chr(13), chr(0))):
+                return jsonify({"ok": False, "error": f"{key}: valor com quebra de linha"}), 400
             updates[key] = val
     if not updates:
         return jsonify({"ok": False, "error": "Nenhum campo para atualizar"}), 400

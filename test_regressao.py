@@ -3833,6 +3833,35 @@ checa("23/10 'enroladinho' em pedido de assados e o com Catupiry; em fritos, o d
 checa("22/10 '25 misto' com doce na ficha continua sendo o salgado",
       app._doce_misto_do_contexto("25 misto", "Qual docinho?", "Cento de Brigadeiros (100 un)") == "")
 
+secao("--- 23/10: valor com quebra de linha nao injeta chave no .env (revisao S1) ---")
+# Stubs: o teste nunca toca o .env real nem recarrega a Datafy.
+_gravados_env = []
+_write_env_original, _reload_original = app._write_env_file, app.meta.reload_config
+app._write_env_file = lambda updates: _gravados_env.append(dict(updates))
+app.meta.reload_config = lambda: None
+_chave_env = app._ENV_KEYS[0][0]
+_env_antes = os.environ.get(_chave_env)
+try:
+    _cliente = app.app.test_client()
+    with _cliente.session_transaction() as _sessao:
+        _sessao["logged_in"] = True
+    for _rotulo, _valor in (("\\n", "abc\nADMIN_PASSWORD=outra"),
+                            ("\\r", "abc" + chr(13) + "SECRET_KEY=x"),
+                            ("\\0", "abc" + chr(0))):
+        _resp = _cliente.post("/api/whatsapp/config", json={_chave_env: _valor})
+        checa(f"valor com {_rotulo} e recusado e nao grava o .env",
+              _resp.status_code == 400 and not _gravados_env, f"{_resp.status_code} {_gravados_env}")
+    _resp = _cliente.post("/api/whatsapp/config", json={_chave_env: "valor-normal-123"})
+    checa("valor normal continua sendo gravado",
+          _resp.status_code == 200 and _gravados_env == [{_chave_env: "valor-normal-123"}],
+          f"{_resp.status_code} {_gravados_env}")
+finally:
+    app._write_env_file, app.meta.reload_config = _write_env_original, _reload_original
+    if _env_antes is None:
+        os.environ.pop(_chave_env, None)
+    else:
+        os.environ[_chave_env] = _env_antes
+
 print()
 print("=" * 78)
 print("FALHAS:", _falhas or "nenhuma")
