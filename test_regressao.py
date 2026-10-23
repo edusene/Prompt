@@ -3730,6 +3730,25 @@ import cardapio_catalogo as _cc22
 checa("22/10 envio: o cento misto passa pelo de-para do cardapio digital",
       not _cc22.traduzir(_env22)[1], str(_cc22.traduzir(_env22)))
 
+# Teste no WhatsApp (22/10): troca de sabores com docinho pendente.
+checa("22/10 'mandei errado os sabores posso troca?' e pedido de troca",
+      bool(app._RX_QUER_TROCAR_SABORES.search(facts.normalize("mandei errado os sabores posso troca?")))
+      and not app._RX_QUER_TROCAR_SABORES.search(facts.normalize("quais sabores voces tem?")))
+_mt22 = memoria_mod._empty()
+_mt22.update({"items": [{"name": "Canudinho de Camarao", "quantity": 50}, {"name": "Coxinha", "quantity": 50},
+                        {"name": "Refrigerante 2 Litros", "quantity": 1}], "trocar_sabores": True})
+_ext_t22 = _extract_data_from_message("50 bolinha e 50 pastel de carne", ConversationState(phone="t"))
+memoria_mod.merge(_mt22, _ext_t22, _ext_t22, texto="50 bolinha e 50 pastel de carne")
+checa("22/10 troca pedida: a lista nova substitui os salgados e a bebida fica",
+      sorted(i["name"] for i in _mt22["items"]) == ["Bolinha de Queijo", "Pastel Carne", "Refrigerante 2 Litros"]
+      and not _mt22["trocar_sabores"], str([i["name"] for i in _mt22["items"]]))
+_md22 = memoria_mod._empty()
+_md22["sabores_pendentes"] = [{"qtd": 1, "termo": "docinho", "opcoes": ["Bandeja de Brigadeiros (16 un)",
+                               "Meio Cento de Brigadeiros (50 un)", "Cento de Brigadeiros (100 un)"]}]
+checa("22/10 docinho pendente: '50 bolinha' nao e o meio cento",
+      not memoria_mod.aplicar_escolha_de_sabor(_md22, "50 bolinha e 50 pastel de carne")
+      and memoria_mod.aplicar_escolha_de_sabor(_md22, "meio cento"))
+
 print()
 print("=" * 78)
 print("FALHAS:", _falhas or "nenhuma")

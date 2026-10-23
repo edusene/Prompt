@@ -134,6 +134,9 @@ def _empty() -> dict:
         # instrucao com o que a equipe tratou, para a PRIMEIRA resposta do
         # modelo. Usada uma vez e apagada.
         "contexto_retomada": "",
+        # O cliente disse que mandou os sabores errados (pedido aberto): os
+        # salgados da proxima mensagem TROCAM os da ficha, nao somam (22/10).
+        "trocar_sabores": False,
         "updated_at": "",
     }
 
@@ -484,7 +487,13 @@ def merge(memoria: dict, extraido: dict, novo_da_mensagem: dict | None = None,
         mudancas.append(f"tirados: {[i.get('name') for i in removidos if id(i) not in parciais]}")
         itens_novos = [n for n in (itens_novos or []) if isinstance(n, dict)
                        and not any(_mesmo_item(n, r) for r in removidos)]
+    _troca_pedida = bool(memoria.get("trocar_sabores")) and any(
+        isinstance(n, dict) and not _e_acompanhamento(n.get("name")) for n in (itens_novos or []))
+    if _troca_pedida:
+        memoria["trocar_sabores"] = False
+        mudancas.append("troca de sabores pedida antes: salgados substituidos")
     if itens_novos and itens_novos != memoria.get("items") and atuais \
+            and not _troca_pedida \
             and (removidos or _pede_tirar_produto(texto)
                  or not _RX_TROCA_O_PEDIDO.search(_sem_acento(texto))):
         # Lista CUMULATIVA (pedido do dono, 07/10): item citado de novo tem a
@@ -1633,7 +1642,12 @@ def aplicar_escolha_de_sabor(memoria: dict, texto: str) -> list[str]:
             # "bandeja", "o meio cento", "2 bandejas": o formato pelo nome curto.
             from agents.conversation import formato_do_doce
             _formato, _qtd_doce = formato_do_doce(texto)
-            if _formato in (p.get("opcoes") or []):
+            # "50 bolinha e 50 pastel": o 50 e de salgado, nao o meio cento
+            # (teste de 22/10 - o docinho pendente virou meio cento sozinho).
+            _numero_de_salgado = _re.search(
+                r"\b\d{2,3}\s+(?:de\s+)?(?!un\b|unidades?\b|brigad|docinh|doces?\b|beijinh|bandej)[a-z]{4,}",
+                limpo)
+            if _formato in (p.get("opcoes") or []) and not _numero_de_salgado:
                 escolhido = _formato
         if not escolhido and p.get("termo") == "refrigerante":
             # "lata", "a de 600": ninguem repete "Refrigerante Lata" inteiro.

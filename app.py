@@ -1124,6 +1124,11 @@ _FAQ_DO_DONO = (
 )
 
 
+_RX_QUER_TROCAR_SABORES = _re_mod.compile(
+    r"\b(?:troc\w*|mud\w*|errad\w*|errei|corrig\w*)\b.{0,30}\bsabor"
+    r"|\bsabor\w*\b.{0,30}\b(?:errad\w*|troc\w*|mud\w*)\b")
+
+
 def _doce_misto_do_contexto(texto: str, ultima_do_agente: str, tem_doce: bool = False) -> str:
     """"pode ser o cento misto" vira "pode ser o cento de brigadeiro misto"
     quando a mensagem anterior falou de docinho. '' = nao mexe.
@@ -5833,6 +5838,21 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                 _memoria_balcao["volume_pendente"] = 0
                 conversation_memory.save(user, _memoria_balcao)
                 print(f"[funil] user={user} cliente ficou com o que ja pediu; total antigo descartado")
+        # "mandei errado os sabores posso troca?" com o pedido aberto: pede os
+        # sabores certos e marca a troca (a proxima lista substitui a da
+        # ficha). Com o docinho pendente ela respondia "Pode trocar sim!" e
+        # repetia a pergunta do docinho (teste no WhatsApp, 22/10).
+        if (_memoria_balcao.get("items") and not _memoria_balcao.get("pedido_enviado")
+                and not conversation_memory.em_pos_pedido(_memoria_balcao)
+                and _RX_QUER_TROCAR_SABORES.search(facts.normalize(_texto_cliente or ""))
+                and not _extract_data_from_message((_texto_cliente or "").lower(),
+                                                   ConversationState(phone=user)).get("items")):
+            _memoria_balcao["trocar_sabores"] = True
+            conversation_memory.save(user, _memoria_balcao)
+            print(f"[funil] user={user} cliente vai trocar os sabores; proxima lista substitui")
+            _responder_direto(user, items, "Pode sim! 😊 Me manda os sabores certos dos "
+                              "salgados, com as quantidades, que eu ajusto o pedido.", _chegada)
+            return
         # Resposta ao "PODE SIM QUAL SABOR VOCE QUER" do acrescimo: o que
         # acrescentar vai para a equipe, que confere se ainda da tempo.
         if _memoria_balcao.get("acrescimo_aberto"):
@@ -6005,6 +6025,16 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                     _texto_b = f"{_texto_b}\n\n{_seguinte_pz}".strip()
             print(f"[balcao] user={user} resposta padrao do dono: {_nome_b}"
                   f"{' (' + _fora + ')' if _fora else ''}")
+            # Primeira mensagem ja e uma pergunta pronta ("quanto tempo de
+            # antecedencia para 500?"): saia sem saudacao e sem o aviso do
+            # inicio (teste no WhatsApp, 22/10). O aviso entra sozinho depois
+            # da saudacao (enviar_em_blocos).
+            if not _equipe_b and not _memoria_balcao.get("saudacao_feita"):
+                _nome_sb = f", {_memoria_balcao['name']}" if _memoria_balcao.get("name") else ""
+                _texto_b = (f"{horario.saudacao(horario.agora())}{_nome_sb}! "
+                            f"Eu sou a Sandrinha da BALBS 💛\n\n{_texto_b}")
+                _memoria_balcao["saudacao_feita"] = True
+                conversation_memory.save(user, _memoria_balcao)
             _responder_direto(user, items, _texto_b, _chegada)
             if _equipe_b:
                 perform_transfer(user, reason=f"{_nome_b}: {_texto_cliente[:120]}",
