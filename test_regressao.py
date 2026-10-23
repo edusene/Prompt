@@ -3696,6 +3696,27 @@ checa("22/10 'disponiveis'/'orcamentos' nao sao produto",
       and app._resposta_de_faq("vcs fazem orçamentos?", {}) is None
       and app._resposta_de_faq("vcs tem mini hamburgues", {})[0] == "produto inexistente")
 
+# ── Teste da Thayline (22/10): erros de fluxo ──
+checa("22/10 endereco: 'dia 30' e 'pra agora' nao entram na rua",
+      [_extract_data_from_message(t, ConversationState(phone="t")).get("endereco") for t in (
+          "igarape rua wilamam maia 5994 dia 30 as 18:30", "igarape rua wilmam maia 5994 dia 22 pra agora",
+          "rua dia 15 de maio 20", "rua sete de setembro 200")]
+      == ["rua wilamam maia 5994", "rua wilmam maia 5994", "rua dia 15 de maio 20", "rua sete de setembro 200"])
+from agents.conversation import item_fora_do_cardapio as _fora22
+checa("22/10 'camudo de camarao' e erro de digitacao, nao item fora",
+      _fora22("50 camudo de camarao") == "" and _fora22("50 travesseirinhos de carne") != "")
+checa("22/10 'orcamento para 50 pessoas' usa a regra dos 10 por pessoa",
+      (app._resposta_do_balcao("queria fazer um orçamento para 50 pessoas", {}) or ("",))[0] == "festa pessoas")
+_mv22 = memoria_mod._empty()
+_mv22.update({"volume_pendente": 200, "items": [{"name": "Coxinha", "quantity": 50},
+              {"name": "Croquete", "quantity": 25}, {"name": "Enroladinho de Salsicha", "quantity": 25},
+              {"name": "Pastel queijo", "quantity": 25}]})
+checa("22/10 sabores somando menos que o total: pergunta o que falta",
+      memoria_mod.falta_para_o_volume(_mv22) == 75
+      and "75 que faltam, ou fica com 125" in memoria_mod.pergunta_bloqueante(_mv22))
+_mv22["items"].append({"name": "Quibe", "quantity": 75})
+checa("22/10 sabores completando o total: nada falta", memoria_mod.falta_para_o_volume(_mv22) == 0)
+
 print()
 print("=" * 78)
 print("FALHAS:", _falhas or "nenhuma")

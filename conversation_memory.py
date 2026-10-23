@@ -1462,6 +1462,40 @@ def tem_salgado_na_ficha(memoria: dict) -> bool:
         _sem_acento(str(i.get("name", "")))) for i in memoria.get("items") or [])
 
 
+def _soma_de_salgados(memoria: dict) -> int:
+    """Salgados da ficha mais os que esperam o sabor ("25 pastel" sem sabor)."""
+    total = 0
+    for i in memoria.get("items") or []:
+        if isinstance(i, dict) and i not in _itens_que_nao_sao_salgado(memoria):
+            try:
+                total += int(float(i.get("quantity") or 0))
+            except (TypeError, ValueError):
+                pass
+    for p in memoria.get("sabores_pendentes") or []:
+        if isinstance(p, dict) and p.get("termo") not in ("refrigerante", "docinho"):
+            try:
+                total += int(p.get("qtd") or 0)
+            except (TypeError, ValueError):
+                pass
+    return total
+
+
+def falta_para_o_volume(memoria: dict) -> int:
+    """Quantos salgados faltam para o total que o cliente disse. 0 = nada.
+
+    "2 centos fritos" e depois "50 coxinha 25 enroladinho 25 croquete 25
+    pastel": 125 de 200, e o pedido seguia sem aviso (teste de 22/10).
+    """
+    try:
+        volume = int(memoria.get("volume_pendente") or 0)
+    except (TypeError, ValueError):
+        return 0
+    if not volume or not tem_salgado_na_ficha(memoria):
+        return 0
+    soma = _soma_de_salgados(memoria)
+    return volume - soma if 0 < soma < volume else 0
+
+
 def _itens_que_nao_sao_salgado(memoria: dict) -> list[dict]:
     """Combos, bebidas e doces da ficha: a divisao do cento nao os apaga."""
     return [dict(i) for i in memoria.get("items") or []
@@ -2383,6 +2417,12 @@ def etapa_coberta(memoria: dict, reply: str, agora=None) -> bool:
                     return False
         return all(_sem_acento(str(p.get("termo"))) in texto for p in pendentes)
 
+    # Soma dos sabores abaixo do total dito: a resposta tem de dizer quanto
+    # falta (22/10).
+    falta = falta_para_o_volume(memoria)
+    if falta:
+        return "?" in reply and str(falta) in texto and "falt" in texto
+
     try:
         import cardapio
         import cardapio_catalogo
@@ -2653,6 +2693,14 @@ def pergunta_bloqueante(memoria: dict, agora=None) -> str:
             blocos.append(f"{p.get('qtd')} de {p.get('termo')}:\n"
                           + "\n".join(f"• {o}" for o in opcoes))
         return "Me confirma o sabor:\n" + "\n".join(blocos) + "\nQual você quer? 😊"
+
+    falta = falta_para_o_volume(memoria)
+    if falta:
+        volume, soma = int(memoria["volume_pendente"]), int(memoria["volume_pendente"]) - falta
+        # Uma pergunta so: _conferir_uma_pergunta cortava o "Ou fica com 125
+        # mesmo?" e o "fica assim" seguinte nao tinha a que responder.
+        return (f"Você pediu {volume} salgados e os sabores somam {soma}. Quais sabores "
+                f"completam os {falta} que faltam, ou fica com {soma} mesmo? 😊")
 
     frase = _frase_de_lote(memoria)
     if frase:

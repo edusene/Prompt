@@ -1047,7 +1047,11 @@ _FAQ_DO_DONO = (
      "Bora pedir quantas? 😊", False),
     ("festa pessoas", _re_mod.compile(r"\b(?:quantos|quantidade|quanto)\b.{0,50}\b(?:pessoas|convidados|adolescentes|criancas)\b"
                                       r"|\b(?:festa|aniversario|evento)\b.{0,30}\b\d{2,4}\s*(?:pessoas|convidados)\b.{0,40}\b(?:quantos|quantidade|preciso|recomend)"
-                                      r"|\bpor\s+pessoa\b"),
+                                      r"|\bpor\s+pessoa\b"
+                                      # "queria fazer um orcamento para 50 pessoas" ia
+                                      # para a equipe (teste de 22/10): a regra dos 10
+                                      # por pessoa (Balbino, 13/10) responde.
+                                      r"|\borcament\w*\b.{0,30}\b\d{2,4}\s*(?:pessoas|convidados)\b"),
      _faq_festa, False),
     ("porcao menor", _re_mod.compile(r"\bporc\w*\s+menor|\bmenos\s+de\s+25\b|\b\d{1,2}\s+de\s+cada\s+sabor\b"
                                      r"|\bquantidade\s+minima\b|\bminimo\s+de\s+salgad|\bpedido\s+minimo\s+de\s+salgad"),
@@ -5777,6 +5781,20 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                 items[0]["text"] = _doce_ctx
                 _texto_cliente = _doce_ctx
                 print(f"[doce] user={user} 'misto' depois de falar de docinho -> {_doce_ctx!r}")
+        # "Ou fica com 125 mesmo?" -> "fica assim": o total dito antes sai da
+        # ficha e o pedido segue com o que ja tem (22/10).
+        if conversation_memory.falta_para_o_volume(_memoria_balcao):
+            _ult_vol = next((m.get("parts", [{}])[0].get("text", "") or ""
+                             for m in reversed(memory.get(user))
+                             if m.get("role") == "assistant"), "")
+            _tn_vol = facts.normalize(_texto_cliente or "")
+            if ("ou fica com" in facts.normalize(_ult_vol)
+                    and not _re_mod.search(r"\d+\s*[a-z]{3,}", _tn_vol)
+                    and (_e_concordancia(_texto_cliente)
+                         or _re_mod.search(r"\b(?:fica|assim|mesmo|so\s+(?:isso|esses|esse)|pode\s+ser)\b", _tn_vol))):
+                _memoria_balcao["volume_pendente"] = 0
+                conversation_memory.save(user, _memoria_balcao)
+                print(f"[funil] user={user} cliente ficou com o que ja pediu; total antigo descartado")
         # Resposta ao "PODE SIM QUAL SABOR VOCE QUER" do acrescimo: o que
         # acrescentar vai para a equipe, que confere se ainda da tempo.
         if _memoria_balcao.get("acrescimo_aberto"):
@@ -7291,6 +7309,23 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                 return ("TRANSFERENCIA RECUSADA. O pedido ainda nao foi fechado: o item ja "
                         "foi somado a ficha. Apresente o espelho atualizado com a pergunta "
                         "de confirmacao.")
+            # Pedido comum que ela mesma atende (22/10): "pedido de 2 cento de
+            # docinhos" foi para a equipe comercial, "trocar sabores" antes de
+            # confirmar recebeu "ja transferi", "verificar disponibilidade" de
+            # brigadeiro chamou a equipe. Acima de 500 salgados o codigo ja
+            # transfere antes do modelo.
+            if (not _memoria.get("pedido_enviado")
+                    and not conversation_memory.em_pos_pedido(_memoria)
+                    and _salgados_da_ficha(_memoria) <= 500
+                    and _re_mod.search(r"^(?:cliente\s+)?(?:pedido|encomenda|quer|deseja|solicit)"
+                                       r"|disponibilidade|troc\w*\s+(?:de\s+|os\s+)?sabor|docinh|brigad|beijinh",
+                                       facts.normalize(reason or ""))):
+                print(f"[transbordo] user={user} RECUSADO: pedido comum: {reason!r}")
+                return ("TRANSFERENCIA RECUSADA. Isto e pedido comum e quem atende e voce: "
+                        "o pedido ainda nao foi fechado. Se o cliente quer trocar os sabores, "
+                        "diga que pode e peca os sabores certos. Docinhos (bandeja, meio cento, "
+                        "cento) e salgados ate 500 voce mesma anota. Siga o funil e nao diga "
+                        "que vai chamar ninguem.")
             performed = perform_transfer(user, reason, send_message=False)
             _transfer_done = True
             if performed:
@@ -8074,6 +8109,29 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                          else "Combinado! 💛 Qualquer coisa, estamos por aqui.")
                 print(f"[pos-pedido] user={user} resposta do modelo sobre conferencia/comprovante "
                       f"trocada (vazou instrucao={_vazou_instrucao})")
+
+        # Promessa de equipe que ninguem chamou: "vou verificar com a equipe
+        # para agilizar", "Posso chamar a equipe para verificar a
+        # disponibilidade dos docinhos" (teste de 22/10). Sem transferencia, a
+        # frase sai.
+        if reply and not _transfer_done and not _RX_LINHA_DE_RESUMO.search(reply):
+            _frases_eq = [f for f in _RX_FIM_DE_FRASE.split(reply) if f.strip()]
+            _sem_eq = [f for f in _frases_eq if not _re_mod.search(
+                r"\b(?:vou|posso|irei|vamos|deixa\s+eu)\s+(?:chamar|verificar|consultar|confirmar|checar|ver)\b"
+                r".{0,40}\b(?:equipe|gerencia|cozinha|producao)\b", facts.normalize(f))]
+            if len(_sem_eq) != len(_frases_eq):
+                reply = " ".join(f.strip() for f in _sem_eq).strip() or (
+                    _proxima_pergunta_do_funil(_memoria) if _memoria.get("items")
+                    else "Qual delícia você quer pedir? 😊")
+                print(f"[equipe] user={user} promessa de verificar com a equipe sem transferencia; frase removida")
+        # Oferta de acompanhamento sem nada no pedido ("nao obrigada" a mini
+        # pizza virou "Pra acompanhar, vai um Refrigerante 2L...", 22/10).
+        if (reply and not _memoria.get("items") and not _memoria.get("volume_pendente")
+                and not _memoria.get("sabores_pendentes") and not _memoria.get("combo_pendente")
+                and not conversation_memory.pergunta_bloqueante(_memoria)
+                and _ofereceu_acompanhamento(reply)):
+            reply = "Tudo bem! 😊 Quer pedir outra coisa?"
+            print(f"[upsell] user={user} oferta sem itens no pedido; trocada")
 
         # "Prazer, Balbino!" no meio da conversa (15/10) e o modelo prometendo
         # horario ("Sim, consigo entregar as 12h" no intervalo, 15/10 12h01):

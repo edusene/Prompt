@@ -1645,7 +1645,11 @@ def item_fora_do_cardapio(texto: str) -> str:
             continue
         # "500 SALASICHAS": erro de digitacao de produto que existe (17/10).
         _corr = _corrigir_grafia(primeira)
-        if _corr and _produto_conhecido(_corr):
+        # "50 camudo de camarao": "canudo" sozinho e ambiguo (frango ou
+        # camarao), o nome inteiro corrigido nao. Ela avisava "Nao temos" e
+        # punha o Canudinho de Camarao no pedido (teste de 22/10).
+        if _corr and (_produto_conhecido(_corr)
+                      or _produto_conhecido(nome.replace(primeira, _corr, 1))):
             continue
         raiz = _forma_de_busca(primeira)[:5]
         if any(any(w.startswith(raiz) for w in n.split()) for n in nomes):
@@ -2191,6 +2195,16 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
             addr = " ".join(addr.split())
             addr = re.split(r"\s\d{1,2}/\d{1,2}(?:/\d{2,4})?\b|\s(?:as|às)\s+\d",
                             addr, maxsplit=1, flags=re.IGNORECASE)[0].strip(" ,-")
+            # "rua wilamam maia 5994 dia 30 as 18:30": o "dia 30" ia para a
+            # comanda (teste de 22/10). So DEPOIS do numero da casa: "Rua Dia
+            # 15 de Maio" e "Av. Domingos" sao nome de rua.
+            _num_casa = re.search(r"\d+", addr)
+            if _num_casa:
+                _cauda = re.split(r"\s(?:para\s+o\s+|pro\s+|no\s+)?dia\s+\d{1,2}\b"
+                                  r"|\s(?:pra|para)\s+(?:agora|hoje|amanh[aã])\b|\s(?:hoje|amanh[aã])\b"
+                                  r"|\s(?:segunda|ter[cç]a|quarta|quinta|sexta|s[aá]bado|domingo)\b",
+                                  addr[_num_casa.end():], maxsplit=1, flags=re.IGNORECASE)[0]
+                addr = (addr[:_num_casa.end()] + _cauda).strip(" ,-")
             _bairro_msg = detectar_bairro(message)
             import facts as _fx_end
             if _bairro_msg:
