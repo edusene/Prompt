@@ -300,8 +300,9 @@ _PRODUTOS_GRANDES = {
     "quiche de carne de sol": "Quiche de Carne de Sol",
     # "1 cento de mini quiche" virava 100 Quiches de Frango a R$ 12,00 e a falta
     # da mini so aparecia no fim (Thayline, 23/10).
-    # shortcut: no cardapio "Mini quiches (Unidade) = R$ 150,00" parece ser a
-    # caixa com um cento; confirmar com o dono antes de a mini voltar ao estoque.
+    # Preco e unidade seguem o cardapio digital (decisao do dono, 23/10): hoje
+    # "Mini quiches (Unidade) = R$ 150,00". Se a unidade for a caixa com um
+    # cento, o acerto e no cardapio (o nome do item), nao aqui.
     "mini quiche": "Mini quiches",
     "mini quiches": "Mini quiches",
     "saltenha": "Saltenha Assada",
