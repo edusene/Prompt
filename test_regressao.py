@@ -3788,6 +3788,18 @@ checa("23/10 'Rua Quinta do Sol 45' nao muda a data para quinta",
                                      ConversationState(phone="t")).get("data_iso")
       and _extract_data_from_message("rua guanabara 45 quinta as 17h",
                                      ConversationState(phone="t")).get("data_iso"))
+_mq23 = memoria_mod._empty()
+_mq23.update({"name": "Ana", "modality": "entrega", "data_agendada": "hoje, sexta-feira (23/10)",
+              "horario": "17h", "items": [{"name": "Coxinha", "quantity": 50}]})
+_svq23 = memoria_mod.save
+memoria_mod.save = lambda *a, **k: None
+memoria_mod.registrar_pedido_enviado("55q23", _mq23)
+memoria_mod.save = _svq23
+_rq23 = app._resposta_do_balcao("que horas chega?", _mq23)
+checa("23/10 'que horas chega?' depois do pedido diz o horario dele, nao o da fabrica",
+      _rq23 and _rq23[0] == "quando_chega" and "hoje, sexta-feira (23/10) às 17h" in _rq23[1], str(_rq23))
+checa("23/10 'que horas voces abrem?' continua sendo o expediente",
+      (app._resposta_do_balcao("que horas voces abrem?", memoria_mod._empty()) or ("",))[0] != "quando_chega")
 checa("22/10 '25 misto' com doce na ficha continua sendo o salgado",
       app._doce_misto_do_contexto("25 misto", "Qual docinho?", "Cento de Brigadeiros (100 un)") == "")
 

@@ -116,6 +116,9 @@ def _empty() -> dict:
         # ultimo_pedido_em: "meu marido ja ta indo buscar" pede a resposta de
         # retirada, "saiu pra entrega?" a de entrega.
         "ultimo_pedido_modalidade": "",
+        # "hoje, sexta-feira (23/10) às 17h": o "que horas chega?" depois do
+        # pedido responde com ele (23/10).
+        "ultimo_pedido_quando": "",
         # Pedido dito por volume dividido ("1 cento pastel e bolinha",
         # "metade/metade"). O balcao responde esses com o valor na hora.
         "pedido_por_volume": False,
@@ -3085,7 +3088,7 @@ def _so_dados_do_cliente(memoria: dict) -> dict:
     for campo in _CAMPOS_DO_CLIENTE:
         if memoria.get(campo):
             limpa[campo] = memoria[campo]
-    for campo in ("ultimo_pedido_em", "ultimo_pedido_modalidade"):
+    for campo in ("ultimo_pedido_em", "ultimo_pedido_modalidade", "ultimo_pedido_quando"):
         if memoria.get(campo):
             limpa[campo] = memoria[campo]
     return limpa
@@ -3109,6 +3112,9 @@ def registrar_pedido_enviado(phone: str, memoria: dict) -> None:
         limpa[campo] = memoria.get(campo, False)
     limpa["ultimo_pedido_em"] = _dt.datetime.now().isoformat(timespec="seconds")
     limpa["ultimo_pedido_modalidade"] = memoria.get("modality") or ""
+    _dia, _hora = memoria.get("data_agendada") or "", memoria.get("horario") or ""
+    limpa["ultimo_pedido_quando"] = (f"{_dia} às {_hora}" if _dia and _hora
+                                     else _dia or (f"às {_hora}" if _hora else ""))
 
     memoria.clear()
     memoria.update(limpa)

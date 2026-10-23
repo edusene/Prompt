@@ -1202,6 +1202,12 @@ def _resposta_de_faq(texto: str, memoria: dict | None = None) -> tuple[str, str,
     return None
 
 
+_RX_QUANDO_CHEGA = _re_mod.compile(
+    r"\b(?:que\s+horas?|qual\s+(?:o\s+)?horario|quando)\b.{0,25}"
+    r"\b(?:cheg\w*|entreg\w*|fica\s+pronto|sai|vem|vao\s+trazer|traz\w*)\b"
+    r"|\b(?:cheg\w*|entreg\w*)\b.{0,15}\bque\s+horas?\b")
+
+
 def _resposta_do_balcao(texto: str, memoria: dict) -> tuple[str, str, bool] | None:
     """(nome, resposta exata do dono, passa para a equipe) ou None."""
     t = facts.normalize(texto or "")
@@ -1217,6 +1223,18 @@ def _resposta_do_balcao(texto: str, memoria: dict) -> tuple[str, str, bool] | No
                                    or conversation_memory.em_pos_pedido(memoria))
     if _RX_MUDA_ENDERECO.search(t) and pedido_feito:
         return "endereco", TEXTO_MUDA_ENDERECO, True
+    # "que horas chega?" depois do pedido fechado e o horario DELE, nao o da
+    # fabrica: saia o expediente e "Qual o seu pedido?" (teste no WhatsApp, 23/10).
+    if (_RX_QUANDO_CHEGA.search(t) and not aberto
+            and conversation_memory.em_pos_pedido(memoria)):
+        quando = memoria.get("ultimo_pedido_quando") or ""
+        if (memoria.get("ultimo_pedido_modalidade") or "").lower() == "retirada":
+            resp = (f"Seu pedido fica pronto {quando}, no balcão da fábrica! 💛" if quando
+                    else "Seu pedido fica pronto no horário combinado, no balcão da fábrica! 💛")
+        else:
+            resp = (f"Seu pedido está agendado para {quando}! 🛵💛" if quando
+                    else "Seu pedido segue pra entrega no horário combinado! 🛵💛")
+        return "quando_chega", resp, False
     # "Quero para entrega resolvi" logo depois de fechar uma retirada: e o
     # MESMO pedido mudando, nao um pedido novo. Virou um segundo pedido de 100
     # coxinhas (teste do dono, 10/10 08h45). A equipe ajusta o que ja saiu.
