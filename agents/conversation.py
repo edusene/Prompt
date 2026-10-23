@@ -1228,6 +1228,10 @@ _RX_CENTO_SOLTO = re.compile(
 # "QUERO 400 VARIADOS" tambem e o total (teste do dono, 03/10).
 _RX_TOTAL_DE_SALGADOS = re.compile(
     r"(?<![\d,.])(\d{2,3})\s+(?:mini\s*)?(?:salgad\w*|variad\w*|sortid\w*|unidades)\b(?!\s+filho)")
+_RX_NOME_DE_RUA = re.compile(
+    r"\b(?:rua|r\.|av\.?|avenida|travessa|tv\.?|alameda|al\.?|estrada|rodovia|pra[cç]a)"
+    r"\s+[^\d,.;\n]{2,60}?(?=\s*,?\s*(?:n[º°o.]?\s*)?\d)",
+    re.IGNORECASE)
 _RX_TOTAL_POR_PREPARO = re.compile(r"(?<![\d,.])(\d{2,3})\s+(?:frit|assad)[oa]s\b")
 
 
@@ -2168,7 +2172,10 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
                 _now = _horario.datetime.strptime(state.current_time, "%d/%m/%Y %H:%M")
             except Exception:
                 _now = None
-        data = detectar_data(message, _now)
+        # O nome da rua nao e data: "Rua Quinta do Sol 45" mudou o pedido de
+        # hoje para quinta (teste no WhatsApp, 23/10). Sai so o nome, ate o
+        # numero da casa; o que vem depois dele continua valendo.
+        data = detectar_data(_RX_NOME_DE_RUA.sub(" ", message or ""), _now)
         # "Pra agora" e pedido de hoje (BLOCO 0: "agora/ja" registra a data de
         # hoje e o horario atual) - sem isto a cliente dizia "pra agora" e
         # ainda recebia "Data do pedido" na lista do que faltava.

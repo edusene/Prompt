@@ -3773,6 +3773,21 @@ memoria_mod.merge(_mmi22, _emi22, _emi22, texto=_tmi22)
 checa("22/10 'pode ser misto' com o cento de brigadeiro na ficha muda o sabor dele",
       [(i["name"], i.get("sabor")) for i in _mmi22["items"]]
       == [("Cento de Brigadeiros (100 un)", "Mista (brigadeiro e beijinho)")], str(_mmi22["items"]))
+_esp23 = ("Cliente: Eduardo\n📅 Data: 29/10/2026\n• 1 un - Cento de Brigadeiros (100 un) — R$ 140,00\n"
+          "💳 Pgt: Dinheiro (troco para R$ 550,00)\nPosso confirmar pra quinta (29/10) às 17h? 💛")
+checa("23/10 'pode ser misto' no espelho muda o pedido e nao fecha",
+      not app._confirmou_o_resumo(_esp23, "pode ser misto")
+      and app._mexeu_no_pedido_no_aceite(_esp23, "pode ser misto")
+      and not app._confirmou_o_resumo(_esp23, "pode ser amanha")
+      and app._confirmou_o_resumo(_esp23, "pode ser")
+      and app._confirmou_o_resumo(_esp23, "sim, pode confirmar")
+      and app._confirmou_o_resumo(_esp23, "pode, em dinheiro")
+      and app._confirmou_o_resumo(_esp23, "sim, nada mais"))
+checa("23/10 'Rua Quinta do Sol 45' nao muda a data para quinta",
+      not _extract_data_from_message("entrega na Rua Quinta do Sol 45 igarape",
+                                     ConversationState(phone="t")).get("data_iso")
+      and _extract_data_from_message("rua guanabara 45 quinta as 17h",
+                                     ConversationState(phone="t")).get("data_iso"))
 checa("22/10 '25 misto' com doce na ficha continua sendo o salgado",
       app._doce_misto_do_contexto("25 misto", "Qual docinho?", "Cento de Brigadeiros (100 un)") == "")
 

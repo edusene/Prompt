@@ -5417,6 +5417,33 @@ def _parece_fechamento(texto: str) -> bool:
     return any(facts.normalize(m) in limpo for m in _MARCAS_DE_FECHAMENTO)
 
 
+# O que muda o pedido dentro de um "pode ser": sabor, item, dia, hora.
+_RX_MUDANCA_NO_ACEITE = _re_mod.compile(
+    r"\b(?:mist[oa]s?|beijinh\w*|brigad\w*|docinh\w*|sabor\w*|tambem|outr[oa]s?"
+    r"|frit[oa]s?|assad[oa]s?|grandes?|mini|refri\w*|coca|guarana|bandeja|cento|meio"
+    r"|amanha|segunda|terca|quarta|quinta|sexta|sabado|domingo|dia\s+\d|\d{1,2}\s*h\w*"
+    r"|as\s+\d|entrega|retirada|retirar|pix|cartao|dinheiro)\b")
+
+
+def _mexeu_no_pedido_no_aceite(ultima_do_agente: str, texto_do_cliente: str) -> bool:
+    """Resposta ao espelho que aceita E muda alguma coisa: "pode ser misto".
+
+    "pode ser misto" trocou o sabor do brigadeiro e fechou o pedido na mesma
+    resposta, sem o cliente ver o espelho novo (teste no WhatsApp, 23/10).
+    """
+    anterior = " ".join(facts.normalize(ultima_do_agente or "").split())
+    if not any(facts.normalize(m) in anterior for m in _MARCAS_DE_RESUMO):
+        return False
+    limpo = " ".join(facts.normalize(texto_do_cliente or "").split())
+    if not limpo:
+        return False
+    # O que o espelho ja mostra nao e mudanca: "pode, no pix" com Pgt: Pix.
+    if any(m.group(0) not in anterior for m in _RX_MUDANCA_NO_ACEITE.finditer(limpo)):
+        return True
+    ext = _extract_data_from_message((texto_do_cliente or "").lower(), ConversationState(phone=""))
+    return bool(ext.get("items") or ext.get("doces") or ext.get("bebidas"))
+
+
 def _confirmou_o_resumo(ultima_do_agente: str, texto_do_cliente: str) -> bool:
     """O cliente esta aceitando o espelho que acabou de receber?
 
@@ -5437,6 +5464,8 @@ def _confirmou_o_resumo(ultima_do_agente: str, texto_do_cliente: str) -> bool:
 
     palavras = limpo.split()
     if any(r in palavras or r in limpo for r in _RESSALVAS_NO_ACEITE):
+        return False
+    if _mexeu_no_pedido_no_aceite(ultima_do_agente, texto_do_cliente):
         return False
 
     # "Pode ser 25 esfirras de carne entao" muda o pedido: o item entra e o
@@ -7323,6 +7352,16 @@ def _handle_flush(user: str, items: list[dict]) -> None:
         _aceitou_o_resumo = _confirmou_o_resumo(last_assistant_text, text_only)
         _sem_aceite_no_espelho = (not _aceitou_o_resumo
                                   and _espelho_sem_aceite(last_assistant_text, text_only))
+        # "pode ser misto": aceita e muda. O espelho novo vai antes do envio.
+        _mudou_no_aceite = (not _aceitou_o_resumo
+                            and _mexeu_no_pedido_no_aceite(last_assistant_text, text_only))
+        if _mudou_no_aceite:
+            print(f"[espelho] user={user} resposta ao espelho muda o pedido - espelho novo antes de fechar")
+            dynamic_prompt += (
+                "\n\n=== O CLIENTE MUDOU O PEDIDO NA RESPOSTA AO RESUMO ==="
+                "\nAplique a mudanca, apresente o resumo ATUALIZADO e pergunte se pode "
+                "confirmar. NAO chame send_order_to_cardapio neste turno."
+            )
         if _aceitou_o_resumo:
             print(f"[flush] user={user} cliente confirmou o resumo - fechamento obrigatorio")
             dynamic_prompt += (
@@ -7560,6 +7599,11 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                 print(f"[espelho] user={user} send_order barrado: sem aceite do cliente")
                 return ("ERRO: o cliente NAO confirmou o resumo. O pedido NAO foi enviado. "
                         f"Responda apenas: {TEXTO_PEDE_CONFIRMACAO}")
+            if _mudou_no_aceite:
+                print(f"[espelho] user={user} send_order barrado: cliente mudou o pedido no aceite")
+                return ("ERRO: o cliente mudou o pedido na resposta ao resumo. O pedido NAO "
+                        "foi enviado. Apresente o resumo ATUALIZADO (chame calculate_order) "
+                        "e pergunte se pode confirmar.")
             # Campos que nao dependem do modelo lembrar de preencher.
             # whatsapp_message_id e a chave de idempotencia do cardapio: com ela,
             # reenviar o mesmo pedido nunca cria duplicata. Deixar isso a cargo
@@ -7896,8 +7940,13 @@ def _handle_flush(user: str, items: list[dict]) -> None:
         if _sem_aceite_no_espelho and not _pedido_saiu and _parece_fechamento(reply):
             print(f"[espelho] user={user} modelo fechou sem aceite; pergunta de novo")
             reply = TEXTO_PEDE_CONFIRMACAO
+        # "pode ser misto": o espelho novo, e nao o fechamento (23/10).
+        if _mudou_no_aceite and not _pedido_saiu and _parece_fechamento(reply):
+            print(f"[espelho] user={user} modelo fechou com o pedido mudado; espelho novo")
+            reply = ((_numeros_do_pedido(_memoria) or {}).get("resumo_formatado")
+                     or TEXTO_PEDE_CONFIRMACAO)
         if ((_aceitou_o_resumo or _parece_fechamento(reply))
-                and not _sem_aceite_no_espelho
+                and not _sem_aceite_no_espelho and not _mudou_no_aceite
                 and not _pedido_saiu and not _pedido_nao_entrou
                 and not _transfer_done):
             # Antes de transferir, TENTA ENVIAR. A ficha tem tudo o que o
