@@ -45,3 +45,7 @@ chat*.txt
 
 # Transcricoes de audio e prints trocados por WhatsApp: correspondencia, nao codigo
 Audio*.txt
+
+# Saida do graphify (grafo local, regeneravel)
+graphify-out/
+.claude/settings.local.json

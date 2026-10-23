@@ -1,0 +1,46 @@
+# Exclusões do grafo (graphify). Ajustado ao projeto Sandrinha (Python/Flask).
+# Nunca indexar segredos, dependências, caches, saídas geradas nem dados de clientes.
+
+# Segredos e credenciais
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+auth.json
+credentials.json
+
+# Dependências e ambiente
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+
+# Saídas geradas
+graphify-out/
+dist/
+build/
+*.egg-info/
+*.log
+
+# Dados de negócio e de clientes (conversas, uploads, cardápio, backups)
+uploads/
+chat*.txt
+Audio*.txt
+fixtures/
+*.docx
+*.db
+*.sqlite3
+backup_knowledge_pre_reindex.json
+/*.jpeg
+/*.jpg
+/*.png
+static/*.png
+static/*.jpg
+static/*.jpeg
+static/*.ico
+
+# Skills vendidas e configuracao local do cliente (nao sao codigo do projeto)
+.claude/

@@ -1,5 +1,7 @@
 # WhatsApp AI Agent + CRM Panel — Datafy API + OpenAI
 
+> **Documentação para agentes e desenvolvedores:** `AGENTS.md` (instruções e comandos), `PRODUCT.md` (produto e regras), `docs/architecture.md`, `docs/onboarding.md`, `docs/quality.md` e `docs/setup.md`. Este README mantém a configuração de implantação. Algumas partes podem estar desatualizadas; as divergências conhecidas estão em `docs/setup.md`.
+
 Agente de IA no WhatsApp com painel CRM completo. Usa a [Datafy API](https://app.datafyapi.com.br) como gateway oficial para a Meta Cloud API, e OpenAI como LLM. Mensagens sao agrupadas via debounce e respostas chegam divididas em multiplas mensagens.
 
 ---
