@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "skills": {
+    "differential-review": {
+      "source": "trailofbits/skills",
+      "ref": "main",
+      "sourceType": "github",
+      "skillPath": "plugins/differential-review/skills/differential-review/SKILL.md",
+      "computedHash": "9f254dc8193c5720ff54f0848619713d3cc1093d5d9b606de64d4dee55416b98"
+    }
+  }
+}

@@ -1,0 +1,7 @@
+# Gate minimo: so regras que hoje tem zero violacoes (medido em 23/10/2026).
+# Erro de sintaxe e nome indefinido sao defeito, nao estilo. O restante do
+# ruff padrao continua so como medicao (docs/quality.md).
+extend-exclude = [".venv", "graphify-out", ".claude"]
+
+[lint]
+select = ["E9", "F63", "F7", "F82"]

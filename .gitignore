@@ -49,3 +49,4 @@ Audio*.txt
 # Saida do graphify (grafo local, regeneravel)
 graphify-out/
 .claude/settings.local.json
+.claude/skills/

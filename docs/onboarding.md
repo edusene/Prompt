@@ -29,6 +29,8 @@ Esperado: última linha `FALHAS: nenhuma`. Este teste não usa rede, banco nem m
 
 O painel fica em `http://localhost:<PORT>/panel` (padrão 5000). Login com `ADMIN_USER` e `ADMIN_PASSWORD`. Para receber mensagens reais é preciso expor o servidor (ex.: `ngrok`), o que envolve a Meta/Datafy e deve ser feito com autorização.
 
+Cuidado: o app carrega o `.env` com `override=True`. Rodar localmente com o `.env` de produção conecta no banco e na Datafy reais, e o agendador de follow-ups roda. O app também precisa de PostgreSQL: em SQLite ele não inicializa (ver `docs/architecture.md`).
+
 ## 5. Antes de mudar comportamento
 
 1. Escreva o caso em `test_regressao.py`, com o defeito reproduzido.

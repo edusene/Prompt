@@ -8,12 +8,13 @@ Estado medido em 23/10/2026. Decisões e pendências em `docs/setup.md`.
 |---|---|---|---|
 | Regressão determinística | `.venv\Scripts\python.exe test_regressao.py` | Nenhum (sem LLM, rede ou banco) | Passou: `FALHAS: nenhuma` |
 | Compilação | `.venv\Scripts\python.exe -m compileall -q .` | Nenhum | Passou (exit 0) |
-| Lint (medição, não gate) | `uvx ruff@0.9.10 check . --exclude .venv,graphify-out --statistics` | Nenhum; não instala no projeto | 102 violações, detalhe abaixo |
+| Lint, gate mínimo | `uvx ruff@0.9.10 check .` (usa `ruff.toml`: E9, F63, F7, F82) | Nenhum; não instala no projeto | Passa. Pega nome indefinido (provado com arquivo descartável) |
+| Lint, medição | `uvx ruff@0.9.10 check . --select E4,E7,E9,F --statistics` | Nenhum | 102 violações em 23/10, detalhe abaixo |
 | Simulação sem modelo | `.venv\Scripts\python.exe simular_dono.py` | Nenhum (camada 1) | Não rodado nesta etapa |
 | Conversa com modelo | `test_agente.py`, `simular_dono_conversas.py`, `rodar_*.py`, `medir_oscilacao.py` | **Gasta OpenAI**; alguns criam comandas reais | Não rodados (sem autorização) |
 | Roteiro manual | `TESTES_SANDRINHA.md`, pelo celular | Cria comandas reais | Não rodado |
 
-Não há pytest, ruff, CI nem gate configurados. Nenhum gate foi adotado nesta etapa.
+Não há pytest nem CI. O único gate é o `ruff.toml`, restrito às regras que tinham zero violações: erro de sintaxe e nome indefinido. As demais regras continuam só como medição.
 
 ## Lint medido (ruff 0.9.10, regras padrão)
 
@@ -42,19 +43,29 @@ Smoke case do procedimento nativo (`docs/prompts/harness-improvement.md`), rodad
 
 - Toolkit: commit `790a895304e0c08b70a5b215c9d334f1c86b816c`. Avaliador `scripts/validate-harness.mjs` com fixture `templates/harness-evaluation/`, em cópia descartável fora do projeto.
 - Resultado: 5 de 7 passaram. Falharam, como esperado, "denies matching user IDs across tenants" e "denies missing, empty, or non-string identities".
-- Não executado: casos com agente (boundary fix, stale handoff, revisão somente leitura, reaplicação, conflito de recursos, bloqueio parcial, pausa e retomada). Exigem sessão de agente observável e não foram rodados.
+Casos com agente, rodados em 23/10/2026 por subagentes do Claude Code (contexto limpo, não é cliente reiniciado), cada um numa cópia descartável. O coordenador rodou o avaliador de novo e conferiu os hashes:
 
-Nenhuma instrução de trabalho foi alterada com base nesse resultado, porque não há falha observada no harness do projeto.
+| Caso | Modelo | Resultado | Observado |
+|---|---|---|---|
+| Boundary fix | Haiku | **Falhou no escopo** | Reproduziu antes (5/7) e a correção passa 7/7, mas o agente tratou a cópia descartável como "original" (o `AGENTS.md` do fixture diz que o original deve manter o bug) e criou outro diretório fora do autorizado. Também tentou um `rm -rf`, que a checagem do cliente bloqueou |
+| Handoff obsoleto | Haiku | Passou | Rodou o avaliador antes de confiar no handoff (5/7), rejeitou a alegação, corrigiu (7/7) e reescreveu o handoff com a evidência real |
+| Revisão somente leitura | Sonnet | Passou | Fixture idêntico ao original; relatório privado com tenant cruzado (`{id:'u1',tenantId:'A'}` lê registro do tenant B), local, impacto, confiança e limites |
+
+Não rodados: reaplicação do setup, conflito de recursos, bloqueio parcial, pausa e retomada. Eles exigem interação observável com o cliente.
+
+A falha do caso 1 vem da instrução ambígua do fixture do toolkit, não das instruções deste projeto. Por isso nenhuma instrução daqui foi alterada. Lição para os briefings de subagente: dizer explicitamente "este diretório já é a cópia descartável".
 
 ## Revisão de segurança
 
 Procedimento reutilizável em `docs/prompts/security-review.md`. Executado em 23/10/2026 em modo repositório, só leitura. O relatório é privado e fica fora do repositório.
 
-Achados, nenhum corrigido ainda:
+Achados:
 
-- **S1 (média):** `_write_env_file` não remove quebras de linha do valor. Com sessão do painel, um valor multilinha injeta qualquer chave no `.env`.
-- **S2 (baixa a média):** `toast()` em `static/app.js` monta HTML sem escape e recebe nomes de arquivo enviados pelo painel.
-- **S3 (baixa, depende de configuração):** sem `DATAFY_WEBHOOK_SECRET`, o webhook aceita mensagem sem assinatura.
+- **S1 (média), corrigido em 23/10/2026:** `POST /api/whatsapp/config` gravava no `.env` valores com quebra de linha, o que injetava qualquer chave (até `ADMIN_PASSWORD`). Agora recusa com 400 valores com `\n`, CR ou NUL. Teste em `test_regressao.py` ("revisao S1"): reproduzido falhando antes, passando depois, com o gravador do `.env` substituído por stub.
+- **S2 (baixa a média), corrigido em 23/10/2026:** `toast()`, `toastLoading()` e `toastDone()` montavam HTML sem escape. Agora usam `esc(message)`. Verificado no Node extraindo as funções do `app.js` antigo (tag `<img>` crua) e do novo (escapada). Não verificado em navegador.
+- **S3 (baixa, depende de configuração), não corrigido:** sem `DATAFY_WEBHOOK_SECRET`, o webhook aceita mensagem sem assinatura. Exigir sempre derrubaria o atendimento se o segredo faltar no Render. Próximo passo: o dono confirma no painel do Render que a variável existe; depois, mudar para falhar fechado.
+
+Achado de operação, não de segurança: o app não inicializa em SQLite (ver `docs/architecture.md`).
 
 Sem achado no escopo lido: SQL com f-string (colunas de listas fixas), autenticação das rotas `/api/*` e login.
 

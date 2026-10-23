@@ -5,7 +5,7 @@ Atendente de WhatsApp da fábrica de salgados do Balbino. Produto, fluxos e regr
 ## Stack
 
 - Python (3.11+; o ambiente local usa a `.venv`), Flask + Flask-Limiter, APScheduler.
-- Banco: SQLite por padrão (`DB_DRIVER=sqlite`); PostgreSQL com pgvector quando `DB_DRIVER=postgresql`.
+- Banco: PostgreSQL com pgvector (`DB_DRIVER=postgresql`). O padrão do código é `sqlite`, mas o esquema usa sintaxe de PostgreSQL (`SERIAL`, `NOW()`) e o app não inicializa em SQLite (verificado em 23/10/2026).
 - LLM: OpenAI (`OPENAI_MODEL`, `OPENAI_TEMPERATURE`). Gateway WhatsApp: Datafy API (Meta Cloud).
 - Não há Node, Next.js, ORM, CI nem gates de lint configurados.
 
@@ -15,6 +15,8 @@ Atendente de WhatsApp da fábrica de salgados do Balbino. Produto, fluxos e regr
 - Rodar o painel e o webhook: `python app.py` (porta `PORT`, padrão 5000)
 - Teste determinístico (sem LLM, rede ou banco; custo zero): `python test_regressao.py`. Termina com `FALHAS: nenhuma` quando passa.
 - Compilação: `python -m compileall -q .`
+- Lint (gate mínimo, `ruff.toml`: erro de sintaxe e nome indefinido): `uvx ruff@0.9.10 check .`
+- Rodar o app localmente carrega o `.env` real (`load_dotenv(override=True)`): banco, Datafy e OpenAI de produção. Para teste, use uma cópia sem `.env` e variáveis sintéticas.
 
 ## Não rodar sem autorização explícita
 
