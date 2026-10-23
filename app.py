@@ -4872,7 +4872,7 @@ def _conferir_etapa_travada(user: str, reply: str, memoria: dict) -> str:
     # "Voce confirmou 25 Pao Pizza... totalizando 100 salgados." antes da
     # pergunta do que falta so repete o que ela diz (teste da Thayline, 23/10).
     if ("que faltam" in facts.normalize(travada)
-            and _re_mod.search(r"\b(?:confirm\w*|totaliz\w*|somam|soma|ficou|ficam)\b",
+            and _re_mod.search(r"\b(?:confirm\w*|totaliz\w*|somam|soma|ficou|ficam|pediu)\b",
                                facts.normalize(corpo))):
         corpo = ""
     if len([c for c in corpo if c.isalpha()]) < 12:
