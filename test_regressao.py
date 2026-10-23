@@ -3800,6 +3800,35 @@ checa("23/10 'que horas chega?' depois do pedido diz o horario dele, nao o da fa
       _rq23 and _rq23[0] == "quando_chega" and "hoje, sexta-feira (23/10) às 17h" in _rq23[1], str(_rq23))
 checa("23/10 'que horas voces abrem?' continua sendo o expediente",
       (app._resposta_do_balcao("que horas voces abrem?", memoria_mod._empty()) or ("",))[0] != "quando_chega")
+# Teste da Thayline (23/10): 2 centos assados com 100 nos sabores.
+def _mth23():
+    _m = memoria_mod._empty()
+    _m.update({"volume_pendente": 200, "pedido_por_volume": True, "items": [
+        {"name": "Pão Pizza", "quantity": 25, "price": 0.8}, {"name": "Calzone de frango", "quantity": 25, "price": 0.8},
+        {"name": "Esfirra de Carne", "quantity": 25, "price": 0.8}, {"name": "Enroladinho de Salsicha", "quantity": 25, "price": 0.8}]})
+    return _m
+_t23 = "ver 50 pao pizza 50 canudos metade camarao metade frango"
+_m23 = _mth23(); _e23 = _extract_data_from_message(_t23, ConversationState(phone="t"))
+memoria_mod.merge(_m23, _e23, _e23, texto=_t23)
+checa("23/10 '50 canudos metade camarao metade frango' e 25 de cada, e o pao pizza soma",
+      sorted((i["name"], i["quantity"]) for i in _m23["items"]) == sorted([
+          ("Pão Pizza", 75), ("Calzone de frango", 25), ("Esfirra de Carne", 25),
+          ("Enroladinho de Salsicha", 25), ("Canudinho de Camarao", 25), ("Canudinho de Frango", 25)])
+      and not memoria_mod.falta_para_o_volume(_m23), str(_m23["items"]))
+_m23b = _mth23()
+checa("23/10 'repetir os mesmos' completa com 50 de cada",
+      memoria_mod.repetir_os_mesmos(_m23b) and all(i["quantity"] == 50 for i in _m23b["items"])
+      and bool(app._RX_REPETIR_OS_MESMOS.search(facts.normalize("pode repetir os msm tem como"))))
+_men23 = memoria_mod._empty(); _men23.update({"volume_pendente": 100, "preparo_pendente": "assado"})
+_een23 = _extract_data_from_message("25 pao pizza 25 calzone 25 esfira 25 enroladinho", ConversationState(phone="t"))
+memoria_mod.merge(_men23, _een23, _een23, texto="25 pao pizza 25 calzone 25 esfira 25 enroladinho")
+_mef23 = memoria_mod._empty(); _mef23.update({"volume_pendente": 50, "preparo_pendente": "frito"})
+_eef23 = _extract_data_from_message("25 coxinha 25 enroladinho", ConversationState(phone="t"))
+memoria_mod.merge(_mef23, _eef23, _eef23, texto="25 coxinha 25 enroladinho")
+checa("23/10 'enroladinho' em pedido de assados e o com Catupiry; em fritos, o de salsicha",
+      "Enroladinho de salsicha com Catupiry" in [i["name"] for i in _men23["items"]]
+      and "Enroladinho de Salsicha" in [i["name"] for i in _mef23["items"]],
+      str([i["name"] for i in _men23["items"]]))
 checa("22/10 '25 misto' com doce na ficha continua sendo o salgado",
       app._doce_misto_do_contexto("25 misto", "Qual docinho?", "Cento de Brigadeiros (100 un)") == "")
 

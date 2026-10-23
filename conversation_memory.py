@@ -434,6 +434,41 @@ def _mesmo_item(a: dict, b: dict) -> bool:
         return False
 
 
+def _ajustar_ao_preparo(memoria: dict, texto: str, mudancas: list) -> None:
+    """Sabor que existe frito E assado segue o preparo que o cliente disse.
+
+    "2 centos de salgados assados" e depois "25 enroladinho": entrou o
+    Enroladinho de Salsicha (frito), e nao o com Catupiry (assado) - teste da
+    Thayline, 23/10. So troca quando o preparo e um so e a mensagem nao diz o
+    outro.
+    """
+    preparo = (memoria.get("preparo_pendente") or "").strip()
+    if preparo not in ("frito", "assado"):
+        return
+    outro = "frito" if preparo == "assado" else "assado"
+    if _re.search(rf"\b{outro[:4]}", _sem_acento(texto or "")):
+        return
+    do_preparo = _sabores_do_pacote(preparo + "s")
+    do_outro = {_sem_acento(n) for n in _sabores_do_pacote(outro + "s")}
+    for item in memoria.get("items") or []:
+        if not isinstance(item, dict) or _sem_acento(str(item.get("name", ""))) not in do_outro:
+            continue
+        raiz = _sem_acento(str(item["name"])).split()[0]
+        par = [n for n in do_preparo if _sem_acento(n).split()[0] == raiz]
+        if len(par) != 1:
+            continue
+        antigo = item["name"]
+        item["name"] = par[0]
+        try:
+            import facts
+            oficial = facts.resolve_unit_price(par[0], int(item.get("quantity") or 0))
+            if oficial:
+                item["price"] = oficial["preco_unitario"]
+        except Exception:
+            pass
+        mudancas.append(f"{antigo} -> {par[0]} (pedido {preparo})")
+
+
 def merge(memoria: dict, extraido: dict, novo_da_mensagem: dict | None = None,
           texto: str = "") -> tuple[dict, list]:
     """Funde o que foi extraido da mensagem na memoria acumulada.
@@ -504,10 +539,23 @@ def merge(memoria: dict, extraido: dict, novo_da_mensagem: dict | None = None,
         # Antes a mensagem com itens trocava o pedido inteiro: "Sim, ajusta para
         # 50 esfirras" apagou a coxinha, e o Pao Pizza sumiu do espelho final.
         combinado = [dict(i) for i in atuais]
+        # Resposta a "quais sabores completam os que faltam?": o sabor que ja
+        # esta no pedido SOMA. "50 pao pizza" trocou os 25 por 50 e a conta
+        # ficou em 125 de 200 (teste da Thayline, 23/10).
+        _falta = falta_para_o_volume(memoria)
+        try:
+            _soma_nova = sum(int(n.get("quantity") or 0) for n in itens_novos
+                             if isinstance(n, dict) and not _e_acompanhamento(n.get("name")))
+        except (TypeError, ValueError):
+            _soma_nova = 0
+        _completa = bool(_falta) and 0 < _soma_nova <= _falta and not removidos
         for novo in itens_novos:
             if not isinstance(novo, dict):
                 continue
             igual = next((i for i in combinado if _mesmo_item(i, novo)), None)
+            if igual and _completa and not _e_acompanhamento(novo.get("name")):
+                igual["quantity"] = int(igual.get("quantity") or 0) + int(novo.get("quantity") or 0)
+                continue
             if igual:
                 for campo in ("quantity", "price", "tamanho", "sabor"):
                     if novo.get(campo) not in (None, "", 0):
@@ -620,6 +668,7 @@ def merge(memoria: dict, extraido: dict, novo_da_mensagem: dict | None = None,
         mudancas.append(f"sabores_pendentes={[s['termo'] for s in sabores_novos]}")
 
     _volume_novo(memoria, novo_da_mensagem or {}, mudancas)
+    _ajustar_ao_preparo(memoria, texto, mudancas)
 
     # Troco so existe para dinheiro. Quem pediu troco para 100 e depois trocou
     # para Pix nao pode levar essa observacao para a comanda.
@@ -1532,6 +1581,24 @@ def falta_para_o_volume(memoria: dict) -> int:
         return 0
     soma = _soma_de_salgados(memoria)
     return volume - soma if 0 < soma < volume else 0
+
+
+def repetir_os_mesmos(memoria: dict) -> bool:
+    """"pode repetir os mesmos": completa o que falta com os mesmos sabores,
+    em partes iguais. False quando nao fecha em 25 por sabor.
+
+    125... de 200 com "repete os mesmos" repetia a pergunta do que falta
+    (teste da Thayline, 23/10).
+    """
+    falta = falta_para_o_volume(memoria)
+    salgados = [i for i in memoria.get("items") or []
+                if isinstance(i, dict) and not _e_acompanhamento(i.get("name"))]
+    if not falta or not salgados or falta % (25 * len(salgados)):
+        return False
+    cada = falta // len(salgados)
+    for i in salgados:
+        i["quantity"] = int(i.get("quantity") or 0) + cada
+    return True
 
 
 def _itens_que_nao_sao_salgado(memoria: dict) -> list[dict]:
@@ -2521,6 +2588,12 @@ def _frase_do_volume(memoria: dict) -> tuple[str, str]:
     # As opcoes ja vem na pergunta, uma embaixo da outra (pedido do dono,
     # 08/10): o cliente tinha de perguntar "quais sabores voces tem?".
     _fritos, _assados = _sabores_do_pacote("fritos"), _sabores_do_pacote("assados")
+    # "Pode escolher ate 8 sabores" com 7 assados na lista (teste de 23/10):
+    # o limite e o que o cardapio tem.
+    _no_cardapio = {"frito": len(_fritos), "assado": len(_assados)}.get(_preparo, 0)
+    if _no_cardapio:
+        _quantos = min(_quantos, _no_cardapio)
+    _plural = "sabor" if _quantos == 1 else "sabores"
     # A lista inteira so quando o cliente pede os sabores (Balbino, 17/10:
     # "pergunta qual sabor; se perguntar quais tem, ai manda a lista").
     if not memoria.get("mostrar_sabores"):

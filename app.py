@@ -1202,6 +1202,11 @@ def _resposta_de_faq(texto: str, memoria: dict | None = None) -> tuple[str, str,
     return None
 
 
+_RX_REPETIR_OS_MESMOS = _re_mod.compile(
+    r"\b(?:repet\w*|dobr\w*|duplic\w*)\b|\b(?:os|as|dos|das)\s+(?:mesm[oa]s|msm|iguais)\b"
+    r"|\bmais\s+(?:25|vinte\s+e\s+cinco)\s+de\s+cada\b")
+
+
 _RX_QUANDO_CHEGA = _re_mod.compile(
     r"\b(?:que\s+horas?|qual\s+(?:o\s+)?horario|quando)\b.{0,25}"
     r"\b(?:cheg\w*|entreg\w*|fica\s+pronto|sai|vem|vao\s+trazer|traz\w*)\b"
@@ -4864,6 +4869,12 @@ def _conferir_etapa_travada(user: str, reply: str, memoria: dict) -> str:
             if len(_frase_t) >= 12 and _frase_t.endswith(("!", ".")):
                 corpo = _re_mod.sub(r"\s*" + _re_mod.escape(_frase_t), "", corpo,
                                     flags=_re_mod.IGNORECASE).strip()
+    # "Voce confirmou 25 Pao Pizza... totalizando 100 salgados." antes da
+    # pergunta do que falta so repete o que ela diz (teste da Thayline, 23/10).
+    if ("que faltam" in facts.normalize(travada)
+            and _re_mod.search(r"\b(?:confirm\w*|totaliz\w*|somam|soma|ficou|ficam)\b",
+                               facts.normalize(corpo))):
+        corpo = ""
     if len([c for c in corpo if c.isalpha()]) < 12:
         novo = travada
     elif ja_cobriu:
@@ -5887,7 +5898,37 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                              for m in reversed(memory.get(user))
                              if m.get("role") == "assistant"), "")
             _tn_vol = facts.normalize(_texto_cliente or "")
-            if ("ou fica com" in facts.normalize(_ult_vol)
+            # "pode repetir os msm" e "no lugar desse 100 pode ser fritos?": a
+            # pergunta do que falta saia de novo, quatro vezes (teste da
+            # Thayline, 23/10). Vem antes do "fica assim": "pode ser fritos"
+            # nao e ficar com o que tem.
+            _prep = _re_mod.search(r"\b(frit|assad)[oa]s?\b", _tn_vol)
+            _sem_sabor_vol = not (_extract_data_from_message(
+                (_texto_cliente or "").lower(), ConversationState(phone="")).get("items"))
+            if ("que faltam" in facts.normalize(_ult_vol) and _sem_sabor_vol
+                    and (_prep or _RX_REPETIR_OS_MESMOS.search(_tn_vol))):
+                _falta_vol = conversation_memory.falta_para_o_volume(_memoria_balcao)
+                if _RX_REPETIR_OS_MESMOS.search(_tn_vol):
+                    if conversation_memory.repetir_os_mesmos(_memoria_balcao):
+                        conversation_memory.save(user, _memoria_balcao)
+                        print(f"[funil] user={user} completou os {_falta_vol} com os mesmos sabores")
+                    else:
+                        _responder_direto(user, items, (
+                            f"Com os mesmos sabores não fecha em 25 de cada. 😊 Me diz quantos "
+                            f"de cada para completar os {_falta_vol} que faltam?"), _chegada)
+                        return
+                elif _prep:
+                    _preparo_fv = "frito" if _prep.group(1) == "frit" else "assado"
+                    _lista_fv = conversation_memory._sabores_do_pacote(_preparo_fv + "s")
+                    _quantos_fv = max(1, min(_falta_vol // 25, len(_lista_fv) or 1))
+                    print(f"[funil] user={user} completar os {_falta_vol} com {_preparo_fv}s; lista")
+                    _responder_direto(user, items, (
+                        f"Pode sim! 😊 Quais sabores {_preparo_fv}s completam os {_falta_vol} que "
+                        f"faltam? Pode escolher até {_quantos_fv} "
+                        f"{'sabor' if _quantos_fv == 1 else 'sabores'} (25 de cada):\n"
+                        + conversation_memory._lista_em_linhas(_lista_fv)), _chegada)
+                    return
+            elif ("ou fica com" in facts.normalize(_ult_vol)
                     and not _re_mod.search(r"\d+\s*[a-z]{3,}", _tn_vol)
                     and (_e_concordancia(_texto_cliente)
                          or _re_mod.search(r"\b(?:fica|assim|mesmo|so\s+(?:isso|esses|esse)|pode\s+ser)\b", _tn_vol))):

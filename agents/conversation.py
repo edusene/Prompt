@@ -1466,6 +1466,27 @@ def _volume_de_dois_sabores(m: re.Match) -> str:
     return f"{m.group('n')} salgados {tipo} de {a} e {tipo} de {b}"
 
 
+_RX_METADE_DO_MESMO = re.compile(
+    r"\b(\d{2,3})\s+([a-zà-ÿ]{4,})\s+(?:de\s+)?metade\s+(?:de\s+)?([a-zà-ÿ]{4,})"
+    r"\s+(?:e\s+)?metade\s+(?:de\s+)?([a-zà-ÿ]{4,})\b")
+
+
+def metade_do_mesmo_salgado(msg_lower: str) -> str:
+    """"50 canudos metade camarao metade frango" -> "25 canudos de camarao 25
+    canudos de frango". O item sumia do pedido (teste da Thayline, 23/10).
+
+    So reescreve quando os dois nomes existem no cardapio e cada metade fecha
+    em 25.
+    """
+    def _troca(m):
+        n, base, s1, s2 = int(m.group(1)), m.group(2), m.group(3), m.group(4)
+        if n % 50 or not (_produto_conhecido(f"{base} de {s1}")
+                          and _produto_conhecido(f"{base} de {s2}")):
+            return m.group(0)
+        return f"{n // 2} {base} de {s1} {n // 2} {base} de {s2}"
+    return _RX_METADE_DO_MESMO.sub(_troca, msg_lower or "")
+
+
 def itens_divididos(msg_lower: str, quebrados: list | None = None) -> list[dict]:
     """Volume dividido por igual entre os sabores ditos. [] quando nao ha.
 
@@ -2136,6 +2157,7 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
         r"\b(\d{1,2}|uma|duas|tres|três)\s+por[cç](?:[aã]o|[oõ]es)\s+de\s+(?!\d)",
         lambda m: f"{25 * {'uma': 1, 'duas': 2, 'tres': 3, 'três': 3}.get(m.group(1), int(m.group(1)) if m.group(1).isdigit() else 1)} ",
         msg_lower)
+    msg_lower = metade_do_mesmo_salgado(msg_lower)
     extracted = {}
     if extracted_cep:
         extracted["cep"] = extracted_cep
