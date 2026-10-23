@@ -828,8 +828,10 @@ _FIM_DA_RUA = re.compile(
     # "rua julia 6559 igarape pra agora" foi impresso assim no espelho (teste
     # de 01/10): o "pra agora" e horario, e o "pra" de "pra hoje" sobrava.
     r"p(?:a)?ra\s+(?:hoje|amanh|agora|as|às)|agora\b|"
-    r"segunda|ter[cç]a|quarta|quinta|sexta|"
-    r"s[aá]bado|domingo)",
+    # Dia da semana so com cara de data: "Rua Quinta do Sol" e "Avenida
+    # Domingos" sao nome de rua (o corte depois do numero pega o resto).
+    r"(?:segunda|ter[cç]a|quarta|quinta|sexta|s[aá]bado|domingo)"
+    r"(?:[\s-]*feira\b|\s+(?:[aà]s?|de\s+manh|[aà]\s+tarde|[aà]\s+noite)\b|\s*$))",
     re.IGNORECASE)
 
 
@@ -883,10 +885,11 @@ _NAO_E_NOME_DE_RUA = re.compile(
 # cento e meio = 150, dois centos = 200. "cento e meio" vem ANTES de "cento"
 # na alternancia, senao casaria so o "cento" e o pedido sairia pela metade.
 _PACOTE_POR_EXTENSO = re.compile(
+    # "um cento e meio" e "cento e cinquenta" nao tem produto "e meio" (23/10).
     r"\b(?:(uma?|1)\s+)?("
     r"por[cç][aã]o|meio\s+cento|cento\s+e\s+meio|"
     r"(?:dois|duas|tr[eê]s|quatro|\d{1,2})\s+centos?|cento"
-    r")\s+(?:de\s+|d[eo]s\s+)?([a-zà-ÿ][a-zà-ÿ\s]{2,40}?)"
+    r")\s+(?:de\s+|d[eo]s\s+)?(?!e\s)([a-zà-ÿ][a-zà-ÿ\s]{2,40}?)"
     r"(?=\s*(?:[^a-z\u00e0-\u00ff\s]|\be\b|\bpara\b|\bpra\b|\bcom\b|$))",
     re.IGNORECASE)
 
@@ -1192,6 +1195,11 @@ def volume_sem_sabor(msg_lower: str) -> int:
         unidades = int(m.group(1))
         if 25 <= unidades < 1000 and unidades % 25 == 0:
             return unidades
+    # "300 fritos", "200 fritos e 100 assados": o preparo no lugar de
+    # "salgados" tambem e o total (teste de 22/10 - a ficha ficava sem volume).
+    unidades = sum(int(n) for n in _RX_TOTAL_POR_PREPARO.findall(msg_lower or ""))
+    if 25 <= unidades < 1000 and unidades % 25 == 0:
+        return unidades
     # "Quero 1 cento, mas nao sei quais sabores. Escolhe por mim" (teste de
     # 06/10): o cento sozinho, sem "de salgados", tambem e o volume.
     m = _RX_CENTO_SOLTO.search(msg_lower or "")
@@ -1220,6 +1228,7 @@ _RX_CENTO_SOLTO = re.compile(
 # "QUERO 400 VARIADOS" tambem e o total (teste do dono, 03/10).
 _RX_TOTAL_DE_SALGADOS = re.compile(
     r"(?<![\d,.])(\d{2,3})\s+(?:mini\s*)?(?:salgad\w*|variad\w*|sortid\w*|unidades)\b(?!\s+filho)")
+_RX_TOTAL_POR_PREPARO = re.compile(r"(?<![\d,.])(\d{2,3})\s+(?:frit|assad)[oa]s\b")
 
 
 _RX_FRITO = re.compile(r"\bfrit[oa]s?\b")

@@ -587,9 +587,15 @@ def merge(memoria: dict, extraido: dict, novo_da_mensagem: dict | None = None,
         for d in doces:
             if any(_mesmo_item(d, r) for r in removidos_inteiros):
                 continue
-            if not any(isinstance(i, dict) and i.get("name") == d["name"] for i in itens):
+            igual = next((i for i in itens if isinstance(i, dict) and i.get("name") == d["name"]), None)
+            if igual is None:
                 itens.append(dict(d))
                 mudancas.append(f"doce={d['quantity']} x {d['name']}")
+            elif d.get("sabor") and igual.get("sabor") != d["sabor"]:
+                # "pode ser misto" com o cento de brigadeiro ja na ficha: o
+                # sabor novo vale para o doce que esta la (teste de 22/10).
+                igual["sabor"] = d["sabor"]
+                mudancas.append(f"doce {d['name']} sabor={d['sabor']}")
         memoria["items"] = itens
     doces_sem_formato = fonte.get("doces_pendentes") or (extraido or {}).get("doces_pendentes") or []
     if doces_sem_formato and not doces:
@@ -788,6 +794,29 @@ _EXTENSO_DE_TROCO = {
     "mil": 1000,
 }
 
+
+def _troco_por_extenso(palavras: list) -> float | None:
+    """'cento e cinquenta' -> 150; 'mil e quinhentos' -> 1500.
+
+    Pegar a primeira palavra do dicionario lia "cento e cinquenta" como 50
+    (teste de 22/10): os numeros ligados por "e" se somam.
+    """
+    total = 0
+    achou = False
+    for i, p in enumerate(palavras):
+        numero = _EXTENSO_DE_TROCO.get(p)
+        if numero is None:
+            if achou and not (p == "e" and i + 1 < len(palavras)
+                              and palavras[i + 1] in _EXTENSO_DE_TROCO):
+                break
+            continue
+        if p == "mil" and total:
+            total *= 1000
+        else:
+            total += numero
+        achou = True
+    return float(total) if achou else None
+
 # Resposta que e pedido, e nao dinheiro (sobre o texto sem acento): "cento"
 # seguido de produto/sabor, ou produto citado. "cento e cinquenta" passa.
 _RX_CARA_DE_PEDIDO = _re.compile(
@@ -961,10 +990,7 @@ def capturar_troco(memoria: dict, pergunta_anterior: str, texto: str) -> str:
 
     valor = _valor_do_troco(texto)
     if valor is None:
-        for palavra, numero in _EXTENSO_DE_TROCO.items():
-            if palavra in palavras:
-                valor = float(numero)
-                break
+        valor = _troco_por_extenso(palavras)
 
     if valor is not None:
         memoria["troco_para"] = f"{valor:.2f}"

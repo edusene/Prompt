@@ -3749,6 +3749,33 @@ checa("22/10 docinho pendente: '50 bolinha' nao e o meio cento",
       not memoria_mod.aplicar_escolha_de_sabor(_md22, "50 bolinha e 50 pastel de carne")
       and memoria_mod.aplicar_escolha_de_sabor(_md22, "meio cento"))
 
+# Pendencias menores do teste de 22/10.
+checa("22/10 '300 fritos' e '200 fritos e 100 assados' sao o volume",
+      _vss("quero 300 fritos") == 300
+      and _vss("200 fritos e 100 assados") == 300
+      and _vss("100 coxinhas fritas") == 0)
+checa("23/10 'um cento e meio' e 150 e 'cento e cinquenta' nao vira 100",
+      _vss("um cento e meio") == 150 and _vss("cento e cinquenta") != 100)
+_mtr22 = memoria_mod._empty(); _mtr22["payment_method"] = "dinheiro"
+checa("22/10 troco 'cento e cinquenta' e R$ 150, nao R$ 50",
+      memoria_mod.capturar_troco(_mtr22, "Precisa de troco para quanto?", "cento e cinquenta") == "150.00")
+import agents.conversation as _cv22
+checa("22/10 'Avenida Domingos' e 'Rua Quinta do Sol' nao sao dia da semana",
+      _cv22._FIM_DA_RUA.split("Avenida Domingos Vieira 120", maxsplit=1)[0] == "Avenida Domingos Vieira 120"
+      and _cv22._FIM_DA_RUA.split("Rua Quinta do Sol 45", maxsplit=1)[0] == "Rua Quinta do Sol 45"
+      and _cv22._FIM_DA_RUA.split("Rua Guanabara sexta-feira", maxsplit=1)[0] == "Rua Guanabara")
+_mmi22 = memoria_mod._empty()
+_mmi22["items"] = [{"name": "Cento de Brigadeiros (100 un)", "quantity": 1, "price": 140.0}]
+_tmi22 = app._doce_misto_do_contexto("pode ser misto", "Qual docinho? Brigadeiro ou beijinho?",
+                                     "Cento de Brigadeiros (100 un)")
+_emi22 = _extract_data_from_message(_tmi22, ConversationState(phone="t"))
+memoria_mod.merge(_mmi22, _emi22, _emi22, texto=_tmi22)
+checa("22/10 'pode ser misto' com o cento de brigadeiro na ficha muda o sabor dele",
+      [(i["name"], i.get("sabor")) for i in _mmi22["items"]]
+      == [("Cento de Brigadeiros (100 un)", "Mista (brigadeiro e beijinho)")], str(_mmi22["items"]))
+checa("22/10 '25 misto' com doce na ficha continua sendo o salgado",
+      app._doce_misto_do_contexto("25 misto", "Qual docinho?", "Cento de Brigadeiros (100 un)") == "")
+
 print()
 print("=" * 78)
 print("FALHAS:", _falhas or "nenhuma")

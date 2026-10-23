@@ -1145,6 +1145,13 @@ def _doce_misto_do_contexto(texto: str, ultima_do_agente: str, tem_doce: bool = 
     if not (tem_doce or _re_mod.search(r"brigadeiro e beijinho|beijinho|docinho|brigadeiros", ult)):
         return ""
     if not _re_mod.search(r"\b(?:bandejas?|meio\s+cento|centos?)\b", t):
+        # "pode ser misto" com o doce ja na ficha: o formato e o dele (22/10).
+        # So sem numero e logo depois de falar do doce: "25 misto" e o salgado.
+        if (isinstance(tem_doce, str) and tem_doce and not _re_mod.search(r"\d", t)
+                and len(t.split()) <= 5
+                and _re_mod.search(r"beijinho|docinho|brigadeiro", ult)):
+            formato = facts.normalize(_re_mod.sub(r"\(.*?\)", " ", tem_doce)).strip()
+            return _re_mod.sub(r"\bmist[oa]s?\b", f"{formato} misto", t, count=1)
         return ""
     return _re_mod.sub(r"\bmist[oa]s?\b", "de brigadeiro misto", t, count=1)
 
@@ -5816,10 +5823,12 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             _ult_doce = next((m.get("parts", [{}])[0].get("text", "") or ""
                               for m in reversed(memory.get(user))
                               if m.get("role") == "assistant"), "")
+            _doces_ficha = [str(i.get("name", "")) for i in _memoria_balcao.get("items") or []
+                            if isinstance(i, dict)
+                            and _re_mod.search(r"brigad", facts.normalize(str(i.get("name", ""))))]
             _doce_ctx = _doce_misto_do_contexto(
                 _texto_cliente, _ult_doce,
-                any(_re_mod.search(r"brigad", facts.normalize(str(i.get("name", ""))))
-                    for i in _memoria_balcao.get("items") or [] if isinstance(i, dict)))
+                _doces_ficha[0] if len(_doces_ficha) == 1 else bool(_doces_ficha))
             if _doce_ctx:
                 items[0]["text"] = _doce_ctx
                 _texto_cliente = _doce_ctx
@@ -6382,7 +6391,11 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                     + "\nPode me dizer quantos de cada 😊", _chegada)
                 return
         _ofertados = _produtos_da_oferta(_ultima_ag) if _ofereceu_acompanhamento(_ultima_ag) else []
+        # "pode confirmar" depois da oferta e fechar so com o que tem, nao
+        # aceitar o refrigerante (simulacao de 23/10).
         if (_ofertados and _memoria.get("items") and _e_concordancia(text_only)
+                and not _re_mod.search(r"\b(?:confirm\w*|fech\w*|finaliz\w*)\b",
+                                       facts.normalize(text_only or ""))
                 and not _extracted_fresh.get("items") and not _extracted_fresh.get("bebidas")
                 and not _extracted_fresh.get("doces")):
             if len(_ofertados) > 1:
