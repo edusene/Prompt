@@ -4031,6 +4031,80 @@ checa("CEP seguido so do numero guarda o numero",
       _ext24("76824252 5994").get("endereco") == "Rua Wilman Maia, 5994")
 _cep24.buscar = _cep24_orig
 
+secao("Gateway AutoZap (API propria, 25/10)")
+_env25 = app._envelope_autozap_para_meta({"event": "message.received", "data": {
+    "phone_number_id": "123", "contact": {"wa_id": "5569999990000", "name": "Ana"},
+    "message": {"id": "wamid.X", "from": "5569999990000", "timestamp": "1", "type": "text",
+                "text": {"body": "Olá!"}}}})
+_val25 = _env25["entry"][0]["changes"][0]["value"]
+checa("message.received vira o envelope da Cloud API",
+      _env25["object"] == "whatsapp_business_account"
+      and _val25["messages"][0]["text"]["body"] == "Olá!"
+      and _val25["contacts"][0]["profile"]["name"] == "Ana"
+      and app._extract_body_from_meta_message(_val25["messages"][0])[0] == "Olá!")
+checa("evento que nao e mensagem fica vazio",
+      app._envelope_autozap_para_meta({"event": "channel.connected", "data": {}})["entry"] == [])
+import hashlib as _hl25
+import hmac as _hm25
+import time as _tm25
+os.environ["AUTOZAP_WEBHOOK_SECRET"] = "whsec_teste"
+_corpo25 = '{"event": "channel.connected", "data": {}}'
+_ts25 = str(int(_tm25.time()))
+_ass25 = "sha256=" + _hm25.new(b"whsec_teste", f"{_ts25}.{_corpo25}".encode(), _hl25.sha256).hexdigest()
+_cli25 = app.app.test_client()
+_ok25 = _cli25.post("/webhook", data=_corpo25, content_type="application/json",
+                    headers={"X-Webhook-Signature": _ass25, "X-Webhook-Timestamp": _ts25})
+_ruim25 = _cli25.post("/webhook", data=_corpo25, content_type="application/json",
+                      headers={"X-Webhook-Signature": "sha256=00", "X-Webhook-Timestamp": _ts25})
+checa("webhook do AutoZap: assinatura certa passa, errada e recusada",
+      _ok25.status_code == 200 and _ruim25.status_code == 401, (_ok25.status_code, _ruim25.status_code))
+os.environ.pop("AUTOZAP_WEBHOOK_SECRET", None)
+_sem25 = _cli25.post("/webhook", data=_corpo25, content_type="application/json",
+                     headers={"X-Webhook-Signature": _ass25, "X-Webhook-Timestamp": _ts25})
+checa("webhook do AutoZap sem segredo configurado recusa (503)", _sem25.status_code == 503)
+
+import meta as _meta25
+_env_antes25 = {k: os.environ.get(k) for k in ("WHATSAPP_PROVIDER", "AUTOZAP_API_KEY", "AUTOZAP_PHONE_NUMBER_ID", "AUTOZAP_API_URL")}
+os.environ.update(WHATSAPP_PROVIDER="autozap", AUTOZAP_API_KEY="sk_test_x",
+                  AUTOZAP_PHONE_NUMBER_ID="123456", AUTOZAP_API_URL="https://az.example/api/v1")
+_meta25._carregar_config()
+_chamadas25 = []
+class _Resp25:
+    def __init__(self, status, corpo, conteudo=b"", tipo="application/json"):
+        self.status_code, self._corpo, self.content = status, corpo, conteudo
+        self.ok, self.text, self.headers = status < 400, str(corpo), {"Content-Type": tipo}
+    def json(self):
+        return self._corpo
+_req_orig25, _get_orig25 = _meta25.requests.request, _meta25.requests.get
+_meta25.requests.request = lambda m, u, json=None, params=None, headers=None, timeout=None: (
+    _chamadas25.append((m, u, json, headers)) or _Resp25(201, {"data": {
+        "wamid": "wamid.Y", "contact_wa_id": "5569", "meta_response": None}}))
+_meta25.requests.get = lambda u, headers=None, timeout=None: _Resp25(200, None, b"OGG", "audio/ogg")
+_r25 = _meta25.send_text("5569", "oi")
+checa("envio pelo AutoZap: URL, chave e corpo sem messaging_product",
+      _chamadas25[0][1] == "https://az.example/api/v1/whatsapp/123456/messages"
+      and _chamadas25[0][3]["Authorization"] == "Bearer sk_test_x"
+      and _chamadas25[0][2] == {"to": "5569", "type": "text", "text": {"body": "oi"}}
+      and _r25["ok"] and _r25["data"]["messages"][0]["id"] == "wamid.Y", (_chamadas25, _r25))
+_meta25.send_typing("wamid.Z")
+checa("digitando pelo AutoZap usa messages/read com typing",
+      _chamadas25[-1][1].endswith("/whatsapp/123456/messages/read")
+      and _chamadas25[-1][2] == {"message_id": "wamid.Z", "typing": True})
+_m25 = _meta25.get_webhook_media_url("MID")
+checa("midia recebida pelo AutoZap: tipo do cabecalho e bytes na mao",
+      _m25["ok"] and _m25["data"]["mime_type"] == "audio/ogg"
+      and _meta25.download_media_bytes(_m25["data"]["url"]) == b"OGG")
+checa("config do AutoZap exige chave sk_", _meta25.config_problem() is None)
+_meta25.requests.request, _meta25.requests.get = _req_orig25, _get_orig25
+for _k25, _v25 in _env_antes25.items():
+    if _v25 is None:
+        os.environ.pop(_k25, None)
+    else:
+        os.environ[_k25] = _v25
+_meta25._carregar_config()
+checa("sem WHATSAPP_PROVIDER continua a Datafy", _meta25.provider() == "datafy"
+      and _meta25._BASE == "https://cloud.datafyapi.com.br/v1")
+
 print()
 print("=" * 78)
 print("FALHAS:", _falhas or "nenhuma")

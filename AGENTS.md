@@ -6,7 +6,7 @@ Atendente de WhatsApp da fábrica de salgados do Balbino. Produto, fluxos e regr
 
 - Python (3.11+; o ambiente local usa a `.venv`), Flask + Flask-Limiter, APScheduler.
 - Banco: Supabase (PostgreSQL com pgvector, `DB_DRIVER=postgresql`). O padrão do código é `sqlite`, mas o esquema usa sintaxe de PostgreSQL (`SERIAL`, `NOW()`) e o app não inicializa em SQLite (verificado em 23/10/2026).
-- LLM: OpenAI (`OPENAI_MODEL`, `OPENAI_TEMPERATURE`). Gateway WhatsApp: Datafy API (Meta Cloud).
+- LLM: OpenAI (`OPENAI_MODEL`, `OPENAI_TEMPERATURE`). Gateway WhatsApp: Datafy API (Meta Cloud) ou AutoZap, a API própria (`WHATSAPP_PROVIDER=autozap`); o padrão é a Datafy.
 - Não há Node, Next.js, ORM, CI nem gates de lint configurados.
 
 ## Comandos

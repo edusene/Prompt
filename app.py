@@ -8458,6 +8458,7 @@ except Exception as e:
 
 print(f"[config] Datafy API: PHONE_ID={os.getenv('DATAFY_PHONE_NUMBER_ID', '') or 'N/A'}")
 print(f"[config] Datafy API: WABA_ID={os.getenv('DATAFY_WABA_ID', '') or 'N/A'}")
+print(f"[config] Gateway de envio: {meta.provider()} PHONE_ID={get_phone_id() or 'N/A'}")
 
 # ── Auth routes ───────────────────────────────────────────────────────────────
 
@@ -8497,6 +8498,30 @@ def add_security_headers(response):
 
 # ── Webhook ──────────────────────────────────────────────────────────────────
 
+def _envelope_autozap_para_meta(evento: dict) -> dict:
+    """Evento do AutoZap -> o mesmo envelope da Cloud API que a Datafy repassa.
+
+    message.received traz {"contact": {wa_id, name}, "message": <mensagem da
+    Cloud API>}; o resto do webhook continua lendo entry -> changes -> value.
+    Evento que nao e mensagem nem status vira envelope vazio (ignorado).
+    """
+    tipo = str(evento.get("event") or "")
+    d = evento.get("data") or {}
+    value = {}
+    if tipo == "message.received" and isinstance(d.get("message"), dict):
+        contato = d.get("contact") or {}
+        value = {"contacts": [{"wa_id": contato.get("wa_id", ""),
+                               "profile": {"name": contato.get("name", "")}}],
+                 "messages": [d["message"]]}
+    elif tipo == "message.status.updated":
+        st = d.get("status") if isinstance(d.get("status"), dict) else d
+        value = {"statuses": [st]}
+    else:
+        print(f"[webhook] AutoZap evento {tipo or '?'} ignorado")
+    return {"object": "whatsapp_business_account",
+            "entry": [{"changes": [{"field": "messages", "value": value}]}] if value else []}
+
+
 @app.get("/webhook")
 def webhook_verify():
     """Para a Datafy API essa rota não é chamada da mesma maneira que a Meta chama com GET."""
@@ -8505,42 +8530,53 @@ def webhook_verify():
 
 @app.post("/webhook")
 def webhook():
-    # Validação Datafy
-    signature = request.headers.get("x-datafy-signature-256", "")
-    timestamp = request.headers.get("x-datafy-timestamp", "")
+    # Dois gateways podem chamar esta rota, cada um com o seu segredo: a Datafy
+    # (x-datafy-*) e o AutoZap, a API propria (X-Webhook-*, desde 25/10). O
+    # calculo da assinatura e o mesmo: HMAC-SHA256(segredo, "timestamp.corpo").
+    if request.headers.get("X-Webhook-Signature"):
+        gateway = "AutoZap"
+        signature = request.headers.get("X-Webhook-Signature", "")
+        timestamp = request.headers.get("X-Webhook-Timestamp", "")
+        segredo = os.getenv("AUTOZAP_WEBHOOK_SECRET", "")
+    else:
+        gateway = "Datafy"
+        signature = request.headers.get("x-datafy-signature-256", "")
+        timestamp = request.headers.get("x-datafy-timestamp", "")
+        segredo = DATAFY_WEBHOOK_SECRET
     raw_body = request.get_data(as_text=True)
 
     # Com o segredo configurado, mensagem sem assinatura e recusada: antes ela
     # passava direto, e qualquer um podia fazer a Sandrinha responder (e mandar
     # pedido ao cardapio) para qualquer numero (revisao de seguranca, 22/10).
-    # Sem o segredo nao ha como provar que veio da Datafy: recusa tudo (S3, 23/10).
-    if not DATAFY_WEBHOOK_SECRET:
-        print("[webhook] DATAFY_WEBHOOK_SECRET ausente - recusado")
+    # Sem o segredo nao ha como provar a origem: recusa tudo (S3, 23/10).
+    if not segredo:
+        print(f"[webhook] segredo do {gateway} ausente - recusado")
         return "Service Unavailable", 503
-    if DATAFY_WEBHOOK_SECRET and not (signature and timestamp):
-        print("[webhook] Sem assinatura (Datafy) - recusado")
+    if not (signature and timestamp):
+        print(f"[webhook] Sem assinatura ({gateway}) - recusado")
         return "Forbidden", 401
-    if DATAFY_WEBHOOK_SECRET:
-        expected = "sha256=" + hmac.new(
-            DATAFY_WEBHOOK_SECRET.encode("utf-8"),
-            f"{timestamp}.{raw_body}".encode("utf-8"),
-            hashlib.sha256
-        ).hexdigest()
+    expected = "sha256=" + hmac.new(
+        segredo.encode("utf-8"),
+        f"{timestamp}.{raw_body}".encode("utf-8"),
+        hashlib.sha256
+    ).hexdigest()
 
-        if not hmac.compare_digest(signature.encode("utf-8"), expected.encode("utf-8")):
-            print("[webhook] Assinatura invalida (Datafy)")
-            return "Forbidden", 401
+    if not hmac.compare_digest(signature.encode("utf-8"), expected.encode("utf-8")):
+        print(f"[webhook] Assinatura invalida ({gateway})")
+        return "Forbidden", 401
 
-        try:
-            req_ts = int(timestamp)
-            if abs(time.time() - req_ts) > 300:
-                print("[webhook] Timestamp fora do limite de 5 minutos (Datafy)")
-                return "Forbidden", 401
-        except ValueError:
-            print("[webhook] Timestamp invalido (Datafy)")
+    try:
+        req_ts = int(timestamp)
+        if abs(time.time() - req_ts) > 300:
+            print(f"[webhook] Timestamp fora do limite de 5 minutos ({gateway})")
             return "Forbidden", 401
+    except ValueError:
+        print(f"[webhook] Timestamp invalido ({gateway})")
+        return "Forbidden", 401
 
     data = request.get_json(silent=True) or {}
+    if gateway == "AutoZap":
+        data = _envelope_autozap_para_meta(data)
 
     # Validacao basica Meta / Datafy
     if data.get("object") != "whatsapp_business_account":
@@ -10165,6 +10201,12 @@ _ENV_KEYS = [
     ("DATAFY_PHONE_NUMBER_ID", "Phone Number ID", False),
     ("DATAFY_WABA_ID", "WABA ID", False),
     ("DATAFY_WEBHOOK_SECRET", "Webhook Secret", True),
+    # API propria (AutoZap, 25/10). WHATSAPP_PROVIDER=autozap passa o envio para ela.
+    ("WHATSAPP_PROVIDER", "Gateway de envio (datafy ou autozap)", False),
+    ("AUTOZAP_API_URL", "AutoZap URL da API", False),
+    ("AUTOZAP_API_KEY", "AutoZap chave da API (sk_live_)", True),
+    ("AUTOZAP_PHONE_NUMBER_ID", "AutoZap Phone Number ID", False),
+    ("AUTOZAP_WEBHOOK_SECRET", "AutoZap segredo do webhook (whsec_)", True),
     ("WEBHOOK_URL", "URL Webhook", False),
     ("OPENAI_API_KEY", "OpenAI API Key", True),
     ("OPENAI_MODEL", "Modelo OpenAI", False),
