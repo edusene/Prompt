@@ -64,7 +64,10 @@ _RESPOSTAS_DO_BALCAO = (
     # So quem quer COMPRAR congelado: "veio tudo congelado e murcho" e
     # reclamacao (teste do dono, 06/10 - recebia o texto de venda).
     ("congelado", _re_mod.compile(
-        r"\b(?:vend\w*|tem|tens|fazem|faz|trabalh\w*|quero|queria|encomend\w*|compr\w*)\b"
+        # "me passa os precos da tabela do cento congelado": o modelo inventou
+        # "unidades avulsas a R$ 9,00" (teste do dono, 24/10).
+        r"\b(?:vend\w*|tem|tens|fazem|faz|trabalh\w*|quero|queria|encomend\w*|compr\w*"
+        r"|prec\w*|valor\w*|quanto|tabela)\b"
         r".{0,40}\bcongelad\w*|\bcongelad\w*\b.{0,25}\b(?:pra|para)\s+fritar"),
      # Texto de venda do dono (08/10): a frase seca nao vendia.
      "Sim, trabalhamos sim! ❄️\n"

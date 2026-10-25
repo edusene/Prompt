@@ -739,7 +739,8 @@ _NAO_E_PRODUTO_PERGUNTADO = _re_mod.compile(
     r"\b(?:salgad|frit|assad|doce|entreg|delivery|pronta|agora|hoje|amanha|cardapio|combo|promo"
     r"|refri|bebida|opc|sabor|congel|pedido|horario|vaga|desconto|troco|pix|cartao|dinheiro|nota"
     r"|como|quanto|qual|quais|algum|alguma|outro|outra|mais|lugar|taxa|frete|minimo|porcao|cento"
-    r"|brigad|bolo|churro|coxinh|pastel|past|rissol|quib|kib|esfirr|empad|canud|calzon|enrolad"
+    # "vc fazem docinhos?" virou "Nao temos docinhos" (24/10).
+    r"|brigad|docinh|beijinh|bandej|bolo|churro|coxinh|pastel|past|rissol|quib|kib|esfirr|empad|canud|calzon|enrolad"
     r"|croquet|misto|bolinh|pao\s+pizza|tuchaua|coca|fanta|pepsi|guarana|suco"
     # "quais sabores vc tem disponiveis?" virou "Nao temos disponiveis no
     # momento", e "vcs fazem orcamentos?", "Nao temos orcamentos" (22/10).
@@ -2300,6 +2301,7 @@ def _tentar_volta_automatica(user: str, items: list[dict], contact: dict,
 # ── Reset ─────────────────────────────────────────────────────────────────────
 
 _PALAVRA_RESET_PADRAO = "#reset"
+_ULTIMO_AVISO_RESET: dict[str, float] = {}
 
 _MENSAGEM_RESET_PADRAO = (
     "Prontinho, recomecei o atendimento do zero! 💛 Eu sou a Sandrinha da "
@@ -2376,6 +2378,13 @@ def perform_reset(phone: str, origem: str = "cliente", avisar: bool = True) -> N
 
     if not avisar:
         return
+    # Dois #RESET em sequencia: o aviso saia duas vezes no mesmo segundo
+    # (teste do dono, 24/10 18h06). A conversa ja esta zerada.
+    _agora_m = time.monotonic()
+    if _agora_m - _ULTIMO_AVISO_RESET.get(phone, -999.0) < 30:
+        print(f"[reset] user={phone} aviso repetido em menos de 30s; nao reenviado")
+        return
+    _ULTIMO_AVISO_RESET[phone] = _agora_m
 
     resposta = database.get_setting("reset_message", "") or _MENSAGEM_RESET_PADRAO
     res = send_text(phone, resposta)
@@ -3443,7 +3452,9 @@ def _referencia_lista_ausente(reply: str) -> bool:
     """"Quer escolher algum desses?" sozinha: a cliente nao tem lista nenhuma (23/10)."""
     return bool(_re_mod.fullmatch(
         r"\W*(?:(?:quer|gostaria\s+de|deseja)\s+)?(?:escolher\s+)?(?:algum|alguma)\s+"
-        r"(?:desses|dessas|destes|destas)\W*", facts.normalize(reply or "")))
+        r"(?:desses|dessas|destes|destas)\W*"
+        # "Qual voce prefere?" sozinha, sem opcao nenhuma (24/10).
+        r"|\W*qual\s+(?:voce\s+)?prefere\W*", facts.normalize(reply or "")))
 
 
 def _pergunta_de_preco(texto: str) -> bool:
@@ -5406,6 +5417,10 @@ _RX_SAUDACAO_DA_CONVERSA = _re_mod.compile(
     r"\s*(?:Bom dia|Boa tarde|Boa noite)\b[^!\n]{0,40}!"
     r"(?:[ \t]*(?:Eu\s+sou|Sou|Aqui\s+[ée])\s+a\s+Sandrinha\s+da\s+BALBS[ \t]*(?:💛)?[.!]?)?[ \t]*")
 _REGRAS_ENVIADAS: dict[str, float] = {}
+# {user: (texto, instante)} da ultima mensagem enviada. "Faltam essas
+# informacoes" saiu duas vezes seguidas, 8 a 14s depois, sem mensagem nova da
+# cliente no meio (Thayline, 24/10).
+_ULTIMO_ENVIO: dict[str, tuple[str, float]] = {}
 
 
 PERGUNTA_DO_PEDIDO_NAS_DICAS = "Quais você vai querer hoje? 💛"
@@ -5479,12 +5494,18 @@ def enviar_em_blocos(user: str, texto: str, chegada: float | None = None) -> Non
             time.sleep(pausa)
         if indice == 0:
             _esperar_piso(chegada)
+        _anterior = _ULTIMO_ENVIO.get(user)
+        if (_anterior and len(chunk) >= 20 and _anterior[0] == chunk
+                and time.monotonic() - _anterior[1] < 20):
+            print(f"[flush] user={user} mensagem identica a anterior em menos de 20s; nao reenviada")
+            continue
         _t_envio = time.monotonic()
         res = send_text(user, chunk)
         _somar_medida("envio", time.monotonic() - _t_envio)
         if not res.get("ok"):
             print(f"[flush] ERRO ao enviar p/ {user}: {res.get('error')}")
             continue
+        _ULTIMO_ENVIO[user] = (chunk, time.monotonic())
         # O espelho no painel (3 consultas ao banco por mensagem) ia antes da
         # proxima mensagem ao cliente. Vai para a fila do painel, na mesma ordem.
         _no_painel(send_msg_out_to_panel, user, chunk)
@@ -6957,6 +6978,11 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                 print(f"[memoria] {user}: sabor escolhido -> "
                       f"{'; '.join(_escolha_sabor)}")
 
+        _troca_esg = conversation_memory.aplicar_troca_do_esgotado(_memoria, text_only)
+        if _troca_esg:
+            conversation_memory.save(user, _memoria)
+            print(f"[memoria] {user}: {'; '.join(_troca_esg)}")
+
         # Sabor do refrigerante ("coca", "fanta"), dito junto do pedido ou em
         # resposta a pergunta das opcoes do cardapio digital.
         if (_memoria.get("items") and not _memoria.get("sabores_pendentes")
@@ -8130,6 +8156,8 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                 and not _memoria.get("sabores_pendentes") and not _memoria.get("combo_pendente")
                 and not conversation_memory.pergunta_bloqueante(_memoria)
                 and not _pergunta_de_disponibilidade(_texto_cliente)
+                # "2 bolos de milho" com o bolo esgotado: o aviso e a resposta (24/10).
+                and not _re_mod.search(r"esgotad|em falta|nao temos|acabou", facts.normalize(reply))
                 and _ofereceu_acompanhamento(reply)):
             reply = "Tudo bem! 😊 Quer pedir outra coisa?"
             print(f"[upsell] user={user} oferta sem itens no pedido; trocada")
@@ -8675,6 +8703,9 @@ def webhook():
             # ele precisa funcionar quando a conversa esta em modo humano, que
             # e onde handle_flush desiste logo no inicio.
             if e_pedido_de_reset(body) and not _ja_processada:
+                _descartadas = buffer.descartar(number)
+                if _descartadas:
+                    print(f"[reset] {number}: {_descartadas} mensagem(ns) anterior(es) ao reset descartada(s)")
                 try:
                     perform_reset(number, origem="cliente")
                 except Exception as e:

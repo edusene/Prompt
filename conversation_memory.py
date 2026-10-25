@@ -258,7 +258,8 @@ _RX_TROCA_O_PEDIDO = _re.compile(
 # "tira as esfirras", "retira os 30 pasteis", "sem a coca", "em vez da esfirra".
 _RX_TIRA_ITEM = _re.compile(
     r"\b(?:tira|tirar|tire|retira|retirar|retire|remove|remover|exclui|excluir|cancela|cancelar"
-    r"|sem|em\s+vez\s+d[eoa]s?|ao\s+inves\s+d[eoa]s?)\s+"
+    # "nao quero tuchaua" foi ignorado 4 vezes (Thayline, 24/10).
+    r"|sem|em\s+vez\s+d[eoa]s?|ao\s+inves\s+d[eoa]s?|nao\s+(?:quero|vou\s+querer))\s+"
     # "tira SO os quibes" (teste do dono, 08/10 12h39)
     r"(?:(?:so|somente|apenas)\s+)?"
     r"(?:o\s+|a\s+|os\s+|as\s+|aquel[ea]s?\s+|tod[oa]s\s+(?:os\s+|as\s+)?)?(?:(?P<qtd>\d+)\s+)?(?:de\s+)?"
@@ -604,7 +605,13 @@ def merge(memoria: dict, extraido: dict, novo_da_mensagem: dict | None = None,
             # o cita) e voltava para o pedido (teste do dono, 08/10 15h50).
             if any(_mesmo_item(b, r) for r in removidos_inteiros):
                 continue
-            igual = next((i for i in itens if isinstance(i, dict) and i.get("name") == b["name"]), None)
+            # Coca e Fanta de 2 litros sao linhas diferentes (24/10). Sem sabor
+            # de um lado, e a mesma linha, e o sabor dito completa a ficha.
+            igual = next((i for i in itens if isinstance(i, dict) and i.get("name") == b["name"]
+                          and (not b.get("sabor") or not i.get("sabor") or i["sabor"] == b["sabor"])), None)
+            if igual is not None and b.get("sabor") and not igual.get("sabor"):
+                igual["sabor"] = b["sabor"]
+                mudancas.append(f"bebida {b['name']} sabor={b['sabor']}")
             if igual is None:
                 itens.append(dict(b))
                 mudancas.append(f"bebida={b['quantity']} x {b['name']}")
@@ -1900,6 +1907,51 @@ def itens_indisponiveis(memoria: dict) -> list[str]:
     return fora
 
 
+def aplicar_troca_do_esgotado(memoria: dict, texto: str) -> list[str]:
+    """"pode ser canudo de camarao" com UM item em falta na ficha: troca por ele.
+
+    A resposta a "Por qual sabor voce quer trocar?" vem sem numero e nao virava
+    item; a pergunta saiu 6 vezes seguidas (Thayline, 24/10). A quantidade e a
+    do item em falta.
+    """
+    fora = itens_indisponiveis(memoria)
+    # Com numero ("mais 50 pao pizza") o item ja entrou pela extracao.
+    if len(fora) != 1 or not texto or _re.search(r"\d", texto):
+        return []
+    try:
+        from agents.conversation import _forma_de_busca, _indice_de_produtos
+    except Exception:
+        return []
+    itens = [i for i in memoria.get("items") or [] if isinstance(i, dict)]
+    velho = next((i for i in itens if _sem_acento(str(i.get("name"))) == _sem_acento(fora[0])), None)
+    if velho is None:
+        return []
+    t = f" {_forma_de_busca(texto)} "
+    achados = [(chave, nome) for chave, nome in _indice_de_produtos().items()
+               if f" {chave} " in t and _sem_acento(nome) != _sem_acento(fora[0])]
+    if not achados:
+        return []
+    novo_nome = max(achados, key=lambda c: len(c[0]))[1]
+    qtd = int(velho.get("quantity") or 0)
+    if itens_indisponiveis({"items": [{"name": novo_nome, "quantity": qtd}]}):
+        return []
+    try:
+        import facts
+        oficial = facts.resolve_unit_price(novo_nome, qtd)
+    except Exception:
+        oficial = None
+    igual = next((i for i in itens if i is not velho and _sem_acento(str(i.get("name"))) == _sem_acento(novo_nome)), None)
+    if igual:
+        igual["quantity"] = int(igual.get("quantity") or 0) + qtd
+        itens = [i for i in itens if i is not velho]
+    else:
+        velho.clear()
+        velho.update({"name": novo_nome, "quantity": qtd,
+                      "price": oficial["preco_unitario"] if oficial else 0.0})
+    memoria["items"] = itens
+    return [f"{fora[0]} em falta -> {qtd} x {novo_nome}"]
+
+
 def pendencia_de_indisponivel(memoria: dict) -> str:
     """Sabor pedido que esta ESGOTADO na planilha. Fura a fila do funil."""
     fora = itens_indisponiveis(memoria)
@@ -2772,7 +2824,8 @@ def aplicar_sabor_de_bebida(memoria: dict, texto: str) -> list[str]:
 
 
 _MARCAS_DE_REFRI = {"coca": "A Coca-Cola", "fanta": "A Fanta", "pepsi": "A Pepsi",
-                    "sprite": "O Sprite", "kuat": "O Kuat", "soda": "A Soda"}
+                    "sprite": "O Sprite", "kuat": "O Kuat", "soda": "A Soda",
+                    "guarana": "O Guaraná Antártica"}
 
 
 def pergunta_bloqueante(memoria: dict, agora=None) -> str:

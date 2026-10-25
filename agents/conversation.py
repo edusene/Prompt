@@ -318,6 +318,12 @@ _PRODUTOS_GRANDES = {
     "empada de camarao": "Empada de Camarao",
     "empada de camarão": "Empada de Camarao",
     "croquete de macaxeira": "Croquete de Macaxeira",
+    # "3 unidades de mini pizza" e "3 fatias de pudim" nao viravam item: o
+    # resumo saiu so com a coca e o modelo inventou porcao de 25 (24/10).
+    "mini pizza": "Mini Pizza (Brotinho)",
+    "pizza brotinho": "Mini Pizza (Brotinho)",
+    "brotinho": "Mini Pizza (Brotinho)",
+    "pudim": "Pudim (Fatia)",
 }
 
 _TODOS_PRODUTOS = {**_PRODUTOS_FRI_COCOQ, **_PRODUTOS_ASSADOS, **_PRODUTOS_GRANDES}
@@ -396,7 +402,8 @@ _ENTREGA_SUBSTANTIVO = re.compile(
 # Intencao de retirar, dita com verbo: vale mesmo numa frase com pergunta.
 _RETIRADA_EXPLICITA = re.compile(
     r"\bretirar\b"
-    r"|\b(?:vou|posso|prefiro|quero|queria|resolvi|melhor|vamos)\s+(?:retirar|buscar|pegar)\b"
+    # "vou busca", sem o r (Thayline, 24/10).
+    r"|\b(?:vou|posso|prefiro|quero|queria|resolvi|melhor|vamos)\s+(?:retirar?|buscar?|pegar?)\b"
     # "OPA RESOLVI PEGAR NA LOJA" (teste do dono, 17/10): o espelho voltava
     # com a entrega e o frete.
     r"|\b(?:peg|busc|retir)\w*\s+(?:ai\s+|la\s+)?na\s+loja\b"
@@ -432,6 +439,8 @@ _NAO_E_NOME = {
     "entrega", "retirada", "pedido", "salgado", "salgados", "coxinha", "quibe",
     "pix", "dinheiro", "cartao", "credito", "debito", "troco", "frete", "taxa",
     "cliente", "gente", "voce", "eu", "ele", "ela", "nos",
+    # tratamento, nao nome: o audio virou "Boa noite, Dona!" (teste do dono, 24/10)
+    "dona", "dono", "moca", "moco", "senhora", "senhor", "menina", "atendente", "sandrinha",
 }
 
 # Cada frase abaixo e uma apresentacao EXPLICITA. A versao anterior aceitava
@@ -1111,6 +1120,10 @@ def sabores_possiveis(bruto: str, so_lote: bool = True, preparo: str = "") -> li
     alvo = _forma_de_busca(bruto)
     if len(alvo) < 3:
         return []
+    # "1940 e de hoje" (audio, 19h40): "e de" cabia em "rissole DE carne" e
+    # virou pergunta do sabor de 1940 salgados (teste do dono, 24/10).
+    if not any(len(w) >= 3 for w in alvo.split() if w not in ("de", "da", "do", "e", "com")):
+        return []
     indice = _indice_de_produtos()
     if alvo in indice:
         return []
@@ -1602,7 +1615,10 @@ _RX_BEBIDA = re.compile(
     r"(?:\b(?P<qtd>\d{1,2}|uma?|duas|dois|tr[eê]s)\s+)?"
     r"\b(?P<marca>coca(?:[\s-]*colas?|s)?|refri(?:gerante)?s?|guaran[aá]s?|tuchaua"
     r"|fanta|sprite|pepsi|kuat|soda)\b"
-    r"(?P<resto>[^,.;!?\n]{0,30})",
+    # O resto para na proxima bebida: "2 coca 2litros 1 fanta laranja e 1
+    # guarana" engolia a fanta e o guarana na coca (Thayline, 24/10).
+    r"(?P<resto>(?:(?!(?:\b(?:\d{1,2}|uma?|duas|dois|tr[eê]s)\s+)?\b(?:coca|refri|guaran|tuchaua"
+    r"|fanta|sprite|pepsi|kuat|soda))[^,.;!?\n]){0,30})",
     re.IGNORECASE)
 
 _QTD_POR_EXTENSO = {"um": 1, "uma": 1, "dois": 2, "duas": 2, "tres": 3, "três": 3}
@@ -1623,6 +1639,15 @@ ALFAJOR = "Alfajor"
 _RX_ALFAJOR = re.compile(
     r"(?:\b(?P<qtd>\d{1,2}|uma?|dois|duas|tr[eê]s)\s+(?:unidades?\s+(?:de\s+)?)?)?\balfajor(?:es)?\b",
     re.IGNORECASE)
+
+# "4 bandejas", "duas bandeija de pao pizza", "as 4 banbeijas": a bandeja de
+# assados (esfirra e pao pizza, composicao fixa) nao era item e o pedido nunca
+# fechou (Thayline, 24/10).
+BANDEJA_ASSADOS = "Salgadinhos Assados - Bandeja com 15"
+_RX_BANDEJA = re.compile(
+    r"(?:\b(?P<qtd>\d{1,2}|uma?|dois|duas|tr[eê]s|quatro|cinco)\s+)?\bba[nm][dbn]?e?i?jas?\b",
+    re.IGNORECASE)
+_QTD_POR_EXTENSO.update({"quatro": 4, "cinco": 5})
 
 # O unico bolo da fabrica e o de milho. "Bolo" sozinho ("um bolo", resposta a
 # oferta) e ele; "bolo" com outro complemento ("pra aniversario", "de
@@ -1742,7 +1767,7 @@ _NAO_E_PRODUTO = (
     "salgad", "frit", "assad", "variad", "sortid", "unidad", "reais", "real", "minut", "hora",
     "pessoa", "convid", "cento", "porc", "sabor", "litro", "lata", "mini", "grand", "gram",
     "dias", "misto", "refri", "guaran", "docinh", "brigad", "beijin", "coca", "bolo", "pacot",
-    "caixa", "bandej", "kilo", "quilo", "metro", "numer", "casa", "apart", "bloco", "lote",
+    "caixa", "bandej", "bandei", "banbei", "kilo", "quilo", "metro", "numer", "casa", "apart", "bloco", "lote",
     "quadra", "anos", "vezes", "combo", "suco", "pudim", "alfaj", "bairr", "perto", "esquin",
     "frente", "fundos", "lado", "andar", "outr", "pedid", "opcoe", "tipos", "moto", "entreg",
     "semana", "meses", "parcel", "fatia", "pedac", "garraf", "copo", "agua", "graus",
@@ -1771,7 +1796,8 @@ def bolo_fora_do_cardapio(texto: str) -> bool:
 PALAVRAS_DA_BEBIDA = {
     BEBIDA_LATA: ("lata", "latinha"),
     BEBIDA_600: ("600",),
-    BEBIDA_TUCHAUA: ("tuchaua", "guarana"),
+    # "guarana antartica" e sabor do refrigerante comum: virava 2 Tuchauas (24/10).
+    BEBIDA_TUCHAUA: ("tuchaua", r"guarana(?!\s+ant)"),
     BEBIDA_2L: (r"2\s*l(?:t|ts|itros?)?\b", r"dois\s+litros"),
 }
 
@@ -1784,6 +1810,11 @@ def bebidas_citadas(msg_lower: str) -> tuple[list[dict], list[dict]]:
     chutado: volta como pendencia, para ela perguntar qual.
     """
     itens, pendentes = [], []
+    tamanho_dito = ""
+    # "duas cocas" e, na mensagem seguinte, "2 litros": o buffer junta as duas
+    # com quebra de linha e o tamanho se perdia (24/10).
+    msg_lower = re.sub(r"\s*\n\s*(?=(?:de\s+)?(?:2\s*l|dois\s+litros|lat(?:a|inha)|600))", " ",
+                       msg_lower or "")
     for m in _RX_BEBIDA.finditer(msg_lower or ""):
         # "sem refri", "nao quero refrigerante": e assim que se RECUSA a oferta.
         if re.search(r"\b(?:sem|n[aã]o|nada\s+de|nem)\b[^,.;!?\n]{0,18}$",
@@ -1796,23 +1827,42 @@ def bebidas_citadas(msg_lower: str) -> tuple[list[dict], list[dict]]:
         # "3 cocas": sem o plural a marca nao casa com o sabor (23/10).
         marca = re.sub(r"^(coca(?:[\s-]*cola)?)s$", r"\1", m.group("marca").lower())
         resto = (m.group("resto") or "").lower()
+        # Guarana Antartica e sabor do refrigerante comum (lata, 600, 2L); o
+        # guarana sozinho continua sendo o Tuchaua (24/10).
+        antartica = marca.startswith("guaran") and bool(re.search(r"\bant[aá]r", resto))
         if re.search(r"\blat(?:a|inha)s?\b", resto):
             nome = BEBIDA_LATA
         elif re.search(r"\b600", resto):
             nome = BEBIDA_600
-        elif marca.startswith(("guaran", "tuchaua")):
+        elif marca.startswith(("guaran", "tuchaua")) and not antartica:
             nome = BEBIDA_TUCHAUA
         elif re.search(r"\b2\s*l\b|\b2\s*lts?\b|\b(?:2|dois)\s*litros?\b", resto):
             nome = BEBIDA_2L
+        elif tamanho_dito:
+            # "2 coca 2litros 1 fanta laranja": o tamanho dito vale para a
+            # bebida seguinte da mesma mensagem.
+            nome = tamanho_dito
         else:
-            _marca = "" if marca.startswith("refri") else marca
+            _marca = "" if marca.startswith("refri") else ("guarana antartica" if antartica else marca)
             _ops = _opcoes_de_refrigerante()
             if _marca:
                 _ops = [o for o in _ops if o != BEBIDA_TUCHAUA] or _ops
             pendentes.append({"qtd": qtd, "termo": "refrigerante", "opcoes": _ops,
                               "marca": _marca})
             continue
-        if any(i["name"] == nome for i in itens):
+        if nome != BEBIDA_TUCHAUA:
+            tamanho_dito = nome
+        sabor = ""
+        if nome != BEBIDA_TUCHAUA and not marca.startswith("refri"):
+            try:
+                import cardapio_catalogo
+                from conversation_memory import casar_sabor
+                sabor = casar_sabor(f"{marca} {resto}", cardapio_catalogo.opcoes_do_item(nome) or [])
+            except Exception:
+                sabor = ""
+        # Coca e Fanta de 2 litros sao duas linhas: deduplicar so pelo nome
+        # juntava tudo numa linha so (24/10).
+        if any(i["name"] == nome and i.get("sabor", "") == sabor for i in itens):
             continue
         try:
             import facts
@@ -1825,7 +1875,10 @@ def bebidas_citadas(msg_lower: str) -> tuple[list[dict], list[dict]]:
             pendentes.append({"qtd": qtd, "termo": "refrigerante",
                               "opcoes": _opcoes_de_refrigerante(), "em_falta": nome})
             continue
-        itens.append({"name": nome, "quantity": qtd, "price": oficial["preco_unitario"]})
+        novo = {"name": nome, "quantity": qtd, "price": oficial["preco_unitario"]}
+        if sabor:
+            novo["sabor"] = sabor
+        itens.append(novo)
 
     # O bolo da oferta ("vai um Bolo de Milho?" -> "Um bolo") tambem sumia do
     # espelho: nao estava no indice de produtos (teste do dono, 29/09 15h24).
@@ -1864,6 +1917,24 @@ def bebidas_citadas(msg_lower: str) -> tuple[list[dict], list[dict]]:
             oficial = None
         if oficial:
             itens.append({"name": ALFAJOR, "quantity": qtd, "price": oficial["preco_unitario"]})
+    for m in _RX_BANDEJA.finditer(msg_lower or ""):
+        if re.search(r"\b(?:sem|n[aã]o|nada\s+de|nem)\b[^,.;!?\n]{0,18}$",
+                     (msg_lower or "")[:m.start()]):
+            continue
+        # A bandeja de docinhos e do caminho dos doces.
+        if re.search(r"\b(?:brigad|docinh|beijinh|doce)", (msg_lower or "")[m.end():m.end() + 25]):
+            continue
+        bruto_qtd = (m.group("qtd") or "").lower()
+        qtd = int(bruto_qtd) if bruto_qtd.isdigit() else _QTD_POR_EXTENSO.get(bruto_qtd, 1)
+        if not 0 < qtd <= 20 or any(i["name"] == BANDEJA_ASSADOS for i in itens):
+            continue
+        try:
+            import facts
+            oficial = facts.resolve_unit_price(BANDEJA_ASSADOS, qtd)
+        except Exception:
+            oficial = None
+        if oficial:
+            itens.append({"name": BANDEJA_ASSADOS, "quantity": qtd, "price": oficial["preco_unitario"]})
     return itens, pendentes[:1]
 
 
@@ -1963,6 +2034,20 @@ def combos_citados(msg_lower: str) -> tuple[list[dict], str]:
             achados.append({"name": nome, "quantity": qtd,
                             "price": oficial["preco_unitario"] if oficial else 0.0})
         resto_msg = resto_msg.replace(m.group(0), " ")
+    # "combo mix de camarao e o outro de frango": o segundo combo vinha sem a
+    # palavra "combo" e sumia; o total oscilou entre R$ 110 e R$ 210 (24/10).
+    if achados:
+        for m in re.finditer(r"\b(?:o\s+|um\s+)?outro\s+(?:combo\s+)?(?:mix\s+)?(?:de\s+)?([a-zà-ú]+)", msg_lower):
+            nome = next((n for rx, n in _COMBO_POR_PALAVRA if re.search(rx, m.group(1)) and n in nomes), "")
+            if nome and not any(c["name"] == nome for c in achados):
+                try:
+                    import facts
+                    oficial = facts.resolve_unit_price(nome, 1)
+                except Exception:
+                    oficial = None
+                achados.append({"name": nome, "quantity": 1,
+                                "price": oficial["preco_unitario"] if oficial else 0.0})
+                resto_msg = resto_msg.replace(m.group(0), " ")
     return achados, resto_msg
 
 
@@ -2333,6 +2418,9 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
         if not state.endereco and not extracted.get("endereco") and _dados_cep.get("rua"):
             _num_cep = re.search(r"\b(?:n|n[º°o]|numero|num|casa)\s*\.?\s*(\d{1,5}[a-z]?)\b",
                                  _horario_norm(message))
+            # "76824252 5994": so o CEP e o numero, sem "casa". O numero se
+            # perdia e ela pedia de novo (Thayline, 24/10 15h12).
+            _num_cep = _num_cep or re.fullmatch(r"\W*(\d{1,5}[a-z]?)\W*", _horario_norm(message))
             extracted["endereco"] = (f"{_dados_cep['rua']}, {_num_cep.group(1)}" if _num_cep
                                      else _dados_cep["rua"])
         _bairro_cep = _dados_cep.get("bairro") or ""
@@ -2552,6 +2640,13 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
         if sabores_pendentes:
             extracted["sabores_pendentes"] = sabores_pendentes
 
+        # "25 empada" num pedido de assados e a Empadinha do lote, nao a Empada
+        # grande vendida por unidade. Virava a grande, em falta, e a troca
+        # entrou em laco (Thayline, 24/10).
+        for _it in items_found:
+            if _it["name"] == "Empada de Frango" and int(_it.get("quantity") or 0) >= 25:
+                _it["name"] = "Empadinha de Frango"
+                _it["price"] = _PRECO_UNITARIO.get("Empadinha de Frango", _it["price"])
         _somados_msg: list = []
         for _it in items_found:
             _igual = next((x for x in _somados_msg if x["name"] == _it["name"]

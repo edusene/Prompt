@@ -1982,8 +1982,9 @@ checa("'pode ser o guaraná' responde a pergunta com 1 Tuchaua, nao 2",
       [(i["name"], i["quantity"]) for i in _F_GUARANA["items"]
        if "Tuchaua" in i["name"]] == [("Guaraná Tuchaua 2 Litros", 1)]
       and not _F_GUARANA.get("sabores_pendentes"), str(_F_GUARANA["items"]))
+# Sem a marca: com "Coca-Cola" o sabor ja entra pela mensagem (24/10).
 _F_2L = _merge_msg(memoria_mod._empty(), "Quero meio cento frito: 25 coxinhas e 25 "
-                   "bolinhas de queijo, e 1 Coca-Cola de 2 litros gelada.")
+                   "bolinhas de queijo, e 1 refrigerante de 2 litros gelado.")
 checa("pergunta que oferece o esgotado e esconde lata/600ml nao cobre a etapa",
       not memoria_mod.etapa_coberta(_F_2L, "Qual sabor para o refrigerante de 2 litros: Guaraná "
                                            "Tuchaua ou Refrigerante 2 Litros (esgotado)?"))
@@ -3886,7 +3887,7 @@ checa("um preparo so continua sendo o primeiro volume",
       _vss23("1 cento e meio de fritos") == 150 and _vss23("1 cento frito ou meio cento?") == 100)
 _beb23 = _extract_data_from_message("pode ser 3 cocas de 2litros", ConversationState(phone="t")).get("bebidas")
 checa("'3 cocas de 2litros' e bebida (o plural nao some)",
-      _beb23 == [{"name": "Refrigerante 2 Litros", "quantity": 3, "price": 15.0}], _beb23)
+      _beb23 == [{"name": "Refrigerante 2 Litros", "quantity": 3, "price": 15.0, "sabor": "Coca cola"}], _beb23)
 _mc23 = dict(memoria_mod._empty(), items=[{"name": "Coxinha", "quantity": 25, "price": 0.8},
                                          {"name": "Refrigerante 2 Litros", "quantity": 1, "price": 15.0}])
 _ec23 = _extract_data_from_message("3 coca cola 2litros", ConversationState(phone="t"))
@@ -3944,6 +3945,91 @@ checa("'Quer escolher algum desses?' sem lista e trocada",
       [app._referencia_lista_ausente(t) for t in
        ("Quer escolher algum desses?", "Temos coxinha e quibe, quer algum desses?",
         "Temos:\n• Coxinha\n• Quibe\nQuer escolher algum desses?")] == [True, False, False])
+
+secao("Testes de 24/10 (Thayline e dono)")
+from agents.conversation import item_fora_do_cardapio, detectar_nome  # noqa: E402
+def _ext24(t, items=None):
+    return _extract_data_from_message(t.lower(), ConversationState(phone="t", items=items or []))
+def _nomes24(lst):
+    return [(i["name"], i["quantity"], i.get("sabor", "")) for i in lst or []]
+checa("'25 empada' num pedido de assados e a Empadinha do lote",
+      _nomes24(_ext24("25 empada").get("items")) == [("Empadinha de Frango", 25, "")]
+      and _nomes24(_ext24("50 empadas").get("items")) == [("Empadinha de Frango", 50, "")])
+checa("'2 empadas' continua a Empada grande",
+      _nomes24(_ext24("2 empadas").get("items")) == [("Empada de Frango", 2, "")])
+checa("mini pizza e pudim viram item",
+      _nomes24(_ext24("3 unidades de mini pizza").get("items")) == [("Mini Pizza (Brotinho)", 3, "")]
+      and _nomes24(_ext24("3 fatias de pudim").get("items")) == [("Pudim (Fatia)", 3, "")])
+checa("varias bebidas numa mensagem, cada uma com o seu sabor",
+      _nomes24(_ext24("ver pra mim 2 coca 2litros 1 fanta laranja e 1 guarana").get("bebidas"))
+      == [("Refrigerante 2 Litros", 2, "Coca cola"), ("Refrigerante 2 Litros", 1, "Fanta laranja"),
+          ("Guaraná Tuchaua 2 Litros", 1, "")])
+checa("guarana antartica e sabor do 2L, nao o Tuchaua",
+      _nomes24(_ext24("guarana antartica 2 litros").get("bebidas"))
+      == [("Refrigerante 2 Litros", 1, "Guaraná antártica")]
+      and (_ext24("tem como coloca um guarana antartica").get("bebidas_pendentes") or [{}])[0].get("marca")
+      == "guarana antartica")
+checa("'duas cocas' + '2 litros' na linha seguinte",
+      _nomes24(_ext24("entao ver duas cocas\n2 litros").get("bebidas")) == [("Refrigerante 2 Litros", 2, "Coca cola")])
+_f24 = memoria_mod.merge(dict(memoria_mod._empty(), items=[
+    {"name": "Refrigerante 2 Litros", "quantity": 2, "price": 15.0, "sabor": "Coca cola"}]),
+    {"bebidas": [{"name": "Refrigerante 2 Litros", "quantity": 1, "price": 15.0, "sabor": "Fanta laranja"}]},
+    {}, "1 fanta laranja 2 litros")[0]
+checa("fanta 2L nao some dentro da coca 2L na ficha",
+      _nomes24(_f24["items"]) == [("Refrigerante 2 Litros", 2, "Coca cola"), ("Refrigerante 2 Litros", 1, "Fanta laranja")],
+      _f24["items"])
+_pg24 = dict(memoria_mod._empty(), sabores_pendentes=[
+    {"qtd": 2, "termo": "refrigerante", "opcoes": ["Refrigerante Lata", "Guaraná Tuchaua 2 Litros", "Refrigerante 2 Litros"]}])
+memoria_mod.aplicar_escolha_de_sabor(_pg24, "uma coca ir um guarana antartica")
+checa("'guarana antartica' nao escolhe o Tuchaua",
+      not any("Tuchaua" in i["name"] for i in _pg24.get("items") or []), _pg24.get("items"))
+_t24 = memoria_mod.merge(dict(memoria_mod._empty(), items=[
+    {"name": "Coxinha", "quantity": 50, "price": 0.8},
+    {"name": "Guaraná Tuchaua 2 Litros", "quantity": 1, "price": 12.0}]), {}, {}, "nao quero tuchaua")[0]
+checa("'nao quero tuchaua' tira o Tuchaua",
+      [i["name"] for i in _t24["items"]] == ["Coxinha"], _t24["items"])
+checa("combo mix de camarao e o outro de frango: dois combos",
+      [c["name"] for c in _ext24("combo mix de camarao ir o outro de frango").get("combos") or []]
+      == ["Combo Mix Camarão", "Combo Mix Frango"])
+checa("bandeja de assados vira item, inclusive 'banbeijas'",
+      _nomes24(_ext24("as 4 banbeijas os msm sabores").get("bebidas"))
+      == [("Salgadinhos Assados - Bandeja com 15", 4, "")]
+      and _nomes24(_ext24("duas bandeija de pao pizza ir esfira").get("bebidas"))
+      == [("Salgadinhos Assados - Bandeja com 15", 2, "")]
+      and not item_fora_do_cardapio("as 4 banbeijas os msm sabores")
+      and _nomes24(_ext24("1 bandeja de brigadeiro").get("doces")) == [("Bandeja de Brigadeiros (16 un)", 1, "")])
+checa("'vc fazem docinhos?' nao e produto inexistente",
+      app._faq_produto_inexistente("vc fazem docinhos?") == "")
+checa("horario do audio ('1940 e de hoje') nao vira 1940 salgados",
+      not _ext24("1940 é de hoje").get("sabores_pendentes")
+      and _ext24("30 de carne").get("sabores_pendentes"))
+_esg24 = dict(memoria_mod._empty(), items=[{"name": "Coxinha", "quantity": 50, "price": 0.8},
+                                          {"name": "Mini quiches", "quantity": 1, "price": 150.0}])
+memoria_mod.aplicar_troca_do_esgotado(_esg24, "troca a mini quiche ir coloca quiche de carne de sol")
+checa("a resposta a 'por qual sabor quer trocar?' troca o item em falta",
+      [(i["name"], i["quantity"]) for i in _esg24["items"]] == [("Coxinha", 50), ("Quiche de Carne de Sol", 1)]
+      and not memoria_mod.itens_indisponiveis(_esg24), _esg24["items"])
+_esg24b = dict(memoria_mod._empty(), items=[{"name": "Mini quiches", "quantity": 1, "price": 150.0}])
+checa("com numero a troca fica com a extracao",
+      not memoria_mod.aplicar_troca_do_esgotado(_esg24b, "pode ser mais 50 pao pizza"))
+checa("preco da tabela do congelado sai do texto do dono",
+      (app._resposta_do_balcao("me passa os preços da tabela do cento congelado e do cento frito", {}) or ("",))[0]
+      == "congelado")
+checa("'Dona' nao e nome", detectar_nome("quero falar com a dona") == "")
+checa("'vou busca' e retirada", _ext24("vou busca").get("modality") == "retirada")
+checa("'Qual você prefere?' sozinha e trocada", app._referencia_lista_ausente("Qual você prefere?")
+      and not app._referencia_lista_ausente("Coxinha ou quibe, qual você prefere?"))
+import buffer as _buffer24
+_b24 = _buffer24.MessageBuffer(60, lambda u, i: None)
+_b24.add("u", "quero 500 salgadinhos")
+checa("#reset descarta a mensagem que esperava o debounce",
+      _b24.descartar("u") == 1 and not _b24.tem_mensagem_nova("u"))
+import cep as _cep24
+_cep24_orig = _cep24.buscar
+_cep24.buscar = lambda c: {"rua": "Rua Wilman Maia", "bairro": "Igarapé", "cidade": "Porto Velho", "uf": "RO"}
+checa("CEP seguido so do numero guarda o numero",
+      _ext24("76824252 5994").get("endereco") == "Rua Wilman Maia, 5994")
+_cep24.buscar = _cep24_orig
 
 print()
 print("=" * 78)

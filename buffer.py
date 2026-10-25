@@ -72,6 +72,20 @@ class MessageBuffer:
                 if user in self._state:
                     self._state[user]["ocupado"] = False
 
+    def descartar(self, user: str) -> int:
+        """Joga fora o que esperava o debounce. Usado pelo #reset: a mensagem
+        mandada antes dele era respondida depois, ja na conversa nova (24/10)."""
+        with self._lock:
+            estado = self._state.get(user)
+            if not estado:
+                return 0
+            if estado.get("timer") is not None:
+                estado["timer"].cancel()
+                estado["timer"] = None
+            n = len(estado["items"])
+            estado["items"] = []
+            return n
+
     def tem_mensagem_nova(self, user: str) -> bool:
         """Chegou mensagem do cliente enquanto a anterior era respondida?"""
         with self._lock:
