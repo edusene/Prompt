@@ -293,6 +293,10 @@ def _consultar_preco_handler(produto: str = "", formato: str = "", **kwargs) -> 
                 "preco": i["preco"] if i["preco"] is not None else i["preco_texto"],
                 "forma_de_venda": _forma_de_venda(i),
                 "disponivel": i["disponivel"],
+                # Sabores e descricao do cardapio: o modelo inventava o sabor
+                # do suco (Camyli, 26/10). So diga sabor que estiver aqui.
+                **({"sabores": i["opcoes"]} if i.get("opcoes") else {}),
+                **({"obs": i["obs"]} if i.get("obs") else {}),
             }
             for i in itens
         ],
@@ -817,7 +821,31 @@ def _faq_sabor_de_refri(t: str, memoria: dict | None = None) -> str:
     return f"Os sabores do {tamanho} são: {lista}. Qual você prefere? 🥤"
 
 
+def _faq_sabor_de_suco(t: str) -> str:
+    """Sabores do suco, do cardapio. "Temos suco natural de laranja" foi
+    invencao do modelo: o cardapio diz Caja, Maracuja, Goiaba e Abacaxi
+    (Camyli, 26/10). Pedido com sabor que existe segue o fluxo ("")."""
+    from agents.conversation import opcoes_do_suco
+    from conversation_memory import casar_sabor
+    sabores = opcoes_do_suco()
+    if not sabores:
+        return ""
+    lista = ", ".join(sabores[:-1]) + " e " + sabores[-1] if len(sabores) > 1 else sabores[0]
+    dito = _re_mod.search(r"\bsucos?\s+(?:natural\s+)?de\s+(?!que\b|qual|quais)([a-z]{3,})", t)
+    if dito:
+        if casar_sabor(dito.group(1), sabores):
+            return ""
+        return (f"Suco de {dito.group(1)} não temos. Os sabores do suco natural são: "
+                f"{lista}. Qual você prefere? 🥤")
+    return f"Os sabores do suco natural são: {lista}. Qual você prefere? 🥤"
+
+
 _FAQ_DO_DONO = (
+    ("sabor de suco", _re_mod.compile(r"\bsucos?\b.{0,30}\b(?:de\s+que|sabor\w*|qual|quais)\b"
+                                      r"|\b(?:sabor\w*|qual|quais)\b.{0,25}\bsucos?\b"
+                                      r"|\b(?:tem|tens|vende\w*)\b.{0,10}\bsucos?\b"
+                                      r"|\bsucos?\s+(?:natural\s+)?de\s+[a-z]{3,}"),
+     _faq_sabor_de_suco, False),
     ("kibe requeijao", _re_mod.compile(r"\b(?:kibe|quibe)s?\b.{0,40}\brequeij"),
      "Nosso kibe tradicional não leva requeijão! Quantos vamos pedir? 😊", False),
     ("misto recheio", _re_mod.compile(r"\bmisto\b.{0,30}\b(?:leva|recheio|recheado|o\s+que|que\s+vem|feito)\b"

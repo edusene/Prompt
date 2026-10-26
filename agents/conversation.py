@@ -1382,6 +1382,14 @@ def completar_pelo_contexto(texto: str, ultima_do_agente: str, ultima_do_cliente
     t = " ".join((texto or "").lower().split())
     if not t or len(t) > 80:
         return texto
+    # "quero de maracuja" depois de "Os sabores do suco natural sao: ...".
+    if ("sabores do suco" in (ultima_do_agente or "").lower() and "suco" not in t
+            and not re.search(r"\b(?:n[aã]o|nem|sem)\b", t)):
+        from conversation_memory import casar_sabor
+        sabor = casar_sabor(t, opcoes_do_suco())
+        if sabor:
+            q = re.search(r"\b(\d{1,2})\b", t)
+            return f"{q.group(1) if q else 1} suco de {sabor.lower()}"
     m = _RX_SO_COMPLEMENTO.match(t)
     if m and ultima_do_agente and (m.group("qtd1") or m.group("qtd2")):
         comp = facts.normalize(m.group("comp"))
@@ -1652,6 +1660,16 @@ _RX_ALFAJOR = re.compile(
 SUCO = "Suco Natural 300 ml"
 _RX_SUCO = re.compile(
     r"(?:\b(?P<qtd>\d{1,2}|uma?|dois|duas|tr[eê]s)\s+)?\bsucos?\b", re.IGNORECASE)
+
+
+def opcoes_do_suco() -> list[str]:
+    """Sabores do suco, do cardapio digital. [] se ilegivel."""
+    try:
+        import facts
+        return next((list(p.get("opcoes") or []) for p in facts.get()["produtos"]
+                     if p["item"] == SUCO), [])
+    except Exception:
+        return []
 
 # "4 bandejas", "duas bandeija de pao pizza", "as 4 banbeijas": a bandeja de
 # assados (esfirra e pao pizza, composicao fixa) nao era item e o pedido nunca
@@ -1932,20 +1950,33 @@ def bebidas_citadas(msg_lower: str) -> tuple[list[dict], list[dict]]:
             itens.append({"name": ALFAJOR, "quantity": qtd, "price": oficial["preco_unitario"]})
     for m in _RX_SUCO.finditer(msg_lower or ""):
         # "tem suco de que?" e pergunta, nao pedido.
-        if re.search(r"\b(?:sem|n[aã]o|nada\s+de|nem|tem|tens|vende\w*|faz\w*)\b[^,.;!?\n]{0,18}$",
+        if re.search(r"\b(?:sem|n[aã]o|nada\s+de|nem|tem|tens|vende\w*|faz\w*|quais|qual|sabor\w*)\b[^,.;!?\n]{0,18}$",
                      (msg_lower or "")[:m.start()]):
             continue
         bruto_qtd = (m.group("qtd") or "").lower()
         qtd = int(bruto_qtd) if bruto_qtd.isdigit() else _QTD_POR_EXTENSO.get(bruto_qtd, 1)
         if not 0 < qtd <= 20 or any(i["name"] == SUCO for i in itens):
             continue
+        # O sabor vem das opcoes do cardapio. Sabor que nao existe ("suco de
+        # laranja") nao entra: a resposta dos sabores do suco diz quais tem.
+        dito = re.match(r"\s+(?:natural\s+)?(de\s+)?([a-zà-ÿ]{3,}(?:\s+[a-zà-ÿ/]+)?)",
+                        (msg_lower or "")[m.end():])
+        sabor = ""
+        if dito and not re.match(r"(?:que|qual|quais|com|pra|para|tamb)\b", dito.group(2)):
+            from conversation_memory import casar_sabor
+            sabor = casar_sabor(dito.group(2), opcoes_do_suco())
+            if not sabor and dito.group(1):
+                continue
         try:
             import facts
             oficial = facts.resolve_unit_price(SUCO, qtd)
         except Exception:
             oficial = None
         if oficial:
-            itens.append({"name": SUCO, "quantity": qtd, "price": oficial["preco_unitario"]})
+            novo = {"name": SUCO, "quantity": qtd, "price": oficial["preco_unitario"]}
+            if sabor:
+                novo["sabor"] = sabor
+            itens.append(novo)
     for m in _RX_BANDEJA.finditer(msg_lower or ""):
         if re.search(r"\b(?:sem|n[aã]o|nada\s+de|nem)\b[^,.;!?\n]{0,18}$",
                      (msg_lower or "")[:m.start()]):

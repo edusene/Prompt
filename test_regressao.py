@@ -4145,6 +4145,20 @@ checa("'esgotado' de item disponivel e inventado; de item indisponivel fica",
       app._esgotado_inventado("A Coxinha grande está esgotada no momento.")
       and not app._esgotado_inventado("A mini quiche está esgotada.")
       and not app._esgotado_inventado("O Refrigerante 2 Litros está esgotado."))
+_faq26 = app._resposta_de_faq("TEM SUCO DE QUE ?")
+_lar26 = app._resposta_de_faq("tem suco de laranja?")
+checa("sabores do suco saem do cardapio, sem inventar laranja",
+      _faq26 and "Maracujá" in _faq26[1] and "laranja" not in _faq26[1].lower()
+      and _lar26 and _lar26[1].startswith("Suco de laranja não temos"), (_faq26, _lar26))
+checa("'suco de maracuja' leva o sabor; 'suco de laranja' nao entra; pergunta nao e pedido",
+      _nomes24(_ext24("quero 25 coxinhas e um suco de maracuja").get("bebidas"))
+      == [("Suco Natural 300 ml", 1, "Maracujá")]
+      and not _ext24("quero 1 suco de laranja").get("bebidas")
+      and not _ext24("quais os sabores do suco").get("bebidas"))
+checa("'quero de maracuja' depois da lista de sabores do suco vira o suco",
+      _cv.completar_pelo_contexto("QUERO DE MARACUJÁ", "Os sabores do suco natural são: Cajá, "
+                                  "Maracujá, Goiaba e Abacaxi c/Hortelã. Qual você prefere? 🥤")
+      == "1 suco de maracujá")
 _src26 = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "app.py"), encoding="utf-8").read()
 checa("'o segundo combo' escolhe pela posicao na lista", "(primeir|segund|terceir|quart|quint)" in _src26)
 

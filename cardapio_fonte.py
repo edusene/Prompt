@@ -360,7 +360,11 @@ def _produtos(itens: list[dict]) -> list[dict]:
         produtos.append({"categoria": categoria, "item": interno, "formato": formato,
                          "preco": preco, "preco_texto": f"{preco:.2f}" if preco else rotulo_preco,
                          "disponivel": disponivel, "origem": nome,
-                         "opcoes": list(it.get("flavor_options") or [])})
+                         "opcoes": list(it.get("flavor_options") or []),
+                         # Descricao do cardapio ("Sabores disponiveis: Caja,
+                         # Maracuja..."): sem ela o modelo inventou suco de
+                         # laranja (Camyli, 26/10).
+                         "obs": " ".join(str(it.get("description") or "").split())})
     # Mesma ordem da planilha: pacotes e sabores de Fritos e Assados primeiro,
     # depois o resto. A busca por nome pega a PRIMEIRA linha que casa, e "Quibe"
     # existe como sabor de lote e como salgado grande - com o grande na frente,
@@ -461,8 +465,9 @@ def texto_para_prompt(dados: dict) -> str:
     for p in dados.get("produtos") or []:
         preco = f"{p['preco']:.2f}" if p.get("preco") is not None else (p.get("preco_texto") or "")
         opcoes = f" | opcoes: {', '.join(p['opcoes'])}" if p.get("opcoes") else ""
+        obs = f" | obs: {p['obs']}" if p.get("obs") else ""
         linhas.append(f"{p['categoria']} | {p['item']} | {p['formato']} | {preco} | "
-                      f"{'SIM' if p.get('disponivel', True) else 'NAO'}{opcoes}")
+                      f"{'SIM' if p.get('disponivel', True) else 'NAO'}{opcoes}{obs}")
     linhas += ["", "=== BAIRROS E TAXAS DE ENTREGA (cardapio digital) ===", "Bairro | Taxa"]
     linhas += [f"{b['nome']} | {b['taxa']:.2f}" for b in dados.get("bairros") or []]
     linhas += ["", "=== HORARIOS (cardapio digital) ===", "Dia | Horario | Obs"]
