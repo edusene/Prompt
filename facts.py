@@ -260,26 +260,43 @@ def _unidades_do_formato(item: dict) -> int:
     return int(match.group(1)) if match else 1
 
 
-def preco_unitario_da_categoria(categoria: str) -> tuple[float | None, str]:
+def preco_unitario_da_categoria(categoria: str, quantity: int = 0) -> tuple[float | None, str]:
     """Preco por unidade de uma categoria vendida em lote (Fritos, Assados).
 
     Fritos: porcao de 25 por R$ 20,00 -> R$ 0,80 a unidade. O sabor nao tem
     preco proprio no cardapio ("Incluso no Pacote"), entao e daqui que sai o
     valor de '50 coxinhas'.
+
+    Com a quantidade, o preco e o dos lotes que a compoem (cento, meio cento,
+    porcao), como o calculateOrder cobra: nos Assados a porcao e R$ 30,00 e o
+    cento R$ 140,00, e "100 canudinhos" saia R$ 120,00 na linha e R$ 140,00
+    no total (Camyli, 26/10).
     """
     alvo = normalize(categoria)
     melhor = None
     origem = ""
+    lotes = {}
     for p in get()["produtos"]:
         if normalize(p["categoria"]) != alvo or p["preco"] is None:
             continue
         unidades = _unidades_do_formato(p)
         if unidades <= 1:
             continue
+        if unidades % 25 == 0 and p.get("disponivel", True):
+            lotes.setdefault(unidades, p)
         unitario = p["preco"] / unidades
         if melhor is None or unitario < melhor:
             melhor = unitario
             origem = f"{p['item']} = {_brl(p['preco'])} ({unidades} un)"
+    if quantity and quantity % 25 == 0 and lotes:
+        resto, total, partes = quantity, 0.0, []
+        for unidades in sorted(lotes, reverse=True):
+            n, resto = divmod(resto, unidades)
+            if n:
+                total += n * lotes[unidades]["preco"]
+                partes.append(f"{n} x {lotes[unidades]['item']} = {_brl(n * lotes[unidades]['preco'])}")
+        if not resto:
+            return total / quantity, " + ".join(partes)
     return melhor, origem
 
 
@@ -335,11 +352,13 @@ def resolve_unit_price(nome: str, quantity: int = 1) -> dict | None:
     alvo = normalize(nome)
 
     def _como_sabor(p: dict, exato: bool) -> dict | None:
-        unitario, origem = preco_unitario_da_categoria(p["categoria"])
+        unitario, origem = preco_unitario_da_categoria(p["categoria"], quantity)
         if unitario is None:
             return None
         return {
-            "preco_unitario": round(unitario, 2),
+            # 4 casas: 75 assados = R$ 100,00 (1,3333 a unidade); com 2 casas a
+            # linha saia R$ 99,75.
+            "preco_unitario": round(unitario, 4),
             "item_oficial": p["item"],
             "base": f"{p['categoria']}: {origem}",
             "exato": exato,

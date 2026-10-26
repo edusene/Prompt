@@ -1334,14 +1334,22 @@ def sabores_citados(texto: str) -> list[str]:
         return bool(nome) and (nome in _SABORES_DE_LOTE or nome in de_lote_do_dono)
 
     achados = []
+    # "canudo de frango e camarao": o produto vale para o sabor seguinte. O
+    # camarao sumia e o cento inteiro ia para o frango (Camyli, 26/10).
+    prefixo = ""
     for parte in re.split(r"\s*(?:,|;|/|\+|\be\b|\bou\b)\s*", alvo):
         parte = _RX_ANTES_DO_SABOR_CITADO.sub("", parte.strip()).strip(" .!?")
         if len(parte) < 3:
             continue
         for pedaco in _separar_sabores_sem_virgula(parte, _de_lote):
             nome = _produto_conhecido(pedaco)
+            if not _de_lote(nome) and prefixo:
+                nome = _produto_conhecido(prefixo + re.sub(r"^d[eao]\s+", "", pedaco))
             if _de_lote(nome) and nome not in achados:
                 achados.append(nome)
+                m = re.match(r"(.+?\bd[eao]\s+)", pedaco)
+                if m:
+                    prefixo = m.group(1)
     return achados
 
 
@@ -1639,6 +1647,11 @@ ALFAJOR = "Alfajor"
 _RX_ALFAJOR = re.compile(
     r"(?:\b(?P<qtd>\d{1,2}|uma?|dois|duas|tr[eê]s)\s+(?:unidades?\s+(?:de\s+)?)?)?\balfajor(?:es)?\b",
     re.IGNORECASE)
+# "1 suco" nao era item: "suco" esta em _NAO_E_PRODUTO e o resumo saiu sem
+# ele (Camyli, 26/10). O cardapio digital tem um suco so.
+SUCO = "Suco Natural 300 ml"
+_RX_SUCO = re.compile(
+    r"(?:\b(?P<qtd>\d{1,2}|uma?|dois|duas|tr[eê]s)\s+)?\bsucos?\b", re.IGNORECASE)
 
 # "4 bandejas", "duas bandeija de pao pizza", "as 4 banbeijas": a bandeja de
 # assados (esfirra e pao pizza, composicao fixa) nao era item e o pedido nunca
@@ -1917,6 +1930,22 @@ def bebidas_citadas(msg_lower: str) -> tuple[list[dict], list[dict]]:
             oficial = None
         if oficial:
             itens.append({"name": ALFAJOR, "quantity": qtd, "price": oficial["preco_unitario"]})
+    for m in _RX_SUCO.finditer(msg_lower or ""):
+        # "tem suco de que?" e pergunta, nao pedido.
+        if re.search(r"\b(?:sem|n[aã]o|nada\s+de|nem|tem|tens|vende\w*|faz\w*)\b[^,.;!?\n]{0,18}$",
+                     (msg_lower or "")[:m.start()]):
+            continue
+        bruto_qtd = (m.group("qtd") or "").lower()
+        qtd = int(bruto_qtd) if bruto_qtd.isdigit() else _QTD_POR_EXTENSO.get(bruto_qtd, 1)
+        if not 0 < qtd <= 20 or any(i["name"] == SUCO for i in itens):
+            continue
+        try:
+            import facts
+            oficial = facts.resolve_unit_price(SUCO, qtd)
+        except Exception:
+            oficial = None
+        if oficial:
+            itens.append({"name": SUCO, "quantity": qtd, "price": oficial["preco_unitario"]})
     for m in _RX_BANDEJA.finditer(msg_lower or ""):
         if re.search(r"\b(?:sem|n[aã]o|nada\s+de|nem)\b[^,.;!?\n]{0,18}$",
                      (msg_lower or "")[:m.start()]):
@@ -2238,7 +2267,20 @@ def numeros_por_extenso(texto: str) -> str:
         if m.group("unidade"):
             valor += _UNIDADES_EXTENSO[m.group("unidade").lower()]
         return str(valor)
-    return _RX_NUMERO_EXTENSO.sub(_troca, texto or "")
+
+    # "uma coxinha", "uma fatia de pudim": a quiche, a coxinha e o pudim sumiam
+    # do resumo (Camyli, 26/10). "Um"/"uma" so viram 1 antes de produto, para
+    # "uma pergunta" e "um pouco" ficarem como estao.
+    def _um(m):
+        w = m.group(1).lower()
+        if w.startswith(("fatia", "porc", "cento", "unidade")) or _produto_conhecido(w):
+            return "1"
+        return m.group(0)
+    texto = _RX_UM_UMA.sub(_um, texto or "")
+    return _RX_NUMERO_EXTENSO.sub(_troca, texto)
+
+
+_RX_UM_UMA = re.compile(r"\bum[a]?\b(?=\s+(?:(?:de|da|do)\s+)?([a-zà-ÿ]+))", re.IGNORECASE)
 
 
 def _extract_data_from_message(message: str, state: "ConversationState") -> dict:

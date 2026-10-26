@@ -5262,6 +5262,28 @@ def _escolheu_lanche(texto: str) -> bool:
     return any(m in limpo for m in _MARCAS_ESCOLHEU_BALCAO)
 
 
+_GENERICAS_DO_ITEM = {"unidade", "sabor", "porcao", "cento", "fatia", "grande", "frango"}
+
+
+def _esgotado_inventado(frase: str) -> bool:
+    """A frase diz que algo esta esgotado e nao cita item que o cardapio
+    marca como indisponivel? Na duvida (cardapio ilegivel), nao."""
+    f = facts.normalize(frase or "")
+    if not _re_mod.search(r"\besgotad|\bem falta\b", f):
+        return False
+    # Sabor de refrigerante em falta nao e produto do cardapio: fica.
+    if _re_mod.search(r"refri|coca|fanta|guarana|pepsi|sprite|suco|\blata|litro|tuchaua", f):
+        return False
+    try:
+        fora = [facts.normalize(p["item"]) for p in facts.get()["produtos"]
+                if not p.get("disponivel", True)]
+    except Exception:
+        return False
+    palavras = {w.rstrip("s") for n in fora for w in n.split()
+                if len(w) >= 5 and w not in _GENERICAS_DO_ITEM}
+    return not any(_re_mod.search(r"\b" + _re_mod.escape(w), f) for w in palavras)
+
+
 def _parece_fechamento(texto: str) -> bool:
     """A resposta anuncia ao cliente que o pedido foi fechado?"""
     limpo = " ".join(facts.normalize(texto or "").split())
@@ -6273,7 +6295,22 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                     _q = _m.group(1) or ""
                     _q = int(_q) if _q.isdigit() else _cvc._QTD_POR_EXTENSO.get(_q, 0)
                     _escolhidos.append({"name": _nome_cb, "quantity": _q})
+            # "quero o segundo combo": a posicao na lista que ela mandou. Nao
+            # entrava na ficha e o pedido saiu sem o combo (Camyli, 26/10).
+            _ord = _re_mod.search(r"\b(primeir|segund|terceir|quart|quint)[oa]\b", _tn)
+            if not _escolhidos and _ord:
+                _lista_ord = [p["item"] for p in facts.get()["produtos"]
+                              if facts.normalize(p["categoria"]) == "combos"
+                              and p.get("disponivel", True) and p.get("preco")]
+                _i = ("primeir", "segund", "terceir", "quart", "quint").index(_ord.group(1))
+                if _i < len(_lista_ord):
+                    _escolhidos.append({"name": _lista_ord[_i], "quantity": 0})
             if _escolhidos:
+                # "1 cento de fritos mais 1 coca" era a descricao do combo, nao
+                # um cento a parte: sem isto ela pedia os sabores do cento.
+                if not conversation_memory.tem_salgado_na_ficha(_memoria):
+                    _memoria["volume_pendente"] = 0
+                    _memoria["preparo_pendente"] = ""
                 _total_cb = int(_memoria.get("combo_pendente") or 0)
                 _sem_qtd = [c for c in _escolhidos if not c["quantity"]]
                 if _sem_qtd:
@@ -8164,6 +8201,16 @@ def _handle_flush(user: str, items: list[dict]) -> None:
         if reply and _referencia_lista_ausente(reply):
             reply = "Qual delícia você quer pedir? 😊"
             print(f"[lista] user={user} 'algum desses' sem lista na mensagem; trocada")
+        # "a Coxinha grande está esgotada" com ela disponivel no cardapio
+        # (Camyli, 26/10): esgotado so de item que o cardapio marca assim.
+        if reply and not _RX_LINHA_DE_RESUMO.search(reply):
+            _frases_es = [f for f in _RX_FIM_DE_FRASE.split(reply) if f.strip()]
+            _sem_falso = [f for f in _frases_es if not _esgotado_inventado(f)]
+            if len(_sem_falso) != len(_frases_es):
+                reply = " ".join(f.strip() for f in _sem_falso).strip() or (
+                    _proxima_pergunta_do_funil(_memoria) if _memoria.get("items")
+                    else "Qual delícia você quer pedir? 😊")
+                print(f"[estoque] user={user} modelo disse esgotado de item disponivel; frase removida")
 
         # "Prazer, Balbino!" no meio da conversa (15/10) e o modelo prometendo
         # horario ("Sim, consigo entregar as 12h" no intervalo, 15/10 12h01):

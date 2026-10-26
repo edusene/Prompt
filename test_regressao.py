@@ -4105,6 +4105,49 @@ _meta25._carregar_config()
 checa("sem WHATSAPP_PROVIDER continua a Datafy", _meta25.provider() == "datafy"
       and _meta25._BASE == "https://cloud.datafyapi.com.br/v1")
 
+secao("Teste da Camyli (26/10)")
+from agents import conversation as _cv  # noqa: E402
+checa("'uma coxinha', 'uma fatia de pudim', 'uma quiche' viram item",
+      _nomes24(_ext24("QUERO 2 CROQUETE E UMA COXINHA ,UMA FATIA DE PUDIM").get("items"))
+      == [("Croquete", 2, ""), ("Coxinha", 1, ""), ("Pudim (Fatia)", 1, "")]
+      and _nomes24(_ext24("QUERO 1 FANTA LATA E UMA QUICHE DE FRANGO").get("items"))
+      == [("Quiche de Frango", 1, "")]
+      and _nomes24(_ext24("quero um croquete").get("items")) == [("Croquete", 1, "")])
+checa("'um'/'uma' fora de pedido nao vira numero",
+      _cv.numeros_por_extenso("uma pergunta, quero um pouco") == "uma pergunta, quero um pouco")
+checa("'um suco' entra; 'tem suco de que?' nao",
+      _nomes24(_ext24("quero 25 coxinhas e um suco").get("bebidas")) == [("Suco Natural 300 ml", 1, "")]
+      and not _ext24("TEM SUCO DE QUE ?").get("bebidas"))
+checa("'canudo de frango e camarao': o produto vale para o segundo sabor",
+      _cv.sabores_citados("CANUDO DE FRANGO E CAMARÃO") == ["Canudinho de Frango", "Canudinho de Camarao"]
+      and _cv.sabores_citados("coxinha e kibe") == ["Coxinha", "Quibe"])
+_get_orig26 = facts.get
+_dados26 = dict(_get_orig26())
+_dados26["produtos"] = [p for p in _dados26["produtos"] if facts.normalize(p["categoria"]) != "assados"
+                        or p["preco"] is None] + [
+    {"categoria": "Assados", "item": n, "formato": f, "preco": v, "disponivel": True}
+    for n, f, v in (("Porção (25 un)", "Porção", 30.0), ("Meio cento (50 un)", "Meio Cento", 70.0),
+                    ("Cento (100 un)", "Cento", 140.0))]
+facts.get = lambda *a, **k: _dados26
+try:
+    _p26 = {q: round(facts.resolve_unit_price("Canudinho de Frango", q)["preco_unitario"] * q, 2)
+            for q in (25, 75, 100, 125)}
+finally:
+    facts.get = _get_orig26
+checa("preco do assado segue os lotes do cardapio (cento R$ 140, nao 4 porcoes)",
+      _p26 == {25: 30.0, 75: 100.0, 100: 140.0, 125: 170.0}, _p26)
+import cardapio as _cardapio26
+_r26 = _cardapio26.montar_resumo([], 0, 15, 0, 15, bairro="Jardim Santana", modalidade="entrega",
+                                 endereco="RUA VITORIA POPULAR 587 JARDIM SANTANA BLOCO 03")
+checa("resumo nao repete o bairro que ja esta no endereco",
+      "📍 Entrega: RUA VITORIA POPULAR 587 JARDIM SANTANA BLOCO 03\n" in _r26, _r26)
+checa("'esgotado' de item disponivel e inventado; de item indisponivel fica",
+      app._esgotado_inventado("A Coxinha grande está esgotada no momento.")
+      and not app._esgotado_inventado("A mini quiche está esgotada.")
+      and not app._esgotado_inventado("O Refrigerante 2 Litros está esgotado."))
+_src26 = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "app.py"), encoding="utf-8").read()
+checa("'o segundo combo' escolhe pela posicao na lista", "(primeir|segund|terceir|quart|quint)" in _src26)
+
 print()
 print("=" * 78)
 print("FALHAS:", _falhas or "nenhuma")

@@ -778,7 +778,13 @@ def montar_resumo(items: list[dict], subtotal: float, delivery_fee: float,
         _end = endereco or "[ENDERECO]"
         if referencia and referencia.lower() not in _end.lower():
             _end = f"{_end}, {referencia}"
-        linhas.append(f"📍 Entrega: {_end} - {bairro or '[BAIRRO]'}")
+        # "RUA VITORIA POPULAR 587 JARDIM SANTANA BLOCO 03 - Jardim Santana":
+        # o bairro ja vinha no endereco (Camyli, 26/10).
+        import facts
+        if bairro and facts.normalize(bairro) in facts.normalize(_end):
+            linhas.append(f"📍 Entrega: {_end}")
+        else:
+            linhas.append(f"📍 Entrega: {_end} - {bairro or '[BAIRRO]'}")
 
     linhas.append("Itens:")
     for item in items or []:
