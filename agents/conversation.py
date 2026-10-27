@@ -1534,6 +1534,9 @@ def _volume_de_dois_sabores(m: re.Match) -> str:
 _RX_METADE_DO_MESMO = re.compile(
     r"\b(\d{2,3})\s+([a-zà-ÿ]{4,})\s+(?:de\s+)?metade\s+(?:de\s+)?([a-zà-ÿ]{4,})"
     r"\s+(?:e\s+)?metade\s+(?:de\s+)?([a-zà-ÿ]{4,})\b")
+_RX_DOIS_SABORES_DO_MESMO = re.compile(
+    r"\b(\d{2,3}|meio\s+cento|(?:um|1)\s+cento)\s+(?:de\s+)?([a-zà-ÿ]{4,})\s+(?:de\s+)?([a-zà-ÿ]{4,})"
+    r"\s+e\s+(?:de\s+)?([a-zà-ÿ]{4,})\b(?!\s*(?:,|e\s))")
 
 
 def metade_do_mesmo_salgado(msg_lower: str) -> str:
@@ -1544,12 +1547,17 @@ def metade_do_mesmo_salgado(msg_lower: str) -> str:
     em 25.
     """
     def _troca(m):
-        n, base, s1, s2 = int(m.group(1)), m.group(2), m.group(3), m.group(4)
+        bruto = re.sub(r"\s+", " ", m.group(1))
+        n = {"meio cento": 50, "um cento": 100, "1 cento": 100}.get(bruto) or int(bruto)
+        base, s1, s2 = m.group(2), m.group(3), m.group(4)
         if n % 50 or not (_produto_conhecido(f"{base} de {s1}")
                           and _produto_conhecido(f"{base} de {s2}")):
             return m.group(0)
         return f"{n // 2} {base} de {s1} {n // 2} {base} de {s2}"
-    return _RX_METADE_DO_MESMO.sub(_troca, msg_lower or "")
+    msg_lower = _RX_METADE_DO_MESMO.sub(_troca, msg_lower or "")
+    # "meio cento de canudos frango e camarao": sem "metade", o camarao sumia ou
+    # o pedido inteiro nao era lido (teste do dono, 27/10).
+    return _RX_DOIS_SABORES_DO_MESMO.sub(_troca, msg_lower)
 
 
 def itens_divididos(msg_lower: str, quebrados: list | None = None) -> list[dict]:

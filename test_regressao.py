@@ -3207,6 +3207,23 @@ checa("27/10 'neio cento de pastel' e meio cento (50), nao 100",
       [(p["qtd"], p["termo"]) for p in _extract_data_from_message(
           "quero encomendar 1 cento de coxinhas ,e neio cento de pastel",
           ConversationState(items=[])).get("sabores_pendentes") or []] == [(50, "pastel")])
+checa("27/10 'meio cento de canudos frango e camarao' sao 25 de cada",
+      [(i["name"], i["quantity"]) for i in _extract_data_from_message(
+          "quero meio cento de canudos frango e camarão", ConversationState(items=[])).get("items") or []]
+      == [("Canudinho de Frango", 25), ("Canudinho de Camarao", 25)])
+checa("27/10 'meio cento de coxinha e quibe' continua 25 de cada",
+      [(i["name"], i["quantity"]) for i in _extract_data_from_message(
+          "meio cento de coxinha e quibe", ConversationState(items=[])).get("items") or []]
+      == [("Coxinha", 25), ("Quibe", 25)])
+import cardapio_catalogo as _cc27  # noqa: E402
+_cn27 = lambda its: [(a["name"], a["quantity"]) for a in _cc27.traduzir(  # noqa: E731
+    [{"name": n, "quantity": q, "price": 1.4} for n, q in its])[0]]
+checa("27/10 25 canudinhos vao na porcao de assados, nao no 'Canudinhos' (Combo Mix)",
+      _cn27([("Canudinho de Frango", 25)]) == [("25 uni Salgadinhos assados", 25)])
+checa("27/10 25+25 canudinhos vao no 'Canudinhos' de 50",
+      _cn27([("Canudinho de Frango", 25), ("Canudinho de Camarão", 25)]) == [("Canudinhos", 50)])
+checa("27/10 aviso do almoco nao se apresenta de novo",
+      '_apresentacao = ("" if _memoria.get("saudacao_feita")' in open("app.py", encoding="utf-8").read())
 _ho27, _rd_orig27, _pt_orig27 = [], app._responder_direto, app.perform_transfer
 app._responder_direto = lambda u, it, t, c=None: _ho27.append(t)
 app.perform_transfer = lambda *a, **k: None

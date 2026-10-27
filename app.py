@@ -6917,8 +6917,12 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             if _RX_PIX_NA_ENTREGA.search(facts.normalize(text_only or "")):
                 _fato_txt += f"{TEXTO_PIX_NA_ENTREGA}\n\n"
             # Mesma apresentacao do dia (08/10: "Aqui e a Sandrinha" so a noite).
+            # Conversa ja apresentada nao se apresenta de novo no meio do
+            # pedido (teste do intervalo de almoco, 27/10).
+            _apresentacao = ("" if _memoria.get("saudacao_feita") else
+                             f"{horario.saudacao(_agora)}{_nome}! Eu sou a Sandrinha da BALBS 💛\n\n")
             _resposta = (
-                f"{horario.saudacao(_agora)}{_nome}! Eu sou a Sandrinha da BALBS 💛\n\n"
+                f"{_apresentacao}"
                 f"{_eco}{_fato_txt}"
                 f"{_negativas_do_bloco_6(user, text_only, _expediente['mensagem'], _memoria)}"
             )

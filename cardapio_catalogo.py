@@ -65,17 +65,20 @@ LOTES = {
         "quantidade_teste": 100,
         "preco_esperado": 120.00,
     },
-    # Canudinho e Assado na planilha, mas no cardapio digital e produto proprio
-    # com preco de porcao de 25 - e a regra do dono diz que so sai em 25.
+    # Canudinho e Assado na planilha, mas no cardapio digital e produto proprio.
+    # Desde 27/10 o "Canudinhos" e de 50 (2 sabores, R$ 70); com 25 o
+    # calculateOrder casava com o Combo Mix Frango e cobrava R$ 2.500. Os 25
+    # vao na porcao de assados, que aceita o sabor do canudinho (R$ 35).
     "Canudinhos": {
-        "preco_unitario": 1.20,
+        "preco_unitario": 1.40,
         "passo": 25,
         "context": "lote",
         "pacotes": [
-            {"nome_base44": "Canudinhos", "minimo": 25, "max_sabores": 1},
+            {"nome_base44": "Canudinhos", "minimo": 50, "max_sabores": 2},
+            {"nome_base44": "25 uni Salgadinhos assados", "minimo": 25, "max_sabores": 1},
         ],
-        "quantidade_teste": 25,
-        "preco_esperado": 30.00,
+        "quantidade_teste": 50,
+        "preco_esperado": 70.00,
     },
 }
 
