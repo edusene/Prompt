@@ -624,8 +624,12 @@ def merge(memoria: dict, extraido: dict, novo_da_mensagem: dict | None = None,
                 mudancas.append(f"bebida -> {b['quantity']} x {b['name']}")
         memoria["items"] = itens
     sem_tamanho = fonte.get("bebidas_pendentes") or (extraido or {}).get("bebidas_pendentes") or []
-    if sem_tamanho and not any(_e_bebida(i.get("name")) for i in memoria.get("items") or []
-                               if isinstance(i, dict)):
+    # "e uma fanta pra mim tambem" com a Fanta uva ja na ficha: a segunda
+    # bebida sumia sem pergunta (teste de 27/10).
+    _bebida_a_mais = bool(_re.search(r"\b(?:mais|tambem|outr[ao]s?|acrescent\w*|adicion\w*|inclu\w*)\b",
+                                     _sem_acento(texto or "")))
+    if sem_tamanho and (_bebida_a_mais or not any(_e_bebida(i.get("name")) for i in memoria.get("items") or []
+                                                  if isinstance(i, dict))):
         pendentes = list(memoria.get("sabores_pendentes") or [])
         aberta = next((p for p in pendentes if p.get("termo") == "refrigerante"), None)
         if not aberta:

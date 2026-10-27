@@ -3981,6 +3981,14 @@ _f24 = memoria_mod.merge(dict(memoria_mod._empty(), items=[
 checa("fanta 2L nao some dentro da coca 2L na ficha",
       _nomes24(_f24["items"]) == [("Refrigerante 2 Litros", 2, "Coca cola"), ("Refrigerante 2 Litros", 1, "Fanta laranja")],
       _f24["items"])
+_pend27 = [{"qtd": 1, "termo": "refrigerante", "opcoes": ["Refrigerante Lata", "Refrigerante 2 Litros"], "marca": "fanta"}]
+_ficha27 = lambda: dict(memoria_mod._empty(), items=[  # noqa: E731
+    {"name": "Refrigerante 2 Litros", "quantity": 1, "price": 15.0, "sabor": "Fanta uva"}])
+checa("27/10 'e uma fanta pra mim tambem' com a Fanta uva na ficha pergunta o tamanho",
+      memoria_mod.merge(_ficha27(), {}, {"bebidas_pendentes": _pend27}, "e uma fanta pra mim tambem")[0]
+      .get("sabores_pendentes") == _pend27)
+checa("27/10 'uma fanta' repetida sem 'mais' nao abre pergunta",
+      not memoria_mod.merge(_ficha27(), {}, {"bebidas_pendentes": _pend27}, "uma fanta")[0].get("sabores_pendentes"))
 _pg24 = dict(memoria_mod._empty(), sabores_pendentes=[
     {"qtd": 2, "termo": "refrigerante", "opcoes": ["Refrigerante Lata", "Guaraná Tuchaua 2 Litros", "Refrigerante 2 Litros"]}])
 memoria_mod.aplicar_escolha_de_sabor(_pg24, "uma coca ir um guarana antartica")
