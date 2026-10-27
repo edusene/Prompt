@@ -2648,7 +2648,14 @@ def etapa_coberta(memoria: dict, reply: str, agora=None) -> bool:
             # Tuchaua ou 600ml ou Lata?" chamava TAMANHO de sabor - o dono
             # leu como se as opcoes do cardapio nao existissem (01/10).
             if p.get("so_sabor"):
-                if not ("qual voce prefere" in texto or "qual sabor" in texto):
+                # Os sabores reais da lata, todos: o modelo inventou "Guarana
+                # Parecis, Refrigerante Lata" como sabores (teste de 27/10).
+                try:
+                    import cardapio_catalogo as _cat
+                    _sabores = _cat.opcoes_do_item((p.get("opcoes") or [""])[0]) or []
+                except Exception:
+                    _sabores = []
+                if not (_sabores and "?" in reply and all(_sem_acento(s) in texto for s in _sabores)):
                     return False
                 continue
             if ("qual refrigerante voce prefere" not in texto and "qual tamanho voce prefere" not in texto

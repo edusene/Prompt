@@ -4027,6 +4027,9 @@ for _nao27 in ("nao", "quero em lata"):
     checa(f"27/10 '{_nao27}' oferece os sabores da lata",
           _pn27.startswith("No Refrigerante Lata") and "Fanta laranja" in _pn27 and "Pepsi" in _pn27
           and memoria_mod.etapa_coberta(_fn27, _pn27), _pn27)
+    checa(f"27/10 '{_nao27}': sabores inventados pelo modelo nao cobrem a etapa",
+          not memoria_mod.etapa_coberta(_fn27, "Qual sabor de refrigerante em lata você prefere (Coca-Cola, "
+                                               "Guaraná Parecis, Refrigerante Parecis, Refrigerante Lata)?"))
     memoria_mod.aplicar_escolha_de_sabor(_fn27, "fanta laranja")
     checa(f"27/10 '{_nao27}' e 'fanta laranja': lata de Fanta separada da lata de Coca",
           sorted((i["name"], i.get("sabor")) for i in _fn27["items"])
