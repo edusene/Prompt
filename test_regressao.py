@@ -3234,13 +3234,54 @@ _b27 = {"MenuItem": [{"name": "Quibe", "category": "6ae0", "price": 9.0, "availa
                       "flavor_options": ["Canudinho (frango)"]}],
         "InternalMenuItem": [], "Category": [{"id": "6ae0", "name": "Salgado Frito Grande"}],
         "InternalDeliveryFee": [], "BusinessHours": [], "InternalBusinessRule": []}
+_b27["MenuItem"].append({"name": "Cento salgadinhos fritos (congelados)", "category": "salgadinhos_fritos",
+                         "price": 40.0, "available": True, "unit_increment": 25.0,
+                         "flavor_options": ["Coxinha de frango", "Salsicha"]})
+_b27["MenuItem"].append({"name": "Rissoles de Queijo e Presunto (grande)", "category": "6ae0",
+                         "price": 9.0, "available": True, "unit_increment": 1.0})
 _p27 = _cf27.montar_dados(_b27)["produtos"]
+checa("27/10 nome publico do rissole de queijo e presunto vira o item do catalogo",
+      any(p["item"] == "Rissole de Queijo e Presunto" and p["preco"] == 9.0 for p in _p27), str(_p27))
+checa("27/10 congelado nao vira a porcao de 25 dos fritos (R$ 40 em vez de R$ 20)",
+      not any(p["categoria"] == "Fritos" and p.get("origem", "").endswith("(congelados)") for p in _p27)
+      and any(p["categoria"] == "Congelados" and p.get("opcoes") == ["Coxinha de frango", "Salsicha"]
+              for p in _p27), str(_p27))
+_fg27, facts.get = facts.get, lambda *a, **k: {"produtos": [p for p in _p27 if p["categoria"] == "Congelados"]}
+checa("27/10 texto do congelado traz os sabores do cardapio",
+      "• Salsicha" in app.texto_congelado() and "• Kibe" not in app.texto_congelado(), app.texto_congelado())
+facts.get = _fg27
 checa("27/10 sem a copia interna: categoria por id vira Salgados Grandes",
       any(p["item"] == "Quibe" and p["categoria"] == "Salgados Grandes" for p in _p27), str(_p27))
 checa("27/10 sem a copia interna: Canudinhos nao vira meio cento de fritos",
       not any(p.get("origem") == "Canudinhos" for p in _p27), str(_p27))
 checa("27/10 '2 quibes grandes' sao unidade, nao lote de 25",
       _cc27.traduzir([{"name": "Quibe", "quantity": 2}]) == ([{"name": "Quibe", "quantity": 2, "context": "unidade"}], []))
+for _t27 in ("risoles queijo e presunto", "risole de queijo e presunto", "rissole queijo",
+             "rissoles presunto e queijo"):
+    checa(f"27/10 '{_t27}' e o Rissole de Queijo e Presunto, nao o de carne",
+          _produto_conhecido(_t27) == "Rissole de Queijo e Presunto", str(_produto_conhecido(_t27)))
+checa("27/10 'risoles de carne' continua o de carne",
+      _produto_conhecido("risoles de carne") == "Rissole de Carne")
+_uc27, _qc27 = app._ultima_do_cliente, app._quantidade_ja_certa
+app._quantidade_ja_certa = lambda u: False
+for _t27, _sim27 in (("posso retirar meu pedido as 19:30?", False), ("pode ser pra 18h", False),
+                     ("quero 50 coxinhas pra 19h", True), ("quero 30 coxinhas", True)):
+    app._ultima_do_cliente = lambda u, _t=_t27: _t
+    checa(f"27/10 aviso dos 25 em '{_t27}': {_sim27}", app._regra_dos_25_serve("55") == _sim27)
+app._ultima_do_cliente, app._quantidade_ja_certa = _uc27, _qc27
+from agents.conversation import _extract_data_from_message as _ex27, ConversationState as _CS27  # noqa: E402
+for _t27, _q27 in (("quero meio cento de canudo", 50), ("quero um cento de canudos", 100)):
+    _e27 = _ex27(_t27, _CS27())
+    checa(f"27/10 '{_t27}' pergunta o sabor do canudinho, nao frito ou assado",
+          not _e27.get("volume_pendente") and [(p["qtd"], sorted(p["opcoes"])) for p in _e27.get("sabores_pendentes") or []]
+          == [(_q27, ["Canudinho de Camarao", "Canudinho de Frango"])], str(_e27))
+    _f27 = {"items": [], "sabores_pendentes": _e27.get("sabores_pendentes")}
+    memoria_mod.aplicar_escolha_de_sabor(_f27, "frango e camarão")
+    checa(f"27/10 '{_t27}' + 'frango e camarão' divide ao meio",
+          sorted((i["name"], i["quantity"]) for i in _f27["items"])
+          == [("Canudinho de Camarao", _q27 // 2), ("Canudinho de Frango", _q27 // 2)], str(_f27))
+checa("27/10 'meio cento de salgados' continua volume sem sabor",
+      _ex27("querio meio cento de salgados", _CS27()).get("volume_pendente") == 50)
 _ho27, _rd_orig27, _pt_orig27 = [], app._responder_direto, app.perform_transfer
 app._responder_direto = lambda u, it, t, c=None: _ho27.append(t)
 app.perform_transfer = lambda *a, **k: None

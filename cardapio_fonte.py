@@ -202,6 +202,8 @@ _NOME_DO_ITEM = {
     "enroladinho de salsicha (grande)": "Enroladinho de Salsicha",
     "rissoles de carne (grande)": "Rissole de Carne",
     "rissoles de queijo e presunto": "Rissole de Queijo e Presunto",
+    # Nome no cardapio publico (27/10).
+    "rissoles de queijo e presunto (grande)": "Rissole de Queijo e Presunto",
     "bomba de carne de sol": "Bomba de Carne de Sol",
     "quiche carne de sol": "Quiche de Carne de Sol",
     "refrigerante 2 l": "Refrigerante 2 Litros",
@@ -330,6 +332,15 @@ def _produtos(itens: list[dict]) -> list[dict]:
                 and (modo == "batch_25" or str(it.get("unit_increment") or "").startswith("25"))):
             # Pacote proprio de canudinhos (R$ 30 o lote de 25): os sabores ja
             # sao opcoes do lote de assados, como na planilha.
+            continue
+        if categoria in ("Fritos", "Assados") and "congelad" in _n(nome):
+            # "Cento salgadinhos fritos (congelados)", R$ 40 de 25 em 25, virava
+            # a "Porcao (25 un)" dos fritos e 25 coxinhas fritas saiam a R$ 40
+            # (27/10). Fica numa linha propria, com os sabores do cardapio.
+            produtos.append({"categoria": "Congelados", "item": nome, "formato": "Cento",
+                             "preco": preco, "preco_texto": f"{preco:.2f}" if preco else "",
+                             "disponivel": disponivel, "origem": nome,
+                             "opcoes": list(it.get("flavor_options") or [])})
             continue
         # A porcao de 25 assados veio como venda "unit" de 25 em 25, com
         # sabores (07/10): e lote do mesmo jeito que o batch_25.

@@ -335,6 +335,11 @@ _PRODUTOS_GRANDES = {
     # "kit empadinhas" virava 1 empadinha) ou nao viravam nada.
     "rissole de queijo e presunto": "Rissole de Queijo e Presunto",
     "rissole de queijo": "Rissole de Queijo e Presunto",
+    # Como a cliente escreve, sem o "de" ou com a ordem trocada (27/10).
+    "rissole queijo e presunto": "Rissole de Queijo e Presunto",
+    "rissole queijo": "Rissole de Queijo e Presunto",
+    "rissole de presunto e queijo": "Rissole de Queijo e Presunto",
+    "rissole presunto e queijo": "Rissole de Queijo e Presunto",
     "empada doce": "Empada Doce",
     "empada de leite condensado": "Empada Doce",
     "kit empadinhas": "Kit Empadinhas (15 unid)",
@@ -969,6 +974,10 @@ def _forma_de_busca(nome: str) -> str:
             # "25 paes pizza" virava "pae pizza" e o Pao Pizza sumia do pedido
             # (testes do dono, 07/10 20h29 e 21h02).
             p = "pao"
+        elif p in ("risole", "risoles"):
+            # "risoles queijo e presunto" so casava com a chave curta "risole"
+            # e virava Rissole de Carne na comanda (teste de 27/10 18h31).
+            p = "rissole"
         elif len(p) > 3 and p.endswith("s"):
             p = p[:-1]
         palavras.append(p)
@@ -2826,7 +2835,16 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
         else:
             # Volume dito sem sabor: guarda para a ficha pedir os sabores.
             unidades = volume_sem_sabor(msg_lower)
-            if unidades:
+            # "meio cento de canudo": o produto vale mais que o volume. Virava
+            # "frito ou assado? ate 2 sabores" e "frango e camarao" nao fechava
+            # (teste de 27/10 17h47).
+            _opcoes_vol = [(p, sabores_possiveis(p)) for _um, _f, p
+                           in _PACOTE_POR_EXTENSO.findall(msg_lower) if p]
+            _opcoes_vol = [(p, o) for p, o in _opcoes_vol if len(o) > 1]
+            if unidades and len(_opcoes_vol) == 1:
+                extracted["sabores_pendentes"] = list(extracted.get("sabores_pendentes") or []) + [
+                    {"qtd": unidades, "termo": _opcoes_vol[0][0], "opcoes": _opcoes_vol[0][1]}]
+            elif unidades:
                 extracted["volume_pendente"] = unidades
 
     # Bebida em qualquer mensagem, inclusive com o pedido ja na ficha: ela

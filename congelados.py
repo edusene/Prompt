@@ -40,9 +40,12 @@ def _sem_congelado(nome: str) -> str:
 def texto_congelado() -> str:
     """A oferta de congelado no padrao do dono, com os dados do cardapio."""
     linhas = _congelados_do_cardapio()
-    sabores = [_sem_congelado(p["item"]) for p in linhas
-               if not cardapio.nome_e_so_formato(p["item"])
-               and facts.normalize(p["item"]) != facts.normalize(p["categoria"])]
+    # O pacote do cardapio traz os sabores nas opcoes (27/10: a lista fixa do
+    # dono so tinha 5 dos 10).
+    sabores = [str(s).strip() for p in linhas for s in p.get("opcoes") or []]
+    sabores += [_sem_congelado(p["item"]) for p in linhas
+                if not p.get("opcoes") and not cardapio.nome_e_so_formato(p["item"])
+                and facts.normalize(p["item"]) != facts.normalize(p["categoria"])]
     sabores = [s for s in dict.fromkeys(sabores) if s] or list(_SABORES_CONGELADOS_DO_DONO)
     cento = next((p["preco"] for p in linhas if p.get("preco")
                   and cardapio.unidades_do_rotulo(p["item"]) == 100), None)

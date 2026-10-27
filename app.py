@@ -5587,6 +5587,9 @@ def _quantidade_ja_certa(user: str) -> bool:
 _RX_SALGADO_DE_FESTA = _re_mod.compile(
     r"salgad|cento|coxinh|[kq]uib|bolinh|risol|pastel|pasteis|enroladinh|croquet|"
     r"\bmist|empadinh|canudinh|esfirr|calzon|pao pizza|churros|festa|\b\d{2,3}\b")
+_RX_HORARIO_NA_FRASE = _re_mod.compile(
+    r"\b(?:as|ate|pras?|para)\s+\d{1,2}(?:\s*(?:h|horas?|hrs?)?\s*\d{2})?\b"
+    r"|\b\d{1,2}\s*(?:h|horas?|hrs?)\s*\d{0,2}\b")
 _RX_ABERTURA_GENERICA = _re_mod.compile(
     r"\b(?:oi+|ola|opa|bom dia|boa tarde|boa noite|tudo bem|tudo bom|td bem|"
     r"quero|queria|gostaria|de|fazer|um|uma|pedido|encomenda|encomendar|pedir|"
@@ -5611,6 +5614,9 @@ def _regra_dos_25_serve(user: str) -> bool:
     if _quantidade_ja_certa(user):
         return False
     t = facts.normalize(_ultima_do_cliente(user))
+    # Horario nao e quantidade: "posso retirar as 19:30?" recebia o aviso dos
+    # 25 por causa do "19 30" (teste de 27/10 18h07).
+    t = _RX_HORARIO_NA_FRASE.sub(" ", t)
     if _RX_SALGADO_DE_FESTA.search(t):
         return True
     return not _re_mod.sub(r"[^a-z ]", " ", _RX_ABERTURA_GENERICA.sub(" ", t)).split()
