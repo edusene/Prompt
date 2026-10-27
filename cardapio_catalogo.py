@@ -158,6 +158,15 @@ MAPA = {
         "categoria": "Salgados Grandes", "nome_base44": "Bomba de carne de sol", "context": "unidade",
         "quantidade_teste": 1, "preco_esperado": 10.00,
     },
+    # Kits do cardapio publico (27/10): sem de-para, "sem equivalente conferido".
+    "Kit Mini Empadinhas": {
+        "categoria": "Assados", "nome_base44": "Kit Mini Empadinhas", "context": "unidade",
+        "quantidade_teste": 1, "preco_esperado": 36.00,
+    },
+    "Kit Empadinhas (15 unid)": {
+        "categoria": "Assados", "nome_base44": "Kit Empadinhas (15 unid)", "context": "unidade",
+        "quantidade_teste": 1, "preco_esperado": 18.00,
+    },
     "Quiche de Frango": {
         "categoria": "Salgados Grandes", "nome_base44": "Quiche de Frango", "context": "unidade",
         "quantidade_teste": 1, "preco_esperado": 12.00,
@@ -245,6 +254,9 @@ BLOQUEADOS = {
     "Panqueca de Carne": ("Salgados Grandes", "nao existe no cardapio digital"),
     "Panqueca de Frango": ("Salgados Grandes", "nao existe no cardapio digital"),
     "Saltenha Frita": ("Salgados Grandes", "o cardapio so tem 'Mini Saltenha Frita' (R$ 2,00, minimo 10), que e outro produto"),
+    # 27/10: o kit diz 10 unidades por R$ 20, mas o calculateOrder cobra R$ 20
+    # por unidade em multiplos de 10 (10 mini saltenhas = R$ 200).
+    "Kit Mini Saltenha Frita (10und)": ("Salgados Grandes", "o preco do kit precisa ser confirmado pela equipe"),
     "Cento de Beijinhos (100 un)": ("Bolos e Doces", "o cardapio digital nao tem beijinho; a busca cai em brigadeiro"),
     "Meio Cento de Beijinhos (50 un)": ("Bolos e Doces", "o cardapio digital nao tem beijinho; a busca cai na bandeja de 16 docinhos"),
     "Cento Misto Brigadeiro e Beijinho (100 un)": ("Bolos e Doces", "o cardapio digital nao tem misto; a busca cai em brigadeiro"),

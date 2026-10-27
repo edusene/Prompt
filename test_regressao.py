@@ -3262,6 +3262,29 @@ for _t27 in ("risoles queijo e presunto", "risole de queijo e presunto", "rissol
           _produto_conhecido(_t27) == "Rissole de Queijo e Presunto", str(_produto_conhecido(_t27)))
 checa("27/10 'risoles de carne' continua o de carne",
       _produto_conhecido("risoles de carne") == "Rissole de Carne")
+checa("27/10 'risole grande de queijo e presunto' nao vira o de carne",
+      _produto_conhecido("risole grande de queijo e presunto") == "Rissole de Queijo e Presunto")
+for _t27 in ("mini saltenha", "mini saltenhas fritas", "saltenha frita", "kit de mini saltenha"):
+    checa(f"27/10 '{_t27}' e o kit de mini saltenha, nao a Saltenha Assada",
+          _produto_conhecido(_t27) == "Kit Mini Saltenha Frita (10und)", str(_produto_conhecido(_t27)))
+checa("27/10 'saltenha' sozinha continua a assada", _produto_conhecido("saltenha") == "Saltenha Assada")
+checa("27/10 kit de mini saltenha nao fecha sem a equipe (preco por unidade no cardapio)",
+      bool(_cc27.traduzir([{"name": "Kit Mini Saltenha Frita (10und)", "quantity": 20}])[1]))
+checa("27/10 Kit Mini Empadinhas tem de-para",
+      _cc27.traduzir([{"name": "Kit Mini Empadinhas", "quantity": 1}])
+      == ([{"name": "Kit Mini Empadinhas", "quantity": 1, "context": "unidade"}], []),
+      str(_cc27.traduzir([{"name": "Kit Mini Empadinhas", "quantity": 1}])))
+_fg27b, facts.get = facts.get, lambda *a, **k: {"produtos": [
+    {"categoria": "Assados", "item": "Kit Mini Empadinhas", "preco": 36.0, "disponivel": True,
+     "obs": "Kit com 30 unidades de mini empadinhas."}]}
+_ho27b, _rd27b, _pt27b = [], app._responder_direto, app.perform_transfer
+app._responder_direto = lambda u, it, t, c=None: _ho27b.append(t)
+app.perform_transfer = lambda *a, **k: None
+app.trigger_human_handoff("55", [], "quantidade fora do multiplo de 25: ['10 Empadinha de Frango']")
+app.trigger_human_handoff("55", [], "quantidade fora do multiplo de 25: ['20 Coxinha']")
+app._responder_direto, app.perform_transfer, facts.get = _rd27b, _pt27b, _fg27b
+checa("27/10 '10 mini empadinhas': o desvio oferece o kit com o preco do cardapio",
+      "Kit Mini Empadinhas (30 unidades) por R$ 36,00" in _ho27b[0] and "Kit" not in _ho27b[1], str(_ho27b))
 _uc27, _qc27 = app._ultima_do_cliente, app._quantidade_ja_certa
 app._quantidade_ja_certa = lambda u: False
 for _t27, _sim27 in (("posso retirar meu pedido as 19:30?", False), ("pode ser pra 18h", False),

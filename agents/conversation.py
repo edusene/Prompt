@@ -313,7 +313,15 @@ _PRODUTOS_GRANDES = {
     "mini quiches de carne de sol": "Mini quiches",
     "saltenha": "Saltenha Assada",
     "saltenha assada": "Saltenha Assada",
-    "saltenha frita": "Saltenha Frita",
+    # A unica saltenha frita do cardapio e o kit de mini: "saltenha frita"
+    # perdia o "frita" na limpeza do nome e virava Saltenha Assada, 20 a
+    # R$ 180 (teste de 27/10 16h24).
+    "saltenha frita": "Kit Mini Saltenha Frita (10und)",
+    "mini saltenha": "Kit Mini Saltenha Frita (10und)",
+    "mini saltenha frita": "Kit Mini Saltenha Frita (10und)",
+    "kit mini saltenha": "Kit Mini Saltenha Frita (10und)",
+    "kit de mini saltenha": "Kit Mini Saltenha Frita (10und)",
+    "kit mini saltenha frita": "Kit Mini Saltenha Frita (10und)",
     "panqueca": "Panqueca de Carne",
     "panqueca de carne": "Panqueca de Carne",
     "panqueca de frango": "Panqueca de Frango",
@@ -1082,6 +1090,10 @@ def _produto_conhecido(bruto: str) -> str | None:
     # salsicha com Catupiry, sabor que a cliente nunca disse (teste de 22/10).
     if alvo in ("assado", "assada", "frito", "frita", "salgado", "salgadinho"):
         return None
+    # Tamanho no meio do nome: "risole grande de queijo e presunto" casava so
+    # "rissole" e virava o de carne (27/10). O tamanho e lido a parte.
+    if len(alvo.split()) > 2:
+        alvo = " ".join(w for w in alvo.split() if w != "grande")
 
     indice = _indice_de_produtos()
     if alvo in indice:

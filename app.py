@@ -5682,6 +5682,20 @@ def enviar_em_blocos(user: str, texto: str, chegada: float | None = None) -> Non
         _no_painel(send_msg_out_to_panel, user, chunk)
 
 
+def _linha_do_kit_de_empadinhas() -> str:
+    """"Também temos o Kit Mini Empadinhas (30 unidades) por R$ 36,00." pelo cardapio, ou ''."""
+    try:
+        kit = next((p for p in facts.get()["produtos"] if p["item"] == "Kit Mini Empadinhas"
+                    and p.get("disponivel", True) and p.get("preco")), None)
+    except Exception:
+        kit = None
+    if not kit:
+        return ""
+    _qtd = _re_mod.search(r"(\d+)\s+unidades", kit.get("obs") or "")
+    _qtd = f" ({_qtd.group(1)} unidades)" if _qtd else ""
+    return f"Também temos o Kit Mini Empadinhas{_qtd} por {cardapio._brl(kit['preco'])}."
+
+
 def trigger_human_handoff(user: str, items: list[dict], motivo: str,
                           chegada: float | None = None, texto: str = "") -> None:
     """Trilho 2 do funil duplo: desvio vai para a equipe na hora.
@@ -5695,6 +5709,11 @@ def trigger_human_handoff(user: str, items: list[dict], motivo: str,
     # e a cliente nao sabia o que errou (Balbino, 27/10).
     if not texto and motivo.startswith("quantidade fora do multiplo de 25"):
         texto = f"{texto_regras_do_pedido()}\n\n{TEXTO_DESARME}"
+        # "10 mini empadinhas": o kit e o que vende abaixo de 25 (teste de 27/10 18h10).
+        if "Empadinha" in motivo:
+            _kit = _linha_do_kit_de_empadinhas()
+            if _kit:
+                texto = f"{texto_regras_do_pedido()}\n\n{_kit}\n\n{TEXTO_DESARME}"
     _responder_direto(user, items, texto or TEXTO_DESARME, chegada)
     perform_transfer(user, reason=f"desvio: {motivo}", send_message=False)
 
