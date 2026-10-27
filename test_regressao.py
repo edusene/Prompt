@@ -4253,6 +4253,13 @@ checa("produtos da copia publica, com a estrutura da interna",
 checa("'mini quiche de frango' e a mini, nao a quiche grande",
       [i["name"] for i in _ext24("1 cento de mini quiche de frango").get("items") or []] == ["Mini quiches"]
       and [i["name"] for i in _ext24("1 quiche de frango").get("items") or []] == ["Quiche de Frango"])
+_lote26 = {p["item"]: p["preco"] for p in _cf_fx._produtos([
+    {"name": "Mini quiches", "category": "assados_especiais", "price": 150.0, "available": True,
+     "sales_mode": "batch_25", "batch_size": 100, "min_quantity": 100, "unit_increment": 25},
+    {"name": "Quiche de Frango", "category": "assados_especiais", "price": 12.0, "available": True,
+     "sales_mode": "unit"}])}
+checa("item vendido em lote: preco do cardapio e do lote (cento de mini quiche R$ 150)",
+      _lote26.get("Mini quiches") == 1.5 and _lote26.get("Quiche de Frango") == 12.0, _lote26)
 checa("sem a copia publica, a interna inteira",
       _cf_fx._itens_do_cardapio({"InternalMenuItem": [{"name": "X"}]}) == [{"name": "X"}])
 _src26 = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "app.py"), encoding="utf-8").read()

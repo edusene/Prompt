@@ -353,6 +353,14 @@ def _produtos(itens: list[dict]) -> list[dict]:
         if categoria in ("Fritos", "Assados"):
             # Bandeja/kit vendidos por unidade dentro da familia: item proprio.
             pass
+        try:
+            _lote = float(it.get("batch_size") or 0)
+        except (TypeError, ValueError):
+            _lote = 0
+        if modo == "batch_25" and _lote > 1 and categoria != "Combos" and preco:
+            # O preco e do lote: o calculateOrder cobra R$ 150 o cento de Mini
+            # quiches (R$ 1,50 a unidade); aqui virava R$ 150 cada (26/10).
+            preco = round(preco / _lote, 4)
         interno = _mapa_normalizado(_NOME_DO_ITEM).get(_n(nome), nome)
         rotulo_preco = str(it.get("price_unit_label") or "")
         formato = ("Combo" if categoria == "Combos" else
