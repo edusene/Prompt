@@ -3203,6 +3203,19 @@ checa("fiado continua negado pelo robo (nao transborda)",
 _src = open("app.py", encoding="utf-8").read()
 checa("quantidade fora do multiplo de 25 dispara o transbordo",
       "quantidade fora do multiplo de 25" in _src and "def trigger_human_handoff(" in _src)
+checa("27/10 'neio cento de pastel' e meio cento (50), nao 100",
+      [(p["qtd"], p["termo"]) for p in _extract_data_from_message(
+          "quero encomendar 1 cento de coxinhas ,e neio cento de pastel",
+          ConversationState(items=[])).get("sabores_pendentes") or []] == [(50, "pastel")])
+_ho27, _rd_orig27, _pt_orig27 = [], app._responder_direto, app.perform_transfer
+app._responder_direto = lambda u, it, t, c=None: _ho27.append(t)
+app.perform_transfer = lambda *a, **k: None
+app.trigger_human_handoff("55", [], "quantidade fora do multiplo de 25: ['20 Coxinha']")
+app.trigger_human_handoff("55", [], "duvida sem resposta no cardapio")
+app._responder_direto, app.perform_transfer = _rd_orig27, _pt_orig27
+checa("27/10 quantidade fora dos 25: o aviso ATENCAO vai antes do desarme",
+      _ho27[0].startswith(app.texto_regras_do_pedido()) and _ho27[0].endswith(app.TEXTO_DESARME), _ho27)
+checa("27/10 outro desvio continua so com o desarme", _ho27[1] == app.TEXTO_DESARME, _ho27)
 checa("duvida sem resposta dispara o transbordo", "duvida sem resposta no cardapio" in _src)
 checa("pedido de desconto NAO dispara o transbordo (voltou a defesa de preco, 13/10)",
       'trigger_human_handoff(user, items, "pedido de desconto"' not in _src)

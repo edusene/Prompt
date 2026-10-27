@@ -5685,6 +5685,10 @@ def trigger_human_handoff(user: str, items: list[dict], motivo: str,
     assume pelo WhatsApp Web (decisao do Balbino, 12/10).
     """
     print(f"[transbordo] user={user} desvio -> equipe: {motivo}")
+    # Quantidade fora dos 25: o aviso vai junto. Saia so "vou chamar a equipe"
+    # e a cliente nao sabia o que errou (Balbino, 27/10).
+    if not texto and motivo.startswith("quantidade fora do multiplo de 25"):
+        texto = f"{texto_regras_do_pedido()}\n\n{TEXTO_DESARME}"
     _responder_direto(user, items, texto or TEXTO_DESARME, chegada)
     perform_transfer(user, reason=f"desvio: {motivo}", send_message=False)
 

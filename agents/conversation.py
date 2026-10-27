@@ -2429,6 +2429,8 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
     # bairro (teste do dono, 10/10 08h39). So com quantidade antes e "de"
     # depois - "entrega no centro" continua sendo o bairro.
     # "1 sento de coxinha" (digitacao) tambem: virava 1 coxinha grande (26/10).
+    # "neio cento de pastel" (digitacao) virava 100 pasteis no resumo (27/10).
+    msg_lower = re.sub(r"\b(?:neio|meiu|mei)\s+(?=(?:cento|centro|sento)\b)", "meio ", msg_lower)
     msg_lower = re.sub(r"\b(um|uma|meio|dois|duas|tres|\d+)\s+(?:centros?|sentos?)\s+(?=de\s)",
                        lambda m: f"{m.group(1)} {'centos' if m.group(1) not in ('um', 'uma', 'meio', '1') else 'cento'} ",
                        msg_lower)

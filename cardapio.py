@@ -1057,6 +1057,24 @@ def calcular_pedido(items: list[dict], bairro: str = "", modalidade: str = "",
                 }
 
             subtotal = float(data.get("subtotal") or 0)
+            # O subtotal do cardapio digital tem de bater com as linhas pela
+            # tabela: "Canudinhos" casou com o Combo Mix Frango (R$ 100/un) e o
+            # resumo cobrou R$ 5.000,00 por 50 canudos de R$ 70 (teste de 27/10).
+            _linhas = 0.0
+            for _i in items or []:
+                try:
+                    _linhas += float(_i.get("quantity") or 0) * float(_i.get("price") or 0)
+                except (TypeError, ValueError):
+                    pass
+            if _linhas and abs(subtotal - _linhas) > 0.01:
+                print(f"[cardapio] DIVERGENCIA de subtotal: cardapio=R$ {subtotal:.2f} "
+                      f"tabela=R$ {_linhas:.2f} itens={json.dumps(data.get('items'), ensure_ascii=False)[:300]}")
+                return {
+                    "success": False,
+                    "error": (f"O cardapio digital calculou R$ {subtotal:.2f} e a tabela da "
+                              f"R$ {_linhas:.2f} para os mesmos itens. NAO informe total ao "
+                              "cliente; confirme com a equipe."),
+                }
             # O frete e o da tabela oficial — a mesma que consultar_frete usou
             # para responder ao cliente. Quando os dois discordam, prevalece a
             # tabela e a divergencia fica no log para o dono reconciliar; assim
