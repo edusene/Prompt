@@ -3226,6 +3226,19 @@ checa("27/10 aviso do almoco nao se apresenta de novo",
       '_apresentacao = ("" if _memoria.get("saudacao_feita")' in open("app.py", encoding="utf-8").read())
 checa("27/10 oferta logo depois do pedido repete os itens anotados",
       "itens anotados repetidos antes da oferta" in open("app.py", encoding="utf-8").read())
+import cardapio_fonte as _cf27  # noqa: E402
+_b27 = {"MenuItem": [{"name": "Quibe", "category": "6ae0", "price": 9.0, "available": True,
+                      "unit_increment": 1.0},
+                     {"name": "Canudinhos", "category": "salgadinhos_fritos", "price": 70.0,
+                      "available": True, "unit_increment": 25.0, "min_quantity": 50.0,
+                      "flavor_options": ["Canudinho (frango)"]}],
+        "InternalMenuItem": [], "Category": [{"id": "6ae0", "name": "Salgado Frito Grande"}],
+        "InternalDeliveryFee": [], "BusinessHours": [], "InternalBusinessRule": []}
+_p27 = _cf27.montar_dados(_b27)["produtos"]
+checa("27/10 sem a copia interna: categoria por id vira Salgados Grandes",
+      any(p["item"] == "Quibe" and p["categoria"] == "Salgados Grandes" for p in _p27), str(_p27))
+checa("27/10 sem a copia interna: Canudinhos nao vira meio cento de fritos",
+      not any(p.get("origem") == "Canudinhos" for p in _p27), str(_p27))
 _ho27, _rd_orig27, _pt_orig27 = [], app._responder_direto, app.perform_transfer
 app._responder_direto = lambda u, it, t, c=None: _ho27.append(t)
 app.perform_transfer = lambda *a, **k: None

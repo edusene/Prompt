@@ -34,7 +34,10 @@ import httpx
 
 APP_ID = "68f8f95fb3eb7abc71694599"
 ENTIDADES = ("MenuItem", "InternalMenuItem", "InternalDeliveryFee", "BusinessHours",
-             "InternalBusinessRule")
+             "InternalBusinessRule", "Category")
+# O dono desativa a copia interna dos produtos (27/10): sem ela, ou sem a lista
+# de categorias, a leitura segue com a publica em vez de congelar no retrato.
+_OPCIONAIS = ("InternalMenuItem", "Category")
 TTL_SEG = 300.0
 _SNAPSHOT_KEY = "cardapio_snapshot"
 
@@ -135,7 +138,13 @@ def bruto(forcar: bool = False) -> dict | None:
         if not forcar and _cache is not None and time.monotonic() - _cache_em < TTL_SEG:
             return _cache
         try:
-            novo = {e: ler(e) for e in ENTIDADES}
+            novo = {e: ler(e) for e in ENTIDADES if e not in _OPCIONAIS}
+            for e in _OPCIONAIS:
+                try:
+                    novo[e] = ler(e)
+                except Exception as e_opc:
+                    print(f"[cardapio-fonte] WARN {e} indisponivel ({e_opc}); seguindo sem ela")
+                    novo[e] = []
             if not (novo["MenuItem"] or novo["InternalMenuItem"]) or not novo["InternalDeliveryFee"]:
                 raise RuntimeError("cardapio veio vazio")
             _cache, _cache_em = novo, time.monotonic()
@@ -245,6 +254,7 @@ _CATEGORIA = {
     "salgadinhos_fritos": "Fritos",
     "salgadinhos_assados": "Assados",
     "lanches": "Salgados Grandes",
+    "salgado_frito_grande": "Salgados Grandes",
     "assados_especiais": "Salgados Grandes",
     "combos": "Combos",
     "doces": "Bolos e Doces",
@@ -315,7 +325,8 @@ def _produtos(itens: list[dict]) -> list[dict]:
         except (TypeError, ValueError):
             preco = None
         modo = str(it.get("sales_mode") or "")
-        if categoria in ("Fritos", "Assados") and modo == "batch_25" and "canudinho" in _n(nome):
+        if (categoria in ("Fritos", "Assados") and "canud" in _n(nome)
+                and (modo == "batch_25" or str(it.get("unit_increment") or "").startswith("25"))):
             # Pacote proprio de canudinhos (R$ 30 o lote de 25): os sabores ja
             # sao opcoes do lote de assados, como na planilha.
             continue
@@ -457,6 +468,9 @@ def _itens_do_cardapio(b: dict) -> list[dict]:
     if not publicos:
         return internos
     por_nome = {_n(str(i.get("name") or "")).strip(): i for i in internos}
+    # Na publica, parte das categorias vem como id ("6ae0fe85...") - o nome
+    # esta na entidade Category. A interna tinha o nome (27/10).
+    categorias = {c.get("id"): c.get("name") for c in b.get("Category") or []}
     itens = []
     for pub in publicos:
         item = dict(por_nome.get(_n(str(pub.get("name") or "")).strip(), {}))
@@ -465,7 +479,7 @@ def _itens_do_cardapio(b: dict) -> list[dict]:
             if pub.get(campo) is not None:
                 item[campo] = pub[campo]
         if not item.get("category"):
-            item["category"] = pub.get("category")
+            item["category"] = categorias.get(pub.get("category")) or pub.get("category")
         esgotados = {_n(str(x)) for x in pub.get("unavailable_flavors") or []}
         item["flavor_options"] = [o for o in pub.get("flavor_options") or []
                                   if _n(str(o)) not in esgotados]
