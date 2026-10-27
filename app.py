@@ -4694,6 +4694,15 @@ def _conferir_etapa_travada(user: str, reply: str, memoria: dict) -> str:
             continue
         mantidas.append(limpo)
 
+    # Sabor que nao existe no tamanho pedido: o que o modelo diz da bebida sai.
+    # "Sobre a Fanta Uva lata, temos Refrigerante Lata por R$ 7,00" vinha antes
+    # do "so temos em 2L", como se a lata de uva existisse (teste de 27/10).
+    if any(p.get("termo") == "refrigerante" and (p.get("pedido") or p.get("so_sabor"))
+           for p in memoria.get("sabores_pendentes") or []):
+        _sobre_bebida = [f for f in mantidas if _RX_FALA_DE_BEBIDA.search(facts.normalize(f))]
+        cortadas += _sobre_bebida
+        mantidas = [f for f in mantidas if f not in _sobre_bebida]
+
     # Cortada a lista, o cabecalho dela nao pode ficar: "Por favor, envie numa
     # lista vertical:" saia sozinho, sem lista nenhuma, tres vezes na mesma
     # conversa (teste do dono, 29/09 15h17).
@@ -4775,6 +4784,10 @@ def _conferir_etapa_travada(user: str, reply: str, memoria: dict) -> str:
     print(f"[funil] user={user} etapa travada ({travada[:40]!r}): "
           f"cobriu={ja_cobriu} cortado={' | '.join(cortadas)[:100]!r}")
     return novo.strip()
+
+
+_RX_FALA_DE_BEBIDA = _re_mod.compile(
+    r"\b(?:refri\w*|bebidas?|latas?|litros?|fanta|coca|pepsi|guarana|sprite|kuat|tuchaua|parecis)\b")
 
 
 # Frase que so anuncia uma lista de dados a mandar. Sem a lista, nao diz nada.
@@ -6300,6 +6313,9 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             _extracted["items"] = _somados
             print(f"[memoria] {user}: acrescimo no pedido aberto -> "
                   f"{[(i.get('name'), i.get('quantity')) for i in _somados]}")
+        # Antes do merge: "pepsi" depois dos sabores da lata fecha a pergunta ja nele.
+        _refri_so_um = [p for p in _memoria.get("sabores_pendentes") or []
+                        if p.get("termo") == "refrigerante" and (p.get("pedido") or p.get("so_sabor"))]
         _memoria, _mudancas = conversation_memory.merge(_memoria, _extracted, _extracted_fresh,
                                                         texto=text_only)
         if _fora_aviso:
@@ -6353,11 +6369,21 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             _memoria["sabores_pendentes"] = [p for p in _pend if p not in _resolvidas]
             conversation_memory.save(user, _memoria)
             print(f"[memoria] {user}: sabor inexistente resolvido pela propria mensagem")
+        _escolha_cedo = []
         if _memoria.get("sabores_pendentes"):
             _escolha_cedo = conversation_memory.aplicar_escolha_de_sabor(_memoria, text_only)
             if _escolha_cedo:
                 conversation_memory.save(user, _memoria)
                 print(f"[memoria] {user}: sabor escolhido -> {'; '.join(_escolha_cedo)}")
+        # "pode ser" / "nao" / "pepsi" ao "so temos em 2L": resposta do codigo. O
+        # modelo perguntou "Lata ou 2 Litros?" com o 2L ja anotado (teste de 27/10).
+        if (_refri_so_um and not any(p in (_memoria.get("sabores_pendentes") or []) for p in _refri_so_um)
+                and len(facts.normalize(text_only or "").split()) <= 4):
+            conversation_memory.save(user, _memoria)
+            _texto_refri = conversation_memory.anotado_de_refrigerante(_memoria, _escolha_cedo + _mudancas)
+            _responder_direto(user, items, "\n\n".join(
+                t for t in (_texto_refri, _proxima_pergunta_do_funil(_memoria)) if t), _chegada)
+            return
         # "Entao troca por mais 25 coxinhas": o cliente trocou o sabor que nao
         # existe por outro item, de fora da lista. A pergunta do palmito
         # continuava voltando (teste do dono, 08/10 15h41 e 15h44). Depois da

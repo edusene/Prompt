@@ -4035,6 +4035,17 @@ for _nao27 in ("nao", "quero em lata"):
           sorted((i["name"], i.get("sabor")) for i in _fn27["items"])
           == [("Refrigerante Lata", "Coca"), ("Refrigerante Lata", "Fanta laranja")]
           and not _fn27.get("sabores_pendentes"), _fn27)
+_fc27 = dict(memoria_mod._empty(), upsell_feito=True, items=[{"name": "Coxinha", "quantity": 25, "price": 0.8}],
+             sabores_pendentes=_copy_fx.deepcopy(_l27.get("bebidas_pendentes")))
+_rc27 = app._conferir_etapa_travada("t", "Confirmando seu pedido de 25 Coxinhas. Sobre a Fanta Uva lata, "
+                                         "temos Refrigerante Lata por R$ 7,00.", _fc27)
+checa("27/10 frase do modelo sobre a lata de uva sai; fica a pergunta do cardapio",
+      "R$ 7,00" not in _rc27 and "só temos em Refrigerante 2 Litros" in _rc27 and "25 Coxinhas" in _rc27, _rc27)
+_fa27 = dict(memoria_mod._empty(), items=[{"name": "Refrigerante 2 Litros", "quantity": 1, "price": 15.0, "sabor": "Fanta uva"}])
+checa("27/10 'Anotado:' sai da ficha", memoria_mod.anotado_de_refrigerante(
+    _fa27, ["refrigerante -> 1 x Refrigerante 2 Litros"]) == "Anotado: 1 Refrigerante 2 Litros Fanta uva! 😊")
+checa("27/10 sem escolha, sem 'Anotado:'",
+      memoria_mod.anotado_de_refrigerante(_fa27, ["refrigerante -> sabores de Refrigerante Lata"]) == "")
 catalogo.opcoes_do_item = _opcoes_orig27
 _pg24 = dict(memoria_mod._empty(), sabores_pendentes=[
     {"qtd": 2, "termo": "refrigerante", "opcoes": ["Refrigerante Lata", "Guaraná Tuchaua 2 Litros", "Refrigerante 2 Litros"]}])

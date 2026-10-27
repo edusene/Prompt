@@ -1879,6 +1879,20 @@ def aplicar_escolha_de_sabor(memoria: dict, texto: str) -> list[str]:
     return mudancas
 
 
+def anotado_de_refrigerante(memoria: dict, mudancas: list[str]) -> str:
+    """"Anotado: 1 Refrigerante 2 Litros Fanta uva! 😊" para a escolha de refrigerante. '' sem escolha."""
+    for m in mudancas or []:
+        achou = _re.match(r"(?:refrigerante -> |bebida=)(\d+) x (.+)$", m)
+        if not achou:
+            continue
+        item = next((i for i in reversed(memoria.get("items") or [])
+                     if isinstance(i, dict) and i.get("name") == achou.group(2)), None)
+        if item:
+            sabor = f" {item['sabor']}" if item.get("sabor") else ""
+            return f"Anotado: {achou.group(1)} {item['name']}{sabor}! 😊"
+    return ""
+
+
 # ── Sabor esgotado ──────────────────────────────────────────────────────────
 # Categorias que JA SAO o acompanhamento da oferta adicional. Quem pediu
 # refrigerante nao precisa ouvir a oferta de refrigerante.
