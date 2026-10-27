@@ -3989,6 +3989,24 @@ checa("27/10 'e uma fanta pra mim tambem' com a Fanta uva na ficha pergunta o ta
       .get("sabores_pendentes") == _pend27)
 checa("27/10 'uma fanta' repetida sem 'mais' nao abre pergunta",
       not memoria_mod.merge(_ficha27(), {}, {"bebidas_pendentes": _pend27}, "uma fanta")[0].get("sabores_pendentes"))
+_opcoes_orig27 = catalogo.opcoes_do_item
+_SABORES27 = {"Refrigerante Lata": ["Coca", "Coca zero", "Fanta laranja", "Pepsi"],
+              "Refrigerante 600ml": ["Coca cola", "Coca cola zero"],
+              "Refrigerante 2 Litros": ["Coca cola", "Fanta laranja", "Fanta uva"]}
+catalogo.opcoes_do_item = lambda n: _SABORES27.get(n, [])
+_l27 = _ext24("uma fanta uva lata")
+checa("27/10 'fanta uva lata' nao vira Fanta laranja: pergunta com o tamanho que tem uva",
+      not _l27.get("bebidas") and [(p["marca"], "Refrigerante Lata" in p["opcoes"], "Refrigerante 600ml" in p["opcoes"])
+                                   for p in _l27.get("bebidas_pendentes") or []] == [("fanta uva", False, False)], _l27)
+checa("27/10 'fanta laranja lata' continua lata", _nomes24(_ext24("uma fanta laranja lata").get("bebidas"))
+      == [("Refrigerante Lata", 1, "Fanta laranja")])
+_fl27 = dict(memoria_mod._empty(), sabores_pendentes=_l27.get("bebidas_pendentes"))
+checa("27/10 a pergunta diz o sabor", memoria_mod.pergunta_bloqueante(_fl27).startswith("A Fanta uva temos em:"),
+      memoria_mod.pergunta_bloqueante(_fl27))
+memoria_mod.aplicar_escolha_de_sabor(_fl27, "2 litros")
+checa("27/10 '2 litros' guarda a Fanta uva", [(i["name"], i.get("sabor")) for i in _fl27["items"]]
+      == [("Refrigerante 2 Litros", "Fanta uva")], _fl27["items"])
+catalogo.opcoes_do_item = _opcoes_orig27
 _pg24 = dict(memoria_mod._empty(), sabores_pendentes=[
     {"qtd": 2, "termo": "refrigerante", "opcoes": ["Refrigerante Lata", "Guaraná Tuchaua 2 Litros", "Refrigerante 2 Litros"]}])
 memoria_mod.aplicar_escolha_de_sabor(_pg24, "uma coca ir um guarana antartica")

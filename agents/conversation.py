@@ -1918,13 +1918,24 @@ def bebidas_citadas(msg_lower: str) -> tuple[list[dict], list[dict]]:
             if _marca:
                 _ops = [o for o in _ops if o != BEBIDA_TUCHAUA] or _ops
                 # "fanta uva" so existe no 2L: oferecia lata e 600 sem Fanta (26/10).
-                _ops = _tamanhos_com_o_sabor(f"{_marca} {resto}", _ops)
+                _ops, _sabor_dito = _tamanhos_com_o_sabor(f"{_marca} {resto}", _ops)
+                # "fanta uva" inteiro: a escolha "2 litros" casa o sabor por aqui.
+                _marca = _sabor_dito or _marca
             if not _marca or len(_ops) != 1:
                 pendentes.append({"qtd": qtd, "termo": "refrigerante", "opcoes": _ops,
                                   "marca": _marca})
                 continue
             nome = _ops[0]
             deduzido = True
+        if nome != BEBIDA_TUCHAUA and not deduzido and not marca.startswith("refri"):
+            # "fanta uva lata": a lata nao tem Fanta uva e saia Fanta laranja.
+            # Pergunta com os tamanhos que tem o sabor; trocar sozinha muda o preco (27/10).
+            _todos = [o for o in _opcoes_de_refrigerante() if o != BEBIDA_TUCHAUA]
+            _com, _sabor_dito = _tamanhos_com_o_sabor(f"{marca} {resto}", _todos)
+            if nome in _todos and nome not in _com:
+                pendentes.append({"qtd": qtd, "termo": "refrigerante", "opcoes": _com,
+                                  "marca": _sabor_dito or marca})
+                continue
         if nome != BEBIDA_TUCHAUA and not deduzido:
             tamanho_dito = nome
         sabor = ""
@@ -2228,17 +2239,18 @@ def e_pergunta_sem_pedido(msg_lower: str) -> bool:
     return not _RX_INTENCAO_DE_PEDIDO.search(t)
 
 
-def _tamanhos_com_o_sabor(dito: str, tamanhos: list[str]) -> list[str]:
-    """Tamanhos com sabor que tem todas as palavras ditas do sabor ("fanta uva")."""
+def _tamanhos_com_o_sabor(dito: str, tamanhos: list[str]) -> tuple[list[str], str]:
+    """(tamanhos com sabor que tem todas as palavras ditas, essas palavras: "fanta uva")."""
     import cardapio_catalogo
     from horario import _norm
     por = {t: [_norm(s).split() for s in (cardapio_catalogo.opcoes_do_item(t) or [])] for t in tamanhos}
     vocab = {w for ss in por.values() for s in ss for w in s}
     # "cola" nao separa sabor: a lata e "Coca", o 600 e "Coca cola".
-    palavras = [w for w in _norm(dito).split() if w in vocab and w != "cola"]
+    palavras = list(dict.fromkeys(w for w in _norm(dito).split() if w in vocab and w != "cola"))
     if not palavras:
-        return tamanhos
-    return [t for t in tamanhos if any(all(w in s for w in palavras) for s in por[t])] or tamanhos
+        return tamanhos, ""
+    return ([t for t in tamanhos if any(all(w in s for w in palavras) for s in por[t])] or tamanhos,
+            " ".join(palavras))
 
 
 def _opcoes_de_refrigerante() -> list[str]:

@@ -2885,7 +2885,11 @@ def pergunta_bloqueante(memoria: dict, agora=None) -> str:
                 com_preco = list(opcoes)
             lista = (", ".join(com_preco[:-1]) + " ou " + com_preco[-1]) if len(com_preco) > 1 \
                 else "".join(com_preco)
-            marca = _MARCAS_DE_REFRI.get(refri["marca"].split()[0], refri["marca"].title())
+            _w = refri["marca"].split()
+            marca = _MARCAS_DE_REFRI.get(_w[0], refri["marca"].title())
+            # "A Fanta uva temos em: 2 Litros": sem o sabor parecia que a lata pedida sumiu (27/10).
+            if _w[0] in _MARCAS_DE_REFRI and _w[0] != "guarana" and _w[1:]:
+                marca += " " + " ".join(_w[1:])
             return f"{aviso}{marca} temos em: {lista}. Qual tamanho você prefere? 🥤"
         return f"{aviso}Qual refrigerante você prefere: {texto}? 🥤"
 
