@@ -132,6 +132,12 @@ MAPA = {
         "categoria": "Salgados Grandes", "nome_base44": "Rissoles de Carne (grande)", "context": "unidade",
         "quantidade_teste": 1, "preco_esperado": 9.00,
     },
+    # Quibe e sabor de lote e salgado grande: sem esta entrada, "2 quibes
+    # grandes" caia na regra dos 25 (teste de 27/10).
+    "Quibe": {
+        "categoria": "Salgados Grandes", "nome_base44": "Quibe", "context": "unidade",
+        "quantidade_teste": 1, "preco_esperado": 9.00,
+    },
     "Rissole de Queijo e Presunto": {
         "categoria": "Salgados Grandes", "nome_base44": "Rissole de Queijo e Presunto", "context": "unidade",
         "quantidade_teste": 1, "preco_esperado": 9.00,

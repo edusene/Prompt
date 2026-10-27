@@ -3239,6 +3239,8 @@ checa("27/10 sem a copia interna: categoria por id vira Salgados Grandes",
       any(p["item"] == "Quibe" and p["categoria"] == "Salgados Grandes" for p in _p27), str(_p27))
 checa("27/10 sem a copia interna: Canudinhos nao vira meio cento de fritos",
       not any(p.get("origem") == "Canudinhos" for p in _p27), str(_p27))
+checa("27/10 '2 quibes grandes' sao unidade, nao lote de 25",
+      _cc27.traduzir([{"name": "Quibe", "quantity": 2}]) == ([{"name": "Quibe", "quantity": 2, "context": "unidade"}], []))
 _ho27, _rd_orig27, _pt_orig27 = [], app._responder_direto, app.perform_transfer
 app._responder_direto = lambda u, it, t, c=None: _ho27.append(t)
 app.perform_transfer = lambda *a, **k: None
