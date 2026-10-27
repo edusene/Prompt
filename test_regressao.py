@@ -4020,6 +4020,9 @@ for _nao27 in ("nao", "quero em lata"):
     _fn27 = dict(memoria_mod._empty(), items=[{"name": "Refrigerante Lata", "quantity": 1, "price": 7.0, "sabor": "Coca"}],
                  sabores_pendentes=_copy_fx.deepcopy(_l27.get("bebidas_pendentes")))
     memoria_mod.aplicar_escolha_de_sabor(_fn27, _nao27)
+    checa(f"27/10 '{_nao27}' nao fecha a pergunta que ele mesmo abriu (recusa do app)",
+          [p for p in _fn27["sabores_pendentes"] if p.get("aberta_por") != facts.normalize(_nao27)] == []
+          and len(_fn27["sabores_pendentes"]) == 1, _fn27["sabores_pendentes"])
     _pn27 = memoria_mod.pergunta_bloqueante(_fn27)
     checa(f"27/10 '{_nao27}' oferece os sabores da lata",
           _pn27.startswith("No Refrigerante Lata") and "Fanta laranja" in _pn27 and "Pepsi" in _pn27

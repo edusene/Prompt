@@ -6502,8 +6502,10 @@ def _handle_flush(user: str, items: list[dict]) -> None:
         # docinho (ou do refrigerante) fecha. Ela voltava a cada mensagem, quatro
         # vezes seguidas, e o cliente pediu desconto de raiva (teste do dono,
         # 09/10 21h17). So depois da escolha acima: "nao, quero a bandeja" escolhe.
+        # A pergunta que este mesmo "nao" abriu ("so temos em 2L" -> sabores da lata) fica.
         _acomp = [p for p in (_memoria.get("sabores_pendentes") or [])
-                  if p.get("termo") in ("docinho", "refrigerante")]
+                  if p.get("termo") in ("docinho", "refrigerante")
+                  and p.get("aberta_por") != facts.normalize(text_only or "")]
         if _acomp and _RX_RECUSA_ACOMPANHAMENTO.search(facts.normalize(text_only or "")):
             _memoria["sabores_pendentes"] = [p for p in _memoria["sabores_pendentes"]
                                              if p not in _acomp]

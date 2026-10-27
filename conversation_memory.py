@@ -1753,7 +1753,8 @@ def aplicar_escolha_de_sabor(memoria: dict, texto: str) -> list[str]:
     for p in pendentes:
         # A mensagem que abriu a pergunta nao e a resposta: "fanta uva lata"
         # virava o "quero em lata" e a pergunta nem saia (teste de 27/10).
-        if p.get("dito") and _sem_acento(p["dito"]) in " ".join(limpo.split()):
+        if ((p.get("dito") and _sem_acento(p["dito"]) in " ".join(limpo.split()))
+                or (p.get("aberta_por") and p["aberta_por"] == limpo)):
             sobraram.append(p)
             continue
         escolhido = ""
@@ -1826,8 +1827,9 @@ def aplicar_escolha_de_sabor(memoria: dict, texto: str) -> list[str]:
             elif p.get("pedido") and (_re.search(r"\b(?:nao|nem)\b", limpo) or any(
                     _re.search(r"\b" + w, limpo) for w in PALAVRAS_DA_BEBIDA.get(p["pedido"], ()))):
                 # "nao" / "quero lata" ao "so temos em 2L. Pode ser?": os sabores da lata.
+                # "aberta_por": o mesmo "nao" nao pode fechar a pergunta que abriu (recusa no app).
                 sobraram.append({"qtd": p.get("qtd"), "termo": "refrigerante",
-                                 "opcoes": [p["pedido"]], "so_sabor": True})
+                                 "opcoes": [p["pedido"]], "so_sabor": True, "aberta_por": limpo})
                 mudancas.append(f"refrigerante -> sabores de {p['pedido']}")
                 continue
             elif _re.search(r"\b(?:sim|pode|ok|okay|beleza|blz|claro|isso|fechado|manda|show|tudo bem)\b", limpo):
