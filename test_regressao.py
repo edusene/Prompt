@@ -4236,6 +4236,22 @@ checa("oferta do painel com suco/lata/alfajor vira item no 'sim'",
       app._produtos_da_oferta("Que tal um suco natural geladinho?") == [_cv.SUCO]
       and app._produtos_da_oferta("Vai uma coca lata?") == [_cv.BEBIDA_LATA]
       and app._produtos_da_oferta("Pra adoçar, um alfajor?") == [_cv.ALFAJOR])
+_pub26 = _cf_fx._itens_do_cardapio({
+    "InternalMenuItem": [
+        {"name": "Bolo de Milho ", "category": "bolos_doces", "price": 30.0, "available": False, "sales_mode": "sweet"},
+        {"name": "25 uni Salgadinhos assados", "category": "salgadinhos assados", "price": 30.0,
+         "available": True, "sales_mode": "unit", "unit_increment": 25, "flavor_options": ["pão pizza"]},
+        {"name": "So Interna", "category": "bolos_doces", "price": 9.0, "available": True}],
+    "MenuItem": [
+        {"name": "Bolo de Milho", "category": "69a8", "price": 30.0, "available": True},
+        {"name": "25 uni Salgadinhos assados", "category": "69a8", "price": 35.0, "available": True,
+         "flavor_options": ["pão pizza", "esfirra de carne"], "unavailable_flavors": ["esfirra de carne"]}]})
+checa("produtos da copia publica, com a estrutura da interna",
+      [(i["name"], i["available"], i["price"], i.get("sales_mode"), i["category"], i["flavor_options"]) for i in _pub26]
+      == [("Bolo de Milho", True, 30.0, "sweet", "bolos_doces", []),
+          ("25 uni Salgadinhos assados", True, 35.0, "unit", "salgadinhos assados", ["pão pizza"])], _pub26)
+checa("sem a copia publica, a interna inteira",
+      _cf_fx._itens_do_cardapio({"InternalMenuItem": [{"name": "X"}]}) == [{"name": "X"}])
 _src26 = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "app.py"), encoding="utf-8").read()
 checa("'o segundo combo' escolhe pela posicao na lista", "(primeir|segund|terceir|quart|quint)" in _src26)
 

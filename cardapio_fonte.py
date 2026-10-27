@@ -11,9 +11,11 @@ Aqui o cardapio vira a fonte. Leitura publica da API de entidades do app:
 
     GET {base}/api/apps/{APP_ID}/entities/<Entidade>
 
-Le a copia INTERNA (InternalMenuItem, InternalDeliveryFee) porque e ela que o
-calculateOrder usa para cobrar: a Sandrinha informa o mesmo valor que o pedido
-vai ter. A copia publica (MenuItem) so entra no relatorio de divergencia.
+Os produtos vem da copia PUBLICA (MenuItem), a que a cliente ve: o dono edita
+la, e a interna ficou para tras (Bolo de Milho ativo na publica e desativado na
+interna, 26/10). A INTERNA (InternalMenuItem) continua lida: da a estrutura que
+a publica nao tem (sales_mode, batch_size, categoria) e e a reserva quando a
+publica vem vazia. As taxas seguem na InternalDeliveryFee.
 
 `montar_dados()` devolve o MESMO dicionario que facts._build() montava a partir
 da planilha, com os MESMOS nomes de item que o resto do codigo ja conhece
@@ -31,7 +33,7 @@ import time
 import httpx
 
 APP_ID = "68f8f95fb3eb7abc71694599"
-ENTIDADES = ("InternalMenuItem", "InternalDeliveryFee", "BusinessHours",
+ENTIDADES = ("MenuItem", "InternalMenuItem", "InternalDeliveryFee", "BusinessHours",
              "InternalBusinessRule")
 TTL_SEG = 300.0
 _SNAPSHOT_KEY = "cardapio_snapshot"
@@ -134,7 +136,7 @@ def bruto(forcar: bool = False) -> dict | None:
             return _cache
         try:
             novo = {e: ler(e) for e in ENTIDADES}
-            if not novo["InternalMenuItem"] or not novo["InternalDeliveryFee"]:
+            if not (novo["MenuItem"] or novo["InternalMenuItem"]) or not novo["InternalDeliveryFee"]:
                 raise RuntimeError("cardapio veio vazio")
             _cache, _cache_em = novo, time.monotonic()
             _salvar_snapshot(novo)
@@ -435,6 +437,34 @@ def _regras(regras: list[dict]) -> list[dict]:
             for r in regras if r.get("active", True)]
 
 
+def _itens_do_cardapio(b: dict) -> list[dict]:
+    """Os itens da copia publica, com a estrutura da interna pelo nome.
+
+    Da publica: nome, preco, disponivel, sabores (menos os esgotados) e
+    descricao. Da interna: sales_mode, batch_size, categoria e o resto que a
+    publica nao tem. Sem a publica (retrato antigo), a interna inteira.
+    """
+    publicos = b.get("MenuItem") or []
+    internos = b.get("InternalMenuItem") or []
+    if not publicos:
+        return internos
+    por_nome = {_n(str(i.get("name") or "")).strip(): i for i in internos}
+    itens = []
+    for pub in publicos:
+        item = dict(por_nome.get(_n(str(pub.get("name") or "")).strip(), {}))
+        for campo in ("name", "price", "available", "description",
+                      "min_quantity", "unit_increment", "max_flavors"):
+            if pub.get(campo) is not None:
+                item[campo] = pub[campo]
+        if not item.get("category"):
+            item["category"] = pub.get("category")
+        esgotados = {_n(str(x)) for x in pub.get("unavailable_flavors") or []}
+        item["flavor_options"] = [o for o in pub.get("flavor_options") or []
+                                  if _n(str(o)) not in esgotados]
+        itens.append(item)
+    return itens
+
+
 def montar_dados(dados_brutos: dict | None = None) -> dict | None:
     """O dicionario de facts._build(), a partir do cardapio. None se indisponivel."""
     b = dados_brutos if dados_brutos is not None else bruto()
@@ -444,7 +474,7 @@ def montar_dados(dados_brutos: dict | None = None) -> dict | None:
     chave_pix = next((r["valor"] for r in regras if r["chave"] == "chave_pix"), "")
     return {
         "bairros": _bairros(b.get("InternalDeliveryFee") or []),
-        "produtos": _produtos(b.get("InternalMenuItem") or []),
+        "produtos": _produtos(_itens_do_cardapio(b)),
         "horarios": _horarios(b.get("BusinessHours") or []),
         "pagamento": ([{"chave": "Pix", "valor": "Chave Pix CNPJ", "obs": chave_pix}]
                       if chave_pix else []),
