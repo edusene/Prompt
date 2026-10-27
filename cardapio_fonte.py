@@ -13,9 +13,11 @@ Aqui o cardapio vira a fonte. Leitura publica da API de entidades do app:
 
 Os produtos vem da copia PUBLICA (MenuItem), a que a cliente ve: o dono edita
 la, e a interna ficou para tras (Bolo de Milho ativo na publica e desativado na
-interna, 26/10). A INTERNA (InternalMenuItem) continua lida: da a estrutura que
-a publica nao tem (sales_mode, batch_size, categoria) e e a reserva quando a
-publica vem vazia. As taxas seguem na InternalDeliveryFee.
+interna, 26/10). Desde 27/10 a copia interna (InternalMenuItem e
+InternalDeliveryFee) esta parada, e o calculateOrder tambem le so a publica:
+produtos da MenuItem, taxas da DeliveryFee, nome da categoria da Category. Da
+interna ficam so as regras (InternalBusinessRule). Retrato antigo, com as
+entidades internas, continua legivel.
 
 `montar_dados()` devolve o MESMO dicionario que facts._build() montava a partir
 da planilha, com os MESMOS nomes de item que o resto do codigo ja conhece
@@ -33,11 +35,10 @@ import time
 import httpx
 
 APP_ID = "68f8f95fb3eb7abc71694599"
-ENTIDADES = ("MenuItem", "InternalMenuItem", "InternalDeliveryFee", "BusinessHours",
-             "InternalBusinessRule", "Category")
-# O dono desativa a copia interna dos produtos (27/10): sem ela, ou sem a lista
-# de categorias, a leitura segue com a publica em vez de congelar no retrato.
-_OPCIONAIS = ("InternalMenuItem", "Category")
+ENTIDADES = ("MenuItem", "DeliveryFee", "BusinessHours", "InternalBusinessRule", "Category")
+# Sem a lista de categorias a leitura segue (o produto com categoria por id
+# fica de fora) em vez de congelar no retrato.
+_OPCIONAIS = ("Category",)
 TTL_SEG = 300.0
 _SNAPSHOT_KEY = "cardapio_snapshot"
 
@@ -145,7 +146,7 @@ def bruto(forcar: bool = False) -> dict | None:
                 except Exception as e_opc:
                     print(f"[cardapio-fonte] WARN {e} indisponivel ({e_opc}); seguindo sem ela")
                     novo[e] = []
-            if not (novo["MenuItem"] or novo["InternalMenuItem"]) or not novo["InternalDeliveryFee"]:
+            if not novo["MenuItem"] or not novo["DeliveryFee"]:
                 raise RuntimeError("cardapio veio vazio")
             _cache, _cache_em = novo, time.monotonic()
             _salvar_snapshot(novo)
@@ -495,7 +496,7 @@ def montar_dados(dados_brutos: dict | None = None) -> dict | None:
     regras = _regras(b.get("InternalBusinessRule") or [])
     chave_pix = next((r["valor"] for r in regras if r["chave"] == "chave_pix"), "")
     return {
-        "bairros": _bairros(b.get("InternalDeliveryFee") or []),
+        "bairros": _bairros(b.get("DeliveryFee") or b.get("InternalDeliveryFee") or []),
         "produtos": _produtos(_itens_do_cardapio(b)),
         "horarios": _horarios(b.get("BusinessHours") or []),
         "pagamento": ([{"chave": "Pix", "valor": "Chave Pix CNPJ", "obs": chave_pix}]
