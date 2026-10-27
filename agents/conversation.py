@@ -1879,6 +1879,7 @@ def bebidas_citadas(msg_lower: str) -> tuple[list[dict], list[dict]]:
         # "3 cocas": sem o plural a marca nao casa com o sabor (23/10).
         marca = re.sub(r"^(coca(?:[\s-]*cola)?)s$", r"\1", m.group("marca").lower())
         resto = (m.group("resto") or "").lower()
+        deduzido = False
         if marca.startswith("refri"):
             # "refrigerante parecis" e produto proprio, lido pelo nome.
             if re.match(r"\s*parecis\b", resto):
@@ -1916,10 +1917,15 @@ def bebidas_citadas(msg_lower: str) -> tuple[list[dict], list[dict]]:
             _ops = _opcoes_de_refrigerante()
             if _marca:
                 _ops = [o for o in _ops if o != BEBIDA_TUCHAUA] or _ops
-            pendentes.append({"qtd": qtd, "termo": "refrigerante", "opcoes": _ops,
-                              "marca": _marca})
-            continue
-        if nome != BEBIDA_TUCHAUA:
+                # "fanta uva" so existe no 2L: oferecia lata e 600 sem Fanta (26/10).
+                _ops = _tamanhos_com_o_sabor(f"{_marca} {resto}", _ops)
+            if not _marca or len(_ops) != 1:
+                pendentes.append({"qtd": qtd, "termo": "refrigerante", "opcoes": _ops,
+                                  "marca": _marca})
+                continue
+            nome = _ops[0]
+            deduzido = True
+        if nome != BEBIDA_TUCHAUA and not deduzido:
             tamanho_dito = nome
         sabor = ""
         if nome != BEBIDA_TUCHAUA and not marca.startswith("refri"):
@@ -2220,6 +2226,19 @@ def e_pergunta_sem_pedido(msg_lower: str) -> bool:
     if "?" not in t:
         return False
     return not _RX_INTENCAO_DE_PEDIDO.search(t)
+
+
+def _tamanhos_com_o_sabor(dito: str, tamanhos: list[str]) -> list[str]:
+    """Tamanhos com sabor que tem todas as palavras ditas do sabor ("fanta uva")."""
+    import cardapio_catalogo
+    from horario import _norm
+    por = {t: [_norm(s).split() for s in (cardapio_catalogo.opcoes_do_item(t) or [])] for t in tamanhos}
+    vocab = {w for ss in por.values() for s in ss for w in s}
+    # "cola" nao separa sabor: a lata e "Coca", o 600 e "Coca cola".
+    palavras = [w for w in _norm(dito).split() if w in vocab and w != "cola"]
+    if not palavras:
+        return tamanhos
+    return [t for t in tamanhos if any(all(w in s for w in palavras) for s in por[t])] or tamanhos
 
 
 def _opcoes_de_refrigerante() -> list[str]:
