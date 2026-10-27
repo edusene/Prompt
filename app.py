@@ -5570,6 +5570,39 @@ def _quantidade_ja_certa(user: str) -> bool:
             and not conversation_memory.pendencia_de_item(memoria))
 
 
+# Assunto de salgado de festa (o que a regra dos 25 cobre).
+_RX_SALGADO_DE_FESTA = _re_mod.compile(
+    r"salgad|cento|coxinh|[kq]uib|bolinh|risol|pastel|pasteis|enroladinh|croquet|"
+    r"\bmist|empadinh|canudinh|esfirr|calzon|pao pizza|churros|festa|\b\d{2,3}\b")
+_RX_ABERTURA_GENERICA = _re_mod.compile(
+    r"\b(?:oi+|ola|opa|bom dia|boa tarde|boa noite|tudo bem|tudo bom|td bem|"
+    r"quero|queria|gostaria|de|fazer|um|uma|pedido|encomenda|encomendar|pedir|"
+    r"por favor|pfv|pf|sandrinha|balbs|e ai|eai)\b")
+
+
+def _ultima_do_cliente(user: str) -> str:
+    try:
+        historico = memory.get(user)
+    except Exception:
+        return ""
+    for entrada in reversed(historico):
+        if entrada.get("role") == "user":
+            return " ".join(str(p.get("text") or "") for p in entrada.get("parts") or [])
+    return ""
+
+
+def _regra_dos_25_serve(user: str) -> bool:
+    """O aviso dos 25 por sabor so quando ajuda: abertura generica ("oi",
+    "quero fazer um pedido") ou salgado de festa sem a quantidade certa.
+    "Tem bolo de milho?" recebia o aviso a toa (teste do Eduardo, 26/10)."""
+    if _quantidade_ja_certa(user):
+        return False
+    t = facts.normalize(_ultima_do_cliente(user))
+    if _RX_SALGADO_DE_FESTA.search(t):
+        return True
+    return not _re_mod.sub(r"[^a-z ]", " ", _RX_ABERTURA_GENERICA.sub(" ", t)).split()
+
+
 def _regras_ainda_nao_enviadas(user: str) -> bool:
     agora = time.monotonic()
     ultima = _REGRAS_ENVIADAS.get(user)
@@ -5591,13 +5624,14 @@ def enviar_em_blocos(user: str, texto: str, chegada: float | None = None) -> Non
     if _saud and _regras_ainda_nao_enviadas(user):
         _resto = texto[_saud.end():].strip()
         _inicio = [_saud.group(0).strip()]
-        # Link do cardapio sempre no inicio (Balbino, 26/10).
+        # Link do cardapio sempre, na propria mensagem da saudacao (Balbino e
+        # Eduardo, 26/10).
         if "ocardapio.net" not in (texto or ""):
-            _inicio.append(TEXTO_LINK_DO_CARDAPIO)
-        # Quem ja pediu na quantidade certa nao precisa da regra dos 25
-        # (Balbino, 26/10).
-        if _quantidade_ja_certa(user):
-            print(f"[regras] user={user} quantidade ja certa; aviso das regras omitido")
+            _inicio[0] += "\n" + TEXTO_LINK_DO_CARDAPIO
+        # Quem ja pediu na quantidade certa, ou perguntou de outra coisa (bolo,
+        # refri), nao precisa da regra dos 25 (Balbino, 26/10).
+        if not _regra_dos_25_serve(user):
+            print(f"[regras] user={user} quantidade ja certa ou outro assunto; aviso das regras omitido")
         else:
             # So a pergunta generica do pedido ("Quais delicias vamos pedir
             # hoje?"): fica a do aviso, que termina com ela (Eduardo, 20/10).

@@ -4167,7 +4167,10 @@ checa("'quero de maracuja' depois da lista de sabores do suco vira o suco",
 secao("Pedidos do dono (26/10): inicio, cardapio, centos")
 _env26 = []
 _orig26 = (app.send_text, app._pausa_digitacao, app._esperar_piso, app._no_painel,
-           app.conversation_memory.load)
+           app.conversation_memory.load, app.memory.get)
+_cli26 = {"5526a": "oi", "5526b": "quero 50 coxinhas", "5526c": "Tem bolo de milho?",
+          "5526d": "quero 30 coxinhas"}
+app.memory.get = lambda u: [{"role": "user", "parts": [{"text": _cli26.get(u, "")}]}]
 app.send_text = lambda u, t: _env26.append(t) or {"ok": True}
 app._pausa_digitacao = lambda *a: 0
 app._esperar_piso = lambda *a: None
@@ -4184,12 +4187,25 @@ try:
     app._ULTIMO_ENVIO.pop("5526b", None)
     app.enviar_em_blocos("5526b", "Boa tarde, Ana! Eu sou a Sandrinha da BALBS 💛 Pra acompanhar, vai um refri? 🥤")
     _com_qtd26 = list(_env26)
+    _env26.clear()
+    app.conversation_memory.load = lambda u: {"items": [], "volume_pendente": 0}
+    for _u26, _txt26 in (("5526c", "Boa noite, Eduardo! Eu sou a Sandrinha da BALBS 💛 Tem sim, o Bolo de Milho custa R$ 30,00."),
+                         ("5526d", "Boa noite, Eduardo! Eu sou a Sandrinha da BALBS 💛 Anotado!")):
+        app._REGRAS_ENVIADAS.pop(_u26, None)
+        app._ULTIMO_ENVIO.pop(_u26, None)
+        app.enviar_em_blocos(_u26, _txt26)
+        _cli26[_u26] = list(_env26)
+        _env26.clear()
 finally:
     (app.send_text, app._pausa_digitacao, app._esperar_piso, app._no_painel,
-     app.conversation_memory.load) = _orig26
-checa("inicio: link do cardapio sempre, logo depois da saudacao",
-      _sem_qtd26[1] == app.TEXTO_LINK_DO_CARDAPIO and _com_qtd26[1] == app.TEXTO_LINK_DO_CARDAPIO,
-      (_sem_qtd26, _com_qtd26))
+     app.conversation_memory.load, app.memory.get) = _orig26
+checa("inicio: link do cardapio sempre, na mensagem da saudacao",
+      all(m[0].endswith(app.TEXTO_LINK_DO_CARDAPIO) and m[0].startswith("Boa")
+          for m in (_sem_qtd26, _com_qtd26, _cli26["5526c"])), (_sem_qtd26, _com_qtd26))
+checa("inicio: 'tem bolo de milho?' nao recebe o aviso dos 25",
+      not any("25 em 25" in c for c in _cli26["5526c"]) and len(_cli26["5526c"]) == 2, _cli26["5526c"])
+checa("inicio: salgado fora da quantidade ('30 coxinhas') recebe o aviso",
+      any("25 em 25" in c for c in _cli26["5526d"]), _cli26["5526d"])
 checa("inicio: aviso dos 25 sai sem pedido e some com a quantidade certa",
       any("25 em 25" in c for c in _sem_qtd26) and not any("25 em 25" in c for c in _com_qtd26)
       and _com_qtd26[-1].startswith("Pra acompanhar"), (_sem_qtd26, _com_qtd26))
