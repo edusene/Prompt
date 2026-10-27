@@ -1803,6 +1803,28 @@ def aplicar_escolha_de_sabor(memoria: dict, texto: str) -> list[str]:
                        for palavra in PALAVRAS_DA_BEBIDA.get(opcao, ())):
                     escolhido = opcao
                     break
+        sabor_escolhido = ""
+        _ops_refri = p.get("opcoes") or []
+        if not escolhido and p.get("termo") == "refrigerante" and len(_ops_refri) == 1:
+            from agents.conversation import PALAVRAS_DA_BEBIDA
+            if p.get("so_sabor"):
+                # "fanta laranja" depois de "na lata temos: ...".
+                try:
+                    import cardapio_catalogo as _cat
+                    sabor_escolhido = casar_sabor(texto, _cat.opcoes_do_item(_ops_refri[0]) or [])
+                except Exception:
+                    sabor_escolhido = ""
+                if sabor_escolhido:
+                    escolhido = _ops_refri[0]
+            elif p.get("pedido") and (_re.search(r"\b(?:nao|nem)\b", limpo) or any(
+                    _re.search(r"\b" + w, limpo) for w in PALAVRAS_DA_BEBIDA.get(p["pedido"], ()))):
+                # "nao" / "quero lata" ao "so temos em 2L. Pode ser?": os sabores da lata.
+                sobraram.append({"qtd": p.get("qtd"), "termo": "refrigerante",
+                                 "opcoes": [p["pedido"]], "so_sabor": True})
+                mudancas.append(f"refrigerante -> sabores de {p['pedido']}")
+                continue
+            elif _re.search(r"\b(?:sim|pode|ok|okay|beleza|blz|claro|isso|fechado|manda|show|tudo bem)\b", limpo):
+                escolhido = _ops_refri[0]
         if not escolhido:
             sobraram.append(p)
             continue
@@ -1822,21 +1844,24 @@ def aplicar_escolha_de_sabor(memoria: dict, texto: str) -> list[str]:
                 preco = oficial["preco_unitario"]
         except Exception:
             pass
+        _sab = sabor_escolhido
+        # "Uma coca" -> "2 litros": a marca dita antes e o sabor do item.
+        if not _sab and p.get("termo") == "refrigerante" and p.get("marca"):
+            try:
+                import cardapio_catalogo as _cat
+                _sab = casar_sabor(p["marca"], _cat.opcoes_do_item(escolhido) or [])
+            except Exception:
+                _sab = ""
+        # Lata de Coca e lata de Fanta sao linhas diferentes.
         ja = next((i for i in itens if isinstance(i, dict)
-                   and _sem_acento(str(i.get("name"))) == _sem_acento(escolhido)), None)
+                   and _sem_acento(str(i.get("name"))) == _sem_acento(escolhido)
+                   and (not _sab or i.get("sabor", "") == _sab)), None)
         if ja:
             ja["quantity"] = int(ja.get("quantity") or 0) + qtd
         else:
             novo_item = {"name": escolhido, "quantity": qtd, "price": preco}
-            # "Uma coca" -> "2 litros": a marca dita antes e o sabor do item.
-            if p.get("termo") == "refrigerante" and p.get("marca"):
-                try:
-                    import cardapio_catalogo as _cat
-                    _sab = casar_sabor(p["marca"], _cat.opcoes_do_item(escolhido) or [])
-                    if _sab:
-                        novo_item["sabor"] = _sab
-                except Exception:
-                    pass
+            if _sab:
+                novo_item["sabor"] = _sab
             itens.append(novo_item)
         mudancas.append(f"{p.get('termo')} -> {qtd} x {escolhido}")
     if mudancas:
@@ -2613,7 +2638,12 @@ def etapa_coberta(memoria: dict, reply: str, agora=None) -> bool:
             # Frase fixa: "Qual sabor de refrigerante voce prefere: Guarana
             # Tuchaua ou 600ml ou Lata?" chamava TAMANHO de sabor - o dono
             # leu como se as opcoes do cardapio nao existissem (01/10).
-            if "qual refrigerante voce prefere" not in texto and "qual tamanho voce prefere" not in texto:
+            if p.get("so_sabor"):
+                if not ("qual voce prefere" in texto or "qual sabor" in texto):
+                    return False
+                continue
+            if ("qual refrigerante voce prefere" not in texto and "qual tamanho voce prefere" not in texto
+                    and not (len(p.get("opcoes") or []) == 1 and "pode ser" in texto)):
                 return False
             from agents.conversation import PALAVRAS_DA_BEBIDA
             for opcao in p.get("opcoes") or []:
@@ -2872,6 +2902,19 @@ def pergunta_bloqueante(memoria: dict, agora=None) -> str:
             else (opcoes[0] if opcoes else "")
         aviso = (f"O {refri['em_falta']} está em falta hoje! "
                  if refri.get("em_falta") else "")
+        if refri.get("so_sabor") and opcoes:
+            # "Nao" ao "so temos em 2L": os sabores do tamanho que ela pediu (27/10).
+            try:
+                import cardapio_catalogo as _cat
+                import facts as _f
+                sabores = _cat.opcoes_do_item(opcoes[0]) or []
+                of = _f.resolve_unit_price(opcoes[0], 1)
+            except Exception:
+                sabores, of = [], None
+            if sabores:
+                lista = (", ".join(sabores[:-1]) + " ou " + sabores[-1]) if len(sabores) > 1 else sabores[0]
+                preco = f" ({_brl(of['preco_unitario'])})" if of else ""
+                return f"No {opcoes[0]}{preco} temos: {lista}. Qual você prefere? 🥤"
         if refri.get("marca"):
             # "Uma coca" -> o tamanho, com o preco (13/10: a pergunta generica
             # se repetia quando o cliente respondia "coca cola" de novo).
@@ -2890,6 +2933,9 @@ def pergunta_bloqueante(memoria: dict, agora=None) -> str:
             # "A Fanta uva temos em: 2 Litros": sem o sabor parecia que a lata pedida sumiu (27/10).
             if _w[0] in _MARCAS_DE_REFRI and _w[0] != "guarana" and _w[1:]:
                 marca += " " + " ".join(_w[1:])
+            if len(com_preco) == 1:
+                # Um tamanho so: "qual tamanho?" nao tem escolha (27/10).
+                return f"{aviso}{marca} só temos em {com_preco[0]}. Pode ser? 🥤"
             return f"{aviso}{marca} temos em: {lista}. Qual tamanho você prefere? 🥤"
         return f"{aviso}Qual refrigerante você prefere: {texto}? 🥤"
 

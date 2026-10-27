@@ -4001,11 +4001,30 @@ checa("27/10 'fanta uva lata' nao vira Fanta laranja: pergunta com o tamanho que
 checa("27/10 'fanta laranja lata' continua lata", _nomes24(_ext24("uma fanta laranja lata").get("bebidas"))
       == [("Refrigerante Lata", 1, "Fanta laranja")])
 _fl27 = dict(memoria_mod._empty(), sabores_pendentes=_l27.get("bebidas_pendentes"))
-checa("27/10 a pergunta diz o sabor", memoria_mod.pergunta_bloqueante(_fl27).startswith("A Fanta uva temos em:"),
-      memoria_mod.pergunta_bloqueante(_fl27))
+_pq27 = memoria_mod.pergunta_bloqueante(_fl27)
+checa("27/10 um tamanho so: 'so temos em 2L. Pode ser?'",
+      _pq27.startswith("A Fanta uva só temos em Refrigerante 2 Litros") and "Pode ser?" in _pq27, _pq27)
+checa("27/10 a frase fixa cobre a etapa", memoria_mod.etapa_coberta(_fl27, _pq27))
+_fs27 = _copy_fx.deepcopy(_fl27)
+memoria_mod.aplicar_escolha_de_sabor(_fs27, "pode ser")
+checa("27/10 'pode ser' anota o 2L Fanta uva", [(i["name"], i.get("sabor")) for i in _fs27["items"]]
+      == [("Refrigerante 2 Litros", "Fanta uva")], _fs27["items"])
 memoria_mod.aplicar_escolha_de_sabor(_fl27, "2 litros")
 checa("27/10 '2 litros' guarda a Fanta uva", [(i["name"], i.get("sabor")) for i in _fl27["items"]]
       == [("Refrigerante 2 Litros", "Fanta uva")], _fl27["items"])
+for _nao27 in ("nao", "quero em lata"):
+    _fn27 = dict(memoria_mod._empty(), items=[{"name": "Refrigerante Lata", "quantity": 1, "price": 7.0, "sabor": "Coca"}],
+                 sabores_pendentes=_copy_fx.deepcopy(_l27.get("bebidas_pendentes")))
+    memoria_mod.aplicar_escolha_de_sabor(_fn27, _nao27)
+    _pn27 = memoria_mod.pergunta_bloqueante(_fn27)
+    checa(f"27/10 '{_nao27}' oferece os sabores da lata",
+          _pn27.startswith("No Refrigerante Lata") and "Fanta laranja" in _pn27 and "Pepsi" in _pn27
+          and memoria_mod.etapa_coberta(_fn27, _pn27), _pn27)
+    memoria_mod.aplicar_escolha_de_sabor(_fn27, "fanta laranja")
+    checa(f"27/10 '{_nao27}' e 'fanta laranja': lata de Fanta separada da lata de Coca",
+          sorted((i["name"], i.get("sabor")) for i in _fn27["items"])
+          == [("Refrigerante Lata", "Coca"), ("Refrigerante Lata", "Fanta laranja")]
+          and not _fn27.get("sabores_pendentes"), _fn27)
 catalogo.opcoes_do_item = _opcoes_orig27
 _pg24 = dict(memoria_mod._empty(), sabores_pendentes=[
     {"qtd": 2, "termo": "refrigerante", "opcoes": ["Refrigerante Lata", "Guaraná Tuchaua 2 Litros", "Refrigerante 2 Litros"]}])

@@ -1933,8 +1933,9 @@ def bebidas_citadas(msg_lower: str) -> tuple[list[dict], list[dict]]:
             _todos = [o for o in _opcoes_de_refrigerante() if o != BEBIDA_TUCHAUA]
             _com, _sabor_dito = _tamanhos_com_o_sabor(f"{marca} {resto}", _todos)
             if nome in _todos and nome not in _com:
+                # "pedido": no "nao" ao "so temos em 2L", ela oferece os sabores da lata.
                 pendentes.append({"qtd": qtd, "termo": "refrigerante", "opcoes": _com,
-                                  "marca": _sabor_dito or marca})
+                                  "marca": _sabor_dito or marca, "pedido": nome})
                 continue
         if nome != BEBIDA_TUCHAUA and not deduzido:
             tamanho_dito = nome
