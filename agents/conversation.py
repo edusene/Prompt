@@ -279,8 +279,8 @@ _PRODUTOS_ASSADOS = {
     "pão pizza": "Pao Pizza",
     "canudinho": "Canudinho de Frango",
     "canudinho de frango": "Canudinho de Frango",
-    "canudinho de camarao": "Canudinho de Camarao",
-    "canudinho de camarão": "Canudinho de Camarao",
+    "canudinho de camarao": "Canudinho de Camarão",
+    "canudinho de camarão": "Canudinho de Camarão",
     # Sabores da porcao de 25 assados cadastrada em 07/10.
     "calzone": "Calzone de frango",
     "calzone de frango": "Calzone de frango",
@@ -290,8 +290,8 @@ _PRODUTOS_ASSADOS = {
     "enroladinho com catupiry": "Enroladinho de salsicha com Catupiry",
     # "1 cento de canudos de frango" (teste do dono, 05/10).
     "canudo de frango": "Canudinho de Frango",
-    "canudo de camarao": "Canudinho de Camarao",
-    "canudo de camarão": "Canudinho de Camarao",
+    "canudo de camarao": "Canudinho de Camarão",
+    "canudo de camarão": "Canudinho de Camarão",
 }
 
 _PRODUTOS_GRANDES = {
@@ -329,8 +329,8 @@ _PRODUTOS_GRANDES = {
     "bomba de carne de sol": "Bomba de Carne de Sol",
     "empada": "Empada de Frango",
     "empada de frango": "Empada de Frango",
-    "empada de camarao": "Empada de Camarao",
-    "empada de camarão": "Empada de Camarao",
+    "empada de camarao": "Empada de Camarão",
+    "empada de camarão": "Empada de Camarão",
     "croquete de macaxeira": "Croquete de Macaxeira",
     # "3 unidades de mini pizza" e "3 fatias de pudim" nao viravam item: o
     # resumo saiu so com a coca e o modelo inventou porcao de 25 (24/10).
@@ -379,7 +379,7 @@ _PRECO_UNITARIO = {
     "Empadinha de Frango": 1.20,
     "Pao Pizza": 1.20,
     "Canudinho de Frango": 1.20,
-    "Canudinho de Camarao": 1.20,
+    "Canudinho de Camarão": 1.20,
     # Produtos Grandes: preços individuais
     "Quiche de Frango": 12.00,
     "Quiche de Carne de Sol": 12.00,
@@ -389,7 +389,7 @@ _PRECO_UNITARIO = {
     "Panqueca de Frango": 15.00,
     "Bomba de Carne de Sol": 10.00,
     "Empada de Frango": 9.00,
-    "Empada de Camarao": 9.00,
+    "Empada de Camarão": 9.00,
     "Croquete de Macaxeira": 9.00,
 }
 

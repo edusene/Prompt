@@ -354,8 +354,11 @@ def nome_sem_rotulo_de_formato(nome: str) -> str:
     # calculate_order falhava e o modelo passava a escrever o espelho inteiro a
     # mao — data por extenso e tudo. Produto que tem o preparo no proprio nome
     # ("Saltenha Assada") sai intacto pela guarda la de cima.
-    texto = _re.sub(r"\b(fritos?|fritas?|assados?|assadas?)\b", " ", texto,
-                    flags=_re.IGNORECASE)
+    # Na saltenha o preparo e o produto: sem o "frita", "Saltenha Frita" virava
+    # Saltenha Assada no resumo, 20 a R$ 180 (teste de 27/10 19h35).
+    if not _re.search(r"\bsaltenhas?\b", texto, flags=_re.IGNORECASE):
+        texto = _re.sub(r"\b(fritos?|fritas?|assados?|assadas?)\b", " ", texto,
+                        flags=_re.IGNORECASE)
     texto = " ".join(texto.replace("-", " ").split()).strip(" -,")
     return texto
 

@@ -2575,6 +2575,32 @@ def _nome_sem_sabor(nome: str) -> tuple[str, str]:
     return nome[:m.start()].strip(), m.group(1).strip()
 
 
+def _itens_a_confirmar_pela_equipe(itens_ficha: list) -> list[str]:
+    """Nomes da ficha bloqueados porque o preco e a equipe que confirma."""
+    import cardapio_catalogo
+    bloqueados = {facts.normalize(n): m for n, m in cardapio_catalogo.bloqueados_efetivos().items()}
+    return [str(i.get("name")) for i in itens_ficha if isinstance(i, dict)
+            and "confirmado pela equipe" in str(bloqueados.get(facts.normalize(str(i.get("name"))), ""))]
+
+
+def _bloqueado_da_ficha_volta(itens: list, itens_ficha: list) -> list:
+    """Item bloqueado na ficha e o modelo calculou sem ele: vale a ficha.
+
+    Com o kit de mini saltenha bloqueado, o modelo trocou por "Saltenha" por
+    conta propria e o resumo saiu com 20 Saltenhas Assadas a R$ 180 (27/10).
+    """
+    import cardapio_catalogo
+    bloqueados = {facts.normalize(n) for n in cardapio_catalogo.bloqueados_efetivos()}
+    da_ficha = [i for i in itens_ficha if isinstance(i, dict)
+                and facts.normalize(str(i.get("name"))) in bloqueados]
+    nomes = {facts.normalize(str(i.get("name"))) for i in itens or [] if isinstance(i, dict)}
+    if da_ficha and not all(facts.normalize(str(i["name"])) in nomes for i in da_ficha):
+        print(f"[cardápio] item bloqueado da ficha fora do calculo do modelo "
+              f"({[i['name'] for i in da_ficha]}); usando os itens da ficha")
+        return [dict(i) for i in itens_ficha if isinstance(i, dict)]
+    return itens
+
+
 def _separar_sabor_do_nome(itens: list, itens_ficha: list) -> list:
     """O modelo manda o item como esta no resumo, com o sabor colado no nome.
 
@@ -6566,6 +6592,16 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                                              if p not in _acomp]
             conversation_memory.save(user, _memoria)
             print(f"[memoria] {user}: cliente recusou {[p['termo'] for p in _acomp]}; pergunta fechada")
+        # Item com preco a confirmar (kit de mini saltenha): a equipe fecha. O
+        # modelo perguntava "Por qual sabor voce gostaria de trocar?" e depois
+        # trocava por Saltenha Assada no resumo (teste de 27/10 19h35).
+        _a_confirmar = _itens_a_confirmar_pela_equipe(_memoria.get("items") or [])
+        if _a_confirmar and not _memoria.get("pedido_enviado"):
+            trigger_human_handoff(
+                user, items, f"item com preco a confirmar: {_a_confirmar}", _chegada,
+                texto=(f"Anotei seu pedido: {conversation_memory._formatar_itens(_memoria['items'])}.\n\n"
+                       f"Esse item precisa de confirmação de preço. {TEXTO_DESARME}"))
+            return
         _total_salgados = max(_salgados_da_ficha(_memoria), int(_memoria.get("volume_pendente") or 0))
         if _total_salgados > 500 and not _memoria.get("pedido_enviado"):
             trigger_human_handoff(user, items, f"pedido acima de 500 salgados ({_total_salgados})",
@@ -7674,6 +7710,7 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                       f"({[i.get('name') for i in (items or [])]}); usando os da ficha")
                 _itens = _memoria["items"]
 
+            _itens = _bloqueado_da_ficha_volta(_itens, _memoria.get("items") or [])
             _itens = _separar_sabor_do_nome(_itens, _memoria.get("items") or [])
             _itens = _quantidade_da_ficha(_itens, _memoria)
             _itens = _com_sabor_da_ficha(_itens, _memoria)

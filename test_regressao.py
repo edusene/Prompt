@@ -112,7 +112,7 @@ checa("horario nao vira item", _itens("hoje as 18h") == [])
 checa("nome de produto com espaco fica inteiro",
       _itens("25 pao pizza") == [(25, "Pao Pizza")])
 checa("camarao nao vira frango",
-      _itens("25 canudinho de camarao") == [(25, "Canudinho de Camarao")])
+      _itens("25 canudinho de camarao") == [(25, "Canudinho de Camarão")])
 # 25/09: "meio cento de X" nao era pedido para a extracao.
 checa("meio cento de coxinha = 50", _itens("meio cento de coxinha") == [(50, "Coxinha")])
 checa("um cento de coxinha = 100", _itens("um cento de coxinha") == [(100, "Coxinha")])
@@ -695,7 +695,7 @@ checa("nome especifico continua resolvendo",
       _produto_conhecido("pastel de carne") == "Pastel Carne")
 checa("coxinha nao e ambiguo", _produto_conhecido("coxinha") == "Coxinha")
 checa("camarao continua nao virando frango",
-      _produto_conhecido("canudinhos de camarao") == "Canudinho de Camarao")
+      _produto_conhecido("canudinhos de camarao") == "Canudinho de Camarão")
 
 _pedido_carne = _extract_data_from_message(
     "Oi, quero 100 salgados fritos: 30 de carne, 30 de queijo e 40 coxinhas.",
@@ -2754,7 +2754,7 @@ from agents.conversation import (completar_pelo_contexto as _cpc, _produto_conhe
                                  detectar_modalidade as _dmod)
 checa("'Quero 50 uni' depois de 'Quantas unidades de canudinhos de camarao?'",
       _cpc("Quero 50 uni", "Quantas unidades de canudinhos de camarão você quer?")
-      == "50 Canudinho de Camarao")
+      == "50 Canudinho de Camarão")
 checa("quantidade solta sem pergunta de quantidade nao vira item",
       _cpc("quero 50", "Qual o seu pedido?") == "quero 50" or "50" in _cpc("quero 50", "Qual o seu pedido?"))
 checa("'canudos de frango' e Canudinho de Frango", _pcon("canudos de frango") == "Canudinho de Frango")
@@ -2800,7 +2800,7 @@ _AG_QTD = ("Os canudinhos de camarão são assados e vendidos em porções fecha
            "R$ 24,00. Qual a quantidade que você deseja?")
 checa("'Quero 50 uni' depois de 'Qual a quantidade...?' citando o combo",
       _cpc("Quero 50 uni", _AG_QTD, "Queria fazer um pedido de canudinhos de camarão")
-      == "50 Canudinho de Camarao")
+      == "50 Canudinho de Camarão")
 checa("transferencia sem mensagem nao grava mensagem 'enviada' no painel",
       "Salva a mensagem de transferência no banco para envio posterior"
       not in open("app.py", encoding="utf-8").read())
@@ -3210,7 +3210,7 @@ checa("27/10 'neio cento de pastel' e meio cento (50), nao 100",
 checa("27/10 'meio cento de canudos frango e camarao' sao 25 de cada",
       [(i["name"], i["quantity"]) for i in _extract_data_from_message(
           "quero meio cento de canudos frango e camarão", ConversationState(items=[])).get("items") or []]
-      == [("Canudinho de Frango", 25), ("Canudinho de Camarao", 25)])
+      == [("Canudinho de Frango", 25), ("Canudinho de Camarão", 25)])
 checa("27/10 'meio cento de coxinha e quibe' continua 25 de cada",
       [(i["name"], i["quantity"]) for i in _extract_data_from_message(
           "meio cento de coxinha e quibe", ConversationState(items=[])).get("items") or []]
@@ -3285,6 +3285,19 @@ app.trigger_human_handoff("55", [], "quantidade fora do multiplo de 25: ['20 Cox
 app._responder_direto, app.perform_transfer, facts.get = _rd27b, _pt27b, _fg27b
 checa("27/10 '10 mini empadinhas': o desvio oferece o kit com o preco do cardapio",
       "Kit Mini Empadinhas (30 unidades) por R$ 36,00" in _ho27b[0] and "Kit" not in _ho27b[1], str(_ho27b))
+checa("27/10 'Saltenha Frita' nao perde o 'frita' na limpeza do nome",
+      cardapio.nome_sem_rotulo_de_formato("Saltenha Frita") == "Saltenha Frita")
+_kit27 = [{"name": "Kit Mini Saltenha Frita (10und)", "quantity": 20}]
+checa("27/10 modelo troca o kit bloqueado por Saltenha: vale a ficha",
+      app._bloqueado_da_ficha_volta([{"name": "Saltenha", "quantity": 20}], _kit27) == _kit27)
+checa("27/10 sem item bloqueado na ficha, vale o calculo do modelo",
+      app._bloqueado_da_ficha_volta([{"name": "Saltenha", "quantity": 2}],
+                                    [{"name": "Saltenha Assada", "quantity": 2}]) == [{"name": "Saltenha", "quantity": 2}])
+checa("27/10 kit de mini saltenha na ficha vai para a equipe, com texto fixo",
+      app._itens_a_confirmar_pela_equipe(_kit27 + [{"name": "Coxinha", "quantity": 25}])
+      == ["Kit Mini Saltenha Frita (10und)"]
+      and app._itens_a_confirmar_pela_equipe([{"name": "Saltenha Assada", "quantity": 2}]) == []
+      and "Esse item precisa de confirmação de preço." in open("app.py", encoding="utf-8").read())
 _uc27, _qc27 = app._ultima_do_cliente, app._quantidade_ja_certa
 app._quantidade_ja_certa = lambda u: False
 for _t27, _sim27 in (("posso retirar meu pedido as 19:30?", False), ("pode ser pra 18h", False),
@@ -3297,12 +3310,12 @@ for _t27, _q27 in (("quero meio cento de canudo", 50), ("quero um cento de canud
     _e27 = _ex27(_t27, _CS27())
     checa(f"27/10 '{_t27}' pergunta o sabor do canudinho, nao frito ou assado",
           not _e27.get("volume_pendente") and [(p["qtd"], sorted(p["opcoes"])) for p in _e27.get("sabores_pendentes") or []]
-          == [(_q27, ["Canudinho de Camarao", "Canudinho de Frango"])], str(_e27))
+          == [(_q27, ["Canudinho de Camarão", "Canudinho de Frango"])], str(_e27))
     _f27 = {"items": [], "sabores_pendentes": _e27.get("sabores_pendentes")}
     memoria_mod.aplicar_escolha_de_sabor(_f27, "frango e camarão")
     checa(f"27/10 '{_t27}' + 'frango e camarão' divide ao meio",
           sorted((i["name"], i["quantity"]) for i in _f27["items"])
-          == [("Canudinho de Camarao", _q27 // 2), ("Canudinho de Frango", _q27 // 2)], str(_f27))
+          == [("Canudinho de Camarão", _q27 // 2), ("Canudinho de Frango", _q27 // 2)], str(_f27))
 checa("27/10 'meio cento de salgados' continua volume sem sabor",
       _ex27("querio meio cento de salgados", _CS27()).get("volume_pendente") == 50)
 _ho27, _rd_orig27, _pt_orig27 = [], app._responder_direto, app.perform_transfer
@@ -3848,7 +3861,7 @@ checa("22/10 'mandei errado os sabores posso troca?' e pedido de troca",
       bool(app._RX_QUER_TROCAR_SABORES.search(facts.normalize("mandei errado os sabores posso troca?")))
       and not app._RX_QUER_TROCAR_SABORES.search(facts.normalize("quais sabores voces tem?")))
 _mt22 = memoria_mod._empty()
-_mt22.update({"items": [{"name": "Canudinho de Camarao", "quantity": 50}, {"name": "Coxinha", "quantity": 50},
+_mt22.update({"items": [{"name": "Canudinho de Camarão", "quantity": 50}, {"name": "Coxinha", "quantity": 50},
                         {"name": "Refrigerante 2 Litros", "quantity": 1}], "trocar_sabores": True})
 _ext_t22 = _extract_data_from_message("50 bolinha e 50 pastel de carne", ConversationState(phone="t"))
 memoria_mod.merge(_mt22, _ext_t22, _ext_t22, texto="50 bolinha e 50 pastel de carne")
@@ -3926,7 +3939,7 @@ memoria_mod.merge(_m23, _e23, _e23, texto=_t23)
 checa("23/10 '50 canudos metade camarao metade frango' e 25 de cada, e o pao pizza soma",
       sorted((i["name"], i["quantity"]) for i in _m23["items"]) == sorted([
           ("Pão Pizza", 75), ("Calzone de frango", 25), ("Esfirra de Carne", 25),
-          ("Enroladinho de Salsicha", 25), ("Canudinho de Camarao", 25), ("Canudinho de Frango", 25)])
+          ("Enroladinho de Salsicha", 25), ("Canudinho de Camarão", 25), ("Canudinho de Frango", 25)])
       and not memoria_mod.falta_para_o_volume(_m23), str(_m23["items"]))
 _m23b = _mth23()
 checa("23/10 'repetir os mesmos' completa com 50 de cada",
@@ -4301,7 +4314,7 @@ checa("'um suco' entra; 'tem suco de que?' nao",
       _nomes24(_ext24("quero 25 coxinhas e um suco").get("bebidas")) == [("Suco Natural 300 ml", 1, "")]
       and not _ext24("TEM SUCO DE QUE ?").get("bebidas"))
 checa("'canudo de frango e camarao': o produto vale para o segundo sabor",
-      _cv.sabores_citados("CANUDO DE FRANGO E CAMARÃO") == ["Canudinho de Frango", "Canudinho de Camarao"]
+      _cv.sabores_citados("CANUDO DE FRANGO E CAMARÃO") == ["Canudinho de Frango", "Canudinho de Camarão"]
       and _cv.sabores_citados("coxinha e kibe") == ["Coxinha", "Quibe"])
 _get_orig26 = facts.get
 _dados26 = dict(_get_orig26())
