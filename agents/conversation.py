@@ -305,6 +305,12 @@ _PRODUTOS_GRANDES = {
     # cento, o acerto e no cardapio (o nome do item), nao aqui.
     "mini quiche": "Mini quiches",
     "mini quiches": "Mini quiches",
+    # "mini quiche de frango": a chave mais longa era "quiche de frango" e virava
+    # a quiche grande de R$ 12 (26/10).
+    "mini quiche de frango": "Mini quiches",
+    "mini quiches de frango": "Mini quiches",
+    "mini quiche de carne de sol": "Mini quiches",
+    "mini quiches de carne de sol": "Mini quiches",
     "saltenha": "Saltenha Assada",
     "saltenha assada": "Saltenha Assada",
     "saltenha frita": "Saltenha Frita",

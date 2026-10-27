@@ -4250,6 +4250,9 @@ checa("produtos da copia publica, com a estrutura da interna",
       [(i["name"], i["available"], i["price"], i.get("sales_mode"), i["category"], i["flavor_options"]) for i in _pub26]
       == [("Bolo de Milho", True, 30.0, "sweet", "bolos_doces", []),
           ("25 uni Salgadinhos assados", True, 35.0, "unit", "salgadinhos assados", ["pão pizza"])], _pub26)
+checa("'mini quiche de frango' e a mini, nao a quiche grande",
+      [i["name"] for i in _ext24("1 cento de mini quiche de frango").get("items") or []] == ["Mini quiches"]
+      and [i["name"] for i in _ext24("1 quiche de frango").get("items") or []] == ["Quiche de Frango"])
 checa("sem a copia publica, a interna inteira",
       _cf_fx._itens_do_cardapio({"InternalMenuItem": [{"name": "X"}]}) == [{"name": "X"}])
 _src26 = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "app.py"), encoding="utf-8").read()
