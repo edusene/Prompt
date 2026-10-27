@@ -4012,6 +4012,10 @@ checa("27/10 'pode ser' anota o 2L Fanta uva", [(i["name"], i.get("sabor")) for 
 memoria_mod.aplicar_escolha_de_sabor(_fl27, "2 litros")
 checa("27/10 '2 litros' guarda a Fanta uva", [(i["name"], i.get("sabor")) for i in _fl27["items"]]
       == [("Refrigerante 2 Litros", "Fanta uva")], _fl27["items"])
+_fm27 = dict(memoria_mod._empty(), sabores_pendentes=_copy_fx.deepcopy(_l27.get("bebidas_pendentes")))
+memoria_mod.aplicar_escolha_de_sabor(_fm27, "Uma fanta uva lata")
+checa("27/10 a mensagem que abriu a pergunta nao a responde ('lata' do pedido)",
+      _fm27["sabores_pendentes"] == _l27.get("bebidas_pendentes") and not _fm27.get("items"), _fm27["sabores_pendentes"])
 for _nao27 in ("nao", "quero em lata"):
     _fn27 = dict(memoria_mod._empty(), items=[{"name": "Refrigerante Lata", "quantity": 1, "price": 7.0, "sabor": "Coca"}],
                  sabores_pendentes=_copy_fx.deepcopy(_l27.get("bebidas_pendentes")))

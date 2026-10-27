@@ -1934,8 +1934,10 @@ def bebidas_citadas(msg_lower: str) -> tuple[list[dict], list[dict]]:
             _com, _sabor_dito = _tamanhos_com_o_sabor(f"{marca} {resto}", _todos)
             if nome in _todos and nome not in _com:
                 # "pedido": no "nao" ao "so temos em 2L", ela oferece os sabores da lata.
+                # "dito": a propria mensagem tem "lata" e nao pode responder a pergunta.
                 pendentes.append({"qtd": qtd, "termo": "refrigerante", "opcoes": _com,
-                                  "marca": _sabor_dito or marca, "pedido": nome})
+                                  "marca": _sabor_dito or marca, "pedido": nome,
+                                  "dito": " ".join(msg_lower.split())})
                 continue
         if nome != BEBIDA_TUCHAUA and not deduzido:
             tamanho_dito = nome

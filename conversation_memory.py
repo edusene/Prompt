@@ -1751,6 +1751,11 @@ def aplicar_escolha_de_sabor(memoria: dict, texto: str) -> list[str]:
     itens = list(memoria.get("items") or [])
     sobraram, mudancas = [], []
     for p in pendentes:
+        # A mensagem que abriu a pergunta nao e a resposta: "fanta uva lata"
+        # virava o "quero em lata" e a pergunta nem saia (teste de 27/10).
+        if p.get("dito") and _sem_acento(p["dito"]) in " ".join(limpo.split()):
+            sobraram.append(p)
+            continue
         escolhido = ""
         for opcao in p.get("opcoes") or []:
             if _sem_acento(opcao) in limpo:
@@ -1805,10 +1810,12 @@ def aplicar_escolha_de_sabor(memoria: dict, texto: str) -> list[str]:
                     break
         sabor_escolhido = ""
         _ops_refri = p.get("opcoes") or []
-        if not escolhido and p.get("termo") == "refrigerante" and len(_ops_refri) == 1:
+        if p.get("termo") == "refrigerante" and len(_ops_refri) == 1 and (not escolhido or p.get("so_sabor")):
             from agents.conversation import PALAVRAS_DA_BEBIDA
             if p.get("so_sabor"):
-                # "fanta laranja" depois de "na lata temos: ...".
+                # "fanta laranja" depois de "na lata temos: ...". So "lata" sem
+                # sabor nao escolhe: a pergunta e o sabor.
+                escolhido = ""
                 try:
                     import cardapio_catalogo as _cat
                     sabor_escolhido = casar_sabor(texto, _cat.opcoes_do_item(_ops_refri[0]) or [])
