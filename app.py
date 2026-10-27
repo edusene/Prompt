@@ -44,9 +44,9 @@ import parse_knowledge
 import scheduler as crm_scheduler
 from agents.conversation import _extract_data_from_message, ConversationState
 
-from meta import send_text, mark_read, send_typing, get_media_url, download_media_bytes
+from meta import send_text, mark_read, send_typing, download_media_bytes
 from meta import get_phone_info, list_templates, get_template, delete_template, create_template
-from meta import get_business_profile, update_business_profile, get_phone_id, get_waba_id
+from meta import get_business_profile, update_business_profile, get_phone_id
 from meta import get_webhook_media_url
 from buffer import MessageBuffer
 from auth import login_required, do_login, do_logout
@@ -82,9 +82,8 @@ if not SECRET_KEY or SECRET_KEY == "troque_esta_chave_secreta_aleatoria":
     import secrets as _secrets
     SECRET_KEY = _secrets.token_hex(32)
     print("[config] ATENCAO: SECRET_KEY ausente ou igual ao exemplo - usando uma aleatoria")
-DATAFY_WEBHOOK_SECRET = os.getenv("DATAFY_WEBHOOK_SECRET", "")
-if not DATAFY_WEBHOOK_SECRET:
-    print("[config] ATENCAO: DATAFY_WEBHOOK_SECRET ausente - o webhook recusa todas as mensagens (503)")
+if not os.getenv("AUTOZAP_WEBHOOK_SECRET", ""):
+    print("[config] ATENCAO: AUTOZAP_WEBHOOK_SECRET ausente - o webhook recusa todas as mensagens (503)")
 
 _BASE_PROMPT = os.getenv(
     "SYSTEM_PROMPT",
@@ -702,6 +701,12 @@ def _faq_lista_de_refri(t: str) -> str:
     for nome in _opcoes_de_refrigerante():
         oficial = facts.resolve_unit_price(nome, 1)
         tamanhos.append(f"{nome} ({cardapio._brl(oficial['preco_unitario'])})" if oficial else nome)
+    # Refrigerante vendido pelo nome (o Parecis), fora dos tamanhos (26/10).
+    for p in facts.get()["produtos"]:
+        if (facts.normalize(p["categoria"]) == "bebidas" and p["item"].startswith("Refrigerante")
+                and p.get("disponivel", True) and p.get("preco")
+                and p["item"] not in _opcoes_de_refrigerante()):
+            tamanhos.append(f"{p['item']} ({cardapio._brl(p['preco'])})")
     import cardapio_catalogo
     junta = lambda xs: ", ".join(xs[:-1]) + " e " + xs[-1] if len(xs) > 1 else "".join(xs)
     texto = f"Temos {junta(tamanhos)}."
@@ -815,10 +820,36 @@ def _faq_sabor_de_refri(t: str, memoria: dict | None = None) -> str:
         return ""
     lista = ", ".join(sabores[:-1]) + " e " + sabores[-1] if len(sabores) > 1 else sabores[0]
     pedido = _re_mod.search(r"\b(?:fanta|coca|guarana|pepsi|sprite|kuat|soda)\s+([a-z]{3,})", t)
+    if (pedido and not any(facts.normalize(pedido.group(0)) in facts.normalize(s) for s in sabores)
+            and not _re_mod.search(r"\b(?:2\s*l|litros?|latas?|latinha|600)\b", t)):
+        # "Tem fanta uva?" sem tamanho: a uva so existe no 2L, e a resposta
+        # olhava so a lata e dizia que nao tinha (26/10).
+        from agents.conversation import _opcoes_de_refrigerante
+        for outro in _opcoes_de_refrigerante():
+            if any(facts.normalize(pedido.group(0)) in facts.normalize(s)
+                   for s in cardapio_catalogo.opcoes_do_item(outro) or []):
+                return f"Temos {pedido.group(0).title()} no {outro}! Quantos você quer? 🥤"
     if pedido and not any(facts.normalize(pedido.group(0)) in facts.normalize(s) for s in sabores):
         return (f"{pedido.group(0).title()} não temos no momento. Os sabores do {tamanho} "
                 f"são: {lista}. Qual você prefere? 🥤")
     return f"Os sabores do {tamanho} são: {lista}. Qual você prefere? 🥤"
+
+
+def _faq_em_falta(t: str) -> str:
+    """"Tem bolo de milho?" com o item desativado no cardapio: diz que esta em
+    falta, com o nome do cardapio, sem passar pelo modelo (26/10)."""
+    try:
+        produtos = facts.get()["produtos"]
+    except Exception:
+        return ""
+    for p in produtos:
+        if p.get("disponivel", True):
+            continue
+        nome = " ".join(_re_mod.sub(r"\(.*?\)", " ", p["item"]).split())
+        alvo = facts.normalize(nome)
+        if len(alvo) >= 5 and _re_mod.search(r"\b" + _re_mod.escape(alvo) + r"s?\b", t):
+            return f"{nome} está em falta hoje 😕 Quer escolher outra delícia do cardápio?"
+    return ""
 
 
 def _faq_sabor_de_suco(t: str) -> str:
@@ -1010,6 +1041,9 @@ def _resposta_de_faq(texto: str, memoria: dict | None = None) -> tuple[str, str,
             facts.normalize(_re_mod.sub(r"\(.*?\)", " ", texto or "")))
         if inexistente:
             return "produto inexistente", inexistente, False
+        em_falta = _faq_em_falta(t)
+        if em_falta:
+            return "em falta", em_falta, False
     return None
 
 
@@ -1883,7 +1917,7 @@ def split_reply(text: str) -> list[str]:
         vistos.add(chave)
         unicos.append(c)
     # Resposta curta vai numa mensagem so: cada mensagem a mais e uma ida a
-    # Datafy (~1s no log de 05/10) e uma pausa de digitacao. A linha em branco
+    # gateway (~1s no log de 05/10) e uma pausa de digitacao. A linha em branco
     # entre os paragrafos fica dentro da mesma mensagem.
     if len(unicos) > 1 and sum(len(c) for c in unicos) <= MAX_UMA_MENSAGEM:
         return ["\n\n".join(unicos)]
@@ -3505,9 +3539,16 @@ def _produtos_da_oferta(oferta: str) -> list[str]:
     from agents import conversation as _cv
     t = facts.normalize(oferta or "")
     achados = []
+    # A frase pode ser a do dono (aba Cardapio): suco, lata, alfajor e pudim
+    # tambem viram item no "sim" (26/10).
     for rx, nome in ((r"\btuchaua\b", _cv.BEBIDA_TUCHAUA),
-                     (r"\brefrigerante\s+2\s*l|\brefrigerante\s+2\s+litros", _cv.BEBIDA_2L),
+                     (r"\b(?:refri\w*|coca(?:\s*cola)?)\s+(?:de\s+)?2\s*l|\b(?:refri\w*|coca(?:\s*cola)?)\s+(?:de\s+)?2\s+litros",
+                      _cv.BEBIDA_2L),
+                     (r"\b(?:refri\w*|coca(?:\s*cola)?)\s+(?:em\s+)?lat(?:a|inha)\b", _cv.BEBIDA_LATA),
                      (r"\bbolo\s+de\s+milho\b", _cv.BOLO),
+                     (r"\bsucos?\b", _cv.SUCO),
+                     (r"\balfajor", _cv.ALFAJOR),
+                     (r"\bpudim\b", "Pudim (Fatia)"),
                      (r"\bdocinhos?\b|\bbrigadeiros?\b", "docinhos")):
         m = _re_mod.search(rx, t)
         if m:
@@ -5511,6 +5552,24 @@ def texto_regras_do_pedido(com_pergunta: bool = False) -> str:
     return f"{texto} {pergunta}" if com_pergunta else texto
 
 
+LINK_DO_CARDAPIO = "https://balbssalgados.ocardapio.net/"
+TEXTO_LINK_DO_CARDAPIO = f"Dá uma olhada no nosso cardápio completo: {LINK_DO_CARDAPIO} 😊"
+
+
+def _quantidade_ja_certa(user: str) -> bool:
+    """O pedido da ficha ja fecha nas regras (25 por sabor, tamanho dito)?"""
+    try:
+        memoria = conversation_memory.load(user)
+    except Exception:
+        return False
+    volume = int(memoria.get("volume_pendente") or 0)
+    if volume and volume % 25 == 0:
+        return True
+    return (conversation_memory.tem_salgado_na_ficha(memoria)
+            and not conversation_memory.pendencia_de_lote(memoria)
+            and not conversation_memory.pendencia_de_item(memoria))
+
+
 def _regras_ainda_nao_enviadas(user: str) -> bool:
     agora = time.monotonic()
     ultima = _REGRAS_ENVIADAS.get(user)
@@ -5531,13 +5590,22 @@ def enviar_em_blocos(user: str, texto: str, chegada: float | None = None) -> Non
     _saud = _RX_SAUDACAO_DA_CONVERSA.match(texto or "")
     if _saud and _regras_ainda_nao_enviadas(user):
         _resto = texto[_saud.end():].strip()
-        # So a pergunta generica do pedido ("Quais delicias vamos pedir
-        # hoje?"): fica a do aviso, que termina com ela (Eduardo, 20/10).
-        if _so_pergunta_generica_do_pedido(_resto):
-            _resto = ""
-        chunks =([_saud.group(0).strip(), texto_regras_do_pedido(com_pergunta="?" not in _resto)]
-                  + (split_reply(_resto) or ([_resto] if _resto else [])))
-        print(f"[regras] user={user} regras do pedido enviadas apos a saudacao")
+        _inicio = [_saud.group(0).strip()]
+        # Link do cardapio sempre no inicio (Balbino, 26/10).
+        if "ocardapio.net" not in (texto or ""):
+            _inicio.append(TEXTO_LINK_DO_CARDAPIO)
+        # Quem ja pediu na quantidade certa nao precisa da regra dos 25
+        # (Balbino, 26/10).
+        if _quantidade_ja_certa(user):
+            print(f"[regras] user={user} quantidade ja certa; aviso das regras omitido")
+        else:
+            # So a pergunta generica do pedido ("Quais delicias vamos pedir
+            # hoje?"): fica a do aviso, que termina com ela (Eduardo, 20/10).
+            if _so_pergunta_generica_do_pedido(_resto):
+                _resto = ""
+            _inicio.append(texto_regras_do_pedido(com_pergunta="?" not in _resto))
+            print(f"[regras] user={user} regras do pedido enviadas apos a saudacao")
+        chunks = _inicio + (split_reply(_resto) or ([_resto] if _resto else []))
     for indice, chunk in enumerate(chunks):
         pausa = _pausa_digitacao(indice, chunk)
         if pausa > 0:
@@ -6070,7 +6138,7 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             perform_transfer(user, reason=f"cliente mencionou '{matched_kw}'")
             return
 
-        # Typing indicator em background: e enfeite, e a ida ate a Datafy
+        # Typing indicator em background: e enfeite, e a ida ate o gateway
         # custava 0,8s do tempo do cliente. Em thread ele aparece no celular
         # mais cedo do que antes, e nao no lugar do preparo da resposta.
         last_wa_msg_id = items[-1].get("wa_message_id", "") if items else ""
@@ -8531,8 +8599,6 @@ try:
 except Exception as e:
     print(f"[crm] WARN: scheduler nao iniciado: {e}")
 
-print(f"[config] Datafy API: PHONE_ID={os.getenv('DATAFY_PHONE_NUMBER_ID', '') or 'N/A'}")
-print(f"[config] Datafy API: WABA_ID={os.getenv('DATAFY_WABA_ID', '') or 'N/A'}")
 print(f"[config] Gateway de envio: {meta.provider()} PHONE_ID={get_phone_id() or 'N/A'}")
 
 # ── Auth routes ───────────────────────────────────────────────────────────────
@@ -8574,7 +8640,7 @@ def add_security_headers(response):
 # ── Webhook ──────────────────────────────────────────────────────────────────
 
 def _envelope_autozap_para_meta(evento: dict) -> dict:
-    """Evento do AutoZap -> o mesmo envelope da Cloud API que a Datafy repassa.
+    """Evento do AutoZap -> o envelope da Cloud API (entry -> changes -> value).
 
     message.received traz {"contact": {wa_id, name}, "message": <mensagem da
     Cloud API>}; o resto do webhook continua lendo entry -> changes -> value.
@@ -8599,25 +8665,18 @@ def _envelope_autozap_para_meta(evento: dict) -> dict:
 
 @app.get("/webhook")
 def webhook_verify():
-    """Para a Datafy API essa rota não é chamada da mesma maneira que a Meta chama com GET."""
-    return "Datafy API endpoint", 200
+    """O AutoZap nao verifica a rota por GET; responde so para quem testar no navegador."""
+    return "AutoZap webhook endpoint", 200
 
 
 @app.post("/webhook")
 def webhook():
-    # Dois gateways podem chamar esta rota, cada um com o seu segredo: a Datafy
-    # (x-datafy-*) e o AutoZap, a API propria (X-Webhook-*, desde 25/10). O
-    # calculo da assinatura e o mesmo: HMAC-SHA256(segredo, "timestamp.corpo").
-    if request.headers.get("X-Webhook-Signature"):
-        gateway = "AutoZap"
-        signature = request.headers.get("X-Webhook-Signature", "")
-        timestamp = request.headers.get("X-Webhook-Timestamp", "")
-        segredo = os.getenv("AUTOZAP_WEBHOOK_SECRET", "")
-    else:
-        gateway = "Datafy"
-        signature = request.headers.get("x-datafy-signature-256", "")
-        timestamp = request.headers.get("x-datafy-timestamp", "")
-        segredo = DATAFY_WEBHOOK_SECRET
+    # So o AutoZap, a API propria (X-Webhook-*, desde 25/10; a Datafy saiu em
+    # 26/10). Assinatura: HMAC-SHA256(segredo, "timestamp.corpo").
+    gateway = "AutoZap"
+    signature = request.headers.get("X-Webhook-Signature", "")
+    timestamp = request.headers.get("X-Webhook-Timestamp", "")
+    segredo = os.getenv("AUTOZAP_WEBHOOK_SECRET", "")
     raw_body = request.get_data(as_text=True)
 
     # Com o segredo configurado, mensagem sem assinatura e recusada: antes ela
@@ -8649,11 +8708,9 @@ def webhook():
         print(f"[webhook] Timestamp invalido ({gateway})")
         return "Forbidden", 401
 
-    data = request.get_json(silent=True) or {}
-    if gateway == "AutoZap":
-        data = _envelope_autozap_para_meta(data)
+    data = _envelope_autozap_para_meta(request.get_json(silent=True) or {})
 
-    # Validacao basica Meta / Datafy
+    # Validacao basica do envelope
     if data.get("object") != "whatsapp_business_account":
         print(f"[webhook] object invalido: {data.get('object')}")
         return jsonify({"ok": True})
@@ -8718,7 +8775,7 @@ def webhook():
             _chegou_em = time.monotonic()
             print(f"[webhook] from={number} ({push_name}) type={msg_type} len={len(body)} msg_id={message_id[:30]}")
 
-            # Marca como lido em background. E uma chamada de rede a Datafy
+            # Marca como lido em background. E uma chamada de rede ao gateway
             # (0,9s medido em producao) cujo resultado ninguem espera: o tique
             # azul no celular do cliente nao muda uma virgula da resposta.
             # Segurava o debounce sem motivo.
@@ -10269,15 +10326,10 @@ def api_whatsapp_upload_media():
     return jsonify({"ok": True, "media_id": data.get("id", ""), "data": data})
 
 
-# ── WhatsApp — Conexao e Configuracao (Datafy) ──────────────────────────────
+# ── WhatsApp — Conexao e Configuracao (AutoZap) ─────────────────────────────
 
 _ENV_KEYS = [
-    ("DATAFY_TOKEN", "Token Datafy", True),
-    ("DATAFY_PHONE_NUMBER_ID", "Phone Number ID", False),
-    ("DATAFY_WABA_ID", "WABA ID", False),
-    ("DATAFY_WEBHOOK_SECRET", "Webhook Secret", True),
-    # API propria (AutoZap, 25/10). WHATSAPP_PROVIDER=autozap passa o envio para ela.
-    ("WHATSAPP_PROVIDER", "Gateway de envio (datafy ou autozap)", False),
+    # API propria (AutoZap, 25/10). A Datafy saiu em 26/10.
     ("AUTOZAP_API_URL", "AutoZap URL da API", False),
     ("AUTOZAP_API_KEY", "AutoZap chave da API (sk_live_)", True),
     ("AUTOZAP_PHONE_NUMBER_ID", "AutoZap Phone Number ID", False),
@@ -10340,7 +10392,7 @@ def _write_env_file(updates: dict[str, str]) -> None:
 @app.get("/api/whatsapp/connection")
 @login_required
 def api_whatsapp_connection():
-    """Testa conexao com a Datafy API e retorna dados da instância."""
+    """Testa conexao com o AutoZap e retorna dados do numero."""
     problem = meta.config_problem()
     if problem:
         return jsonify({"ok": False, "error": problem})
@@ -10349,16 +10401,14 @@ def api_whatsapp_connection():
     if not r.get("ok"):
         return jsonify({
             "ok": False,
-            "error": r.get("error", "Erro ao conectar com Datafy"),
+            "error": r.get("error", "Erro ao conectar com o AutoZap"),
             "phone_number_id": get_phone_id(),
-            "waba_id": get_waba_id(),
         })
 
     d = r.get("data", {})
     return jsonify({
         "ok": True,
         "phone_number_id": get_phone_id(),
-        "waba_id": get_waba_id(),
         "display_name": d.get("verified_name", ""),
         "display_phone": d.get("display_phone_number", ""),
         "quality_rating": d.get("quality_rating", ""),

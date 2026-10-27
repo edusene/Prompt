@@ -324,6 +324,19 @@ _PRODUTOS_GRANDES = {
     "pizza brotinho": "Mini Pizza (Brotinho)",
     "brotinho": "Mini Pizza (Brotinho)",
     "pudim": "Pudim (Fatia)",
+    # Varredura do cardapio (26/10): estes caiam no produto errado ("empada
+    # doce" virava Empada de Frango, "rissole de queijo" virava o de carne,
+    # "kit empadinhas" virava 1 empadinha) ou nao viravam nada.
+    "rissole de queijo e presunto": "Rissole de Queijo e Presunto",
+    "rissole de queijo": "Rissole de Queijo e Presunto",
+    "empada doce": "Empada Doce",
+    "empada de leite condensado": "Empada Doce",
+    "kit empadinhas": "Kit Empadinhas (15 unid)",
+    "kit de empadinhas": "Kit Empadinhas (15 unid)",
+    "kit mini empadinhas": "Kit Mini Empadinhas",
+    "kit de mini empadinhas": "Kit Mini Empadinhas",
+    "centenario": "Centenário (fatia)",
+    "parecis": "Refrigerante Parecis",
 }
 
 _TODOS_PRODUTOS = {**_PRODUTOS_FRI_COCOQ, **_PRODUTOS_ASSADOS, **_PRODUTOS_GRANDES}
@@ -1842,6 +1855,7 @@ def bebidas_citadas(msg_lower: str) -> tuple[list[dict], list[dict]]:
     """
     itens, pendentes = [], []
     tamanho_dito = ""
+    qtd_herdada = 0
     # "duas cocas" e, na mensagem seguinte, "2 litros": o buffer junta as duas
     # com quebra de linha e o tamanho se perdia (24/10).
     msg_lower = re.sub(r"\s*\n\s*(?=(?:de\s+)?(?:2\s*l|dois\s+litros|lat(?:a|inha)|600))", " ",
@@ -1852,15 +1866,33 @@ def bebidas_citadas(msg_lower: str) -> tuple[list[dict], list[dict]]:
                      (msg_lower or "")[:m.start()]):
             continue
         bruto_qtd = (m.group("qtd") or "").lower()
-        qtd = int(bruto_qtd) if bruto_qtd.isdigit() else _QTD_POR_EXTENSO.get(bruto_qtd, 1)
+        qtd = int(bruto_qtd) if bruto_qtd.isdigit() else _QTD_POR_EXTENSO.get(bruto_qtd, qtd_herdada or 1)
+        herdou, qtd_herdada = bool(qtd_herdada), 0
         if not 0 < qtd <= 20:
             continue
         # "3 cocas": sem o plural a marca nao casa com o sabor (23/10).
         marca = re.sub(r"^(coca(?:[\s-]*cola)?)s$", r"\1", m.group("marca").lower())
         resto = (m.group("resto") or "").lower()
+        if marca.startswith("refri"):
+            # "refrigerante parecis" e produto proprio, lido pelo nome.
+            if re.match(r"\s*parecis\b", resto):
+                continue
+            # "1 refrigerante 600ml de guarana": a marca que vem logo depois e o
+            # sabor deste refrigerante. Saiam dois, um sem sabor (26/10).
+            if re.match(r"\s*(?:de\s+|da\s+)?(?:coca|guaran|fanta|sprite|pepsi|kuat|soda)",
+                        (msg_lower or "")[m.end():]):
+                if re.search(r"\blat(?:a|inha)s?\b", resto):
+                    tamanho_dito = BEBIDA_LATA
+                elif re.search(r"\b600", resto):
+                    tamanho_dito = BEBIDA_600
+                elif re.search(r"\b2\s*l\b|\b2\s*lts?\b|\b(?:2|dois)\s*litros?\b", resto):
+                    tamanho_dito = BEBIDA_2L
+                qtd_herdada = qtd
+                continue
         # Guarana Antartica e sabor do refrigerante comum (lata, 600, 2L); o
         # guarana sozinho continua sendo o Tuchaua (24/10).
-        antartica = marca.startswith("guaran") and bool(re.search(r"\bant[aá]r", resto))
+        antartica = marca.startswith("guaran") and (bool(re.search(r"\bant[aá]r", resto))
+                                                    or (herdou and bool(tamanho_dito)))
         if re.search(r"\blat(?:a|inha)s?\b", resto):
             nome = BEBIDA_LATA
         elif re.search(r"\b600", resto):
@@ -1959,7 +1991,7 @@ def bebidas_citadas(msg_lower: str) -> tuple[list[dict], list[dict]]:
             continue
         # O sabor vem das opcoes do cardapio. Sabor que nao existe ("suco de
         # laranja") nao entra: a resposta dos sabores do suco diz quais tem.
-        dito = re.match(r"\s+(?:natural\s+)?(de\s+)?([a-zà-ÿ]{3,}(?:\s+[a-zà-ÿ/]+)?)",
+        dito = re.match(r"\s+(?:natural\s+)?(?:\d{3}\s*ml\s+)?(de\s+)?([a-zà-ÿ]{3,}(?:\s+[a-zà-ÿ/]+)?)",
                         (msg_lower or "")[m.end():])
         sabor = ""
         if dito and not re.match(r"(?:que|qual|quais|com|pra|para|tamb)\b", dito.group(2)):
@@ -2056,6 +2088,10 @@ _RX_COMBO = re.compile(
     # O nome para no " e " do proximo item: "3 combos de camarao e 1 cento
     # frito" engolia o cento (15/10).
     r"(?P<resto>(?:\s+(?:de|do|da|com|mix|\d{1,3}|\+))*(?:\s+(?!e\b)[a-zà-ú]+){1,2})")
+# A bebida que faz parte do nome do combo ("+ coca-cola lata", "com refri 1l").
+_RX_BEBIDA_DO_COMBO = re.compile(
+    r"\s*(?:(?:\+|com)\s*)?(?:uma?\s+|1\s+)?(?:coca(?:[\s-]*cola)?|refri\w*)"
+    r"(?:\s+(?:de\s+)?(?:lata|latinha|1\s*l\w*))?")
 _COMBO_POR_PALAVRA = (
     (r"camar", "Combo Mix Camarão"),
     (r"empad", "Combo 15 Empadinhas + Coca-Cola Lata"),
@@ -2093,7 +2129,11 @@ def combos_citados(msg_lower: str) -> tuple[list[dict], str]:
         if not any(c["name"] == nome for c in achados):
             achados.append({"name": nome, "quantity": qtd,
                             "price": oficial["preco_unitario"] if oficial else 0.0})
-        resto_msg = resto_msg.replace(m.group(0), " ")
+        # "combo 15 empadinhas + coca-cola lata": a coca e a do combo. Ficava
+        # na mensagem e virava uma lata a mais, cobrada a parte (26/10).
+        da_bebida = (_RX_BEBIDA_DO_COMBO.match(msg_lower[m.end():])
+                     if re.search(r"coca|refri", nome.lower()) else None)
+        resto_msg = resto_msg.replace(m.group(0) + (da_bebida.group(0) if da_bebida else ""), " ")
     # "combo mix de camarao e o outro de frango": o segundo combo vinha sem a
     # palavra "combo" e sumia; o total oscilou entre R$ 110 e R$ 210 (24/10).
     if achados:
@@ -2348,7 +2388,8 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
     # "um centro de canudinho" e um CENTO: o pedido sumia e "Centro" virava o
     # bairro (teste do dono, 10/10 08h39). So com quantidade antes e "de"
     # depois - "entrega no centro" continua sendo o bairro.
-    msg_lower = re.sub(r"\b(um|uma|meio|dois|duas|tres|\d+)\s+centros?\s+(?=de\s)",
+    # "1 sento de coxinha" (digitacao) tambem: virava 1 coxinha grande (26/10).
+    msg_lower = re.sub(r"\b(um|uma|meio|dois|duas|tres|\d+)\s+(?:centros?|sentos?)\s+(?=de\s)",
                        lambda m: f"{m.group(1)} {'centos' if m.group(1) not in ('um', 'uma', 'meio', '1') else 'cento'} ",
                        msg_lower)
     # "6 porcoes de coxinha" sao 150 coxinhas, nao 6 (teste do dono, 08/10

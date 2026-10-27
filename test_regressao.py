@@ -2784,7 +2784,7 @@ checa("'consigo retirar as 7:40?' e respondido pelo horario do cardapio",
 _cq = _extract_data_from_message("quero um centoQu frito misto de coxinha e bolinha de queijo",
                                  ConversationState(phone="x")).get("items") or []
 checa("'centoQu' (digitacao) ainda e cento", sum(i["quantity"] for i in _cq) == 100, _cq)
-checa("resposta curta sai numa mensagem so (menos idas a Datafy)",
+checa("resposta curta sai numa mensagem so (menos idas ao gateway)",
       app.split_reply("Boa noite, Balbino! Aqui é a Sandrinha da BALBS 💛\n\nQual o seu pedido? 😊")
       == ["Boa noite, Balbino! Aqui é a Sandrinha da BALBS 💛\n\nQual o seu pedido? 😊"])
 checa("resposta longa continua dividida",
@@ -3835,7 +3835,7 @@ checa("22/10 '25 misto' com doce na ficha continua sendo o salgado",
       app._doce_misto_do_contexto("25 misto", "Qual docinho?", "Cento de Brigadeiros (100 un)") == "")
 
 secao("--- 23/10: valor com quebra de linha nao injeta chave no .env (revisao S1) ---")
-# Stubs: o teste nunca toca o .env real nem recarrega a Datafy.
+# Stubs: o teste nunca toca o .env real nem recarrega o gateway.
 _gravados_env = []
 _write_env_original, _reload_original = app._write_env_file, app.meta.reload_config
 app._write_env_file = lambda updates: _gravados_env.append(dict(updates))
@@ -3864,17 +3864,20 @@ finally:
         os.environ[_chave_env] = _env_antes
 
 secao("--- 23/10: webhook sem segredo configurado recusa tudo (revisao S3) ---")
-_segredo_original = app.DATAFY_WEBHOOK_SECRET
+_segredo_original = os.environ.get("AUTOZAP_WEBHOOK_SECRET")
 try:
     _cliente_wh = app.app.test_client()
-    app.DATAFY_WEBHOOK_SECRET = ""
+    os.environ.pop("AUTOZAP_WEBHOOK_SECRET", None)
     _resp = _cliente_wh.post("/webhook", json={})
-    checa("sem DATAFY_WEBHOOK_SECRET o webhook responde 503", _resp.status_code == 503, str(_resp.status_code))
-    app.DATAFY_WEBHOOK_SECRET = "segredo-de-teste"
+    checa("sem AUTOZAP_WEBHOOK_SECRET o webhook responde 503", _resp.status_code == 503, str(_resp.status_code))
+    os.environ["AUTOZAP_WEBHOOK_SECRET"] = "segredo-de-teste"
     _resp = _cliente_wh.post("/webhook", json={})
     checa("com segredo e sem assinatura continua 401", _resp.status_code == 401, str(_resp.status_code))
 finally:
-    app.DATAFY_WEBHOOK_SECRET = _segredo_original
+    if _segredo_original is None:
+        os.environ.pop("AUTOZAP_WEBHOOK_SECRET", None)
+    else:
+        os.environ["AUTOZAP_WEBHOOK_SECRET"] = _segredo_original
 
 secao("--- 23/10 (tarde): teste da Thayline ---")
 from agents.conversation import volume_sem_sabor as _vss23  # noqa: E402
@@ -4064,8 +4067,8 @@ _sem25 = _cli25.post("/webhook", data=_corpo25, content_type="application/json",
 checa("webhook do AutoZap sem segredo configurado recusa (503)", _sem25.status_code == 503)
 
 import meta as _meta25
-_env_antes25 = {k: os.environ.get(k) for k in ("WHATSAPP_PROVIDER", "AUTOZAP_API_KEY", "AUTOZAP_PHONE_NUMBER_ID", "AUTOZAP_API_URL")}
-os.environ.update(WHATSAPP_PROVIDER="autozap", AUTOZAP_API_KEY="sk_test_x",
+_env_antes25 = {k: os.environ.get(k) for k in ("AUTOZAP_API_KEY", "AUTOZAP_PHONE_NUMBER_ID", "AUTOZAP_API_URL")}
+os.environ.update(AUTOZAP_API_KEY="sk_test_x",
                   AUTOZAP_PHONE_NUMBER_ID="123456", AUTOZAP_API_URL="https://az.example/api/v1")
 _meta25._carregar_config()
 _chamadas25 = []
@@ -4102,8 +4105,10 @@ for _k25, _v25 in _env_antes25.items():
     else:
         os.environ[_k25] = _v25
 _meta25._carregar_config()
-checa("sem WHATSAPP_PROVIDER continua a Datafy", _meta25.provider() == "datafy"
-      and _meta25._BASE == "https://cloud.datafyapi.com.br/v1")
+checa("so o AutoZap: sem Datafy no gateway nem no webhook",
+      _meta25.provider() == "autozap" and _meta25._BASE.startswith("https://")
+      and "datafy" not in open(_meta25.__file__, encoding="utf-8").read().lower().replace("a datafy saiu", "")
+      and "x-datafy" not in open(app.__file__, encoding="utf-8").read().lower())
 
 secao("Teste da Camyli (26/10)")
 from agents import conversation as _cv  # noqa: E402
@@ -4159,6 +4164,78 @@ checa("'quero de maracuja' depois da lista de sabores do suco vira o suco",
       _cv.completar_pelo_contexto("QUERO DE MARACUJÁ", "Os sabores do suco natural são: Cajá, "
                                   "Maracujá, Goiaba e Abacaxi c/Hortelã. Qual você prefere? 🥤")
       == "1 suco de maracujá")
+secao("Pedidos do dono (26/10): inicio, cardapio, centos")
+_env26 = []
+_orig26 = (app.send_text, app._pausa_digitacao, app._esperar_piso, app._no_painel,
+           app.conversation_memory.load)
+app.send_text = lambda u, t: _env26.append(t) or {"ok": True}
+app._pausa_digitacao = lambda *a: 0
+app._esperar_piso = lambda *a: None
+app._no_painel = lambda *a, **k: None
+try:
+    app.conversation_memory.load = lambda u: {"items": [], "volume_pendente": 0}
+    app._REGRAS_ENVIADAS.pop("5526a", None)
+    app._ULTIMO_ENVIO.pop("5526a", None)
+    app.enviar_em_blocos("5526a", "Boa tarde, Ana! Eu sou a Sandrinha da BALBS 💛 Qual o seu pedido? 😊")
+    _sem_qtd26 = list(_env26)
+    _env26.clear()
+    app.conversation_memory.load = lambda u: {"items": [{"name": "Coxinha", "quantity": 50, "price": 0.8}]}
+    app._REGRAS_ENVIADAS.pop("5526b", None)
+    app._ULTIMO_ENVIO.pop("5526b", None)
+    app.enviar_em_blocos("5526b", "Boa tarde, Ana! Eu sou a Sandrinha da BALBS 💛 Pra acompanhar, vai um refri? 🥤")
+    _com_qtd26 = list(_env26)
+finally:
+    (app.send_text, app._pausa_digitacao, app._esperar_piso, app._no_painel,
+     app.conversation_memory.load) = _orig26
+checa("inicio: link do cardapio sempre, logo depois da saudacao",
+      _sem_qtd26[1] == app.TEXTO_LINK_DO_CARDAPIO and _com_qtd26[1] == app.TEXTO_LINK_DO_CARDAPIO,
+      (_sem_qtd26, _com_qtd26))
+checa("inicio: aviso dos 25 sai sem pedido e some com a quantidade certa",
+      any("25 em 25" in c for c in _sem_qtd26) and not any("25 em 25" in c for c in _com_qtd26)
+      and _com_qtd26[-1].startswith("Pra acompanhar"), (_sem_qtd26, _com_qtd26))
+checa("produtos do cardapio que caiam no item errado",
+      _nomes24(_ext24("quero 1 rissole de queijo e presunto").get("items")) == [("Rissole de Queijo e Presunto", 1, "")]
+      and _nomes24(_ext24("quero 2 empada doce").get("items")) == [("Empada Doce", 2, "")]
+      and _nomes24(_ext24("1 kit mini empadinhas").get("items")) == [("Kit Mini Empadinhas", 1, "")]
+      and _nomes24(_ext24("quero 1 parecis").get("items")) == [("Refrigerante Parecis", 1, "")])
+checa("'refrigerante 600ml de guarana' e um refrigerante so, com o sabor",
+      _nomes24(_ext24("quero 1 refrigerante 600ml de guarana").get("bebidas"))
+      == [("Refrigerante 600ml", 1, "Guaraná antártica")]
+      and _nomes24(_ext24("2 refrigerantes lata de coca zero").get("bebidas"))
+      == [("Refrigerante Lata", 2, "Coca zero")]
+      and not _ext24("quero 1 refrigerante parecis").get("bebidas_pendentes"))
+checa("a coca do nome do combo nao vira lata a mais",
+      not _ext24("quero 1 combo 15 empadinhas + coca-cola lata").get("bebidas")
+      and not _ext24("1 combo canudinhos com coca lata").get("bebidas")
+      and _ext24("1 combo de empadinha e uma coca lata").get("bebidas"))
+_centos26 = {t: _nomes24(_ext24(t).get("items")) or _ext24(t).get("volume_pendente") for t in (
+    "1 cento de coxinha", "um cento de coxinha", "100 coxinhas", "cem coxinhas", "2 centos de coxinha",
+    "dois centos de coxinha", "meio cento de coxinha", "cento e meio de coxinha", "1 sento de coxinha",
+    "1 centro de coxinha", "1 cento coxinha", "100 und coxinha", "um cento", "100 salgados", "3 centos")}
+checa("variacoes de cento/100", _centos26 == {
+    "1 cento de coxinha": [("Coxinha", 100, "")], "um cento de coxinha": [("Coxinha", 100, "")],
+    "100 coxinhas": [("Coxinha", 100, "")], "cem coxinhas": [("Coxinha", 100, "")],
+    "2 centos de coxinha": [("Coxinha", 200, "")], "dois centos de coxinha": [("Coxinha", 200, "")],
+    "meio cento de coxinha": [("Coxinha", 50, "")], "cento e meio de coxinha": [("Coxinha", 150, "")],
+    "1 sento de coxinha": [("Coxinha", 100, "")], "1 centro de coxinha": [("Coxinha", 100, "")],
+    "1 cento coxinha": [("Coxinha", 100, "")], "100 und coxinha": [("Coxinha", 100, "")],
+    "um cento": 100, "100 salgados": 100, "3 centos": 300}, _centos26)
+checa("variacoes de cento divididas entre sabores",
+      _nomes24(_ext24("1 cento de coxinha e bolinha").get("items"))
+      == [("Coxinha", 50, ""), ("Bolinha de Queijo", 50, "")]
+      and _nomes24(_ext24("1 cento metade coxinha metade bolinha").get("items"))
+      == [("Coxinha", 50, ""), ("Bolinha de Queijo", 50, "")]
+      and _ext24("2 centos assados").get("preparo_pendente") == "assado")
+_uva26 = app._resposta_de_faq("tem fanta uva?")
+checa("'tem fanta uva?' acha o tamanho que tem (2L)", _uva26 and "2 Litros" in _uva26[1], _uva26)
+_lista26 = app._resposta_de_faq("quais refri tem")
+checa("lista de refrigerantes inclui o Parecis", _lista26 and "Parecis" in _lista26[1], _lista26)
+_falta26 = app._resposta_de_faq("vcs tem centenario?")
+checa("item desativado no cardapio: 'em falta', pelo codigo", _falta26 and _falta26[0] == "em falta", _falta26)
+checa("oferta do painel com suco/lata/alfajor vira item no 'sim'",
+      app._produtos_da_oferta("Que tal um suco natural geladinho?") == [_cv.SUCO]
+      and app._produtos_da_oferta("Vai uma coca lata?") == [_cv.BEBIDA_LATA]
+      and app._produtos_da_oferta("Pra adoçar, um alfajor?") == [_cv.ALFAJOR])
 _src26 = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "app.py"), encoding="utf-8").read()
 checa("'o segundo combo' escolhe pela posicao na lista", "(primeir|segund|terceir|quart|quint)" in _src26)
 

@@ -39,10 +39,10 @@ Detalhes operacionais e exemplos de regra estão em `README.md`, seção 11.
 
 ## Escopo deste repositório
 
-Cobre o agente, o webhook, o painel e os scripts de teste e simulação. Não cobre o cardápio digital nem o cadastro na Meta/Datafy, que são sistemas externos.
+Cobre o agente, o webhook, o painel e os scripts de teste e simulação. Não cobre o cardápio digital nem o cadastro na Meta/AutoZap, que são sistemas externos.
 
 ## Operação
 
-- WhatsApp em modo Coexistence, via Datafy (`TESTES_SANDRINHA.md`).
+- WhatsApp em modo Coexistence, via AutoZap, a API própria (até 25/10/2026 era a Datafy).
 - Banco: Supabase (PostgreSQL).
 - Modelo: `OPENAI_MODEL`, padrão do código `gpt-4.1-mini`.

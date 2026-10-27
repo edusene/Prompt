@@ -2247,7 +2247,7 @@ async function handleDeleteAll(e) {
     }
 }
 
-/* ── WhatsApp (Datafy) ─────────────────────────────────────────────────────── */
+/* ── WhatsApp (AutoZap) ─────────────────────────────────────────────────────── */
 async function loadWAConnection() {
     const el = document.getElementById('wa-status');
     if (!el) return;
@@ -2274,7 +2274,7 @@ async function loadWAConnection() {
             document.getElementById('wa-info-grid').style.display = 'none';
             return;
         }
-        el.innerHTML = '<span class="wa-status-pill open"><span class="pulse-dot green"></span>Conectado a Datafy API</span>';
+        el.innerHTML = '<span class="wa-status-pill open"><span class="pulse-dot green"></span>Conectado ao AutoZap</span>';
         const infoGrid = document.getElementById('wa-info-grid');
         infoGrid.style.display = 'grid';
         document.getElementById('wa-phone').textContent = data.display_phone || data.phone_number_id || '-';
@@ -2767,11 +2767,11 @@ function friendlyError(err) {
 }
 
 function closeDiagnose() {
-    // Removido: diagnostic container nao existe mais na aba Datafy
+    // Removido: diagnostic container nao existe mais na aba WhatsApp
 }
 
 function closeQR() {
-    // Removido: QR container nao existe mais na aba Datafy
+    // Removido: QR container nao existe mais na aba WhatsApp
 }
 
 /* ── Init ─────────────────────────────────────────────────────────────────── */

@@ -4,7 +4,7 @@ Visão de módulos e do fluxo de mensagem. Detalhe de função: `graphify-out/gr
 
 ## Fluxo de uma mensagem
 
-1. Meta/Datafy envia o evento a `POST /webhook` (`app.py`). A assinatura é checada com `DATAFY_WEBHOOK_SECRET` (cabeçalhos `x-datafy-*`) ou `AUTOZAP_WEBHOOK_SECRET` (cabeçalhos `X-Webhook-*`, API própria). O evento do AutoZap é convertido para o envelope da Cloud API em `_envelope_autozap_para_meta`.
+1. O AutoZap (API própria) envia o evento a `POST /webhook` (`app.py`). A assinatura é checada com `AUTOZAP_WEBHOOK_SECRET` (cabeçalhos `X-Webhook-*`). O evento do AutoZap é convertido para o envelope da Cloud API em `_envelope_autozap_para_meta`.
 2. `buffer.py` agrupa mensagens seguidas do mesmo cliente (debounce de `BUFFER_SECONDS`).
 3. `handle_flush` / `_handle_flush` (`app.py`) monta o contexto: estado da conversa (`conversation_memory.py`), fatos (`facts.py`) e base de conhecimento (`knowledge_rag.py`).
 4. `agents/` decide a etapa: `router` classifica a intenção; `triagem`, `pedido`, `cardapio`, `pagamento`, `logistica`, `crise` e `conversation` cuidam de cada etapa. Os prompts ficam em `prompts/*.md`.
@@ -25,7 +25,7 @@ Visão de módulos e do fluxo de mensagem. Detalhe de função: `graphify-out/gr
 | Funil e congelados | `funil.py`, `congelados.py` | Respostas do balcão, desistência, crise, textos de transferência; oferta e pedido de congelado. Saíram do `app.py` em 23/10; `app.py` reexporta os nomes |
 | Conhecimento | `knowledge_rag.py`, `parse_knowledge.py`, `knowledge_repair.py`, `reindex_knowledge.py` | Base de conhecimento com embeddings |
 | Banco | `db.py` (conexão e SQL genérico), `database.py` (esquema e operações) | SQLite ou PostgreSQL |
-| Gateway | `meta.py` | Envio pela Datafy ou pelo AutoZap (`WHATSAPP_PROVIDER`, `AUTOZAP_API_URL`, `AUTOZAP_API_KEY`, `AUTOZAP_PHONE_NUMBER_ID`) |
+| Gateway | `meta.py` | Envio pelo AutoZap (`AUTOZAP_API_URL`, `AUTOZAP_API_KEY`, `AUTOZAP_PHONE_NUMBER_ID`) |
 | Agendamento | `scheduler.py` (follow-ups), `volta_automatica.py` (retorno ao modo automático) | Jobs em background (APScheduler) |
 | Testes e simulação | `test_regressao.py`, `test_agente.py`, `simular_dono*.py`, `rodar_*.py`, `medir_oscilacao.py` | Ver `docs/quality.md` |
 

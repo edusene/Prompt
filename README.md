@@ -1,10 +1,10 @@
-# WhatsApp AI Agent + CRM Panel — Datafy API + OpenAI
+# WhatsApp AI Agent + CRM Panel — AutoZap + OpenAI
 
 > **Documentação para agentes e desenvolvedores:** `AGENTS.md` (instruções e comandos), `PRODUCT.md` (produto e regras), `docs/architecture.md`, `docs/onboarding.md`, `docs/quality.md` e `docs/setup.md`. Este README mantém a configuração de implantação.
 >
 > **Planilha:** até 02/10/2026 os preços vinham de uma planilha. Hoje a única fonte é o cardápio digital (cópia interna do Base44). Onde este README e o código ainda dizem "planilha", leia "tabela de produtos do cardápio digital".
 
-Agente de IA no WhatsApp com painel CRM completo. Usa a [Datafy API](https://app.datafyapi.com.br) como gateway oficial para a Meta Cloud API, e OpenAI como LLM. Mensagens sao agrupadas via debounce e respostas chegam divididas em multiplas mensagens.
+Agente de IA no WhatsApp com painel CRM completo. Usa o AutoZap (API propria de WhatsApp, sobre a Meta Cloud API) como gateway, e OpenAI como LLM. A Datafy saiu em 26/10/2026. Mensagens sao agrupadas via debounce e respostas chegam divididas em multiplas mensagens.
 
 O numero opera em modo **Coexistence** (app WhatsApp Business e API no mesmo numero). Nesse modo a Meta nao entrega ao sistema o que sai do WhatsApp para computador: teste sempre pelo celular (`TESTES_SANDRINHA.md`).
 
@@ -12,20 +12,19 @@ O numero opera em modo **Coexistence** (app WhatsApp Business e API no mesmo num
 
 ## 1. Pre-requisitos
 
-- **Conta na Datafy API** em [app.datafyapi.com.br](https://app.datafyapi.com.br)
-- **Token de Acesso (API Key)**
-- **Phone Number ID** (encontrado via GET /me na Datafy API, ou associado ao seu token)
-- **WABA ID** (WhatsApp Business Account ID vinculado à sua Datafy API ou Meta Cloud Provider)
+- **Conta no AutoZap** (API propria) com um canal de WhatsApp conectado
+- **Chave da API** (`sk_live_...`)
+- **Phone Number ID** do canal
 - Python 3.11+
 
 ### Como obter os valores
 
 | Valor | Onde encontrar |
 |---|---|
-| `DATAFY_TOKEN` | Seu token `sk_live_xxx` fornecido pelo painel Datafy. |
-| `DATAFY_PHONE_NUMBER_ID` | Obtenha na aba Dev da Datafy ou via `GET /me` (se necessário). |
-| `DATAFY_WABA_ID` | O ID da WABA retornado via Meta ou associado ao seu app. |
-| `DATAFY_WEBHOOK_SECRET` | Chave mostrada na aba Webhooks no painel (ex: `whsec_xxx`). |
+| `AUTOZAP_API_URL` | URL da API (padrao `https://eduwhatsapi-elpj.onrender.com/api/v1`). |
+| `AUTOZAP_API_KEY` | Chave `sk_live_xxx` do AutoZap. |
+| `AUTOZAP_PHONE_NUMBER_ID` | Phone Number ID do canal conectado. |
+| `AUTOZAP_WEBHOOK_SECRET` | Segredo do webhook do canal (ex: `whsec_xxx`). |
 
 ---
 
