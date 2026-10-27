@@ -8313,6 +8313,22 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                   f"resposta; esta nao sai: {reply[:60]!r}")
             return
 
+        # Oferta logo depois do pedido sem repetir o que foi anotado: "meio cento
+        # de canudos frango e camarao" ouvia so "Pra acompanhar, que tal um
+        # Refrigerante 2L?" e os itens so voltavam no resumo (teste de 27/10).
+        if (reply and not _memoria.get("upsell_feito") and _extracted_fresh.get("items")
+                and _memoria.get("items") and _ofereceu_acompanhamento(reply)
+                and not _RX_LINHA_DE_RESUMO.search(reply)):
+            _rn_up = facts.normalize(reply)
+            _citados = [i for i in _memoria["items"] if isinstance(i, dict)
+                        and facts.normalize(str(i.get("name") or "")) in _rn_up]
+            if "anot" not in _rn_up and not _citados:
+                _eco_up = f"Anotei seu pedido: {conversation_memory._formatar_itens(_memoria['items'])}.\n\n"
+                _saud_up = _RX_SAUDACAO_DA_CONVERSA.match(reply)
+                _corte = _saud_up.end() if _saud_up else 0
+                reply = f"{reply[:_corte].rstrip()}\n\n{_eco_up}{reply[_corte:].lstrip()}".strip()
+                print(f"[upsell] user={user} itens anotados repetidos antes da oferta")
+
         # A oferta adicional saiu? Entao ela nao volta na proxima mensagem.
         if reply and not _memoria.get("upsell_feito") and _ofereceu_acompanhamento(reply):
             _memoria["upsell_feito"] = True

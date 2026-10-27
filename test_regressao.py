@@ -3224,6 +3224,8 @@ checa("27/10 25+25 canudinhos vao no 'Canudinhos' de 50",
       _cn27([("Canudinho de Frango", 25), ("Canudinho de Camarão", 25)]) == [("Canudinhos", 50)])
 checa("27/10 aviso do almoco nao se apresenta de novo",
       '_apresentacao = ("" if _memoria.get("saudacao_feita")' in open("app.py", encoding="utf-8").read())
+checa("27/10 oferta logo depois do pedido repete os itens anotados",
+      "itens anotados repetidos antes da oferta" in open("app.py", encoding="utf-8").read())
 _ho27, _rd_orig27, _pt_orig27 = [], app._responder_direto, app.perform_transfer
 app._responder_direto = lambda u, it, t, c=None: _ho27.append(t)
 app.perform_transfer = lambda *a, **k: None
