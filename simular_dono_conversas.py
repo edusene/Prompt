@@ -145,7 +145,9 @@ CONVERSAS = [
       "equipe": False}),
     ("cento do mini quiche: nao inventa preco", NOITE,
      ["QUERO SABER VALOR DO CENTO DO MINI QUICHE"],
-     {"equipe": False, "contem": ["por unidade"], "nao_contem": ["1200", "1.200"]}),
+     # "por unidade" so com o mini quiche ligado no cardapio; desligado (28/10),
+     # a resposta e "em falta" - e nunca so a pergunta do pedido.
+     {"equipe": False, "nao_contem": ["1200", "1.200", "Qual o seu pedido"]}),
     ("preco do brigadeiro e SIM QUERO", TARDE,
      ["Quanto custa o cento de brigadeiros?", "SIM QUERO"],
      {"equipe": False, "nao_contem": ["grande (lanche)"]}),

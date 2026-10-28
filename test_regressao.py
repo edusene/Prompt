@@ -3389,6 +3389,34 @@ checa("28/10 retirada paga no balcao: sem chave Pix, forma de pagamento na obser
       '_pagamento_do_pedido = ("" if _memoria.get("modality") == "retirada"' in _src28
       and '_pagamento_antes = ("" if _memoria.get("modality") == "retirada"' in _src28
       and 'f"Paga no balcao: {_forma}"' in _src28)
+_env28, _st28 = [], (app.send_text, app._pausa_digitacao, app._esperar_piso, app._no_painel)
+app.send_text = lambda u, t: (_env28.append(t), {"ok": True})[1]
+app._pausa_digitacao = lambda *a: 0
+app._esperar_piso = lambda *a: None
+app._no_painel = lambda *a, **k: None
+try:
+    _rep28 = "A Coca-Cola temos em lata, 600ml ou 2 litros. Qual tamanho?"
+    app._ULTIMO_ENVIO.pop("5528", None)
+    app._ULTIMA_ENTRADA.pop("5528", None)
+    app.enviar_em_blocos("5528", _rep28)
+    app.enviar_em_blocos("5528", _rep28)          # sem mensagem nova: pula
+    _sem_nova28 = len(_env28)
+    app._ULTIMA_ENTRADA["5528"] = __import__("time").monotonic() + 1
+    app.enviar_em_blocos("5528", _rep28)          # cliente escreveu: sai
+finally:
+    app.send_text, app._pausa_digitacao, app._esperar_piso, app._no_painel = _st28
+checa("28/10 pergunta repetida: sem mensagem nova nao reenvia; com mensagem nova sai",
+      _sem_nova28 == 1 and len(_env28) == 2, str(_env28))
+_fx28 = app._faq_em_falta
+app._faq_em_falta = lambda t: ("Mini quiches está em falta hoje 😕 Quer escolher outra delícia do cardápio?"
+                               if "mini quiche" in t else "")
+try:
+    _mq28 = app._resposta_de_faq("QUERO SABER VALOR DO CENTO DO MINI QUICHE", {})
+    _mix28 = app._resposta_de_faq("quanto fica 50 coxinhas e 25 mini quiche", {})
+finally:
+    app._faq_em_falta = _fx28
+checa("28/10 preco de produto desligado diz 'em falta'; com outro item o pedido segue",
+      (_mq28 or ("",))[0] == "em falta" and _mix28 is None, str((_mq28, _mix28)))
 import congelados as _cong28
 _oferta28 = "Sim, trabalhamos sim! Mini Salgados Congelados - R$ 40 o cento"
 checa("28/10 congelado: '1 cento de salgado congelado' e o sabor solto depois da oferta sao pedido",

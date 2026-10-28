@@ -847,7 +847,11 @@ def _faq_em_falta(t: str) -> str:
             continue
         nome = " ".join(_re_mod.sub(r"\(.*?\)", " ", p["item"]).split())
         alvo = facts.normalize(nome)
-        if len(alvo) >= 5 and _re_mod.search(r"\b" + _re_mod.escape(alvo) + r"s?\b", t):
+        # Singular ou plural em cada palavra: o cardapio diz "Mini quiches" e a
+        # cliente "mini quiche" (simulador, 28/10).
+        _padrao = r"\s+".join(_re_mod.escape(w[:-1] if len(w) > 3 and w.endswith("s") else w) + "s?"
+                              for w in alvo.split())
+        if len(alvo) >= 5 and _re_mod.search(r"\b" + _padrao + r"\b", t):
             return f"{nome} está em falta hoje 😕 Quer escolher outra delícia do cardápio?"
     return ""
 
@@ -1025,6 +1029,13 @@ def _resposta_de_faq(texto: str, memoria: dict | None = None) -> tuple[str, str,
         # Pergunta ("teria como adicionar...") segue na resposta fixa (22/10).
         _pergunta = "?" in t or _re_mod.search(r"\b(?:teria|tem|tera)\s+como\b", t)
         if _ext.get("items") or (_ext.get("doces") and not _pergunta):
+            # Preco de produto desligado ("QUERO SABER VALOR DO CENTO DO MINI
+            # QUICHE"): o modelo oferecia os sabores do item em falta (28/10).
+            if (len(_ext.get("items") or []) == 1
+                    and _re_mod.search(r"\b(?:saber|valor|precos?|custa|quanto)\b", t)):
+                em_falta = _faq_em_falta(t)
+                if em_falta:
+                    return "em falta", em_falta, False
             return None
     except Exception:
         pass
@@ -5596,6 +5607,10 @@ _REGRAS_ENVIADAS: dict[str, float] = {}
 # informacoes" saiu duas vezes seguidas, 8 a 14s depois, sem mensagem nova da
 # cliente no meio (Thayline, 24/10).
 _ULTIMO_ENVIO: dict[str, tuple[str, float]] = {}
+# {user: instante} da ultima mensagem da cliente. Com mensagem nova depois do
+# envio, a mesma pergunta repetida e resposta e sai: a cliente ficava sem
+# resposta nenhuma (simulador, 28/10).
+_ULTIMA_ENTRADA: dict[str, float] = {}
 
 
 PERGUNTA_DO_PEDIDO_NAS_DICAS = "Quais você vai querer hoje? 💛"
@@ -5790,7 +5805,8 @@ def enviar_em_blocos(user: str, texto: str, chegada: float | None = None) -> Non
             _esperar_piso(chegada)
         _anterior = _ULTIMO_ENVIO.get(user)
         if (_anterior and len(chunk) >= 20 and _anterior[0] == chunk
-                and time.monotonic() - _anterior[1] < 20):
+                and time.monotonic() - _anterior[1] < 20
+                and _ULTIMA_ENTRADA.get(user, 0.0) < _anterior[1]):
             print(f"[flush] user={user} mensagem identica a anterior em menos de 20s; nao reenviada")
             continue
         _t_envio = time.monotonic()
@@ -5922,6 +5938,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
 
 def _handle_flush(user: str, items: list[dict]) -> None:
     _inicio = time.monotonic()
+    _ULTIMA_ENTRADA[user] = _inicio
     # Quando o cliente mandou a mensagem. E o unico relogio que interessa para
     # o piso e para a linha [tempo]; _inicio so serve para medir o flush.
     _chegada = min((it.get("recebido_em") or 0.0) for it in items) if items else 0.0
@@ -8168,7 +8185,11 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                 # repergunta. "Qual horario vcs abrem?" virava so "Qual o seu
                 # pedido?" (teste do dono, 05/10) - regra prioritaria dele.
                 _resposta_dada = ""
-                if _RX_CLIENTE_PERGUNTOU.search(text_only or ""):
+                # "QUERO SABER VALOR DO CENTO DO MINI QUICHE" tambem e pergunta:
+                # perdia a resposta e virava so "Qual o seu pedido?" (28/10).
+                if (_RX_CLIENTE_PERGUNTOU.search(text_only or "")
+                        or _re_mod.search(r"\b(?:saber|valor|pre[cç]os?|custa)\b",
+                                          text_only or "", _re_mod.IGNORECASE)):
                     _resposta_dada = " ".join(
                         f.strip() for f in _RX_FIM_DE_FRASE.split(reply)
                         if f.strip() and "?" not in f
