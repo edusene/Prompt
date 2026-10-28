@@ -2083,7 +2083,8 @@ def bebidas_citadas(msg_lower: str) -> tuple[list[dict], list[dict]]:
                      (msg_lower or "")[:m.start()]):
             continue
         # A bandeja de docinhos e do caminho dos doces.
-        if re.search(r"\b(?:brigad|docinh|beijinh|doce)", (msg_lower or "")[m.end():m.end() + 25]):
+        # "1 bandeja mista" tambem: a de assados tem composicao fixa (27/10).
+        if re.search(r"\b(?:brigad|docinh|beijinh|doce|mist)", (msg_lower or "")[m.end():m.end() + 25]):
             continue
         bruto_qtd = (m.group("qtd") or "").lower()
         qtd = int(bruto_qtd) if bruto_qtd.isdigit() else _QTD_POR_EXTENSO.get(bruto_qtd, 1)
@@ -2239,7 +2240,8 @@ def corrigir_digitacao_do_doce(texto: str) -> str:
 def doces_citados(msg_lower: str) -> tuple[list[dict], list[dict]]:
     """(itens, pendentes) de brigadeiro na mensagem."""
     t = " ".join((msg_lower or "").lower().split())
-    m = _RX_DOCE.search(t)
+    # "2 bandejas mistas" nao diz "brigadeiro" mas e a bandeja de docinhos (27/10).
+    m = _RX_DOCE.search(t) or re.search(r"\bbandejas?\s+(?:de\s+)?mist", t)
     if not m or re.search(r"\bdoce\s+de\s+leite\b", t[m.start():m.end() + 12]):
         return [], []
     if re.search(r"\b(?:sem|n[aã]o|nada\s+de|nem)\b[^,.;!?\n]{0,18}$", t[:m.start()]):
@@ -2251,17 +2253,26 @@ def doces_citados(msg_lower: str) -> tuple[list[dict], list[dict]]:
     # coxinha e brigadeiro" o "meio" e da coxinha.
     # Cada trecho com doce e um pedido: "meio cento de brigadeiro, um cento de
     # brigadeiro" perdia o cento (varredura de 27/10).
-    trechos = [s for s in re.split(r",|;|\s+e\s+", t) if _RX_DOCE.search(s)] or [t]
+    # "1 bandeja de beijinho e 1 bandeja mista": o segundo trecho nao diz
+    # "brigadeiro" e sumia, e o "mista" valia para tudo (teste de 27/10).
+    trechos = [s for s in re.split(r",|;|\s+e\s+", t)
+               if _RX_DOCE.search(s) or (re.search(r"\bbandejas?\b", s)
+                                         and not re.search(r"salgad|assad|esfirr|pizza", s))] or [t]
     lidos = [formato_do_doce(s) for s in trechos]
+    # Com mais de um trecho, o sabor e o de cada trecho; com um, quem decide
+    # e sabor_do_doce na mensagem inteira, como antes.
+    sabores = ([sabor_do_doce(s, f) for s, (f, _q) in zip(trechos, lidos)]
+               if len(trechos) > 1 else [None] * len(lidos))
     # "meio cento de brigadeiro e meio cento de beijinho" sao 100 docinhos: o
     # cento misto (beijinho puro so na bandeja). Virava UM meio cento (teste de
     # 22/10).
     if (re.search(r"\bmeio\s+cento\s+(?:de\s+|do\s+)?brigad", t)
             and re.search(r"\bmeio\s+cento\s+(?:de\s+|do\s+)?beijinh", t)):
         lidos = [(DOCE_CENTO, 1)]
+        sabores = [None]
     formato, qtd = lidos[0]
     itens: list[dict] = []
-    for formato_i, qtd_i in lidos:
+    for (formato_i, qtd_i), sabor_i in zip(lidos, sabores):
         if not formato_i or fora:
             continue
         try:
@@ -2271,12 +2282,14 @@ def doces_citados(msg_lower: str) -> tuple[list[dict], list[dict]]:
             oficial = None
         if not oficial:
             continue
-        igual = next((i for i in itens if i["name"] == formato_i), None)
+        igual = next((i for i in itens if i["name"] == formato_i
+                      and i.get("sabor") == sabor_i), None)
         if igual:
             igual["quantity"] += qtd_i
         else:
             itens.append({"name": formato_i, "quantity": qtd_i,
-                          "price": oficial["preco_unitario"]})
+                          "price": oficial["preco_unitario"]}
+                         | ({"sabor": sabor_i} if sabor_i is not None else {}))
     if itens:
         return itens, []
     pendente = {"qtd": max(qtd, 1), "termo": "docinho", "opcoes": opcoes_de_doce()}
@@ -2950,6 +2963,10 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
     # "Bandeja de beijinho", "meio cento misto": o sabor do doce vai junto
     # (o cardapio digital tem Brigadeiro, Beijinho e Mista).
     for _d in extracted.get("doces") or []:
+        if "sabor" in _d:
+            if not _d["sabor"]:
+                _d.pop("sabor")
+            continue          # ja lido no proprio trecho (doces_citados)
         _d_sabor = sabor_do_doce(msg_lower, _d.get("name", ""))
         if _d_sabor:
             _d["sabor"] = _d_sabor

@@ -661,7 +661,15 @@ def merge(memoria: dict, extraido: dict, novo_da_mensagem: dict | None = None,
         for d in doces:
             if any(_mesmo_item(d, r) for r in removidos_inteiros):
                 continue
-            igual = next((i for i in itens if isinstance(i, dict) and i.get("name") == d["name"]), None)
+            # "1 bandeja de beijinho e 1 bandeja mista": mesmo nome, sabores
+            # diferentes na mesma mensagem sao itens separados (27/10).
+            if sum(1 for o in doces if o["name"] == d["name"]) > 1:
+                igual = next((i for i in itens if isinstance(i, dict) and i.get("name") == d["name"]
+                              and i.get("sabor") == d.get("sabor")), None)
+                if igual is not None:
+                    continue
+            else:
+                igual = next((i for i in itens if isinstance(i, dict) and i.get("name") == d["name"]), None)
             if igual is None:
                 itens.append(dict(d))
                 mudancas.append(f"doce={d['quantity']} x {d['name']}")

@@ -3354,6 +3354,16 @@ memoria_mod.aplicar_sabor_de_bebida(_msab, "frango")
 checa("27/10 'frango' responde so ao combo perguntado (o de 50 nao vira Coxinha sem pergunta)",
       _msab["items"][0].get("sabor") == "Canudinho (frango)" and not _msab["items"][1].get("sabor"),
       str(_msab["items"]))
+for _tband, _esp in [
+        ("quero 1 bandeja de brigadeiro, 1 bandeja de beijinho e 1 bandeja mista",
+         [(1, None), (1, "Beijinho"), (1, "Mista (brigadeiro e beijinho)")]),
+        ("quero 2 bandejas mistas", [(2, "Mista (brigadeiro e beijinho)")]),
+        ("quero 1 bandeja de beijinho", [(1, "Beijinho")])]:
+    _mband = memoria_mod._empty()
+    _dband = _exim(_tband, _CSim())
+    memoria_mod.merge(_mband, _dband, _dband, _tband)
+    _vist = [(i["quantity"], i.get("sabor")) for i in _mband.get("items") or []]
+    checa(f"27/10 bandejas de docinho com sabor proprio: {_tband!r}", _vist == _esp, str(_vist))
 checa("27/10 oferta da retirada nao corta o endereco em 'Av.'",
       app._tira_pergunta_final("Não entregamos no seu bairro no momento. Gostaria de retirar aqui na loja "
                                "na Av. Calama, 5892 - Igarapé? 💛") == "Não entregamos no seu bairro no momento. 💛")
