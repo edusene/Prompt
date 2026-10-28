@@ -3429,6 +3429,15 @@ checa("28/10 kit certo na ficha nao recebe 'confirmar 25'; sai a proxima pergunt
 checa("28/10 com 20 coxinhas o 'confirmar 25' continua",
       "25" in app._conferir_aula_de_lote("x", "Podemos confirmar 25 de Coxinha? 😊",
                                           {"items": [{"name": "Coxinha", "quantity": 20}]}))
+_m28 = {"items": [{"name": "Coxinha", "quantity": 100, "price": 0.8},
+                  {"name": "Refrigerante 2 Litros", "quantity": 1, "sabor": "Coca cola"}]}
+checa("28/10 '25 unidades de Coxinha' com 100 na ficha: a frase sai, a pergunta fica",
+      app._conferir_quantidade_dita("x", "Confirmando: Refrigerante 2 Litros Coca cola, 1 porção de "
+                                    "25 unidades de Coxinha frita.\n\nSerá para entrega ou retirada? 😊", _m28)
+      == "Será para entrega ou retirada? 😊")
+checa("28/10 quantidade igual a ficha fica",
+      "100 x Coxinha" in app._conferir_quantidade_dita(
+          "x", "Anotei seu pedido: 100 x Coxinha. Será para entrega ou retirada? 😊", _m28))
 import congelados as _cong28
 _oferta28 = "Sim, trabalhamos sim! Mini Salgados Congelados - R$ 40 o cento"
 checa("28/10 congelado: '1 cento de salgado congelado' e o sabor solto depois da oferta sao pedido",

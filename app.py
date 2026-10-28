@@ -4020,6 +4020,49 @@ def _conferir_aula_de_lote(user: str, reply: str, memoria: dict) -> str:
         return novo
     return _proxima_pergunta_do_funil(memoria)
 
+def _conferir_quantidade_dita(user: str, reply: str, memoria: dict) -> str:
+    """Tira a frase que diz uma quantidade de item diferente da ficha.
+
+    Com 100 coxinhas na ficha, ela escreveu "Confirmando: Refrigerante 2
+    Litros Coca cola, 1 porcao de 25 unidades de Coxinha frita" (teste ao
+    vivo, 28/10 12h29). Com pendencia de lote ou de item, o numero diferente
+    e a sugestao de ajuste e fica.
+    """
+    itens = [i for i in memoria.get("items") or [] if isinstance(i, dict)
+             and not conversation_memory._e_bebida(i.get("name"))]
+    if (not reply or not itens or _RX_LINHA_DE_RESUMO.search(reply)
+            or conversation_memory.pendencia_de_lote(memoria)
+            or conversation_memory.pendencia_de_item(memoria)):
+        return reply
+    por_palavra: dict[str, set] = {}
+    for i in itens:
+        w = (facts.normalize(str(i.get("name"))).split() or [""])[0]
+        if len(w) >= 4:
+            try:
+                por_palavra.setdefault(w[:5], set()).add(int(i.get("quantity") or 0))
+            except (TypeError, ValueError):
+                pass
+    for w, qtds in por_palavra.items():
+        qtds.add(sum(qtds))
+    frases = _RX_FIM_DE_FRASE.split(reply)
+    limpas = []
+    for f in frases:
+        norm = facts.normalize(f)
+        errada = any(int(m.group(1)) not in qtds
+                     for w, qtds in por_palavra.items()
+                     for m in _re_mod.finditer(r"\b(\d+)\s+(?:x\s+)?(?:un(?:idades)?\s+(?:de\s+)?)?"
+                                               + w + r"\w*", norm))
+        if not errada:
+            limpas.append(f)
+    if len(limpas) == len(frases):
+        return reply
+    print(f"[quantidade] user={user} quantidade fora da ficha; frase removida: "
+          f"{' | '.join(f.strip() for f in frases if f not in limpas)[:160]}")
+    novo = " ".join(f.strip() for f in limpas if f.strip()).strip()
+    if len(_re_mod.sub(r"[^A-Za-zÀ-ÿ]", "", novo)) >= 12 and "?" in novo:
+        return novo
+    return _proxima_pergunta_do_funil(memoria)
+
 # -- BLOCO 6: fiado, desconto, e o papel da Sandrinha -----------------------
 
 # Como o cliente pede para pagar depois. Nao e uma palavra: e a promessa de
@@ -8199,6 +8242,7 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             reply = _conferir_pedido_de_dados(user, reply, _memoria)
             reply = _conferir_sem_numero(user, reply)
             reply = _conferir_aula_de_lote(user, reply, _memoria)
+            reply = _conferir_quantidade_dita(user, reply, _memoria)
             # E, com tudo coletado, nao pede licenca: mostra o resumo.
             reply = _conferir_nega_formato(user, reply, _memoria)
             reply = _conferir_permissao(user, reply, _memoria)
