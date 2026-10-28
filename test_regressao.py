@@ -3377,6 +3377,14 @@ checa("28/10 'um cento de beijinho' e Beijinho (o cardapio tem); brigadeiro e be
       [d.get("sabor") for d in _dcento] == [None, "Beijinho"]
       and [d.get("sabor") for d in _exim("teria como adcionar meio cento de brigadeiro e meio cento de beijinho", _CSim()).get("doces") or []]
       == ["Mista (brigadeiro e beijinho)"], str(_dcento))
+import congelados as _cong28
+_oferta28 = "Sim, trabalhamos sim! Mini Salgados Congelados - R$ 40 o cento"
+checa("28/10 congelado: '1 cento de salgado congelado' e o sabor solto depois da oferta sao pedido",
+      _cong28.pedido_de_congelado("quero 1 cento de salgado congelado", "")
+      and _cong28.pedido_de_congelado("coxinha de frango", _oferta28)
+      and not _cong28.pedido_de_congelado("sim", _oferta28)
+      and not _cong28.pedido_de_congelado("tem salgado congelado?", "")
+      and not _cong28.pedido_de_congelado("vou querer fritos mesmo, 25 coxinhas", _oferta28))
 _esp_pix = cardapio.montar_resumo([{"name": "Coxinha", "quantity": 25, "price": 0.8}], 20, 0, 0, 20,
                                   modalidade="retirada", pagamento="pix", cliente="X", horario="15h")
 checa("27/10 retirada com Pix dito mostra 'Pgt: Pix', nao 'Balcão'",

@@ -95,6 +95,18 @@ def pedido_de_congelado(texto: str, ultima_do_agente: str) -> bool:
         return False
     if not (_RX_CONGELADO.search(t) or "Mini Salgados Congelados" in (ultima_do_agente or "")):
         return False
-    itens = _extract_data_from_message((texto or "").lower(),
-                                       ConversationState(phone="")).get("items") or []
-    return bool(itens)
+    extraido = _extract_data_from_message((texto or "").lower(), ConversationState(phone=""))
+    if extraido.get("items"):
+        return True
+    # "1 cento de salgado congelado" (sem sabor) e o sabor solto logo depois
+    # da oferta ("coxinha de frango") tambem sao pedido: caiam no texto da
+    # oferta e depois em "Qual o seu pedido?" (teste de 28/10 00h55).
+    # "me passa os precos da tabela do cento congelado" e pergunta.
+    if _re_mod.search(r"\b(?:precos?|quanto|valor|tabela|custa)\b|\?", t):
+        return False
+    if _RX_CONGELADO.search(t) and extraido.get("volume_pendente"):
+        return True
+    return bool("Mini Salgados Congelados" in (ultima_do_agente or "")
+                and len(t.split()) <= 6
+                and _extract_data_from_message("100 " + (texto or "").lower(),
+                                               ConversationState(phone="")).get("items"))
