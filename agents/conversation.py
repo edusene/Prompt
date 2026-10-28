@@ -2518,6 +2518,9 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
     else:
         extracted_cep = ""
     msg_lower = _distribuir_de_cada(message.lower().strip())
+    # "100 salgados: coxinha, kibe, bolinha e misto" - os dois-pontos apagavam
+    # os sabores e a pergunta deles voltava (28/10).
+    msg_lower = re.sub(r"\b((?:salgad|frit|assad|cento)\w*)\s*:\s*", r"\1 ", msg_lower)
     # "um centoQu frito misto de coxinha e bolinha" (teste do dono, 05/10):
     # letra a mais grudada no "cento" apagava o pedido inteiro.
     msg_lower = re.sub(r"\bcento(?!s\b)[a-z]{1,2}\b", "cento", msg_lower)

@@ -3377,6 +3377,9 @@ checa("28/10 'um cento de beijinho' e Beijinho (o cardapio tem); brigadeiro e be
       [d.get("sabor") for d in _dcento] == [None, "Beijinho"]
       and [d.get("sabor") for d in _exim("teria como adcionar meio cento de brigadeiro e meio cento de beijinho", _CSim()).get("doces") or []]
       == ["Mista (brigadeiro e beijinho)"], str(_dcento))
+_v28 = [(i["name"], i["quantity"]) for i in _exim("quero 100 salgados: coxinha, kibe, bolinha e misto", _CSim()).get("items") or []]
+checa("28/10 '100 salgados: a, b, c e d' le os sabores (25 de cada)",
+      _v28 == [("Coxinha", 25), ("Quibe", 25), ("Bolinha de Queijo", 25), ("Misto", 25)], str(_v28))
 import congelados as _cong28
 _oferta28 = "Sim, trabalhamos sim! Mini Salgados Congelados - R$ 40 o cento"
 checa("28/10 congelado: '1 cento de salgado congelado' e o sabor solto depois da oferta sao pedido",
