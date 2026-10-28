@@ -3497,6 +3497,44 @@ _it28 = _cf28._itens_do_cardapio({"MenuItem": [
      "requires_flavor_selection": True, "flavor_options": ["Coca"]}], "InternalMenuItem": []})
 checa("28/10 sabor sem 'requer selecao' no cadastro nao vira pergunta; com, continua",
       _it28[0]["flavor_options"] == [] and _it28[1]["flavor_options"] == ["Coca"], str(_it28))
+# Testes da Camyli, 28/10 tarde.
+def _ficha28(t):
+    _d = _extract_data_from_message(t.lower(), ConversationState(phone=""))
+    _m = memoria_mod._empty()
+    memoria_mod.merge(_m, _d, _d, t)
+    return [(i["name"], i["quantity"], i.get("sabor")) for i in _m.get("items") or []]
+_e28 = _ficha28("quero meio cento de churros meio cento de pastel e uma refri")
+checa("28/10 'meio cento de churros meio cento de pastel': o churros fica",
+      ("Churros", 50, None) in _e28, str(_e28))
+_d28 = _ficha28("quero meio de fritos so bolinha 1 refrigerante lata e uma bandeija de docinhos")
+checa("28/10 'meio de fritos so bolinha' e 'bandeija': bolinha 50 e bandeja de brigadeiros",
+      ("Bolinha de Queijo", 50, None) in _d28
+      and any(n.startswith("Bandeja de Brigadeiros") for n, _q, _s in _d28), str(_d28))
+_kq28 = "Temos o Kit Mini Saltenha Frita com 10 unidades por R$ 20,00. Qual a quantidade que deseja?"
+checa("28/10 'quero 40 uni' depois do kit de 10 sao 4 kits, nao 40",
+      _ficha28(_ctx28("quero 40 uni", _kq28)) == [("Kit Mini Saltenha Frita (10und)", 4, None)]
+      and _ctx28("quero 4", _kq28) == "4 Kit Mini Saltenha Frita (10und)")
+checa("28/10 'moça tira o o refrigerante' tira o refri",
+      memoria_mod._itens_a_tirar("moça tira o o refrigerante",
+                                         [{"name": "Calzone de frango", "quantity": 100},
+                                          {"name": "Refrigerante 2 Litros", "quantity": 1}])
+      == [{"name": "Refrigerante 2 Litros", "quantity": 1}])
+_dq28 = ("Qual docinho você prefere?\n• Bandeja de Brigadeiros (16 un) — R$ 20,80\n"
+         "• Meio Cento de Brigadeiros (50 un) — R$ 70,00\n• Cento de Brigadeiros (100 un) — R$ 140,00 🍬")
+checa("28/10 '16 unid' e '20,80' na pergunta do docinho sao a bandeja",
+      "bandeja" in _ctx28("16 unid", _dq28) and "bandeja" in _ctx28("20,80", _dq28)
+      and "meio cento" in _ctx28("o de 50", _dq28))
+_s28 = _ficha28("quero 2 sucos de maracuja e 4 de goiaba")
+_s28b = _ficha28("quero 6 sucos maracuja abacaxi com hortela e goiaba")
+checa("28/10 sucos de dois sabores: um item por sabor; sem a conta, sem sabor (ela pergunta)",
+      len(_s28) == 2 and _s28[0][1:] == (2, "Maracujá") and _s28[1][1:] == (4, "Goiaba")
+      and _s28b == [("Suco Natural 300 ml", 6, None)], f"{_s28} {_s28b}")
+_b28 = MessageBuffer(60, lambda u, i: None)
+_b28.add("u", "quero 100 coxinhas", enviado_em=1000)
+_b28.add("u", "quero 50 risoles", enviado_em=990)
+checa("28/10 #reset entregue depois do pedido mandado depois dele: o pedido fica",
+      _b28.descartar("u", enviado_ate=995) == 1 and _b28.tem_mensagem_nova("u"))
+_b28.descartar("u")
 import congelados as _cong28
 _oferta28 = "Sim, trabalhamos sim! Mini Salgados Congelados - R$ 40 o cento"
 checa("28/10 congelado: '1 cento de salgado congelado' e o sabor solto depois da oferta sao pedido",

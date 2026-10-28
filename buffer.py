@@ -18,7 +18,7 @@ class MessageBuffer:
 
     def add(self, user: str, text: str, msg_id: int | None = None,
             wa_message_id: str = "", wa_media_id: str = "",
-            recebido_em: float = 0.0) -> None:
+            recebido_em: float = 0.0, enviado_em: int = 0) -> None:
         with self._lock:
             if user not in self._state:
                 self._state[user] = {"items": [], "timer": None, "ocupado": False}
@@ -32,6 +32,7 @@ class MessageBuffer:
                 "text": text, "msg_id": msg_id,
                 "wa_message_id": wa_message_id, "wa_media_id": wa_media_id,
                 "recebido_em": recebido_em or time.monotonic(),
+                "enviado_em": enviado_em,
             })
 
             # Cancela timer anterior e cria novo (debounce)
@@ -72,18 +73,24 @@ class MessageBuffer:
                 if user in self._state:
                     self._state[user]["ocupado"] = False
 
-    def descartar(self, user: str) -> int:
+    def descartar(self, user: str, enviado_ate: int = 0) -> int:
         """Joga fora o que esperava o debounce. Usado pelo #reset: a mensagem
-        mandada antes dele era respondida depois, ja na conversa nova (24/10)."""
+        mandada antes dele era respondida depois, ja na conversa nova (24/10).
+
+        Com `enviado_ate` (horario de envio do WhatsApp, em segundos), fica a
+        mensagem mandada DEPOIS do reset que chegou antes dele: o WhatsApp
+        entregou "#reset" e o pedido seguinte fora de ordem (Camyli, 28/10)."""
         with self._lock:
             estado = self._state.get(user)
             if not estado:
                 return 0
-            if estado.get("timer") is not None:
+            ficam = [i for i in estado["items"]
+                     if enviado_ate and i.get("enviado_em", 0) > enviado_ate]
+            n = len(estado["items"]) - len(ficam)
+            estado["items"] = ficam
+            if not ficam and estado.get("timer") is not None:
                 estado["timer"].cancel()
                 estado["timer"] = None
-            n = len(estado["items"])
-            estado["items"] = []
             return n
 
     def tem_mensagem_nova(self, user: str) -> bool:

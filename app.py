@@ -6458,6 +6458,19 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                     _seguinte_pz = (TEXTO_PEDE_CONFIRMACAO if _resumo_aberto
                                     else _proxima_pergunta_do_funil(_memoria_balcao))
                     _texto_b = f"{_texto_b}\n\n{_seguinte_pz}".strip()
+            # "quero meio cento de churros, meio cento de pastel e uma refri, quais
+            # refri voce tem?": a resposta pronta saia e o pedido da mesma
+            # mensagem nao ia para a ficha - o resumo veio so com o refri
+            # (teste da Camyli, 28/10).
+            if (not _equipe_b and _nome_b not in ("acrescimo", "prazo confirmar")
+                    and _re_mod.search(r"\b(?:quero|queria|vou\s+querer|manda|me\s+ve|separa)\b",
+                                       facts.normalize(_texto_cliente))):
+                _ext_b = _extract_data_from_message(_texto_cliente.lower(),
+                                                    ConversationState(phone=user))
+                if any(_ext_b.get(k) for k in ("items", "bebidas", "doces", "sabores_pendentes")):
+                    conversation_memory.merge(_memoria_balcao, _ext_b, _ext_b, _texto_cliente)
+                    conversation_memory.save(user, _memoria_balcao)
+                    print(f"[balcao] user={user} pedido da mesma mensagem anotado")
             print(f"[balcao] user={user} resposta padrao do dono: {_nome_b}"
                   f"{' (' + _fora + ')' if _fora else ''}")
             # Primeira mensagem ja e uma pergunta pronta ("quanto tempo de
@@ -9313,6 +9326,22 @@ def webhook():
                     print(f"[webhook] WARN falha ao gravar wamid={message_id}; "
                           f"processando assim mesmo para nao perder o cliente")
 
+            # #reset nao entra no debounce — a palavra nao e conversa, e
+            # comando. Ele precisa funcionar quando a conversa esta em modo
+            # humano, que e onde handle_flush desiste logo no inicio. Roda ANTES
+            # do CRM: depois dele (3s) o pedido mandado logo em seguida ja
+            # tinha lido a ficha antiga e o resumo voltou com o pedido anterior
+            # (Camyli, 28/10). Fica a mensagem mandada depois do reset.
+            if e_pedido_de_reset(body) and not _ja_processada:
+                _descartadas = buffer.descartar(
+                    number, enviado_ate=int(timestamp) if str(timestamp).isdigit() else 0)
+                if _descartadas:
+                    print(f"[reset] {number}: {_descartadas} mensagem(ns) anterior(es) ao reset descartada(s)")
+                try:
+                    perform_reset(number, origem="cliente")
+                except Exception as e:
+                    print(f"[reset] ERRO ao reiniciar {number}: {e}")
+
             # A partir daqui nada mais precisa ser feito ANTES de comecar a
             # contar o debounce. O que vem abaixo — CRM, follow-ups, SSE do
             # painel — sao 1,4s de banco que o cliente estava esperando de pe,
@@ -9336,7 +9365,8 @@ def webhook():
                            msg_id=saved["id"] if saved else None,
                            wa_message_id=str(message_id) if message_id else "",
                            wa_media_id=wa_media_id,
-                           recebido_em=_chegou_em)
+                           recebido_em=_chegou_em,
+                           enviado_em=int(timestamp) if str(timestamp).isdigit() else 0)
 
             if saved:
                 database.update_conversation(conv["id"], last_message_at=database.agora_utc())
@@ -9359,19 +9389,6 @@ def webhook():
             elif not _ja_processada:
                 print(f"[webhook] MSG NAO GRAVADA msg_id={message_id}")
 
-            # #reset nao entra no debounce — a palavra nao e conversa, e
-            # comando — e roda DEPOIS do CRM justamente por nao ter pressa:
-            # ele precisa funcionar quando a conversa esta em modo humano, que
-            # e onde handle_flush desiste logo no inicio.
-            if e_pedido_de_reset(body) and not _ja_processada:
-                _descartadas = buffer.descartar(number)
-                if _descartadas:
-                    print(f"[reset] {number}: {_descartadas} mensagem(ns) anterior(es) ao reset descartada(s)")
-                try:
-                    perform_reset(number, origem="cliente")
-                except Exception as e:
-                    print(f"[reset] ERRO ao reiniciar {number}: {e}")
-                continue
 
     return jsonify({"ok": True})
 

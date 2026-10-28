@@ -262,7 +262,8 @@ _RX_TIRA_ITEM = _re.compile(
     r"|sem|em\s+vez\s+d[eoa]s?|ao\s+inves\s+d[eoa]s?|nao\s+(?:quero|vou\s+querer))\s+"
     # "tira SO os quibes" (teste do dono, 08/10 12h39)
     r"(?:(?:so|somente|apenas)\s+)?"
-    r"(?:o\s+|a\s+|os\s+|as\s+|aquel[ea]s?\s+|tod[oa]s\s+(?:os\s+|as\s+)?)?(?:(?P<qtd>\d+)\s+)?(?:de\s+)?"
+    # "tira o o refrigerante" (artigo repetido, Camyli 28/10) era ignorado.
+    r"(?:o\s+|a\s+|os\s+|as\s+|aquel[ea]s?\s+|tod[oa]s\s+(?:os\s+|as\s+)?){0,2}(?:(?P<qtd>\d+)\s+)?(?:de\s+)?"
     r"(?P<alvo>[a-z]{4,}(?:\s+de\s+[a-z]{4,})?)")
 
 
@@ -3025,6 +3026,15 @@ def pergunta_bloqueante(memoria: dict, agora=None) -> str:
         blocos = []
         for p in pendentes:
             opcoes = (p.get("opcoes") or [])
+            # Refri com o preco de cada tamanho: "quais refri e os valores?" junto
+            # do pedido saia sem preco nenhum (Camyli, 28/10).
+            if p.get("termo") == "refrigerante":
+                try:
+                    import facts as _f
+                    opcoes = [f"{o} ({_brl(of['preco_unitario'])})" if (of := _f.resolve_unit_price(o, 1))
+                              else o for o in opcoes]
+                except Exception:
+                    pass
             blocos.append(f"{p.get('qtd')} de {p.get('termo')}:\n"
                           + "\n".join(f"• {o}" for o in opcoes))
         return "Me confirma o sabor:\n" + "\n".join(blocos) + "\nQual você quer? 😊"

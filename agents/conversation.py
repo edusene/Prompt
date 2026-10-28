@@ -947,7 +947,10 @@ _PACOTE_POR_EXTENSO = re.compile(
     r"por[cç][aã]o|meio\s+cento|cento\s+e\s+meio|"
     r"(?:dois|duas|tr[eê]s|quatro|\d{1,2})\s+centos?|cento"
     r")\s+(?:de\s+|d[eo]s\s+)?(?!e\s)([a-zà-ÿ][a-zà-ÿ\s]{2,40}?)"
-    r"(?=\s*(?:[^a-z\u00e0-\u00ff\s]|\be\b|\bpara\b|\bpra\b|\bcom\b|$))",
+    # O produto para no proximo volume ou numero: "meio cento de churros meio
+    # cento de pastel" virava um produto so e o churros sumia (Camyli, 28/10).
+    r"(?=\s*(?:[^a-z\u00e0-\u00ff\s]|\be\b|\bpara\b|\bpra\b|\bcom\b|$"
+    r"|\bmeio\s+cento\b|\b(?:um|1)\s+cento\b|\buma?\s+por[c\u00e7][a\u00e3]o\b))",
     re.IGNORECASE)
 
 _UNIDADES_DO_PACOTE = {
@@ -1092,6 +1095,11 @@ def _produto_conhecido(bruto: str) -> str | None:
     com camarao no meio (teste do Eduardo, 25/09).
     """
     alvo = _forma_de_busca(bruto)
+    # "meio cento de fritos so bolinha": o preparo e o "so" na frente
+    # escondiam a bolinha, e ela sumia do pedido (Camyli, 28/10).
+    _sem_frente = re.sub(r"^(?:(?:salgad\w*|frit\w*|assad\w*|so|somente|apenas|sabor)\s+)+", "", alvo)
+    if len(_sem_frente) >= 3:
+        alvo = _sem_frente
     if len(alvo) < 3:
         return None
     # Preparo sozinho nao e produto: "3 centos assados" achava "assado" dentro
@@ -1417,6 +1425,16 @@ _RX_SO_COMPLEMENTO = re.compile(
     r"(?:\s+(?P<qtd2>\d{1,3})\s*(?:unidades?|un|unid|uni)?)?\s*[.!]*\s*$")
 
 
+def _qtd_do_produto(qtd: str, produto: str, texto: str) -> str:
+    """"quero 40 uni" depois da oferta do kit de 10 sao 40 unidades = 4 kits, e
+    nao 40 kits de R$ 20 (Camyli, 28/10 - deu R$ 1.025). Numero de 10 para cima
+    ou dito em unidades vai como mini saltenhas, que a extracao divide por 10."""
+    if produto == "Kit Mini Saltenha Frita (10und)" and qtd.isdigit() and (
+            int(qtd) >= 10 or re.search(r"\bun(?:i|id\w*)?\b", texto)):
+        return f"{qtd} mini saltenhas"
+    return f"{qtd} {produto}"
+
+
 def completar_pelo_contexto(texto: str, ultima_do_agente: str, ultima_do_cliente: str = "") -> str:
     """Reescreve, SO para a extracao, o pedido que depende da mensagem anterior.
 
@@ -1439,6 +1457,15 @@ def completar_pelo_contexto(texto: str, ultima_do_agente: str, ultima_do_cliente
         if sabor:
             q = re.search(r"\b(\d{1,2})\b", t)
             return f"{q.group(1) if q else 1} suco de {sabor.lower()}"
+    # "16 unid" ou "20,80" depois de "Qual docinho voce prefere? • Bandeja de
+    # Brigadeiros (16 un) - R$ 20,80 ...": a opcao pelas unidades ou pelo preco.
+    # Ela repetia a lista em laco (Camyli, 28/10).
+    if "qual docinho" in (ultima_do_agente or "").lower() and not re.search(r"[a-z]{4,}\s+de\s+[a-z]{4,}", t):
+        for linha in (ultima_do_agente or "").splitlines():
+            op = re.match(r"\s*•\s*(?P<nome>.+?)\s*\((?P<un>\d+)\s*un\)\s*[—-]\s*R\$\s*(?P<preco>[\d.,]+)", linha)
+            if op and (re.search(r"\b" + op.group("un") + r"\b", t)
+                       or op.group("preco").rstrip(".,") in t.replace(" ", "")):
+                return f"um {op.group('nome').lower()}"
     # Resposta as perguntas do kit de 10 e do beijinho no meio cento (app.py,
     # _pergunta_do_kit e _pergunta_do_beijinho, 28/10).
     _ult = (ultima_do_agente or "").lower()
@@ -1520,7 +1547,7 @@ def completar_pelo_contexto(texto: str, ultima_do_agente: str, ultima_do_cliente
         prod_c = {canon for chave, canon in casados_c
                   if not any(chave != outra and chave in outra for outra, _c in casados_c)}
         if len(prod_c) == 1:
-            return f"{m.group('qtd')} {prod_c.pop()}{_grande}"
+            return _qtd_do_produto(m.group('qtd'), prod_c.pop(), t) + _grande
     if m and ultima_do_agente and re.search(r"\bquant\w*\b", ultima_do_agente.lower()):
         anterior = _forma_de_busca(ultima_do_agente)
         casados = [(chave, canon) for chave, canon in _indice_de_produtos().items()
@@ -1530,7 +1557,7 @@ def completar_pelo_contexto(texto: str, ultima_do_agente: str, ultima_do_cliente
         achados = {canon for chave, canon in casados
                    if not any(chave != outra and chave in outra for outra, _c in casados)}
         if len(achados) == 1:
-            return f"{m.group('qtd')} {achados.pop()}"
+            return _qtd_do_produto(m.group('qtd'), achados.pop(), t)
     m = _RX_QTD_NO_FIM.match(t)
     if m and not re.search(r"\b(?:rua|av|avenida|numero|n)\b", m.group("prod")):
         return f"{m.group('qtd')} {m.group('prod').strip()}"
@@ -2098,6 +2125,31 @@ def bebidas_citadas(msg_lower: str) -> tuple[list[dict], list[dict]]:
         dito = re.match(r"\s+(?:natural\s+)?(?:\d{3}\s*ml\s+)?(de\s+)?([a-zà-ÿ]{3,}(?:\s+[a-zà-ÿ/]+)?)",
                         (msg_lower or "")[m.end():])
         sabor = ""
+        # "6 sucos maracuja, abacaxi com hortela e goiaba" virou 6 de maracuja
+        # (Camyli, 28/10). Mais de um sabor: "2 de X e 4 de Y" vira um item por
+        # sabor; sem a conta de cada um, fica sem sabor e ela pergunta.
+        from conversation_memory import casar_sabor
+        _resto = (msg_lower or "")[m.end():m.end() + 120]
+        _ditos = []
+        for _s in re.finditer(r"(?:\b(\d{1,2})\s+(?:sucos?\s+)?(?:de\s+)?)?\b(caj[aá]|maracuj[aá]|goiaba|abacaxi)", _resto):
+            _op = casar_sabor(_s.group(2), opcoes_do_suco())
+            if _op and _op not in [x[1] for x in _ditos]:
+                _ditos.append((_s.group(1), _op))
+        if len(_ditos) > 1:
+            _qtds = [int(q) if q else None for q, _o in _ditos]
+            if _qtds[0] is None and all(_qtds[1:]):
+                _qtds[0] = qtd
+            try:
+                import facts
+                _preco = facts.resolve_unit_price(SUCO, 1)["preco_unitario"]
+            except Exception:
+                _preco = None
+            if _preco and all(_qtds):
+                itens += [{"name": SUCO, "quantity": q, "price": _preco, "sabor": o}
+                          for q, (_q, o) in zip(_qtds, _ditos)]
+            elif _preco:
+                itens.append({"name": SUCO, "quantity": qtd, "price": _preco})
+            continue
         if dito and not re.match(r"(?:que|qual|quais|com|pra|para|tamb)\b", dito.group(2)):
             from conversation_memory import casar_sabor
             sabor = casar_sabor(dito.group(2), opcoes_do_suco())
@@ -2573,6 +2625,10 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
     # "1 sento de coxinha" (digitacao) tambem: virava 1 coxinha grande (26/10).
     # "neio cento de pastel" (digitacao) virava 100 pasteis no resumo (27/10).
     msg_lower = re.sub(r"\b(?:neio|meiu|mei)\s+(?=(?:cento|centro|sento)\b)", "meio ", msg_lower)
+    # "bandeija de brigadeiro" e "meio de fritos" (Camyli, 28/10): a bandeja
+    # virou pergunta em laco e o meio cento de bolinha sumiu do pedido.
+    msg_lower = re.sub(r"\bbandeij(a|as)\b", r"bandej\1", msg_lower)
+    msg_lower = re.sub(r"\bmeio\s+(?=de\s+(?:frit|salgad|assad)\w*)", "meio cento ", msg_lower)
     msg_lower = re.sub(r"\b(um|uma|meio|dois|duas|tres|\d+)\s+(?:centros?|sentos?)\s+(?=de\s)",
                        lambda m: f"{m.group(1)} {'centos' if m.group(1) not in ('um', 'uma', 'meio', '1') else 'cento'} ",
                        msg_lower)
