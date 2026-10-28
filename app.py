@@ -4809,8 +4809,8 @@ def _conferir_etapa_travada(user: str, reply: str, memoria: dict) -> str:
     # Litros esta em falta hoje!" (teste de 01/10 16h11).
     _norm_corpo = facts.normalize(corpo)
     if ("esgotad" in _norm_corpo or "em falta" in _norm_corpo) and \
-            _re_mod.match(r"^O [^!?]{2,60} está em falta hoje! ", travada):
-        travada = _re_mod.sub(r"^O [^!?]{2,60} está em falta hoje! ", "", travada)
+            _re_mod.match(r"^(?:O [^!?]{2,60} está|[^!?]{2,90} estão) em falta hoje! ", travada):
+        travada = _re_mod.sub(r"^(?:O [^!?]{2,60} está|[^!?]{2,90} estão) em falta hoje! ", "", travada)
 
     # Reconfere DEPOIS dos filtros: o de cima tira a frase que repete a
     # pergunta travada, e era justamente ela que "cobria" a etapa - sobrava so

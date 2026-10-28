@@ -803,7 +803,8 @@ def montar_resumo(items: list[dict], subtotal: float, delivery_fee: float,
 
     if retirada:
         linhas.append(f"💰 Total: {_brl(total)}")
-        linhas.append("💳 Pgt: Balcão")
+        # Pix dito pela cliente aparece (Eduardo, 27/10); sem forma, "Balcão".
+        linhas.append(f"💳 Pgt: {_rotulo_pagamento(pagamento, troco, total) if pagamento else 'Balcão'}")
     else:
         if delivery_fee:
             linhas.append(f"🚚 Frete: {_brl(delivery_fee)}")

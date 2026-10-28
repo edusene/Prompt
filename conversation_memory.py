@@ -2949,7 +2949,11 @@ def pergunta_bloqueante(memoria: dict, agora=None) -> str:
     # disponivel, mas o de Macaxeira que voce pediu nao" (medido em 30/09).
     fora = itens_indisponiveis(memoria)
     if fora:
-        return (f"O sabor {', '.join(fora)} está em falta hoje! "
+        if len(fora) > 1:
+            # "O sabor Kit mini pizza (8und), Mini Lanches esta em falta" (27/10).
+            return (f"{', '.join(fora[:-1])} e {fora[-1]} estão em falta hoje! "
+                    f"Por quais sabores você quer trocar? 😊")
+        return (f"O sabor {fora[0]} está em falta hoje! "
                 f"Por qual sabor você quer trocar? 😊")
 
     divisao = pendencia_de_divisao(memoria)

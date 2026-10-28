@@ -3364,6 +3364,18 @@ for _tband, _esp in [
     memoria_mod.merge(_mband, _dband, _dband, _tband)
     _vist = [(i["quantity"], i.get("sabor")) for i in _mband.get("items") or []]
     checa(f"27/10 bandejas de docinho com sabor proprio: {_tband!r}", _vist == _esp, str(_vist))
+_esp_pix = cardapio.montar_resumo([{"name": "Coxinha", "quantity": 25, "price": 0.8}], 20, 0, 0, 20,
+                                  modalidade="retirada", pagamento="pix", cliente="X", horario="15h")
+checa("27/10 retirada com Pix dito mostra 'Pgt: Pix', nao 'Balcão'",
+      "💳 Pgt: Pix" in _esp_pix and "Balcão" not in _esp_pix, _esp_pix)
+_orig_indisp = memoria_mod.itens_indisponiveis
+memoria_mod.itens_indisponiveis = lambda _m: ["Kit mini pizza (8und)", "Mini Lanches"]
+try:
+    _p2falta = memoria_mod.pergunta_bloqueante(memoria_mod._empty())
+finally:
+    memoria_mod.itens_indisponiveis = _orig_indisp
+checa("27/10 dois itens em falta: 'X e Y estão em falta', sem 'O sabor X, Y está'",
+      " e " in _p2falta and "estão em falta" in _p2falta and "O sabor" not in _p2falta, _p2falta)
 _msuco = memoria_mod._empty()
 _dsuco = _exim("quero 25 coxinhas e suco", _CSim())
 memoria_mod.merge(_msuco, _dsuco, _dsuco, "quero 25 coxinhas e suco")
