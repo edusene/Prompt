@@ -273,7 +273,8 @@ CONVERSAS = [
       "nao_contem": ["Coxinha frango —", "Canudinho de Camarão —"]}),
     ("22/10 primeira mensagem e pergunta pronta: vem com saudacao", datetime(2026, 10, 22, 15, 0),
      ["quanto tempo preciso pedir com antecedencia para 500 salgadinhos?"],
-     {"equipe": False, "contem": ["Eu sou a Sandrinha", "ATENÇÃO", "1 hora de antecedência"]}),
+     # Sem "ATENÇÃO": 500 ja e de 25 em 25 e o aviso fica de fora (Balbino, 26/10).
+     {"equipe": False, "contem": ["Eu sou a Sandrinha", "1 hora de antecedência"]}),
     # ── Teste de 21/10: "9 hras" e a antecedencia com o resumo na tela ──
     ("'as 9 hras' grava; antecedencia volta a pergunta do resumo", datetime(2026, 10, 21, 21, 45),
      ["quero 500 salgadinhos para amanha as 9 hras tem como", "Tudo de coxinha de frango",
@@ -285,7 +286,8 @@ CONVERSAS = [
     ("abertura: 'a partir das 07h40?' SIM grava o horario", TARDE,
      ["QUERO 50 COXINHAS PARA AMANHA AS 7 HORAS RETIRADA", "PODE SIM", "NAO", "SIM"],
      {"espelho": [("Coxinha", 50)], "fecha": True, "equipe": False,
-      "contem": ["07h40", "ATENÇÃO:*\nSalgados de festa apenas de 25 em 25"], "nao_contem": ["Qual horário"]}),
+      # Sem o aviso dos 25: 50 coxinhas ja e a quantidade certa (Balbino, 26/10).
+      "contem": ["07h40"], "nao_contem": ["Qual horário"]}),
     ("intervalo: 'pode ser as 14h?' SIM grava o horario", TARDE,
      ["QUERO 50 COXINHAS PARA AMANHA AS 13 HORAS RETIRADA", "SIM", "NAO", "SIM"],
      {"espelho": [("Coxinha", 50)], "fecha": True, "equipe": False, "nao_contem": ["Qual horário"]}),
