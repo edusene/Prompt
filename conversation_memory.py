@@ -2915,6 +2915,14 @@ def aplicar_sabor_de_bebida(memoria: dict, texto: str) -> list[str]:
         if escolha:
             item["sabor"] = escolha
             mudancas.append(f"{item.get('name')} -> sabor {escolha}")
+            # "QUERO 2 DE GOIABA" na pergunta do suco: sao 2 sucos (27/10 23h31).
+            _qtd = _re.match(r"\s*(?:quero\s+|pode\s+ser\s+|manda\s+)?(\d{1,2})\s+(?:de\s+)?[a-z]",
+                             _sem_acento(texto))
+            _destino = cardapio_catalogo._achar(cardapio_catalogo.mapa_efetivo(), str(item.get("name", "")))
+            if (_qtd and item.get("name") == perguntado and 0 < int(_qtd.group(1)) <= 20
+                    and (_destino or {}).get("categoria") == "Bebidas"):
+                item["quantity"] = int(_qtd.group(1))
+                mudancas.append(f"{item.get('name')} -> {item['quantity']} un")
     return mudancas
 
 

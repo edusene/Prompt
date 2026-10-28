@@ -247,6 +247,11 @@ MAPA = {
         "categoria": "Bebidas", "nome_base44": "Refrigerante 600ml", "context": "unidade",
         "quantidade_teste": 1, "preco_esperado": 8.00,
     },
+    # Sem esta entrada o suco entrava sem a pergunta do sabor (teste de 27/10 23h30).
+    "Suco Natural 300 ml": {
+        "categoria": "Bebidas", "nome_base44": "Suco Natural 300 ml", "context": "unidade",
+        "quantidade_teste": 1, "preco_esperado": 7.00,
+    },
     "Enroladinho de Salsicha": {
         "categoria": "Salgados Grandes", "nome_base44": "Enroladinho de Salsicha", "context": "unidade",
         "quantidade_teste": 1, "preco_esperado": 8.00,

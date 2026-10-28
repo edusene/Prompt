@@ -7675,7 +7675,10 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                     and not conversation_memory.em_pos_pedido(_memoria)
                     and _salgados_da_ficha(_memoria) <= 500
                     and _re_mod.search(r"^(?:cliente\s+)?(?:pedido|encomenda|quer|deseja|solicit)"
-                                       r"|disponibilidade|troc\w*\s+(?:de\s+|os\s+)?sabor|docinh|brigad|beijinh",
+                                       r"|disponibilidade|troc\w*\s+(?:de\s+|os\s+)?sabor|docinh|brigad|beijinh"
+                                       # "Mini quiches esta em falta hoje, cliente precisa
+                                       # escolher outro sabor": a troca ja e perguntada (27/10 23h35).
+                                       r"|em\s+falta|esgotad|outro\s+sabor",
                                        facts.normalize(reason or ""))):
                 print(f"[transbordo] user={user} RECUSADO: pedido comum: {reason!r}")
                 return ("TRANSFERENCIA RECUSADA. Isto e pedido comum e quem atende e voce: "

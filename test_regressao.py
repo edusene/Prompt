@@ -3364,6 +3364,14 @@ for _tband, _esp in [
     memoria_mod.merge(_mband, _dband, _dband, _tband)
     _vist = [(i["quantity"], i.get("sabor")) for i in _mband.get("items") or []]
     checa(f"27/10 bandejas de docinho com sabor proprio: {_tband!r}", _vist == _esp, str(_vist))
+_msuco = memoria_mod._empty()
+_dsuco = _exim("quero 25 coxinhas e suco", _CSim())
+memoria_mod.merge(_msuco, _dsuco, _dsuco, "quero 25 coxinhas e suco")
+_psuco = memoria_mod.pergunta_bloqueante(_msuco)
+memoria_mod.aplicar_sabor_de_bebida(_msuco, "quero 2 de goiaba")
+_vsuco = [(i["quantity"], i.get("sabor")) for i in _msuco["items"] if i["name"] == "Suco Natural 300 ml"]
+checa("27/10 suco sem sabor pergunta o sabor; 'quero 2 de goiaba' vira 2 sucos de goiaba",
+      "Goiaba" in _psuco and _vsuco == [(2, "Goiaba")], f"{_psuco!r} {_vsuco}")
 checa("27/10 pedido de bandeja de beijinho nao cai na pergunta frequente do beijinho",
       app._resposta_de_faq("quero 1 bandeja de beijinho e 1 bandeja mista pra retirar amanhã") is None
       and (app._resposta_de_faq("tem beijinho?") or ("",))[0] == "beijinho")
