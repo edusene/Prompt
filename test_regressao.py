@@ -3438,6 +3438,32 @@ checa("28/10 '25 unidades de Coxinha' com 100 na ficha: a frase sai, a pergunta 
 checa("28/10 quantidade igual a ficha fica",
       "100 x Coxinha" in app._conferir_quantidade_dita(
           "x", "Anotei seu pedido: 100 x Coxinha. Será para entrega ou retirada? 😊", _m28))
+from agents.conversation import completar_pelo_contexto as _ctx28  # noqa: E402
+_kit_q28 = ("A mini saltenha vem em kits de 10 unidades (R$ 20,00 o kit). Para 15, você "
+            "prefere 1 kit (10 unidades) ou 2 kits (20 unidades)? 😊")
+checa("28/10 '15 mini saltenhas' pergunta 1 ou 2 kits; 20 e multiplo e nao pergunta",
+      "1 kit (10 unidades) ou 2 kits" in app._pergunta_do_kit(
+          "quero 15 mini saltenhas", {"items": [{"name": app._KIT_SALTENHA, "quantity": 2}]})
+      and app._pergunta_do_kit("quero 20 mini saltenhas",
+                               {"items": [{"name": app._KIT_SALTENHA, "quantity": 2}]}) == "")
+checa("28/10 '2 kits' / 'o de 20' respondem a pergunta do kit",
+      _ctx28("2 kits", _kit_q28) == "2 kit de mini saltenha"
+      and _ctx28("o de 20", _kit_q28) == "2 kit de mini saltenha")
+_bj_q28 = ("No meio cento não temos só beijinho 😕 Nele temos Brigadeiro ou Mista, brigadeiro e "
+           "beijinho (R$ 70,00). Só de beijinho, temos o cento (R$ 140,00) ou a bandeja de 16 "
+           "(R$ 20,80). Qual você prefere? 😊")
+checa("28/10 'meio cento de beijinho' nao vira Mista calado: pergunta",
+      "não temos só beijinho" in app._pergunta_do_beijinho(
+          "quero meio cento de beijinho",
+          {"doces": [{"name": "Meio Cento de Brigadeiros (50 un)", "quantity": 1,
+                      "sabor": "Mista (brigadeiro e beijinho)"}]})
+      and app._pergunta_do_beijinho(
+          "meio cento misto", {"doces": [{"name": "Meio Cento de Brigadeiros (50 un)",
+                                          "sabor": "Mista (brigadeiro e beijinho)"}]}) == "")
+checa("28/10 resposta ao beijinho: mista, o cento, brigadeiro",
+      _ctx28("mista", _bj_q28) == "um meio cento de docinho misto"
+      and _ctx28("o cento", _bj_q28) == "um cento de beijinho"
+      and _ctx28("pode ser brigadeiro", _bj_q28) == "um meio cento de brigadeiro")
 import congelados as _cong28
 _oferta28 = "Sim, trabalhamos sim! Mini Salgados Congelados - R$ 40 o cento"
 checa("28/10 congelado: '1 cento de salgado congelado' e o sabor solto depois da oferta sao pedido",

@@ -835,6 +835,60 @@ def _faq_sabor_de_refri(t: str, memoria: dict | None = None) -> str:
     return f"Os sabores do {tamanho} são: {lista}. Qual você prefere? 🥤"
 
 
+_KIT_SALTENHA = "Kit Mini Saltenha Frita (10und)"
+
+
+def _pergunta_do_kit(texto: str, ext: dict) -> str:
+    """"quero 15 mini saltenhas": o kit e de 10, entao ela pergunta 1 ou 2 kits.
+    Arredondar sozinha mudava o pedido sem a cliente saber (28/10). A resposta
+    vira item em agents.conversation.completar_pelo_contexto."""
+    t = facts.normalize(texto or "")
+    itens = ext.get("items") or []
+    if (len(itens) != 1 or itens[0].get("name") != _KIT_SALTENHA or "kit" in t
+            or ext.get("doces") or ext.get("bebidas")):
+        return ""
+    m = _re_mod.search(r"\b(\d{1,3})\s+(?:mini\s+)?saltenh", t)
+    if not m or int(m.group(1)) % 10 == 0:
+        return ""
+    n = int(m.group(1))
+    try:
+        preco = cardapio._brl(facts.resolve_unit_price(_KIT_SALTENHA, 1)["preco_unitario"])
+    except Exception:
+        return ""
+    baixo = n // 10
+    if baixo == 0:
+        return (f"A mini saltenha vem em kits de 10 unidades ({preco} o kit). "
+                f"Pode ser 1 kit (10 unidades)? 😊")
+    return (f"A mini saltenha vem em kits de 10 unidades ({preco} o kit). Para {n}, você "
+            f"prefere {baixo} kit{'s' if baixo > 1 else ''} ({baixo * 10} unidades) "
+            f"ou {baixo + 1} kits ({(baixo + 1) * 10} unidades)? 😊")
+
+
+def _pergunta_do_beijinho(texto: str, ext: dict) -> str:
+    """"meio cento de beijinho": o meio cento do cardapio nao tem beijinho puro
+    e virava Mista sem aviso (28/10). Ela diz e pergunta; a resposta vira doce em
+    agents.conversation.completar_pelo_contexto."""
+    t = facts.normalize(texto or "")
+    doces = ext.get("doces") or []
+    if (len(doces) != 1 or ext.get("items") or ext.get("bebidas")
+            or not _re_mod.search(r"\bbeijinhos?\b", t)
+            or _re_mod.search(r"\bmist[oa]s?\b|\bmeio a meio\b|\bos dois\b|\bbrigad", t)
+            or not str(doces[0].get("sabor") or "").startswith("Mista")):
+        return ""
+    nome = doces[0]["name"]
+    formato = _re_mod.sub(r"\s+de\s+brigadeiros.*$", "", nome, flags=_re_mod.IGNORECASE).lower()
+
+    def _preco(n: str) -> str:
+        try:
+            return f" ({cardapio._brl(facts.resolve_unit_price(n, 1)['preco_unitario'])})"
+        except Exception:
+            return ""
+    return (f"No {formato} não temos só beijinho 😕 Nele temos Brigadeiro ou Mista, "
+            f"brigadeiro e beijinho{_preco(nome)}. Só de beijinho, temos o cento"
+            f"{_preco('Cento de Brigadeiros (100 un)')} ou a bandeja de 16"
+            f"{_preco('Bandeja de Brigadeiros (16 un)')}. Qual você prefere? 😊")
+
+
 def _faq_em_falta(t: str) -> str:
     """"Tem bolo de milho?" com o item desativado no cardapio: diz que esta em
     falta, com o nome do cardapio, sem passar pelo modelo (26/10)."""
@@ -1036,6 +1090,12 @@ def _resposta_de_faq(texto: str, memoria: dict | None = None) -> tuple[str, str,
                 em_falta = _faq_em_falta(t)
                 if em_falta:
                     return "em falta", em_falta, False
+            _kit = _pergunta_do_kit(sem_exemplo, _ext)
+            if _kit:
+                return "kit de 10", _kit, False
+            _bj = _pergunta_do_beijinho(sem_exemplo, _ext)
+            if _bj:
+                return "beijinho no meio cento", _bj, False
             return None
     except Exception:
         pass
@@ -6475,11 +6535,16 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             _texto_ctx = completar_pelo_contexto(text_only, _ultima_ag,
                                                  _do_cliente[-1] if _do_cliente else "")
             if _texto_ctx != text_only:
-                _itens_ctx = _extract_data_from_message(
-                    _texto_ctx, ConversationState(phone=user)).get("items")
+                _ext_ctx = _extract_data_from_message(_texto_ctx, ConversationState(phone=user))
+                _itens_ctx = _ext_ctx.get("items")
                 if _itens_ctx:
                     _extracted["items"] = _itens_ctx
                     _extracted_fresh["items"] = _itens_ctx
+                # "mista" depois de "No meio cento nao temos so beijinho" (28/10).
+                elif _ext_ctx.get("doces") and not _extracted_fresh.get("doces"):
+                    _itens_ctx = _ext_ctx["doces"]
+                    _extracted["doces"] = _itens_ctx
+                    _extracted_fresh["doces"] = _itens_ctx
                     print(f"[memoria] {user}: item pelo contexto "
                           f"{text_only!r} -> {_texto_ctx!r}")
 

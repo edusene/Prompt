@@ -1439,6 +1439,30 @@ def completar_pelo_contexto(texto: str, ultima_do_agente: str, ultima_do_cliente
         if sabor:
             q = re.search(r"\b(\d{1,2})\b", t)
             return f"{q.group(1) if q else 1} suco de {sabor.lower()}"
+    # Resposta as perguntas do kit de 10 e do beijinho no meio cento (app.py,
+    # _pergunta_do_kit e _pergunta_do_beijinho, 28/10).
+    _ult = (ultima_do_agente or "").lower()
+    _nega = re.search(r"\b(?:n[aã]o|nem)\b", t)
+    if "mini saltenha vem em kits de 10" in _ult:
+        q = re.search(r"\b(\d{1,3})\b", t)
+        if q:
+            n = int(q.group(1))
+            return f"{n // 10 if n >= 10 and n % 10 == 0 else n} kit de mini saltenha"
+        _ops = re.findall(r"(\d+) kits? \(", _ult)
+        if len(_ops) == 1 and not _nega and re.search(
+                r"\b(?:sim|pode|ok|isso|quero|beleza|blz|claro|fechado)\b", t):
+            return f"{_ops[0]} kit de mini saltenha"
+    if "não temos só beijinho" in _ult:
+        _fmt = re.search(r"no (meio cento|cento|bandeja)", _ult)
+        _fmt = _fmt.group(1) if _fmt else "meio cento"
+        if re.search(r"\bbandejas?\b", t):
+            return "uma bandeja de beijinho"
+        if re.search(r"\bcentos?\b", t) and not re.search(r"\bmeio\b", t):
+            return "um cento de beijinho"
+        if re.search(r"\bmist[oa]s?\b|\bmeio a meio\b|\bos dois\b", t):
+            return f"um {_fmt} de docinho misto"
+        if re.search(r"\bbrigad", t) and not _nega:
+            return f"um {_fmt} de brigadeiro"
     m = _RX_SO_COMPLEMENTO.match(t)
     if m and ultima_do_agente and (m.group("qtd1") or m.group("qtd2")):
         comp = facts.normalize(m.group("comp"))
