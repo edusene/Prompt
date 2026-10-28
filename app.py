@@ -6547,7 +6547,16 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             conversation_memory.save(user, _memoria)
             print(f"[memoria] {user}: sabor inexistente resolvido pela propria mensagem")
         _escolha_cedo = []
-        if _memoria.get("sabores_pendentes"):
+        # "coca" logo depois da oferta de um 2L ("vai um Guarana Tuchaua 2L?" ->
+        # "Pode ser" -> "coca"): o tamanho e o da oferta. Ela perguntava lata,
+        # 600 ou 2L e o pedido travava ali (simulador, 28/10).
+        _ult_n = facts.normalize(_ultima_ag or "")
+        if (_re_mod.search(r"\b2\s*l\b|\b2\s+litros\b", _ult_n)
+                and not _re_mod.search(r"\blata\b|\b600\b|qual tamanho", _ult_n)
+                and any(p.get("termo") == "refrigerante" and p.get("marca") and not p.get("pedido")
+                        for p in _memoria.get("sabores_pendentes") or [])):
+            _escolha_cedo = conversation_memory.aplicar_escolha_de_sabor(_memoria, "2 litros")
+        if _memoria.get("sabores_pendentes") and not _escolha_cedo:
             _escolha_cedo = conversation_memory.aplicar_escolha_de_sabor(_memoria, text_only)
             if _escolha_cedo:
                 conversation_memory.save(user, _memoria)
@@ -6714,6 +6723,25 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                                              if p not in _acomp]
             conversation_memory.save(user, _memoria)
             print(f"[memoria] {user}: cliente recusou {[p['termo'] for p in _acomp]}; pergunta fechada")
+        # Pergunta do refrigerante ignorada duas vezes ("Entrega", o endereco,
+        # "Pix"): fecha e o pedido anda; o resumo mostra o que vai. Ela repetia
+        # o tamanho da coca 4 vezes e o pedido nao fechava (simulador, 28/10).
+        _t_ref = facts.normalize(text_only or "")
+        _refri_ign = []
+        for _p in (_memoria.get("sabores_pendentes") or []):
+            if (_p.get("termo") == "refrigerante" and _p.get("aberta_por") != _t_ref
+                    and not (_p.get("dito") and facts.normalize(_p["dito"]) in _t_ref)
+                    and not _re_mod.search(r"\b(?:refri\w*|coca|fanta|guarana|tuchaua|parecis"
+                                           r"|lata|litros?|2\s*l|600|ml)\b", _t_ref)):
+                _p["ignorada"] = int(_p.get("ignorada") or 0) + 1
+                if _p["ignorada"] >= 2:
+                    _refri_ign.append(_p)
+        if _refri_ign:
+            _memoria["sabores_pendentes"] = [p for p in _memoria["sabores_pendentes"]
+                                             if p not in _refri_ign]
+            print(f"[memoria] {user}: pergunta do refrigerante ignorada 2x; fechada")
+        if _memoria.get("sabores_pendentes") or _refri_ign:
+            conversation_memory.save(user, _memoria)
         # Item com preco a confirmar (kit de mini saltenha): a equipe fecha. O
         # modelo perguntava "Por qual sabor voce gostaria de trocar?" e depois
         # trocava por Saltenha Assada no resumo (teste de 27/10 19h35).
