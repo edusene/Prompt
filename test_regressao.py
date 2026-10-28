@@ -3464,6 +3464,18 @@ checa("28/10 resposta ao beijinho: mista, o cento, brigadeiro",
       _ctx28("mista", _bj_q28) == "um meio cento de docinho misto"
       and _ctx28("o cento", _bj_q28) == "um cento de beijinho"
       and _ctx28("pode ser brigadeiro", _bj_q28) == "um meio cento de brigadeiro")
+_cg28 = app._conferir_congelado_sem_assunto(
+    "5528cg", "Salgado congelado grande/normal para fritar: Congelado trabalhamos apenas com o "
+    "tamanho mini de festa (R$ 40 o cento).\n\nPosso ajudar com mais alguma coisa?",
+    "quero risole grande de queijo e presunto", {})
+checa("28/10 'risole grande' sem falar de congelado: sai a frase, pergunta a quantidade",
+      "congelad" not in _cg28.lower() and "Rissole de Queijo e Presunto" in _cg28, _cg28)
+checa("28/10 cliente que pergunta de congelado continua recebendo congelado",
+      "Congelado" in app._conferir_congelado_sem_assunto(
+          "5528cg", "Congelado trabalhamos apenas com o mini.", "tem congelado grande?", {}))
+checa("28/10 'EITA ESTA MUITO CARO' e reclamacao de preco; 'nao e caro' nao",
+      bool(app._RX_DESCONTO.search("eita esta muito caro quero nao"))
+      and not app._RX_DESCONTO.search("nao e caro"))
 import congelados as _cong28
 _oferta28 = "Sim, trabalhamos sim! Mini Salgados Congelados - R$ 40 o cento"
 checa("28/10 congelado: '1 cento de salgado congelado' e o sabor solto depois da oferta sao pedido",

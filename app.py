@@ -4123,6 +4123,37 @@ def _conferir_quantidade_dita(user: str, reply: str, memoria: dict) -> str:
         return novo
     return _proxima_pergunta_do_funil(memoria)
 
+def _conferir_congelado_sem_assunto(user: str, reply: str, texto_cliente: str,
+                                    memoria: dict) -> str:
+    """Tira a frase de congelado quando ninguem falou de congelado.
+
+    "quero risole grande de queijo e presunto" recebeu "Salgado congelado
+    grande/normal para fritar: Congelado trabalhamos apenas com o tamanho
+    mini" - o modelo puxou a pergunta frequente pelo "grande" (teste da
+    equipe, 27/10 21h56; repetido no simulador em 28/10).
+    """
+    if not reply or "congelad" not in facts.normalize(reply):
+        return reply
+    if "congelad" in facts.normalize(texto_cliente or ""):
+        return reply
+    ultima = next((m.get("parts", [{}])[0].get("text", "") or ""
+                   for m in reversed(memory.get(user)) if m.get("role") == "assistant"), "")
+    if "congelad" in facts.normalize(ultima):
+        return reply
+    frases = _RX_FIM_DE_FRASE.split(reply)
+    limpas = [f for f in frases if "congelad" not in facts.normalize(f)]
+    print(f"[congelado] user={user} resposta falava de congelado sem a cliente pedir; "
+          f"frase removida")
+    if not memoria.get("items"):
+        from agents.conversation import _produto_conhecido
+        foco = _produto_conhecido(texto_cliente or "")
+        if foco:
+            return _pergunta_da_quantidade(foco)
+    novo = " ".join(f.strip() for f in limpas if f.strip()).strip()
+    if len(_re_mod.sub(r"[^A-Za-zÀ-ÿ]", "", novo)) >= 12 and "?" in novo:
+        return novo
+    return _proxima_pergunta_do_funil(memoria)
+
 # -- BLOCO 6: fiado, desconto, e o papel da Sandrinha -----------------------
 
 # Como o cliente pede para pagar depois. Nao e uma palavra: e a promessa de
@@ -4177,7 +4208,10 @@ _RX_DESCONTO = _re_mod.compile(
     r"|\b(?:faz|fazer|sai|sair|deixa|deixar|d[áa]|dar)\s+(?:por\s+)?menos\b"
     r"|\bmelhora\s+o\s+(?:pre[cç]o|valor|frete)\b"
     r"|\b(?:baixa|abaixa|tira|reduz)\s+(?:o\s+|a\s+)?(?:pre[cç]o|valor|frete|taxa)\b"
-    r"|\bpre[cç]o\s+especial\b|\bcondi[cç][ãa]o\s+especial\b|\bquebra\s+o\s+galho\b",
+    r"|\bpre[cç]o\s+especial\b|\bcondi[cç][ãa]o\s+especial\b|\bquebra\s+o\s+galho\b"
+    # "EITA ESTA MUITO CARO QUERO NAO" com o resumo aberto recebia o resumo de
+    # novo (teste do Balbino, 27/10 21h42): reclamar do preco e pedir desconto.
+    r"|\b(?:muito|mt|ta|t[áa]|esta|est[áa]|bem|meio|achei|ficou|salgado)\s+caro\b|\bcaro\s+demais\b",
     _re_mod.IGNORECASE)
 
 # Como ela ja defende o preco.
@@ -6342,6 +6376,11 @@ def _handle_flush(user: str, items: list[dict]) -> None:
         if (not _balcao and not _fora
                 and (not _memoria_balcao.get("items") or _resumo_aberto)
                 and _RX_DESCONTO.search(_texto_cliente.lower())
+                # "o refri ta caro, tira ele": tirar o item vem primeiro.
+                and not conversation_memory._itens_a_tirar(_texto_cliente,
+                                                           _memoria_balcao.get("items") or [])
+                and not _re_mod.search(r"\b(?:tira|tirar|tire|remove|remover|retira|cancela)\b",
+                                       facts.normalize(_texto_cliente))
                 and not _extract_data_from_message(_texto_cliente.lower(),
                                                    ConversationState(phone=user)).get("items")):
             # Com o resumo na tela, a pergunta do resumo volta: o "SIM"
@@ -8308,6 +8347,7 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             reply = _conferir_sem_numero(user, reply)
             reply = _conferir_aula_de_lote(user, reply, _memoria)
             reply = _conferir_quantidade_dita(user, reply, _memoria)
+            reply = _conferir_congelado_sem_assunto(user, reply, text_only, _memoria)
             # E, com tudo coletado, nao pede licenca: mostra o resumo.
             reply = _conferir_nega_formato(user, reply, _memoria)
             reply = _conferir_permissao(user, reply, _memoria)
