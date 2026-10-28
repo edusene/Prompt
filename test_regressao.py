@@ -3336,7 +3336,9 @@ for _t27, _esp27 in (("quero risole grande de queijo e presunto", False),
                      ("quero meio cento de brigadeiro, um cento de brigadeiro, 1 coca cola 2 litros", False),
                      ("quero 10 coxinhas", True), ("oi", True), ("quero um cento de salgados", True),
                      # 28/10: quantidade ja de 25 em 25, so falta o sabor ou a divisao
-                     ("quero 25 pasteis", False), ("quero um cento de coxinha, kibe e enroladinho", False)):
+                     ("quero 25 pasteis", False), ("quero um cento de coxinha, kibe e enroladinho", False),
+                     # congelado e pelo cento
+                     ("vocês tem salgado congelado?", False)):
     app._ultima_do_cliente = lambda u, t=_t27: t
     _avisos27[_t27] = app._regra_dos_25_serve("55") == _esp27
 checa("27/10 aviso dos 25 so com salgado de festa (nao com grande, kit, doce ou bebida)",

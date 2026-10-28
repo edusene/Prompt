@@ -5688,6 +5688,9 @@ def _regra_dos_25_serve(user: str) -> bool:
     # Horario nao e quantidade: "posso retirar as 19:30?" recebia o aviso dos
     # 25 por causa do "19 30" (teste de 27/10 18h07).
     t = _RX_HORARIO_NA_FRASE.sub(" ", t)
+    # Congelado e vendido pelo cento (Balbino, 28/10): o aviso dos 25 nao vale.
+    if _RX_CONGELADO.search(t):
+        return False
     # Pedido so de salgado grande, kit, doce ou bebida ("1 croquete de
     # macaxeira", "meio cento de brigadeiro") recebia o aviso pela palavra
     # (varredura de 27/10): decide o item lido, nao a palavra.
