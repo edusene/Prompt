@@ -3901,7 +3901,13 @@ def _conferir_tamanho(user: str, reply: str, memoria: dict) -> str:
     Com um item abaixo do minimo no pedido a pergunta e legitima, e e ela que
     evitou os R$ 450,00 em coxinha de balcao.
     """
-    if not reply or not conversation_memory.tamanho_ja_definido(memoria):
+    if not reply:
+        return reply
+    # "quero risole grande de queijo e presunto" e ela perguntava "grande ou
+    # mini?" (27/10): a cliente ja disse, e a ficha nao tem duvida aberta.
+    _disse_grande = (not conversation_memory.pendencia_de_item(memoria)
+                     and _escolheu_lanche(_ultima_do_cliente(user)))
+    if not (_disse_grande or conversation_memory.tamanho_ja_definido(memoria)):
         return reply
 
     # Nunca mexer no espelho do pedido. Ele tem linha de item, subtotal,
@@ -3938,6 +3944,9 @@ def _conferir_tamanho(user: str, reply: str, memoria: dict) -> str:
 
     # A pergunta era a mensagem inteira. Nao da para devolver vazio: o codigo
     # escreve a proxima pergunta do funil, como ja faz em outras recusas.
+    # Produto dito sem numero ("quero risole grande"): falta so a quantidade.
+    if _disse_grande and not memoria.get("items"):
+        return "Quantas unidades você quer? 😊"
     return _proxima_pergunta_do_funil(memoria)
 
 
@@ -5673,9 +5682,42 @@ def _regra_dos_25_serve(user: str) -> bool:
     # Horario nao e quantidade: "posso retirar as 19:30?" recebia o aviso dos
     # 25 por causa do "19 30" (teste de 27/10 18h07).
     t = _RX_HORARIO_NA_FRASE.sub(" ", t)
+    # Pedido so de salgado grande, kit, doce ou bebida ("1 croquete de
+    # macaxeira", "meio cento de brigadeiro") recebia o aviso pela palavra
+    # (varredura de 27/10): decide o item lido, nao a palavra.
+    try:
+        _ext = _extract_data_from_message(_ultima_do_cliente(user).lower(),
+                                          ConversationState(phone=user))
+        _itens = [i for k in ("items", "doces", "bebidas", "combos") for i in _ext.get(k) or []]
+    except Exception:
+        _itens = []
+    if _itens:
+        return any(_item_de_festa(i) for i in _itens)
+    # Sem quantidade: "quero risole grande de queijo e presunto". O trecho com
+    # "grande" e o doce saem; sobra o assunto de festa, se houver.
+    _sem = " ".join(s for s in _re_mod.split(r",|;|\s+e\s+", t)
+                    if not _re_mod.search(r"\b(?:grandes?|lanches?|brigadeir\w*|beijinh\w*|docinh\w*)\b", s))
+    if _sem != " ".join(_re_mod.split(r",|;|\s+e\s+", t)):
+        return bool(_RX_SALGADO_DE_FESTA.search(_sem))
     if _RX_SALGADO_DE_FESTA.search(t):
         return True
     return not _re_mod.sub(r"[^a-z ]", " ", _RX_ABERTURA_GENERICA.sub(" ", t)).split()
+
+
+def _item_de_festa(item: dict) -> bool:
+    """Sabor de pacote (25 por sabor) ou nome que existe de festa e grande."""
+    if not isinstance(item, dict) or item.get("tamanho") == "lanche":
+        return False
+    nome = str(item.get("name") or "")
+    try:
+        qtd = int(float(item.get("quantity") or 1))
+        if (facts.resolve_unit_price(nome, qtd) or {}).get("ambiguo"):
+            return True
+        import cardapio_catalogo
+        linha = cardapio_catalogo._linha_da_planilha(nome)
+    except Exception:
+        return False
+    return linha is not None and linha.get("preco") is None
 
 
 def _regras_ainda_nao_enviadas(user: str) -> bool:

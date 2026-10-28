@@ -3325,6 +3325,26 @@ checa("27/10 'frango' escolhe 'Canudinho (FRANGO)' no combo (a pergunta voltava 
       and memoria_mod.casar_sabor("fanta", ["Fanta laranja", "Fanta uva"]) == "")
 checa("27/10 '10 mini lanches' e o item Mini Lanches (nao some, nem vira regra dos 25)",
       [i["name"] for i in _exim("quero 10 mini lanches", _CSim()).get("items") or []] == ["Mini Lanches"])
+_uc27, _qc27 = app._ultima_do_cliente, app._quantidade_ja_certa
+app._quantidade_ja_certa = lambda u: False
+_avisos27 = {}
+for _t27, _esp27 in (("quero risole grande de queijo e presunto", False),
+                     ("quero 1 bomba de carne de sol, 1 croquete de macaxeira, 1 rissole de queijo e presunto "
+                      "e 1 kit empadinhas", False),
+                     ("quero meio cento de brigadeiro, um cento de brigadeiro, 1 coca cola 2 litros", False),
+                     ("quero 10 coxinhas", True), ("oi", True), ("quero um cento de salgados", True)):
+    app._ultima_do_cliente = lambda u, t=_t27: t
+    _avisos27[_t27] = app._regra_dos_25_serve("55") == _esp27
+checa("27/10 aviso dos 25 so com salgado de festa (nao com grande, kit, doce ou bebida)",
+      all(_avisos27.values()), str(_avisos27))
+app._ultima_do_cliente = lambda u: "quero risole grande de queijo e presunto"
+checa("27/10 'grande' dito pela cliente: a pergunta 'grande ou mini?' do modelo sai",
+      app._conferir_tamanho("55", "Essas 1 unidade de Rissole de Queijo e Presunto são grande (lanche) "
+                                  "ou mini (festa)? 😊", memoria_mod._empty()) == "Quantas unidades você quer? 😊")
+app._ultima_do_cliente = lambda u: "quero 1 coxinha"
+checa("27/10 sem 'grande' dito, a pergunta de tamanho fica",
+      "mini" in app._conferir_tamanho("55", "Essa coxinha é grande ou mini?", memoria_mod._empty()))
+app._ultima_do_cliente, app._quantidade_ja_certa = _uc27, _qc27
 checa("27/10 '1 kit mini pizza' e o kit (esgotado), nao a Mini Pizza avulsa",
       [i["name"] for i in _exim("quero 1 kit mini pizza", _CSim()).get("items") or []] == ["Kit mini pizza (8und)"])
 checa("27/10 'uma coxinha im risoles de carne uma bomba': a coxinha fica",
