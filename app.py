@@ -3973,7 +3973,10 @@ _RX_AULA_DE_LOTE = _re_mod.compile(
     # "Voce pode escolher ate 2 sabores (25 de cada)!" com 50 + 50 ja na ficha
     # (teste do Eduardo, 29/09 16h22): alem de aula, errava a conta - era um
     # cento meio a meio, 50 de cada.
-    '|25\\s+de\\s+cada|escolher\\s+at[e\\u00e9]\\s+\\d+\\s+sabor)',
+    '|25\\s+de\\s+cada|escolher\\s+at[e\\u00e9]\\s+\\d+\\s+sabor'
+    # "Podemos confirmar 25 mini saltenhas para voce?" com 2 kits ja certos na
+    # ficha (teste ao vivo, 28/10 12h20): proposta de ajuste sem nada a ajustar.
+    '|(?:confirmar|ajust\\w*|arredond\\w*)\\s+(?:para\\s+|pra\\s+)?25\\b)',
     _re_mod.IGNORECASE)
 
 
@@ -4010,6 +4013,10 @@ def _conferir_aula_de_lote(user: str, reply: str, memoria: dict) -> str:
     novo = " ".join(f.strip() for f in limpas if f.strip()).strip()
     # Mesma licao de _conferir_tamanho: um toco de mensagem nao serve.
     if len(_re_mod.sub(r"[^A-Za-zÀ-ÿ]", "", novo)) >= 12:
+        # A pergunta cortada nao some sem outra no lugar: so a saudacao
+        # deixava a cliente sem saber o que responder.
+        if "?" in "".join(cortadas) and "?" not in novo:
+            return f"{novo}\n\n{_proxima_pergunta_do_funil(memoria)}".strip()
         return novo
     return _proxima_pergunta_do_funil(memoria)
 

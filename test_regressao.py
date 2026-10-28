@@ -3422,6 +3422,13 @@ finally:
     app._faq_em_falta = _fx28
 checa("28/10 preco de produto desligado diz 'em falta'; com outro item o pedido segue",
       (_mq28 or ("",))[0] == "em falta" and _mix28 is None, str((_mq28, _mix28)))
+_kit28 = {"items": [{"name": "Kit Mini Saltenha Frita (10und)", "quantity": 2, "price": 20.0}]}
+_r28 = app._conferir_aula_de_lote("x", "Podemos confirmar 25 mini saltenhas para você? 😊", _kit28)
+checa("28/10 kit certo na ficha nao recebe 'confirmar 25'; sai a proxima pergunta",
+      "25" not in _r28 and "?" in _r28, _r28)
+checa("28/10 com 20 coxinhas o 'confirmar 25' continua",
+      "25" in app._conferir_aula_de_lote("x", "Podemos confirmar 25 de Coxinha? 😊",
+                                          {"items": [{"name": "Coxinha", "quantity": 20}]}))
 import congelados as _cong28
 _oferta28 = "Sim, trabalhamos sim! Mini Salgados Congelados - R$ 40 o cento"
 checa("28/10 congelado: '1 cento de salgado congelado' e o sabor solto depois da oferta sao pedido",
