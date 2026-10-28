@@ -7875,14 +7875,17 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             # disparar numa retirada e a Sandrinha perguntar troco quando nao
             # devia — foi o que quebrou o segundo teste do dono.
             if _retirada:
-                kwargs["payment_method"] = ""
+                # O que a cliente disse (ficha) vale: "retirada no pix" saia sem
+                # forma de pagamento, o Pix nao era retido e a comanda ia direto
+                # para a fabrica, com a chave Pix ja enviada (teste de 28/10 14h32).
+                kwargs["payment_method"] = _memoria.get("payment_method", "")
             else:
                 kwargs["payment_method"] = kwargs.get("payment_method") or _memoria.get("payment_method", "")
-                # 'cartao_a_definir' era o estado interno de "falta saber se e
-                # debito ou credito". A pergunta acabou em 23/09; fichas antigas
-                # ainda podem trazer o valor, e ele vira 'cartao'.
-                if kwargs["payment_method"] == "cartao_a_definir":
-                    kwargs["payment_method"] = "cartao"
+            # 'cartao_a_definir' era o estado interno de "falta saber se e
+            # debito ou credito". A pergunta acabou em 23/09; fichas antigas
+            # ainda podem trazer o valor, e ele vira 'cartao'.
+            if kwargs["payment_method"] == "cartao_a_definir":
+                kwargs["payment_method"] = "cartao"
 
             # Ponto de referencia entra no endereco: o prompt manda coleta-lo
             # (BLOCO 3) e o modelo do BLOCO 5 escreve "Rua, Numero e Ponto de
