@@ -3322,7 +3322,9 @@ checa("27/10 'meio cento de brigadeiro, um cento de brigadeiro': os dois entram"
       == [("Meio Cento de Brigadeiros (50 un)", 1), ("Cento de Brigadeiros (100 un)", 1)])
 checa("27/10 'frango' escolhe 'Canudinho (FRANGO)' no combo (a pergunta voltava em laco)",
       memoria_mod.casar_sabor("frango", ["Canudinho (FRANGO)", "Canudinho (CAMARÃO)"]) == "Canudinho (FRANGO)"
-      and memoria_mod.casar_sabor("fanta", ["Fanta laranja", "Fanta uva"]) == "")
+      and memoria_mod.casar_sabor("fanta", ["Fanta laranja", "Fanta uva"]) == ""
+      and memoria_mod.casar_sabor("quero 1 combo mix frango e 1 combo 15 canudinhos",
+                                  ["Canudinho (frango)", "Canudinho (camarão)"]) == "")
 checa("27/10 '10 mini lanches' e o item Mini Lanches (nao some, nem vira regra dos 25)",
       [i["name"] for i in _exim("quero 10 mini lanches", _CSim()).get("items") or []] == ["Mini Lanches"])
 _uc27, _qc27 = app._ultima_do_cliente, app._quantidade_ja_certa
@@ -3345,6 +3347,13 @@ app._ultima_do_cliente = lambda u: "quero 1 coxinha"
 checa("27/10 sem 'grande' dito, a pergunta de tamanho fica",
       "mini" in app._conferir_tamanho("55", "Essa coxinha é grande ou mini?", memoria_mod._empty()))
 app._ultima_do_cliente, app._quantidade_ja_certa = _uc27, _qc27
+_msab = memoria_mod._empty()
+_msab["items"] = [{"name": "Combo 15 Canudinhos + Coca-Cola Lata", "quantity": 1},
+                  {"name": "Combo 50 Salgadinhos Fritos + Refrigerante 1L", "quantity": 1}]
+memoria_mod.aplicar_sabor_de_bebida(_msab, "frango")
+checa("27/10 'frango' responde so ao combo perguntado (o de 50 nao vira Coxinha sem pergunta)",
+      _msab["items"][0].get("sabor") == "Canudinho (frango)" and not _msab["items"][1].get("sabor"),
+      str(_msab["items"]))
 checa("27/10 '1 kit mini pizza' e o kit (esgotado), nao a Mini Pizza avulsa",
       [i["name"] for i in _exim("quero 1 kit mini pizza", _CSim()).get("items") or []] == ["Kit mini pizza (8und)"])
 checa("27/10 'uma coxinha im risoles de carne uma bomba': a coxinha fica",

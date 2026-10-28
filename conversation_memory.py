@@ -2855,7 +2855,7 @@ def pergunta_do_sabor_da_bebida(memoria: dict) -> str:
     return f"Qual sabor do {nome}: {_lista_com_ou(opcoes)}? 🥤"
 
 
-def casar_sabor(texto: str, opcoes: list[str]) -> str:
+def casar_sabor(texto: str, opcoes: list[str], palavra_unica: bool = True) -> str:
     """A opcao do cardapio que o cliente escolheu ("coca" -> "Coca"). '' se
     nao der para saber sem chutar."""
     t = f" {_sem_acento(texto)} "
@@ -2876,8 +2876,13 @@ def casar_sabor(texto: str, opcoes: list[str]) -> str:
         return ""
     # "frango" para "Canudinho (FRANGO)" ou "Canudinho (CAMARÃO)": a palavra que
     # so uma opcao tem. Sem isto a pergunta do combo voltava em laco (27/10).
-    palavras_de = {o: set(_re.findall(r"[a-z0-9]+", _sem_acento(o))) for o in opcoes}
+    # So na resposta curta a pergunta: no pedido inteiro ("1 combo mix frango e
+    # 1 combo 15 canudinhos") o "frango" de um nome escolhia o sabor dos outros
+    # combos sem perguntar (teste de 27/10 21h41).
     ditas = set(_re.findall(r"[a-z0-9]+", t))
+    if len(t.split()) > 3 or not palavra_unica:
+        return ""
+    palavras_de = {o: set(_re.findall(r"[a-z0-9]+", _sem_acento(o))) for o in opcoes}
     unicas = [o for o in opcoes
               if (palavras_de[o] - set().union(*(p for x, p in palavras_de.items() if x != o))) & ditas]
     return unicas[0] if len(unicas) == 1 else ""
@@ -2890,11 +2895,15 @@ def aplicar_sabor_de_bebida(memoria: dict, texto: str) -> list[str]:
         import cardapio_catalogo
     except Exception:
         return mudancas
+    # A palavra unica ("frango") responde so ao item perguntado, o primeiro
+    # pendente: o Combo 50 virava "Coxinha (frango)" sem pergunta (27/10).
+    perguntado = sabor_de_bebida_pendente(memoria)[0]
     for item in memoria.get("items") or []:
         if not isinstance(item, dict) or str(item.get("sabor") or "").strip():
             continue
         opcoes = cardapio_catalogo.opcoes_do_item(str(item.get("name", "")))
-        escolha = casar_sabor(texto, opcoes) if opcoes else ""
+        escolha = (casar_sabor(texto, opcoes, palavra_unica=item.get("name") == perguntado)
+                   if opcoes else "")
         if escolha:
             item["sabor"] = escolha
             mudancas.append(f"{item.get('name')} -> sabor {escolha}")
