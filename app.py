@@ -1019,7 +1019,12 @@ def _resposta_de_faq(texto: str, memoria: dict | None = None) -> tuple[str, str,
         # Docinho com beijinho continua na resposta do beijinho (fixa): solto
         # para o modelo, ele chamava a equipe "para verificar o beijinho" (22/10).
         # O "cento misto" da resposta seguinte e lido por _doce_misto_do_contexto.
-        if _extract_data_from_message(sem_exemplo, ConversationState(phone="")).get("items"):
+        # Doce com formato ("1 bandeja de beijinho") tambem e pedido: caia no
+        # "Temos sim! ... Qual voce prefere?" (teste de 27/10 23h08).
+        _ext = _extract_data_from_message(sem_exemplo, ConversationState(phone=""))
+        # Pergunta ("teria como adicionar...") segue na resposta fixa (22/10).
+        _pergunta = "?" in t or _re_mod.search(r"\b(?:teria|tem|tera)\s+como\b", t)
+        if _ext.get("items") or (_ext.get("doces") and not _pergunta):
             return None
     except Exception:
         pass
