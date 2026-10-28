@@ -2921,6 +2921,12 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
             if _it["name"] == "Empada de Frango" and int(_it.get("quantity") or 0) >= 25:
                 _it["name"] = "Empadinha de Frango"
                 _it["price"] = _PRECO_UNITARIO.get("Empadinha de Frango", _it["price"])
+        # "20 mini saltenhas" sao 20 unidades = 2 kits de 10, e nao 20 kits
+        # (R$ 400 no lugar de R$ 40). Com "kit" na mensagem, ja e o numero de kits.
+        for _it in items_found:
+            if (_it["name"] == "Kit Mini Saltenha Frita (10und)" and "kit" not in msg_lower
+                    and int(_it.get("quantity") or 0) >= 10):
+                _it["quantity"] = -(-int(_it["quantity"]) // 10)
         _somados_msg: list = []
         for _it in items_found:
             _igual = next((x for x in _somados_msg if x["name"] == _it["name"]

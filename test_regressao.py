@@ -3268,8 +3268,13 @@ for _t27 in ("mini saltenha", "mini saltenhas fritas", "saltenha frita", "kit de
     checa(f"27/10 '{_t27}' e o kit de mini saltenha, nao a Saltenha Assada",
           _produto_conhecido(_t27) == "Kit Mini Saltenha Frita (10und)", str(_produto_conhecido(_t27)))
 checa("27/10 'saltenha' sozinha continua a assada", _produto_conhecido("saltenha") == "Saltenha Assada")
-checa("27/10 kit de mini saltenha nao fecha sem a equipe (preco por unidade no cardapio)",
-      bool(_cc27.traduzir([{"name": "Kit Mini Saltenha Frita (10und)", "quantity": 20}])[1]))
+# 28/10: o cardapio passou a vender o kit de 1 em 1 a R$ 20 - sai do bloqueio.
+checa("28/10 kit de mini saltenha fora do bloqueio",
+      "Kit Mini Saltenha Frita (10und)" not in _cc27.BLOQUEADOS)
+for _t28, _q28 in (("quero 20 mini saltenhas", 2), ("quero 2 kits de mini saltenha", 2),
+                   ("quero 1 kit mini saltenha", 1)):
+    _i28 = _extract_data_from_message(_t28, ConversationState(phone="")).get("items") or [{}]
+    checa(f"28/10 '{_t28}' = {_q28} kit(s) de 10", _i28[0].get("quantity") == _q28, str(_i28))
 checa("27/10 Kit Mini Empadinhas tem de-para",
       _cc27.traduzir([{"name": "Kit Mini Empadinhas", "quantity": 1}])
       == ([{"name": "Kit Mini Empadinhas", "quantity": 1, "context": "unidade"}], []),
@@ -3471,16 +3476,15 @@ checa("27/10 '1' depois de 'quero risole grande de queijo e presunto' nao vira o
 checa("27/10 'Saltenha Frita' nao perde o 'frita' na limpeza do nome",
       cardapio.nome_sem_rotulo_de_formato("Saltenha Frita") == "Saltenha Frita")
 _kit27 = [{"name": "Kit Mini Saltenha Frita (10und)", "quantity": 20}]
-checa("27/10 modelo troca o kit bloqueado por Saltenha: vale a ficha",
-      app._bloqueado_da_ficha_volta([{"name": "Saltenha", "quantity": 20}], _kit27) == _kit27)
+_panq27 = [{"name": "Panqueca de Carne", "quantity": 2}]
+checa("27/10 modelo troca o item bloqueado por outro: vale a ficha",
+      app._bloqueado_da_ficha_volta([{"name": "Saltenha", "quantity": 2}], _panq27) == _panq27)
 checa("27/10 sem item bloqueado na ficha, vale o calculo do modelo",
       app._bloqueado_da_ficha_volta([{"name": "Saltenha", "quantity": 2}],
                                     [{"name": "Saltenha Assada", "quantity": 2}]) == [{"name": "Saltenha", "quantity": 2}])
-checa("27/10 kit de mini saltenha na ficha vai para a equipe, com texto fixo",
-      app._itens_a_confirmar_pela_equipe(_kit27 + [{"name": "Coxinha", "quantity": 25}])
-      == ["Kit Mini Saltenha Frita (10und)"]
-      and app._itens_a_confirmar_pela_equipe([{"name": "Saltenha Assada", "quantity": 2}]) == []
-      and "Esse item precisa de confirmação de preço." in open("app.py", encoding="utf-8").read())
+checa("28/10 kit de mini saltenha na ficha nao vai mais para a equipe",
+      app._itens_a_confirmar_pela_equipe(_kit27 + [{"name": "Coxinha", "quantity": 25}]) == []
+      and app._itens_a_confirmar_pela_equipe([{"name": "Saltenha Assada", "quantity": 2}]) == [])
 _uc27, _qc27 = app._ultima_do_cliente, app._quantidade_ja_certa
 app._quantidade_ja_certa = lambda u: False
 for _t27, _sim27 in (("posso retirar meu pedido as 19:30?", False), ("pode ser pra 18h", False),
