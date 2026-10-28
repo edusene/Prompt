@@ -3354,6 +3354,15 @@ memoria_mod.aplicar_sabor_de_bebida(_msab, "frango")
 checa("27/10 'frango' responde so ao combo perguntado (o de 50 nao vira Coxinha sem pergunta)",
       _msab["items"][0].get("sabor") == "Canudinho (frango)" and not _msab["items"][1].get("sabor"),
       str(_msab["items"]))
+checa("27/10 oferta da retirada nao corta o endereco em 'Av.'",
+      app._tira_pergunta_final("Não entregamos no seu bairro no momento. Gostaria de retirar aqui na loja "
+                               "na Av. Calama, 5892 - Igarapé? 💛") == "Não entregamos no seu bairro no momento. 💛")
+_mbai = memoria_mod._empty()
+_dbai = _exim("quero 25 coxinhas pra entregar amanhã às 16h no bairro vila esmeralda, rua 7 numero 30, pix", _CSim())
+memoria_mod.merge(_mbai, _dbai, _dbai, "")
+_dbai2 = _exim("meu bairro e longe?", _CSim())
+checa("27/10 'no bairro vila esmeralda' (fora da tabela) vira 'nao achei o bairro', pergunta nao",
+      _mbai.get("bairro_nao_achado") == "Vila Esmeralda" and not _dbai2.get("bairro_do_cep"), str(_dbai2))
 checa("27/10 '1 kit mini pizza' e o kit (esgotado), nao a Mini Pizza avulsa",
       [i["name"] for i in _exim("quero 1 kit mini pizza", _CSim()).get("items") or []] == ["Kit mini pizza (8und)"])
 checa("27/10 'uma coxinha im risoles de carne uma bomba': a coxinha fica",

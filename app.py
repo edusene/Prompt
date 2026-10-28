@@ -4091,8 +4091,9 @@ def _tira_pergunta_final(frase: str) -> str:
     contrario: "a regra exige terminar com apenas uma pergunta objetiva"
     (26/09 19h27). Aqui o convite sai e a negativa fica.
     """
-    partes = [t.strip() for t in _re_mod.split(r"(?<=[.!?])\s+", frase or "")
-              if t.strip()]
+    # _RX_FIM_DE_FRASE nao corta em "Av.": saia "retirar aqui na loja na Av. 💛"
+    # (teste de 27/10 22h23).
+    partes = [t.strip() for t in _RX_FIM_DE_FRASE.split(frase or "") if t.strip()]
     mantidas = [t for t in partes if "?" not in t]
     return " ".join(mantidas).strip() or (frase or "").strip()
 

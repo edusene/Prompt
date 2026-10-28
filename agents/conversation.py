@@ -2652,6 +2652,14 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
         bairro = detectar_bairro(message)
         if bairro:
             extracted["bairro"] = bairro
+        else:
+            # "no bairro vila esmeralda, rua 7": fora da tabela, a pergunta do
+            # bairro diz que nao achou, como no CEP (teste de 27/10 22h21).
+            _dito = re.search(r"(?:^|[,;]\s*|\b(?:no|do)\s+)bairro\s+([a-zà-ÿ ]{3,40}?)"
+                              r"\s*(?:[,.;!]|$|\b(?:rua|av|avenida|n|numero|quadra|casa)\b)",
+                              msg_lower.strip())
+            if _dito and "?" not in msg_lower:
+                extracted["bairro_do_cep"] = _dito.group(1).strip()
 
     # ── Pagamento ───────────────────────────────────────────────────────────
     if not state.payment_method:
