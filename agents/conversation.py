@@ -1466,12 +1466,17 @@ def completar_pelo_contexto(texto: str, ultima_do_agente: str, ultima_do_cliente
     # combo) e o pedido sumiu (teste do dono, 06/10).
     if m and ultima_do_cliente and not re.search(r"\d", ultima_do_cliente):
         doc = _forma_de_busca(ultima_do_cliente)
+        # "quero risole grande de queijo e presunto" e depois "1": o "grande" no
+        # meio deixava so a chave "rissole" e virava o de carne (27/10). O
+        # tamanho dito vai junto, senao ela perguntava de novo.
+        _grande = " grande" if re.search(r"\bgrande\b", doc) else ""
+        doc = " ".join(w for w in doc.split() if w != "grande")
         casados_c = [(chave, canon) for chave, canon in _indice_de_produtos().items()
                      if len(chave) >= 6 and re.search(r"\b" + re.escape(chave) + r"\b", doc)]
         prod_c = {canon for chave, canon in casados_c
                   if not any(chave != outra and chave in outra for outra, _c in casados_c)}
         if len(prod_c) == 1:
-            return f"{m.group('qtd')} {prod_c.pop()}"
+            return f"{m.group('qtd')} {prod_c.pop()}{_grande}"
     if m and ultima_do_agente and re.search(r"\bquant\w*\b", ultima_do_agente.lower()):
         anterior = _forma_de_busca(ultima_do_agente)
         casados = [(chave, canon) for chave, canon in _indice_de_produtos().items()
@@ -2420,7 +2425,9 @@ def numeros_por_extenso(texto: str) -> str:
     return _RX_NUMERO_EXTENSO.sub(_troca, texto)
 
 
-_RX_UM_UMA = re.compile(r"\bum[a]?\b(?=\s+(?:(?:de|da|do)\s+)?([a-zà-ÿ]+))", re.IGNORECASE)
+# "uma coxinha im risoles de carne": o "im" e o "um" digitado errado; virava
+# um produto so e a coxinha sumia do resumo (teste de 27/10 18h04).
+_RX_UM_UMA = re.compile(r"\b(?:um[a]?|im)\b(?=\s+(?:(?:de|da|do)\s+)?([a-zà-ÿ]+))", re.IGNORECASE)
 
 
 def _extract_data_from_message(message: str, state: "ConversationState") -> dict:

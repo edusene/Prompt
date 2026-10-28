@@ -3248,7 +3248,7 @@ checa("27/10 congelado nao vira a porcao de 25 dos fritos (R$ 40 em vez de R$ 20
               for p in _p27), str(_p27))
 _fg27, facts.get = facts.get, lambda *a, **k: {"produtos": [p for p in _p27 if p["categoria"] == "Congelados"]}
 checa("27/10 texto do congelado traz os sabores do cardapio",
-      "• Salsicha" in app.texto_congelado() and "• Kibe" not in app.texto_congelado(), app.texto_congelado())
+      "• Enroladinho de Salsicha" in app.texto_congelado() and "• Kibe" not in app.texto_congelado(), app.texto_congelado())
 facts.get = _fg27
 checa("27/10 sem a copia interna: categoria por id vira Salgados Grandes",
       any(p["item"] == "Quibe" and p["categoria"] == "Salgados Grandes" for p in _p27), str(_p27))
@@ -3285,6 +3285,28 @@ app.trigger_human_handoff("55", [], "quantidade fora do multiplo de 25: ['20 Cox
 app._responder_direto, app.perform_transfer, facts.get = _rd27b, _pt27b, _fg27b
 checa("27/10 '10 mini empadinhas': o desvio oferece o kit com o preco do cardapio",
       "Kit Mini Empadinhas (30 unidades) por R$ 36,00" in _ho27b[0] and "Kit" not in _ho27b[1], str(_ho27b))
+_fg27c, facts.get = facts.get, lambda *a, **k: {"produtos": [
+    {"categoria": "Salgados Grandes", "item": "Mini Pizza (Brotinho)", "formato": "Unidade",
+     "preco": 12.0, "disponivel": True},
+    {"categoria": "Assados", "item": "Kit mini pizza (8und)", "formato": "Unidade",
+     "preco": 30.0, "disponivel": False}]}
+checa("27/10 'Mini pizza esta esgotado' com a Mini Pizza (Brotinho) a venda e inventado",
+      app._esgotado_inventado("Mini pizza está esgotado no momento.")
+      and not app._esgotado_inventado("O Kit mini pizza está esgotado."))
+checa("27/10 'mini pizza tem?' responde com o preco do cardapio",
+      app._tem_sim("mini pizza tem?") == "Temos sim! Mini Pizza (Brotinho): R$ 12,00 a unidade. 😊"
+      and app._tem_sim("quero mini pizza") == "", app._tem_sim("mini pizza tem?"))
+facts.get = _fg27c
+from agents.conversation import _extract_data_from_message as _exim, ConversationState as _CSim  # noqa: E402
+checa("27/10 'uma coxinha im risoles de carne uma bomba': a coxinha fica",
+      [i["name"] for i in _exim("queria uma coxinha im risoles de carne uma bomba pra retirada estou indo buscar ja",
+                                _CSim()).get("items") or []]
+      == ["Coxinha", "Rissole de Carne", "Bomba de Carne de Sol"])
+from agents.conversation import completar_pelo_contexto as _cpc27  # noqa: E402
+checa("27/10 '1' depois de 'quero risole grande de queijo e presunto' nao vira o de carne",
+      _cpc27("1", "Os salgados grandes disponíveis são:\n• Rissole de Carne\n• Rissole de Queijo e Presunto\n"
+                  "Você quer quantos rissole grandes de queijo e presunto?",
+             "quero risole grande de queijo e presunto") == "1 Rissole de Queijo e Presunto grande")
 checa("27/10 'Saltenha Frita' nao perde o 'frita' na limpeza do nome",
       cardapio.nome_sem_rotulo_de_formato("Saltenha Frita") == "Saltenha Frita")
 _kit27 = [{"name": "Kit Mini Saltenha Frita (10und)", "quantity": 20}]

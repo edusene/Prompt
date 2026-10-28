@@ -19,6 +19,10 @@ from agents.conversation import _extract_data_from_message, ConversationState
 _SABORES_CONGELADOS_DO_DONO = ("Coxinha", "Bolinha de Queijo", "Risole de Carne",
                                "Presunto e Queijo", "Kibe")
 _RX_CONGELADO = _re_mod.compile(r"\bcongelad\w*")
+# Nome curto do cardapio -> como a cliente pede. Com "Salsicha" na lista, ela
+# ouviu que enroladinho de salsicha congelado nao existia (teste de 27/10).
+_NOME_DO_SABOR_CONGELADO = {"salsicha": "Enroladinho de Salsicha",
+                            "rissoles carne": "Rissole de Carne"}
 TEXTO_CONGELADO_PARA_EQUIPE = ("Anotei seu pedido de congelados! ❄️ Vou passar para "
                                "nossa equipe confirmar e finalizar com você. "
                                "Um instante, por favor. 💛")
@@ -42,7 +46,8 @@ def texto_congelado() -> str:
     linhas = _congelados_do_cardapio()
     # O pacote do cardapio traz os sabores nas opcoes (27/10: a lista fixa do
     # dono so tinha 5 dos 10).
-    sabores = [str(s).strip() for p in linhas for s in p.get("opcoes") or []]
+    sabores = [_NOME_DO_SABOR_CONGELADO.get(facts.normalize(str(s)), str(s).strip())
+               for p in linhas for s in p.get("opcoes") or []]
     sabores += [_sem_congelado(p["item"]) for p in linhas
                 if not p.get("opcoes") and not cardapio.nome_e_so_formato(p["item"])
                 and facts.normalize(p["item"]) != facts.normalize(p["categoria"])]

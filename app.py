@@ -3524,6 +3524,27 @@ def _pergunta_da_quantidade(foco: str) -> str:
         "😊" if avulso else "Fazemos de 25 em 25 por sabor! 😊")
 
 
+def _tem_sim(texto: str) -> str:
+    """"Mini pizza tem?" -> "Temos sim! Mini Pizza (Brotinho): R$ 12,00 a unidade. 😊", ou ''.
+
+    So para pergunta de disponibilidade de produto vendido por unidade e
+    disponivel no cardapio.
+    """
+    if not _pergunta_de_disponibilidade(texto):
+        return ""
+    from agents.conversation import _produto_conhecido
+    nome = _produto_conhecido(facts.normalize(texto or ""))
+    try:
+        linha = next((p for p in facts.get()["produtos"] if nome and p["item"] == nome
+                      and p.get("disponivel", True) and p.get("preco")
+                      and facts.normalize(p.get("formato", "")) == "unidade"), None)
+    except Exception:
+        linha = None
+    if not linha:
+        return ""
+    return f"Temos sim! {linha['item']}: {cardapio._brl(float(linha['preco']))} a unidade. 😊"
+
+
 def _pergunta_de_disponibilidade(texto: str) -> bool:
     """"Vcs tem bolo de milho?": o cliente perguntou se TEM, nao recusou oferta.
 
@@ -5385,8 +5406,17 @@ def _esgotado_inventado(frase: str) -> bool:
     try:
         fora = [facts.normalize(p["item"]) for p in facts.get()["produtos"]
                 if not p.get("disponivel", True)]
+        # "Mini pizza esta esgotado": esgotado e o Kit mini pizza, e a Mini Pizza
+        # (Brotinho) esta a venda (teste de 27/10 20h25). Nome inteiro, sem o
+        # "(...)": cita o disponivel e nao cita o esgotado, e inventado.
+        def _nucleo(nome: str) -> str:
+            return facts.normalize(_re_mod.sub(r"\s*\(.*?\)", "", nome)).strip()
+        nucleos = [(_nucleo(p["item"]), p.get("disponivel", True)) for p in facts.get()["produtos"]]
     except Exception:
         return False
+    if (any(d and len(n) >= 6 and n in f for n, d in nucleos)
+            and not any(not d and len(n) >= 6 and n in f for n, d in nucleos)):
+        return True
     palavras = {w.rstrip("s") for n in fora for w in n.split()
                 if len(w) >= 5 and w not in _GENERICAS_DO_ITEM}
     return not any(_re_mod.search(r"\b" + _re_mod.escape(w), f) for w in palavras)
@@ -8451,7 +8481,7 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             _frases_es = [f for f in _RX_FIM_DE_FRASE.split(reply) if f.strip()]
             _sem_falso = [f for f in _frases_es if not _esgotado_inventado(f)]
             if len(_sem_falso) != len(_frases_es):
-                reply = " ".join(f.strip() for f in _sem_falso).strip() or (
+                reply = _tem_sim(_texto_cliente) or " ".join(f.strip() for f in _sem_falso).strip() or (
                     _proxima_pergunta_do_funil(_memoria) if _memoria.get("items")
                     else "Qual delícia você quer pedir? 😊")
                 print(f"[estoque] user={user} modelo disse esgotado de item disponivel; frase removida")
