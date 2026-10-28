@@ -5699,6 +5699,22 @@ def _regra_dos_25_serve(user: str) -> bool:
         _itens = []
     if _itens:
         return any(_item_de_festa(i) for i in _itens)
+    # "quero 25 pasteis" (falta o sabor) e "um cento de coxinha, kibe e
+    # enroladinho" (falta a divisao): a quantidade ja e de 25 em 25 e o aviso
+    # saia a toa (teste de 28/10 01h14).
+    try:
+        _qtds = [p.get("qtd") for p in _ext.get("sabores_pendentes") or []]
+        # Volume so conta com sabor dito: "um cento de salgados" ainda precisa
+        # do aviso dos 25 por sabor.
+        _resto = _re_mod.sub(r"\b(?:um|uma|meio|dois|duas|\d+)\s+centos?\b|\bcentos?\b", " ",
+                             _ultima_do_cliente(user).lower())
+        if _ext.get("volume_pendente") and (_extract_data_from_message(
+                "25 " + _resto, ConversationState(phone=user)).get("items")):
+            _qtds.append(_ext["volume_pendente"])
+        if _qtds and all(int(q or 0) > 0 and int(q) % 25 == 0 for q in _qtds):
+            return False
+    except Exception:
+        pass
     # Sem quantidade: "quero risole grande de queijo e presunto". O trecho com
     # "grande" e o doce saem; sobra o assunto de festa, se houver.
     _sem = " ".join(s for s in _re_mod.split(r",|;|\s+e\s+", t)
