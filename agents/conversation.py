@@ -2464,6 +2464,39 @@ def numeros_por_extenso(texto: str) -> str:
 # um produto so e a coxinha sumia do resumo (teste de 27/10 18h04).
 _RX_UM_UMA = re.compile(r"\b(?:um[a]?|im)\b(?=\s+(?:(?:de|da|do)\s+)?([a-zà-ÿ]+))", re.IGNORECASE)
 
+# "25 de cada: coxinha, quibe e croquete" e "coxinha, quibe e croquete, 25 de
+# cada": nenhum item saia e o modelo montava o pedido sozinho - o croquete
+# virou o grande, R$ 9 a unidade (teste de 28/10 00h25).
+_RX_DE_CADA_ANTES = re.compile(
+    r"\b(\d{1,3})\s+de\s+cada(?:\s+(?:sabor|um|uma))?\s*[:\-]?\s*([^.;!?\n]+)")
+_RX_DE_CADA_DEPOIS = re.compile(
+    r"(?:\b(?:quero|queria|manda|pode\s+ser|vou\s+querer)\s+)?([^.;!?\n:]+?),?\s+(\d{1,3})\s+de\s+cada\b")
+_RX_FIM_DA_LISTA = re.compile(r"\s+(?:pra|para|retir\w*|entreg\w*|amanh\w*|hoje|no\s+pix|pix|cart\w*)\b.*$")
+
+
+def _distribuir_de_cada(texto: str) -> str:
+    """'25 de cada: a, b e c' -> '25 a, 25 b e 25 c'."""
+    def _lista(n: str, bruto: str) -> str | None:
+        fim = _RX_FIM_DA_LISTA.search(bruto)
+        resto = bruto[fim.start():] if fim else ""
+        corpo = bruto[:fim.start()] if fim else bruto
+        termos = [p.strip() for p in re.split(r",|\s+e\s+", corpo) if p.strip()]
+        if len(termos) < 2 or any(len(p.split()) > 4 or any(c.isdigit() for c in p) for p in termos):
+            return None
+        return ", ".join(f"{n} {p}" for p in termos) + resto
+
+    m = _RX_DE_CADA_ANTES.search(texto)
+    if m:
+        novo = _lista(m.group(1), m.group(2))
+        if novo:
+            return texto[:m.start()] + novo + texto[m.end():]
+    m = _RX_DE_CADA_DEPOIS.search(texto)
+    if m:
+        novo = _lista(m.group(2), m.group(1))
+        if novo:
+            return texto[:m.start()] + "quero " + novo + texto[m.end():]
+    return texto
+
 
 def _extract_data_from_message(message: str, state: "ConversationState") -> dict:
     """Extrai dados estruturados da mensagem do cliente (nome, itens, modalidade, endereco, horario, pagamento).
@@ -2484,7 +2517,7 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
         extracted_cep = _cep_dito
     else:
         extracted_cep = ""
-    msg_lower = message.lower().strip()
+    msg_lower = _distribuir_de_cada(message.lower().strip())
     # "um centoQu frito misto de coxinha e bolinha" (teste do dono, 05/10):
     # letra a mais grudada no "cento" apagava o pedido inteiro.
     msg_lower = re.sub(r"\bcento(?!s\b)[a-z]{1,2}\b", "cento", msg_lower)

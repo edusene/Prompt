@@ -3364,6 +3364,13 @@ for _tband, _esp in [
     memoria_mod.merge(_mband, _dband, _dband, _tband)
     _vist = [(i["quantity"], i.get("sabor")) for i in _mband.get("items") or []]
     checa(f"27/10 bandejas de docinho com sabor proprio: {_tband!r}", _vist == _esp, str(_vist))
+for _tcada, _ecada in [
+        ("quero 25 de cada: coxinha, quibe e croquete. retirada amanhã 15h",
+         [("Coxinha", 25), ("Quibe", 25), ("Croquete", 25)]),
+        ("quero coxinha e quibe, 50 de cada", [("Coxinha", 50), ("Quibe", 50)]),
+        ("um cento, 50 de cada", [])]:
+    _vcada = [(i["name"], i["quantity"]) for i in _exim(_tcada, _CSim()).get("items") or []]
+    checa(f"28/10 'N de cada' distribui a quantidade: {_tcada!r}", _vcada == _ecada, str(_vcada))
 _esp_pix = cardapio.montar_resumo([{"name": "Coxinha", "quantity": 25, "price": 0.8}], 20, 0, 0, 20,
                                   modalidade="retirada", pagamento="pix", cliente="X", horario="15h")
 checa("27/10 retirada com Pix dito mostra 'Pgt: Pix', nao 'Balcão'",
