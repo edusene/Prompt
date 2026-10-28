@@ -2468,7 +2468,7 @@ _RX_UM_UMA = re.compile(r"\b(?:um[a]?|im)\b(?=\s+(?:(?:de|da|do)\s+)?([a-zà-ÿ]
 # cada": nenhum item saia e o modelo montava o pedido sozinho - o croquete
 # virou o grande, R$ 9 a unidade (teste de 28/10 00h25).
 _RX_DE_CADA_ANTES = re.compile(
-    r"\b(\d{1,3})\s+de\s+cada(?:\s+(?:sabor|um|uma))?\s*[:\-]?\s*([^.;!?\n]+)")
+    r"\b(\d{1,3})\s+de\s+cada(?:\s+(?:sabor|um|uma|assados?|fritos?))?\s*[:\-]?\s*([^.;!?\n]+)")
 _RX_DE_CADA_DEPOIS = re.compile(
     r"(?:\b(?:quero|queria|manda|pode\s+ser|vou\s+querer)\s+)?([^.;!?\n:]+?),?\s+(\d{1,3})\s+de\s+cada\b")
 _RX_FIM_DA_LISTA = re.compile(r"\s+(?:pra|para|retir\w*|entreg\w*|amanh\w*|hoje|no\s+pix|pix|cart\w*)\b.*$")
@@ -3027,7 +3027,16 @@ def sabor_do_doce(msg_lower: str, nome_doce: str) -> str:
     if re.search(r"\bmist[oa]s?\b|\bmeio a meio\b|\bos dois\b", t):
         return "Mista (brigadeiro e beijinho)"
     if re.search(r"\bbeijinhos?\b", t):
-        return "Beijinho" if bandeja else "Mista (brigadeiro e beijinho)"
+        # "um cento de beijinho": o cardapio de hoje tem Beijinho no cento, nao
+        # so na bandeja (28/10). Brigadeiro e beijinho juntos seguem mista.
+        try:
+            _opcoes = next((p.get("opcoes") or [] for p in _fx.get()["produtos"]
+                            if p.get("item") == nome_doce), [])
+        except Exception:
+            _opcoes = []
+        if (bandeja or "Beijinho" in _opcoes) and not re.search(r"\bbrigad", t):
+            return "Beijinho"
+        return "Mista (brigadeiro e beijinho)"
     return ""
 
 

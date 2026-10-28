@@ -3368,9 +3368,15 @@ for _tcada, _ecada in [
         ("quero 25 de cada: coxinha, quibe e croquete. retirada amanhã 15h",
          [("Coxinha", 25), ("Quibe", 25), ("Croquete", 25)]),
         ("quero coxinha e quibe, 50 de cada", [("Coxinha", 50), ("Quibe", 50)]),
+        ("25 de cada assado: esfirra e pão pizza", [("Esfirra de Carne", 25), ("Pao Pizza", 25)]),
         ("um cento, 50 de cada", [])]:
     _vcada = [(i["name"], i["quantity"]) for i in _exim(_tcada, _CSim()).get("items") or []]
     checa(f"28/10 'N de cada' distribui a quantidade: {_tcada!r}", _vcada == _ecada, str(_vcada))
+_dcento = _exim("quero meio cento de brigadeiro e um cento de beijinho", _CSim()).get("doces") or []
+checa("28/10 'um cento de beijinho' e Beijinho (o cardapio tem); brigadeiro e beijinho juntos, mista",
+      [d.get("sabor") for d in _dcento] == [None, "Beijinho"]
+      and [d.get("sabor") for d in _exim("teria como adcionar meio cento de brigadeiro e meio cento de beijinho", _CSim()).get("doces") or []]
+      == ["Mista (brigadeiro e beijinho)"], str(_dcento))
 _esp_pix = cardapio.montar_resumo([{"name": "Coxinha", "quantity": 25, "price": 0.8}], 20, 0, 0, 20,
                                   modalidade="retirada", pagamento="pix", cliente="X", horario="15h")
 checa("27/10 retirada com Pix dito mostra 'Pgt: Pix', nao 'Balcão'",
