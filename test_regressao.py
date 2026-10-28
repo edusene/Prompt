@@ -3297,7 +3297,36 @@ checa("27/10 'mini pizza tem?' responde com o preco do cardapio",
       app._tem_sim("mini pizza tem?") == "Temos sim! Mini Pizza (Brotinho): R$ 12,00 a unidade. 😊"
       and app._tem_sim("quero mini pizza") == "", app._tem_sim("mini pizza tem?"))
 facts.get = _fg27c
+checa("27/10 1 combo de 15 vai ao cardapio digital como 15 unidades (minimo do site)",
+      [(a["name"], a["quantity"]) for a in _cc27.traduzir([
+          {"name": "Combo 15 Empadinhas + Coca-Cola Lata", "quantity": 1},
+          {"name": "Combo 15 Canudinhos + Coca-Cola Lata", "quantity": 2},
+          {"name": "Combo 50 Salgadinhos Fritos + Refrigerante 1L", "quantity": 1}])[0]]
+      == [("Combo 15 Empadinhas + Coca-Cola Lata", 15), ("Combo 15 Canudinhos + Coca-Cola Lata", 30),
+          ("Combo 50 Salgadinhos Fritos + Refrigerante 1L", 50)])
+checa("27/10 bandeja de salgadinhos assados tem equivalente no cardapio digital",
+      _cc27.traduzir([{"name": "Salgadinhos Assados - Bandeja com 15", "quantity": 1}])[1] == [])
 from agents.conversation import _extract_data_from_message as _exim, ConversationState as _CSim  # noqa: E402
+checa("27/10 '1 coxinha de frango com catupiry' ja vem grande (nao pergunta o tamanho)",
+      _exim("quero 1 coxinha de frango com catupiry", _CSim()).get("items")[0].get("tamanho") == "lanche"
+      and not _exim("quero 3 coxinhas", _CSim()).get("items")[0].get("tamanho"))
+_mprep = memoria_mod._empty()
+_mprep["preparo_pendente"] = "assado"
+_mprep["items"] = [{"name": "Enroladinho de Salsicha", "quantity": 1, "price": 0.0, "tamanho": "lanche"}]
+memoria_mod._ajustar_ao_preparo(_mprep, "1 saltenha assada, 1 enroladinho de salsicha grande", [])
+checa("27/10 'saltenha assada' nao troca o enroladinho grande pelo assado de festa",
+      _mprep["items"][0]["name"] == "Enroladinho de Salsicha", str(_mprep["items"]))
+from agents.conversation import doces_citados as _dc27  # noqa: E402
+checa("27/10 'meio cento de brigadeiro, um cento de brigadeiro': os dois entram",
+      [(i["name"], i["quantity"]) for i in _dc27("quero meio cento de brigadeiro, um cento de brigadeiro")[0]]
+      == [("Meio Cento de Brigadeiros (50 un)", 1), ("Cento de Brigadeiros (100 un)", 1)])
+checa("27/10 'frango' escolhe 'Canudinho (FRANGO)' no combo (a pergunta voltava em laco)",
+      memoria_mod.casar_sabor("frango", ["Canudinho (FRANGO)", "Canudinho (CAMARÃO)"]) == "Canudinho (FRANGO)"
+      and memoria_mod.casar_sabor("fanta", ["Fanta laranja", "Fanta uva"]) == "")
+checa("27/10 '10 mini lanches' e o item Mini Lanches (nao some, nem vira regra dos 25)",
+      [i["name"] for i in _exim("quero 10 mini lanches", _CSim()).get("items") or []] == ["Mini Lanches"])
+checa("27/10 '1 kit mini pizza' e o kit (esgotado), nao a Mini Pizza avulsa",
+      [i["name"] for i in _exim("quero 1 kit mini pizza", _CSim()).get("items") or []] == ["Kit mini pizza (8und)"])
 checa("27/10 'uma coxinha im risoles de carne uma bomba': a coxinha fica",
       [i["name"] for i in _exim("queria uma coxinha im risoles de carne uma bomba pra retirada estou indo buscar ja",
                                 _CSim()).get("items") or []]

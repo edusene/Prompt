@@ -163,6 +163,12 @@ MAPA = {
         "categoria": "Assados", "nome_base44": "Kit Mini Empadinhas", "context": "unidade",
         "quantidade_teste": 1, "preco_esperado": 36.00,
     },
+    # Sem esta entrada a bandeja ia para a equipe: "sem equivalente" (27/10).
+    "Salgadinhos Assados - Bandeja com 15": {
+        "categoria": "Assados", "nome_base44": "Salgadinhos Assados - Bandeja com 15",
+        "context": "unidade", "sabor_fixo": "Esfirras (carne) e Pão pizza (queijo e presunto)",
+        "quantidade_teste": 1, "preco_esperado": 18.00,
+    },
     "Kit Empadinhas (15 unid)": {
         "categoria": "Assados", "nome_base44": "Kit Empadinhas (15 unid)", "context": "unidade",
         "quantidade_teste": 1, "preco_esperado": 18.00,
@@ -205,7 +211,8 @@ MAPA = {
         "quantidade_teste": 1, "preco_esperado": 65.00,
     },
     # Cadastrado no cardapio digital (com sabores) - antes so existia o Tuchaua.
-    # Combos (15/10): o cardapio digital vende por unidade. Os que pedem sabor
+    # Combos (15/10): o cardapio digital vende por unidade. Os de 15 e 50 (27/10)
+    # contam as unidades de dentro: 1 combo vai como 15 (ou 50), minimo do site. Os que pedem sabor
     # recebem a pergunta "Qual sabor do combo" pelas opcoes do proprio cardapio.
     "Combo Mix Camarão": {
         "categoria": "Combos", "nome_base44": "Combo Mix Camarão", "context": "unidade",
@@ -218,15 +225,15 @@ MAPA = {
     "Combo 15 Empadinhas + Coca-Cola Lata": {
         "categoria": "Combos", "nome_base44": "Combo 15 Empadinhas + Coca-Cola Lata",
         "context": "unidade", "sabor_fixo": "Empadinha (frango)",
-        "quantidade_teste": 1, "preco_esperado": 24.00,
+        "fator": 15, "quantidade_teste": 15, "preco_esperado": 24.00,
     },
     "Combo 15 Canudinhos + Coca-Cola Lata": {
         "categoria": "Combos", "nome_base44": "Combo 15 Canudinhos + Coca-Cola Lata",
-        "context": "unidade", "quantidade_teste": 1, "preco_esperado": 24.00,
+        "context": "unidade", "fator": 15, "quantidade_teste": 15, "preco_esperado": 28.00,
     },
     "Combo 50 Salgadinhos Fritos + Refrigerante 1L": {
         "categoria": "Combos", "nome_base44": "Combo 50 Salgadinhos Fritos + Refrigerante 1L",
-        "context": "unidade", "quantidade_teste": 1, "preco_esperado": 50.00,
+        "context": "unidade", "fator": 50, "quantidade_teste": 50, "preco_esperado": 50.00,
     },
     "Refrigerante 2 Litros": {
         "categoria": "Bebidas", "nome_base44": "Refrigerante 2 L", "context": "unidade",

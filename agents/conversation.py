@@ -322,6 +322,15 @@ _PRODUTOS_GRANDES = {
     "kit mini saltenha": "Kit Mini Saltenha Frita (10und)",
     "kit de mini saltenha": "Kit Mini Saltenha Frita (10und)",
     "kit mini saltenha frita": "Kit Mini Saltenha Frita (10und)",
+    # "1 kit mini pizza" (esgotado) virava 1 Mini Pizza avulsa de R$ 12 sem
+    # aviso (varredura de 27/10).
+    "kit mini pizza": "Kit mini pizza (8und)",
+    "kit de mini pizza": "Kit mini pizza (8und)",
+    "kit mini pizzas": "Kit mini pizza (8und)",
+    # "10 mini lanches" (esgotado) nao virava item, e o modelo oferecia "25 mini
+    # lanches" pela regra da festa (varredura de 27/10).
+    "mini lanche": "Mini Lanches",
+    "mini lanches": "Mini Lanches",
     "panqueca": "Panqueca de Carne",
     "panqueca de carne": "Panqueca de Carne",
     "panqueca de frango": "Panqueca de Frango",
@@ -2240,23 +2249,36 @@ def doces_citados(msg_lower: str) -> tuple[list[dict], list[dict]]:
     fora = False
     # O formato e o do trecho em que o doce aparece: em "cento e meio de
     # coxinha e brigadeiro" o "meio" e da coxinha.
-    trecho = next((s for s in re.split(r",|;|\s+e\s+", t) if _RX_DOCE.search(s)), t)
-    formato, qtd = formato_do_doce(trecho)
+    # Cada trecho com doce e um pedido: "meio cento de brigadeiro, um cento de
+    # brigadeiro" perdia o cento (varredura de 27/10).
+    trechos = [s for s in re.split(r",|;|\s+e\s+", t) if _RX_DOCE.search(s)] or [t]
+    lidos = [formato_do_doce(s) for s in trechos]
     # "meio cento de brigadeiro e meio cento de beijinho" sao 100 docinhos: o
     # cento misto (beijinho puro so na bandeja). Virava UM meio cento (teste de
     # 22/10).
     if (re.search(r"\bmeio\s+cento\s+(?:de\s+|do\s+)?brigad", t)
             and re.search(r"\bmeio\s+cento\s+(?:de\s+|do\s+)?beijinh", t)):
-        formato, qtd = DOCE_CENTO, 1
-    if formato and not fora:
+        lidos = [(DOCE_CENTO, 1)]
+    formato, qtd = lidos[0]
+    itens: list[dict] = []
+    for formato_i, qtd_i in lidos:
+        if not formato_i or fora:
+            continue
         try:
             import facts
-            oficial = facts.resolve_unit_price(formato, qtd)
+            oficial = facts.resolve_unit_price(formato_i, qtd_i)
         except Exception:
             oficial = None
-        if oficial:
-            return [{"name": formato, "quantity": qtd,
-                     "price": oficial["preco_unitario"]}], []
+        if not oficial:
+            continue
+        igual = next((i for i in itens if i["name"] == formato_i), None)
+        if igual:
+            igual["quantity"] += qtd_i
+        else:
+            itens.append({"name": formato_i, "quantity": qtd_i,
+                          "price": oficial["preco_unitario"]})
+    if itens:
+        return itens, []
     pendente = {"qtd": max(qtd, 1), "termo": "docinho", "opcoes": opcoes_de_doce()}
     if fora:
         pendente["em_falta"] = "Beijinho"
@@ -2775,7 +2797,10 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
                 }
                 # "3 coxinha grande": o tamanho ja veio dito (teste de 14/10 -
                 # ela perguntou "grande ou mini?" duas vezes).
-                if qty < 25 and re.search(r"\b(?:grandes?|lanche)\b", product_name):
+                # "1 coxinha de frango com catupiry" so existe grande (27/10).
+                if qty < 25 and (re.search(r"\b(?:grandes?|lanche)\b", product_name)
+                                 or (matched_name == "Coxinha" and re.search(
+                                     re.escape(product_name) + r"\s+com\s+catupiry", msg_lower))):
                     _novo_item["tamanho"] = "lanche"
                     _novo_item["price"] = 0.0
                 items_found.append(_novo_item)

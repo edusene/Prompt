@@ -454,7 +454,11 @@ def _ajustar_ao_preparo(memoria: dict, texto: str, mudancas: list) -> None:
     for item in memoria.get("items") or []:
         if not isinstance(item, dict) or _sem_acento(str(item.get("name", ""))) not in do_outro:
             continue
-        raiz = _sem_acento(str(item["name"])).split()[0]
+        # "1 saltenha assada, 1 enroladinho de salsicha grande": o grande e de
+        # balcao, nao tem preparo - virava o assado de festa (27/10).
+        if item.get("tamanho") == "lanche":
+            continue
+        raiz =_sem_acento(str(item["name"])).split()[0]
         par = [n for n in do_preparo if _sem_acento(n).split()[0] == raiz]
         if len(par) != 1:
             continue
@@ -2866,7 +2870,17 @@ def casar_sabor(texto: str, opcoes: list[str]) -> str:
         palavras = _sem_acento(o).split()
         if palavras and f" {palavras[0]} " in t and (("zero" in palavras) == zero):
             candidatas.append(o)
-    return candidatas[0] if len(candidatas) == 1 else ""
+    if len(candidatas) == 1:
+        return candidatas[0]
+    if candidatas:
+        return ""
+    # "frango" para "Canudinho (FRANGO)" ou "Canudinho (CAMARÃO)": a palavra que
+    # so uma opcao tem. Sem isto a pergunta do combo voltava em laco (27/10).
+    palavras_de = {o: set(_re.findall(r"[a-z0-9]+", _sem_acento(o))) for o in opcoes}
+    ditas = set(_re.findall(r"[a-z0-9]+", t))
+    unicas = [o for o in opcoes
+              if (palavras_de[o] - set().union(*(p for x, p in palavras_de.items() if x != o))) & ditas]
+    return unicas[0] if len(unicas) == 1 else ""
 
 
 def aplicar_sabor_de_bebida(memoria: dict, texto: str) -> list[str]:
