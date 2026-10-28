@@ -7638,7 +7638,8 @@ def _handle_flush(user: str, items: list[dict]) -> None:
         _pedido_saiu = False
         # Forma de pagamento ANTES do envio: registrar_pedido_enviado limpa a
         # ficha, e a mensagem de fechamento depende de saber se foi Pix.
-        _pagamento_do_pedido = (_memoria.get("payment_method") or "").strip().lower()
+        _pagamento_do_pedido = ("" if _memoria.get("modality") == "retirada"
+                                else (_memoria.get("payment_method") or "").strip().lower())
         _total_enviado = 0.0
 
         # True quando calculate_order rodou neste turno. Quando ela rodou, o
@@ -7875,10 +7876,10 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             # disparar numa retirada e a Sandrinha perguntar troco quando nao
             # devia — foi o que quebrou o segundo teste do dono.
             if _retirada:
-                # O que a cliente disse (ficha) vale: "retirada no pix" saia sem
-                # forma de pagamento, o Pix nao era retido e a comanda ia direto
-                # para a fabrica, com a chave Pix ja enviada (teste de 28/10 14h32).
-                kwargs["payment_method"] = _memoria.get("payment_method", "")
+                # Retirada paga no balcao, mesmo no Pix (Eduardo, 28/10): sem
+                # forma de pagamento a API nao retem o pedido. A forma dita pela
+                # cliente vai na observacao, para o balcao saber.
+                kwargs["payment_method"] = ""
             else:
                 kwargs["payment_method"] = kwargs.get("payment_method") or _memoria.get("payment_method", "")
             # 'cartao_a_definir' era o estado interno de "falta saber se e
@@ -7955,10 +7956,15 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                         ),
                     }, ensure_ascii=False)
 
+            _obs = kwargs.get("notes", "")
+            if _retirada and _memoria.get("payment_method"):
+                _forma = {"pix": "Pix", "dinheiro": "dinheiro"}.get(
+                    _memoria["payment_method"], "cartao")
+                _obs = " | ".join(x for x in (f"Paga no balcao: {_forma}", _obs) if x)
             kwargs["notes"] = cardapio.montar_notes(
                 _memoria.get("troco_para", ""),
                 float(_memoria.get("total") or kwargs.get("total") or 0),
-                kwargs.get("notes", ""),
+                _obs,
                 data_iso=_memoria.get("data_iso", ""),
                 horario=_memoria.get("horario", ""),
             )
@@ -8233,7 +8239,8 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             # Lido AGORA: o envio bem sucedido chama registrar_pedido_enviado,
             # que fecha a ficha — depois dele o pagamento ja nao esta la, e a
             # mensagem de Pix saia como a de cartao.
-            _pagamento_antes = _memoria.get("payment_method", "")
+            _pagamento_antes = ("" if _memoria.get("modality") == "retirada"
+                                else _memoria.get("payment_method", ""))
             _total_antes = _total_ficha
 
             if _tentou_enviar:
