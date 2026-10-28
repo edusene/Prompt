@@ -3476,6 +3476,14 @@ checa("28/10 cliente que pergunta de congelado continua recebendo congelado",
 checa("28/10 'EITA ESTA MUITO CARO' e reclamacao de preco; 'nao e caro' nao",
       bool(app._RX_DESCONTO.search("eita esta muito caro quero nao"))
       and not app._RX_DESCONTO.search("nao e caro"))
+_ch28 = _extract_data_from_message("quero 1 kit mini churros", ConversationState(phone="")).get("items") or [{}]
+checa("28/10 '1 kit mini churros' sao 25 churros (R$ 20), nao 1 churros",
+      _ch28[0].get("name") == "Churros" and _ch28[0].get("quantity") == 25, str(_ch28))
+_ep28 = _extract_data_from_message("quero 25 empada de frango", ConversationState(phone="")).get("items") or [{}]
+checa("28/10 '25 empada de frango' tem o preco do cardapio, nao o da tabela fixa",
+      _ep28[0].get("name") == "Empadinha de Frango"
+      and _ep28[0].get("price") == (facts.resolve_unit_price("Empadinha de Frango", 25) or {}).get("preco_unitario"),
+      str(_ep28))
 import congelados as _cong28
 _oferta28 = "Sim, trabalhamos sim! Mini Salgados Congelados - R$ 40 o cento"
 checa("28/10 congelado: '1 cento de salgado congelado' e o sabor solto depois da oferta sao pedido",

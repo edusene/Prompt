@@ -2944,13 +2944,25 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
         for _it in items_found:
             if _it["name"] == "Empada de Frango" and int(_it.get("quantity") or 0) >= 25:
                 _it["name"] = "Empadinha de Frango"
-                _it["price"] = _PRECO_UNITARIO.get("Empadinha de Frango", _it["price"])
+                # Preco do cardapio de hoje: a tabela fixa dizia R$ 1,20 e o
+                # cardapio cobra R$ 35 a porcao de 25 (varredura de 28/10).
+                try:
+                    import facts as _fx
+                    _it["price"] = (_fx.resolve_unit_price("Empadinha de Frango", _it["quantity"])
+                                    or {}).get("preco_unitario") or _it["price"]
+                except Exception:
+                    _it["price"] = _PRECO_UNITARIO.get("Empadinha de Frango", _it["price"])
         # "20 mini saltenhas" sao 20 unidades = 2 kits de 10, e nao 20 kits
         # (R$ 400 no lugar de R$ 40). Com "kit" na mensagem, ja e o numero de kits.
         for _it in items_found:
             if (_it["name"] == "Kit Mini Saltenha Frita (10und)" and "kit" not in msg_lower
                     and int(_it.get("quantity") or 0) >= 10):
                 _it["quantity"] = -(-int(_it["quantity"]) // 10)
+            # "1 kit mini churros" e o Kit Mini Churros (25und), R$ 20 - o mesmo
+            # que 25 churros do lote de fritos. Virava 1 churros e travava (28/10).
+            if (_it["name"] == "Churros" and re.search(r"\bkits?\b", msg_lower)
+                    and 0 < int(_it.get("quantity") or 0) < 25):
+                _it["quantity"] = int(_it["quantity"]) * 25
         _somados_msg: list = []
         for _it in items_found:
             _igual = next((x for x in _somados_msg if x["name"] == _it["name"]
