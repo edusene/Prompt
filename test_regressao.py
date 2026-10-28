@@ -3484,6 +3484,19 @@ checa("28/10 '25 empada de frango' tem o preco do cardapio, nao o da tabela fixa
       _ep28[0].get("name") == "Empadinha de Frango"
       and _ep28[0].get("price") == (facts.resolve_unit_price("Empadinha de Frango", 25) or {}).get("preco_unitario"),
       str(_ep28))
+_mixq28 = ("Para os 2 combos mix: temos o Combo Mix Camarão (R$ 100,00) e o Combo Mix Frango "
+           "(R$ 100,00). Qual você quer? Pode ser um de cada também! 😊")
+checa("28/10 resposta a pergunta do combo mix: 'um de cada' e 'frango'",
+      _ctx28("um de cada", _mixq28) == "1 combo mix frango e 1 combo mix camarao"
+      and _ctx28("frango", _mixq28) == "2 combo mix frango")
+import cardapio_fonte as _cf28  # noqa: E402
+_it28 = _cf28._itens_do_cardapio({"MenuItem": [
+    {"name": "Combo Mix Frango", "price": 100, "category": "combos", "available": True,
+     "requires_flavor_selection": False, "flavor_options": ["Canudinho (FRANGO)", "Canudinho (CAMARÃO)"]},
+    {"name": "Refrigerante Lata", "price": 7, "category": "bebidas", "available": True,
+     "requires_flavor_selection": True, "flavor_options": ["Coca"]}], "InternalMenuItem": []})
+checa("28/10 sabor sem 'requer selecao' no cadastro nao vira pergunta; com, continua",
+      _it28[0]["flavor_options"] == [] and _it28[1]["flavor_options"] == ["Coca"], str(_it28))
 import congelados as _cong28
 _oferta28 = "Sim, trabalhamos sim! Mini Salgados Congelados - R$ 40 o cento"
 checa("28/10 congelado: '1 cento de salgado congelado' e o sabor solto depois da oferta sao pedido",

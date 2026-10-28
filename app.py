@@ -889,6 +889,27 @@ def _pergunta_do_beijinho(texto: str, ext: dict) -> str:
             f"{_preco('Bandeja de Brigadeiros (16 un)')}. Qual você prefere? 😊")
 
 
+def _pergunta_do_combo_mix(texto: str) -> str:
+    """"2 combos mix" sem dizer qual: ela perguntava "frito ou assado?" (conversa
+    de 23/10, revista em 28/10). Ha dois, Frango e Camarao; a resposta vira
+    item em agents.conversation.completar_pelo_contexto."""
+    t = facts.normalize(texto or "")
+    m = _re_mod.search(r"\b(?:(\d+|um|uma|dois|duas)\s+)?combos?\s+(?:de\s+)?mix\b", t)
+    if not m or _re_mod.search(r"\bfrango|\bcamar", t):
+        return ""
+    try:
+        mix = [p for p in facts.get()["produtos"] if p.get("disponivel", True)
+               and facts.normalize(p["item"]).startswith("combo mix")]
+    except Exception:
+        return ""
+    if len(mix) != 2:
+        return ""
+    qtd = {"um": 1, "uma": 1, "dois": 2, "duas": 2}.get(m.group(1) or "", None) or int(m.group(1) or 1)
+    lista = " e o ".join(f"{p['item'].strip()} ({cardapio._brl(p['preco'])})" for p in mix)
+    return (f"Para {'o combo mix' if qtd == 1 else f'os {qtd} combos mix'}: temos o {lista}. "
+            f"Qual você quer?{' Pode ser um de cada também!' if qtd == 2 else ''} 😊")
+
+
 def _faq_em_falta(t: str) -> str:
     """"Tem bolo de milho?" com o item desativado no cardapio: diz que esta em
     falta, com o nome do cardapio, sem passar pelo modelo (26/10)."""
@@ -1072,6 +1093,9 @@ def _resposta_de_faq(texto: str, memoria: dict | None = None) -> tuple[str, str,
     t = facts.normalize(texto or "")
     if not t:
         return None
+    _mix = _pergunta_do_combo_mix(texto)
+    if _mix:
+        return "combo mix", _mix, False
     sem_exemplo = _re_mod.sub(r"\(\s*(?:ex|exemplo)\b[^)]*\)?", " ", (texto or "").lower())
     try:
         # Docinho com beijinho continua na resposta do beijinho (fixa): solto
@@ -6584,6 +6608,11 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                     _itens_ctx = _ext_ctx["doces"]
                     _extracted["doces"] = _itens_ctx
                     _extracted_fresh["doces"] = _itens_ctx
+                # "um de cada" depois de "Para os 2 combos mix: ..." (28/10).
+                elif _ext_ctx.get("combos") and not _extracted_fresh.get("combos"):
+                    _itens_ctx = _ext_ctx["combos"]
+                    _extracted["combos"] = _itens_ctx
+                    _extracted_fresh["combos"] = _itens_ctx
                     print(f"[memoria] {user}: item pelo contexto "
                           f"{text_only!r} -> {_texto_ctx!r}")
 

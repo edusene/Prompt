@@ -338,6 +338,13 @@ def opcoes_do_item(nome: str) -> list[str]:
         return []
     if destino.get("sabor_fixo"):
         return []
+    if destino.get("categoria") == "Combos":
+        # Combo sem "requer selecao" no cadastro (cardapio_fonte deixa sem
+        # opcoes): o Combo Mix Frango perguntava canudinho de frango ou de
+        # camarao e travava o pedido (28/10). O calculateOrder aceita sem sabor.
+        _linha = _linha_da_planilha(nome)
+        if _linha is not None and not _linha.get("opcoes"):
+            return []
     try:
         import cardapio
         return cardapio.opcoes_de_sabor(destino["nome_base44"])

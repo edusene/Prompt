@@ -1452,6 +1452,17 @@ def completar_pelo_contexto(texto: str, ultima_do_agente: str, ultima_do_cliente
         if len(_ops) == 1 and not _nega and re.search(
                 r"\b(?:sim|pode|ok|isso|quero|beleza|blz|claro|fechado)\b", t):
             return f"{_ops[0]} kit de mini saltenha"
+    if "combos mix:" in _ult or "o combo mix:" in _ult:
+        _qm = re.search(r"os (\d+) combos mix", _ult)
+        _q = int(_qm.group(1)) if _qm else 1
+        if re.search(r"\bum de cada\b|\b1 de cada\b|\bos dois\b", t) and _q == 2:
+            return "1 combo mix frango e 1 combo mix camarao"
+        _qn = re.search(r"\b(\d{1,2})\b", t)
+        _q = int(_qn.group(1)) if _qn else _q
+        if re.search(r"\bfrango\b", t) and not re.search(r"\bcamar", t):
+            return f"{_q} combo mix frango"
+        if re.search(r"\bcamar", t) and not re.search(r"\bfrango\b", t):
+            return f"{_q} combo mix camarao"
     if "não temos só beijinho" in _ult:
         _fmt = re.search(r"no (meio cento|cento|bandeja)", _ult)
         _fmt = _fmt.group(1) if _fmt else "meio cento"

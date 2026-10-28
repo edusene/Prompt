@@ -493,8 +493,12 @@ def _itens_do_cardapio(b: dict) -> list[dict]:
         if not item.get("category"):
             item["category"] = categorias.get(pub.get("category")) or pub.get("category")
         esgotados = {_n(str(x)) for x in pub.get("unavailable_flavors") or []}
-        item["flavor_options"] = [o for o in pub.get("flavor_options") or []
-                                  if _n(str(o)) not in esgotados]
+        # Sabor sem "requer selecao" e resto de cadastro: o Combo Mix Frango
+        # tem canudinho de frango E de camarao nas opcoes, e ela perguntava
+        # qual (28/10). O site nao pergunta; o agente tambem nao.
+        _opcoes = (pub.get("flavor_options") or []
+                   if pub.get("requires_flavor_selection") is not False else [])
+        item["flavor_options"] = [o for o in _opcoes if _n(str(o)) not in esgotados]
         itens.append(item)
     return itens
 
