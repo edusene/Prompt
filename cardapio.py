@@ -571,7 +571,8 @@ def _balcao_em_quantidade_de_festa(items: list[dict]) -> list[str]:
             qtd = int(float(item.get("quantity", 0) or 0))
         except (ValueError, TypeError):
             continue
-        if qtd < _LOTE_DE_FESTA:
+        # A cliente ja respondeu que quer o grande (conversation_memory.pendencia_de_balcao).
+        if qtd < _LOTE_DE_FESTA or item.get("balcao_ok"):
             continue
         # So vale para nome que e EXCLUSIVO do balcao ("Coxinha de Frango com
         # Catupiry"). Nome que tambem e sabor de pacote ja foi decidido pela

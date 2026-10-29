@@ -2139,6 +2139,8 @@ def upsell_pendente(memoria: dict, agora=None) -> str:
         return ""
     if pendencia_de_indisponivel(memoria) or pendencia_de_sabor(memoria):
         return ""
+    if _balcao_em_festa(memoria):
+        return ""
     for item in itens:
         if not isinstance(item, dict):
             continue
@@ -2632,6 +2634,9 @@ def etapa_coberta(memoria: dict, reply: str, agora=None) -> bool:
             return False
         return all(_sem_acento(a["sabor"]).split()[0] in texto for a in detalhe)
 
+    if _balcao_em_festa(memoria):
+        return "salgado grande" in texto and "voce quer as" in texto
+
     # Mesma ordem de pergunta_bloqueante: o sabor em falta antes do resto.
     # "Disponivel" junto do nome do item e o contrario do aviso: nao cobre.
     fora = itens_indisponiveis(memoria)
@@ -2950,6 +2955,67 @@ _MARCAS_DE_REFRI = {"coca": "A Coca-Cola", "fanta": "A Fanta", "pepsi": "A Pepsi
                     "guarana": "O Guaraná Antártica"}
 
 
+def _balcao_em_festa(memoria: dict) -> list[tuple[dict, str]]:
+    """[(item, versao mini)] do salgado grande de balcao pedido em quantidade
+    de festa, ainda sem escolha. A trava do cardapio recusava o calculo e o
+    "sim" da cliente nao tinha onde entrar: 45 saltenhas ficavam em laco sem
+    resumo (ao vivo, 29/10)."""
+    try:
+        import cardapio
+        import facts
+        produtos = facts.get()["produtos"]
+    except Exception:
+        return []
+    saida = []
+    for item in memoria.get("items") or []:
+        if not isinstance(item, dict) or item.get("balcao_ok"):
+            continue
+        if not cardapio._balcao_em_quantidade_de_festa([item]):
+            continue
+        palavra = (_sem_acento(str(item.get("name", ""))).split() or [""])[0]
+        mini = next((p["item"] for p in produtos if p.get("disponivel", True)
+                     and "mini" in _sem_acento(p["item"]).split()
+                     and palavra in _sem_acento(p["item"]).split()), "")
+        saida.append((item, mini))
+    return saida
+
+
+def pendencia_de_balcao(memoria: dict) -> str:
+    """"A Saltenha Assada e R$ 9,00 a unidade (salgado grande). Voce quer as
+    45 assim ou o Kit Mini Saltenha Frita (10und) (R$ 20,00)?" (Eduardo, 29/10)."""
+    pend = _balcao_em_festa(memoria)
+    if not pend:
+        return ""
+    item, mini = pend[0]
+    try:
+        import facts
+        preco = facts.resolve_unit_price(item["name"], int(item.get("quantity") or 0))["preco_unitario"]
+        preco_mini = facts.resolve_unit_price(mini, 1)["preco_unitario"] if mini else 0
+    except Exception:
+        return ""
+    alternativa = (f"o {mini} ({_brl(preco_mini)})" if mini and preco_mini
+                   else "salgado de festa (lote de 25)")
+    return (f"A {item['name']} é {_brl(preco)} a unidade (salgado grande). Você quer as "
+            f"{item.get('quantity')} assim ou {alternativa}? 😊")
+
+
+def aplicar_escolha_de_balcao(memoria: dict, texto: str) -> list[str]:
+    """Grava a resposta da pendencia_de_balcao. A versao mini vira kits
+    ("(10und)": 45 -> 5 kits); "assim", "grande", "sim" mantem o balcao."""
+    t = _sem_acento(texto)
+    mudancas = []
+    for item, mini in _balcao_em_festa(memoria):
+        if mini and _re.search(r"\b(?:mini|kits?|frit[ao]s?)\b", t):
+            n = _re.search(r"\((\d+)\s*und\)", mini, _re.I)
+            qtd = int(item.get("quantity") or 0)
+            item.update(name=mini, quantity=-(-qtd // int(n.group(1))) if n else qtd, price=0.0)
+            mudancas.append(f"{qtd} un -> {item['quantity']} {mini}")
+        elif _re.search(r"\b(?:assim|assad[ao]s?|grandes?|essas?|mesmo|sim|pode|isso|quero)\b", t):
+            item["balcao_ok"] = True
+            mudancas.append(f"{item.get('name')} {item.get('quantity')} un -> balcao confirmado")
+    return mudancas
+
+
 def pergunta_bloqueante(memoria: dict, agora=None) -> str:
     """A pergunta que TEM de sair antes de o funil andar. '' quando nao ha.
 
@@ -2961,6 +3027,10 @@ def pergunta_bloqueante(memoria: dict, agora=None) -> str:
     detalhe = _itens_ambiguos_detalhe(memoria)
     if detalhe:
         return pergunta_de_tamanho(detalhe)
+
+    balcao = pendencia_de_balcao(memoria)
+    if balcao:
+        return balcao
 
     # O sabor em falta vem ANTES da pergunta do refrigerante: com as duas
     # abertas, a do refrigerante cobria a etapa e o que o modelo dissesse do

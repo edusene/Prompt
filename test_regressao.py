@@ -3559,6 +3559,25 @@ try:
             for n in ("Kit mini quiche de frango", "Mini quiches (FRANGO)", "Quiche de Frango")]
 finally:
     facts.get = _orig_get29
+_fake_s29 = {"produtos": [
+    {"categoria": "Salgados Grandes", "item": "Saltenha Assada", "formato": "Unidade", "preco": 9.0, "disponivel": True},
+    {"categoria": "Kits", "item": "Kit Mini Saltenha Frita (10und)", "formato": "Unidade", "preco": 20.0, "disponivel": True}]}
+facts.get = lambda: dict(_orig_get29(), **_fake_s29)
+try:
+    _ms29a = {"items": [{"name": "Saltenha Assada", "quantity": 45, "price": 9.0}]}
+    _ms29b = {"items": [{"name": "Saltenha Assada", "quantity": 45, "price": 9.0}]}
+    _pq29 = memoria_mod.pergunta_bloqueante(_ms29a)
+    memoria_mod.aplicar_escolha_de_balcao(_ms29a, "o kit mini")
+    memoria_mod.aplicar_escolha_de_balcao(_ms29b, "assim mesmo")
+    _trava29 = cardapio._balcao_em_quantidade_de_festa(_ms29b["items"])
+    _fim29 = memoria_mod.pergunta_bloqueante(_ms29b)
+finally:
+    facts.get = _orig_get29
+checa("29/10 45 saltenhas: pergunta grande ou kit mini; 'kit mini' vira 5 kits, 'assim' libera a trava",
+      "Você quer as 45 assim ou o Kit Mini Saltenha Frita (10und) (R$ 20,00)?" in _pq29
+      and _ms29a["items"][0]["name"] == "Kit Mini Saltenha Frita (10und)" and _ms29a["items"][0]["quantity"] == 5
+      and _ms29b["items"][0].get("balcao_ok") and not _trava29 and "salgado grande" not in _fim29,
+      f"{_pq29!r} {_ms29a} {_ms29b} {_trava29} {_fim29!r}")
 checa("29/10 'mini quiche de frango' e o kit de mini, nao a Quiche de Frango de R$ 12",
       _q29 == ["Mini quiches (Kit 25und)", "Mini quiches (Kit 25und)", "Quiche de Frango"], _q29)
 from agents.conversation import completar_pelo_contexto as _cpc29

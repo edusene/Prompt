@@ -7468,6 +7468,12 @@ def _handle_flush(user: str, items: list[dict]) -> None:
         # mesmo"). Tem de entrar na FICHA: enquanto a escolha ficava so no
         # texto, a duvida voltava a cada mensagem e o pedido ia para a fila do
         # humano ja resolvido (23/09 15:41).
+        # Resposta a "Voce quer as 45 assim ou o Kit Mini Saltenha...?" (29/10).
+        if "(salgado grande)" in (last_assistant_text or ""):
+            _balcao = conversation_memory.aplicar_escolha_de_balcao(_memoria, text_only)
+            if _balcao:
+                conversation_memory.save(user, _memoria)
+                print(f"[memoria] {user}: escolha do balcao -> {'; '.join(_balcao)}")
         _minis_ajustados = []
         if (conversation_memory.pendencia_de_item(_memoria)
                 and _escolheu_pacote(text_only)):
@@ -8077,6 +8083,10 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             _itens = _separar_sabor_do_nome(_itens, _memoria.get("items") or [])
             _itens = _quantidade_da_ficha(_itens, _memoria)
             _itens = _com_sabor_da_ficha(_itens, _memoria)
+            _balcao_ok = {facts.normalize(str(i.get("name"))) for i in _memoria.get("items") or []
+                          if isinstance(i, dict) and i.get("balcao_ok")}
+            _itens = [dict(i, balcao_ok=True) if facts.normalize(str(i.get("name"))) in _balcao_ok
+                      else i for i in _itens]
 
             resultado = _calculate_order_handler(
                 _itens, bairro,
