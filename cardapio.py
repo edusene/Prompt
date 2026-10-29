@@ -859,6 +859,14 @@ def _resolver_frete(bairro: str) -> tuple[float, str, bool]:
     return taxa, encontrado["bairro"], False
 
 
+def _re_ajustavel(motivo: str) -> bool:
+    """Recusa do calculateOrder que a cliente resolve: antecedencia ou quantidade."""
+    m = (motivo or "").lower()
+    return any(k in m for k in ("sob encomenda", "antecedência", "antecedencia",
+                                "múltipla de", "multipla de", "quantidade mínima",
+                                "quantidade minima"))
+
+
 def calcular_pedido(items: list[dict], bairro: str = "", modalidade: str = "",
                     dia: str = "", horario: str = "", pagamento: str = "",
                     cliente: str = "", endereco: str = "", troco: str = "",
@@ -1017,6 +1025,16 @@ def calcular_pedido(items: list[dict], bairro: str = "", modalidade: str = "",
     payload = {"items": items_api}
     if bairro_oficial:
         payload["bairro"] = bairro_oficial
+    # Item sob encomenda (Mini quiches, Kit Mini Lanches) e recusado sem o dia:
+    # "precisa de 1 dia de antecedencia" mesmo num pedido para depois (29/10).
+    # So o dia (sem hora) e lido em UTC e o primeiro dia possivel era recusado.
+    if data_iso:
+        import re as _re
+        _h = _re.search(r"(\d{1,2})\s*(?:h|:)\s*(\d{2})?", horario or "")
+        _hh, _mm = (int(_h.group(1)), int(_h.group(2) or 0)) if _h else (12, 0)
+        if _hh > 23 or _mm > 59:
+            _hh, _mm = 12, 0
+        payload["scheduled_date"] = f"{data_iso}T{_hh:02d}:{_mm:02d}"
 
     try:
         # Mesmo pedido calculado duas vezes na mesma resposta: pela tool do
@@ -1051,6 +1069,22 @@ def calcular_pedido(items: list[dict], bairro: str = "", modalidade: str = "",
                 f"{i.get('name')}: {i.get('reason') or 'nao aceito'}"
                 for i in (data.get("items") or []) if not i.get("valid")
             ]
+            # Antecedencia e quantidade se resolvem na conversa, como o
+            # QUANTIDADE_NAO_FECHA acima: "Mini quiches e sob encomenda,
+            # primeira data 30/10" nao e caso de equipe (29/10).
+            if invalidos and all(_re_ajustavel(r) for r in invalidos):
+                return {
+                    "success": False,
+                    "erro": "AJUSTE_NA_CONVERSA",
+                    "itens_recusados": invalidos,
+                    "instrucao": (
+                        "O cardapio digital pede um ajuste: " + "; ".join(invalidos)
+                        + ". Explique ao cliente com o nome do item e ofereca o ajuste "
+                        "(a primeira data possivel, ou a quantidade que fecha). Chame "
+                        "calculate_order de novo quando ele aceitar. NAO transfira e "
+                        "NAO informe total antes disso."
+                    ),
+                }
             if invalidos:
                 return {
                     "success": False,

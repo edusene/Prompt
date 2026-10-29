@@ -335,6 +335,15 @@ def opcoes_do_item(nome: str) -> list[str]:
     Lata" -> Coca, Coca zero, ...). [] quando nao ha escolha a fazer."""
     destino = _achar(mapa_efetivo(), nome)
     if not destino or destino.get("categoria") not in ("Bebidas", "Combos"):
+        # Kit com sabor obrigatorio fora de bebida e combo (Kit Mini Lanches,
+        # Mini quiches): o pedido ia sem sabor (29/10). As opcoes sao as da
+        # linha do cardapio, pelo nome oficial.
+        try:
+            oficial = (facts.resolve_unit_price(nome, 1) or {}).get("item_oficial") or nome
+        except Exception:
+            oficial = nome
+        if _norm(oficial).startswith(("kit mini lanches", "mini quiches")):
+            return list((_linha_da_planilha(oficial) or {}).get("opcoes") or [])
         return []
     if destino.get("sabor_fixo"):
         return []

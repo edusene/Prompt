@@ -331,6 +331,13 @@ _PRODUTOS_GRANDES = {
     # lanches" pela regra da festa (varredura de 27/10).
     "mini lanche": "Mini Lanches",
     "mini lanches": "Mini Lanches",
+    "kit mini lanche": "Mini Lanches",
+    "kit mini lanches": "Mini Lanches",
+    # Os dois sabores do Kit Mini Lanches (cardapio de 28/10).
+    "mini hamburguer": "Mini Lanches",
+    "mini hamburgueres": "Mini Lanches",
+    "mini sanduiche": "Mini Lanches",
+    "mini sanduiches": "Mini Lanches",
     "panqueca": "Panqueca de Carne",
     "panqueca de carne": "Panqueca de Carne",
     "panqueca de frango": "Panqueca de Frango",
@@ -3030,6 +3037,25 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
             if (_it["name"] == "Churros" and re.search(r"\bkits?\b", msg_lower)
                     and 0 < int(_it.get("quantity") or 0) < 25):
                 _it["quantity"] = int(_it["quantity"]) * 25
+            # Kit Mini Lanches (de 10) e Mini quiches (kit de 25), cardapio de
+            # 28/10: "1 kit" virava 1 unidade e o sabor dito se perdia (29/10).
+            _kit_de = {"Mini Lanches": 10, "Mini quiches": 25}.get(_it["name"])
+            if _kit_de:
+                import facts as _fk
+                if re.search(r"\bkits?\b", msg_lower) and 0 < int(_it.get("quantity") or 0) < _kit_de:
+                    _it["quantity"] = int(_it["quantity"]) * _kit_de
+                _palavras = {"Mini Lanches": ("hamburg", "sanduich"),
+                             "Mini quiches": ("carne de sol", "frango")}[_it["name"]]
+                _ditas = [w for w in _palavras if w in _fk.normalize(msg_lower)]
+                if len(_ditas) == 1 and not _it.get("sabor"):
+                    try:
+                        import cardapio_catalogo as _cc
+                        _ops = [o for o in _cc.opcoes_do_item(_it["name"])
+                                if _ditas[0] in _fk.normalize(o)]
+                    except Exception:
+                        _ops = []
+                    if len(_ops) == 1:
+                        _it["sabor"] = _ops[0]
         _somados_msg: list = []
         for _it in items_found:
             _igual = next((x for x in _somados_msg if x["name"] == _it["name"]

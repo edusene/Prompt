@@ -2854,8 +2854,9 @@ for _p in ("quero 50 coxinhas e 50 kibes fritos", "Manda 3 saltenhas e 2 quiches
 for _p in ("OLARIA RUA GUANABARA 45 PAGAMENTO NO PIX", "BAIRRO OLARIA RUA SALGADO 2325 CARTAO",
            "RUA JAMARI 2125 DINHEIRO"):
     checa(f"numero da casa + palavra nao e item fora do cardapio: {_p!r}", _ifc2(_p) == "", _ifc2(_p))
-checa("'100 MINI SANDUICHE' e item fora do cardapio",
-      _ifc2("POSSO ENCOMENDAR 100 MINI SANDUICHE PARA AMANHA") == "mini sanduiche"
+# Desde 28/10 o mini sanduiche existe (Kit Mini Lanches).
+checa("'100 MINI SANDUICHE' nao e mais item fora do cardapio",
+      _ifc2("POSSO ENCOMENDAR 100 MINI SANDUICHE PARA AMANHA") == ""
       and _ifc2("quero 50 mini coxinhas") == "")
 checa("'QUERO MAIS 50 CHURROS' soma ao pedido aberto (nao troca)",
       app._RX_SOMA_AO_PEDIDO.search(facts.normalize("ACHO QUE NAO VAI.QUERO MAIS 50 CHURROS"))
@@ -3538,6 +3539,16 @@ _b28.descartar("u")
 _lst29 = app._listas_em_linhas("Os valores são: churros R$ 40,00, pastel R$ 40,00 e coca R$ 15,00.")
 checa("29/10 lista em linhas nao quebra 'R$ 40,00' na virgula",
       "R$ 40,00\n• pastel R$ 40,00" in _lst29 and "• 00" not in _lst29, repr(_lst29))
+_ml29 = _ficha28("quero 1 kit mini lanches de mini hamburguer")
+_ml29b = _ficha28("quero 20 mini sanduiches")
+checa("29/10 Kit Mini Lanches: 'kit' sao 10 e o sabor dito vai no item",
+      # O sabor depende das opcoes do cardapio digital (fora deste teste).
+      len(_ml29) == 1 and _ml29[0][:2] == ("Mini Lanches", 10)
+      and _ml29b[0][:2] == ("Mini Lanches", 20), f"{_ml29} {_ml29b}")
+checa("29/10 recusa por antecedencia/quantidade e ajuste na conversa, nao equipe",
+      cardapio._re_ajustavel("Mini quiches: Item sob encomenda: precisa de 1 dia de antecedência.")
+      and cardapio._re_ajustavel("Kit Mini Lanches: A quantidade deve ser múltipla de 10 (lotes de 10).")
+      and not cardapio._re_ajustavel("Produto indisponível"))
 checa("28/10 hora oferecida (14h) e a unica pendencia: a pergunta repete a oferta",
       "14h" in memoria_mod.pedido_de_dados({"horario_proposto": "14h"}, ["horario"]))
 import congelados as _cong28
@@ -4125,7 +4136,8 @@ checa("22/10 confirmacao: o resumo nao e oferta de acompanhamento",
 checa("22/10 'disponiveis'/'orcamentos' nao sao produto",
       app._resposta_de_faq("quais sabores vc tem disponiveis?", {}) is None
       and app._resposta_de_faq("vcs fazem orçamentos?", {}) is None
-      and app._resposta_de_faq("vcs tem mini hamburgues", {})[0] == "produto inexistente")
+      # Desde 28/10 o mini hamburguer existe (Kit Mini Lanches).
+      and (app._resposta_de_faq("vcs tem mini hamburgues", {}) or ("",))[0] != "produto inexistente")
 
 # ── Teste da Thayline (22/10): erros de fluxo ──
 checa("22/10 endereco: 'dia 30' e 'pra agora' nao entram na rua",
