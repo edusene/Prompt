@@ -4986,6 +4986,15 @@ def _conferir_etapa_travada(user: str, reply: str, memoria: dict) -> str:
         if len(mantidas) != _antes:
             corpo = " ".join(mantidas).strip()
 
+    # Salgado grande em quantidade de festa: o que o modelo diz do item sai.
+    # "Entendido, sao 30 croquetes de macaxeira no tamanho mini festa" vinha
+    # antes do "so temos no tamanho grande" (ao vivo, 29/10).
+    _balcao = conversation_memory._balcao_em_festa(memoria) if "(salgado grande)" in travada else []
+    if _balcao and not ja_cobriu:
+        _pal_b = {facts.normalize(i["name"]).split()[0] for i, _m in _balcao}
+        mantidas = [f for f in mantidas if not any(p[:5] in facts.normalize(f) for p in _pal_b)]
+        corpo = " ".join(mantidas).strip()
+
     # Frase que so repete as opcoes da pergunta do codigo ("As opcoes sao:
     # Refrigerante Lata, Refrigerante 600ml ou Guarana Tuchaua 2 Litros.")
     # logo antes dela.
