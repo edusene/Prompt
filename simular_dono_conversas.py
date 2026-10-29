@@ -140,7 +140,8 @@ CONVERSAS = [
      {"espelho": [("Coxinha", 50)], "fecha": True, "equipe": False, "contem": ["Igarapé"]}),
     ("pedido com a hora 7:30 nao vira 30 coxinhas", TARDE,
      ["SERIA PARA AMANHA AS 8:30 QUERO UM CENTO COXINHA E MEIO CENTO DE PASTEL E UMA COCA COLA 2 LT"
-      " RETIRADA", "carne", "NAO", "SIM"],
+      # Sem "NAO": com a Coca no pedido nao ha oferta, e o "NAO" recusava o resumo.
+      " RETIRADA", "carne", "SIM"],
      {"espelho": [("Coxinha", 100), ("Pastel", 50), ("Refrigerante 2 Litros", 1)], "fecha": True,
       "equipe": False}),
     ("cento do mini quiche: nao inventa preco", NOITE,

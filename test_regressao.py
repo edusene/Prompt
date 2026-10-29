@@ -3596,6 +3596,22 @@ memoria_mod.aplicar_sabor_de_bebida(_msuco, "quero 2 de goiaba")
 _vsuco = [(i["quantity"], i.get("sabor")) for i in _msuco["items"] if i["name"] == "Suco Natural 300 ml"]
 checa("27/10 suco sem sabor pergunta o sabor; 'quero 2 de goiaba' vira 2 sucos de goiaba",
       "Goiaba" in _psuco and _vsuco == [(2, "Goiaba")], f"{_psuco!r} {_vsuco}")
+import cardapio_catalogo as _cc29
+_orig_op29 = _cc29.opcoes_do_item
+_cc29.opcoes_do_item = lambda n: (["CARNE DE SOL", "FRANGO"] if n == "Mini quiches"
+                                  else ["Cajá", "Maracujá", "Goiaba"] if n.startswith("Suco") else [])
+try:
+    _mq29 = _ficha28("quero 2 kits de mini quiche, um de frango e um de carne de sol")
+    _ms29 = memoria_mod._empty()
+    _ms29["items"] = [{"name": "Suco Natural 300 ml", "quantity": 6, "price": 7.0}]
+    memoria_mod.aplicar_sabor_de_bebida(_ms29, "3 de maracuja e 3 de caja")
+finally:
+    _cc29.opcoes_do_item = _orig_op29
+_vs29 = sorted((i["quantity"], i.get("sabor")) for i in _ms29["items"])
+checa("29/10 dois sabores (resposta do suco, kit de mini quiche): um item por sabor",
+      _vs29 == [(3, "Cajá"), (3, "Maracujá")]
+      and sorted(_mq29) == [("Mini quiches", 25, "CARNE DE SOL"), ("Mini quiches", 25, "FRANGO")],
+      f"{_vs29} {_mq29}")
 checa("27/10 pedido de bandeja de beijinho nao cai na pergunta frequente do beijinho",
       app._resposta_de_faq("quero 1 bandeja de beijinho e 1 bandeja mista pra retirar amanhã") is None
       and (app._resposta_de_faq("tem beijinho?") or ("",))[0] == "beijinho")

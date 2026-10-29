@@ -2912,12 +2912,25 @@ def aplicar_sabor_de_bebida(memoria: dict, texto: str) -> list[str]:
     # A palavra unica ("frango") responde so ao item perguntado, o primeiro
     # pendente: o Combo 50 virava "Coxinha (frango)" sem pergunta (27/10).
     perguntado = sabor_de_bebida_pendente(memoria)[0]
-    for item in memoria.get("items") or []:
+    for item in list(memoria.get("items") or []):
         if not isinstance(item, dict) or str(item.get("sabor") or "").strip():
             continue
         opcoes = cardapio_catalogo.opcoes_do_item(str(item.get("name", "")))
         escolha = (casar_sabor(texto, opcoes, palavra_unica=item.get("name") == perguntado)
                    if opcoes else "")
+        # "3 de maracuja e 3 de caja" na pergunta do suco: um item por sabor;
+        # ficavam so os 3 de maracuja (ao vivo, 29/10).
+        _t = _sem_acento(texto)
+        _por_sabor = []
+        for o in opcoes or []:
+            _m = _re.search(r"\b(\d{1,2})\s+(?:de\s+)?" + _re.escape(_sem_acento(o).split()[0]) + r"\b", _t)
+            if _m:
+                _por_sabor.append((int(_m.group(1)), o))
+        if escolha and item.get("name") == perguntado and len(_por_sabor) > 1:
+            _i = memoria["items"].index(item)
+            memoria["items"][_i:_i + 1] = [dict(item, quantity=q, sabor=o) for q, o in _por_sabor]
+            mudancas.append(f"{item.get('name')} -> {_por_sabor}")
+            continue
         if escolha:
             item["sabor"] = escolha
             mudancas.append(f"{item.get('name')} -> sabor {escolha}")

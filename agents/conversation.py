@@ -3037,6 +3037,7 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
                     _it["price"] = _PRECO_UNITARIO.get("Empadinha de Frango", _it["price"])
         # "20 mini saltenhas" sao 20 unidades = 2 kits de 10, e nao 20 kits
         # (R$ 400 no lugar de R$ 40). Com "kit" na mensagem, ja e o numero de kits.
+        _kits_extra: list = []
         for _it in items_found:
             if (_it["name"] == "Kit Mini Saltenha Frita (10und)" and "kit" not in msg_lower
                     and int(_it.get("quantity") or 0) >= 10):
@@ -3065,10 +3066,31 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
                         _ops = []
                     if len(_ops) == 1:
                         _it["sabor"] = _ops[0]
+                # "2 kits de mini quiche, um de frango e um de carne de sol": um
+                # item por sabor; ficava so um dos sabores (ao vivo, 29/10).
+                if len(_ditas) == 2 and not _it.get("sabor"):
+                    _num = {"um": 1, "uma": 1, "dois": 2, "duas": 2, "tres": 3}
+                    _por_sabor = []
+                    for _w in _ditas:
+                        _m = re.search(r"\b(\d{1,3}|uma?|dois|duas|tres)\s+(?:kits?\s+)?(?:de\s+)?" + _w,
+                                       _fk.normalize(msg_lower))
+                        try:
+                            import cardapio_catalogo as _cc
+                            _ops = [o for o in _cc.opcoes_do_item(_it["name"]) if _w in _fk.normalize(o)]
+                        except Exception:
+                            _ops = []
+                        if _m and len(_ops) == 1:
+                            _q = int(_num.get(_m.group(1)) or _m.group(1))
+                            _por_sabor.append((_q * _kit_de if _q < _kit_de else _q, _ops[0]))
+                    if len(_por_sabor) == 2:
+                        _it["quantity"], _it["sabor"] = _por_sabor[0]
+                        _kits_extra.append(dict(_it, quantity=_por_sabor[1][0], sabor=_por_sabor[1][1]))
+        items_found += _kits_extra
         _somados_msg: list = []
         for _it in items_found:
             _igual = next((x for x in _somados_msg if x["name"] == _it["name"]
-                           and x.get("tamanho") == _it.get("tamanho")), None)
+                           and x.get("tamanho") == _it.get("tamanho")
+                           and x.get("sabor") == _it.get("sabor")), None)
             if _igual:
                 _igual["quantity"] += _it["quantity"]
             else:
