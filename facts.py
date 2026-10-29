@@ -222,6 +222,12 @@ def lookup_preco(produto: str, formato: str = "") -> list[dict]:
 
         if alvo_formato and alvo_formato in normalize(p["formato"]):
             score += 0.1
+        # "mini quiche de frango" casava com a "Quiche de Frango" grande (R$ 12)
+        # e a cliente ouviu R$ 300 por 25 mini quiches (29/10). Produto avulso
+        # sem "mini" nao e o mini; sabor de lote (sem preco) segue valendo.
+        if ("mini" in alvo.split() and "mini" not in nome.split()
+                and p.get("preco") is not None):
+            score -= 0.3
         if score >= 0.6:
             resultados.append((score, p))
 

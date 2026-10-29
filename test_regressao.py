@@ -3549,6 +3549,18 @@ checa("29/10 recusa por antecedencia/quantidade e ajuste na conversa, nao equipe
       cardapio._re_ajustavel("Mini quiches: Item sob encomenda: precisa de 1 dia de antecedência.")
       and cardapio._re_ajustavel("Kit Mini Lanches: A quantidade deve ser múltipla de 10 (lotes de 10).")
       and not cardapio._re_ajustavel("Produto indisponível"))
+_fake_q29 = {"produtos": [
+    {"categoria": "Salgados Grandes", "item": "Quiche de Frango", "formato": "Unidade", "preco": 12.0, "disponivel": True},
+    {"categoria": "Salgados Grandes", "item": "Mini quiches (Kit 25und)", "formato": "Unidade", "preco": 1.5, "disponivel": True}]}
+_orig_get29 = facts.get
+facts.get = lambda: dict(_orig_get29(), **_fake_q29)
+try:
+    _q29 = [(facts.resolve_unit_price(n, 25) or {}).get("item_oficial")
+            for n in ("Kit mini quiche de frango", "Mini quiches (FRANGO)", "Quiche de Frango")]
+finally:
+    facts.get = _orig_get29
+checa("29/10 'mini quiche de frango' e o kit de mini, nao a Quiche de Frango de R$ 12",
+      _q29 == ["Mini quiches (Kit 25und)", "Mini quiches (Kit 25und)", "Quiche de Frango"], _q29)
 from agents.conversation import completar_pelo_contexto as _cpc29
 checa("29/10 '20 por favor' depois de citar o mini hamburguer e a quantidade dele",
       _cpc29("20 por favor", "Quais itens você gostaria de pedir hoje?",
