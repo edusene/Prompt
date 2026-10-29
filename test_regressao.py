@@ -3535,6 +3535,9 @@ _b28.add("u", "quero 50 risoles", enviado_em=990)
 checa("28/10 #reset entregue depois do pedido mandado depois dele: o pedido fica",
       _b28.descartar("u", enviado_ate=995) == 1 and _b28.tem_mensagem_nova("u"))
 _b28.descartar("u")
+_lst29 = app._listas_em_linhas("Os valores são: churros R$ 40,00, pastel R$ 40,00 e coca R$ 15,00.")
+checa("29/10 lista em linhas nao quebra 'R$ 40,00' na virgula",
+      "R$ 40,00\n• pastel R$ 40,00" in _lst29 and "• 00" not in _lst29, repr(_lst29))
 checa("28/10 hora oferecida (14h) e a unica pendencia: a pergunta repete a oferta",
       "14h" in memoria_mod.pedido_de_dados({"horario_proposto": "14h"}, ["horario"]))
 import congelados as _cong28

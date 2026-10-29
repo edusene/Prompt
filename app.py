@@ -1254,9 +1254,11 @@ def _listas_em_linhas(reply: str) -> str:
 
     def _troca(m):
         itens_txt = m.group("itens").strip()
-        if "?" in itens_txt:
+        # Parenteses com virgula dentro ("2L (Coca, Fanta) por R$ 15,00") viravam
+        # pedacos soltos, e "R$ 40,00" virava "R$ 40" + "• 00" (29/10).
+        if "?" in itens_txt or "(" in itens_txt:
             return m.group(0)
-        partes = [p.strip() for p in _re_mod.split(r",\s*", itens_txt) if p.strip()]
+        partes = [p.strip() for p in _re_mod.split(r",(?!\d)\s*", itens_txt) if p.strip()]
         if partes:
             # O ultimo vem com "e"/"ou": "Pao Pizza e Canudinho", "quibe e outros".
             ultimo = _re_mod.split(r"\s+(?:e|ou)\s+", partes[-1])
@@ -6462,15 +6464,21 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             # refri voce tem?": a resposta pronta saia e o pedido da mesma
             # mensagem nao ia para a ficha - o resumo veio so com o refri
             # (teste da Camyli, 28/10).
-            if (not _equipe_b and _nome_b not in ("acrescimo", "prazo confirmar")
-                    and _re_mod.search(r"\b(?:quero|queria|vou\s+querer|manda|me\s+ve|separa)\b",
-                                       facts.normalize(_texto_cliente))):
+            # O dia e a hora tambem: "2 combos mix pra amanha" recebia depois
+            # "Para qual dia?" (teste ao vivo, 29/10). Item so com verbo de
+            # pedido - "quanto custa 100 coxinhas?" nao e pedido.
+            if not _equipe_b and _nome_b not in ("acrescimo", "prazo confirmar"):
                 _ext_b = _extract_data_from_message(_texto_cliente.lower(),
                                                     ConversationState(phone=user))
-                if any(_ext_b.get(k) for k in ("items", "bebidas", "doces", "sabores_pendentes")):
+                if not _re_mod.search(r"\b(?:quero|queria|vou\s+querer|manda|me\s+ve|separa|encomend\w*)\b",
+                                      facts.normalize(_texto_cliente)):
+                    for _k in ("items", "bebidas", "doces", "sabores_pendentes", "volume_pendente",
+                               "bebidas_pendentes", "combos"):
+                        _ext_b.pop(_k, None)
+                if any(_ext_b.get(k) for k in conversation_memory._CAMPOS + ("bebidas", "doces")):
                     conversation_memory.merge(_memoria_balcao, _ext_b, _ext_b, _texto_cliente)
                     conversation_memory.save(user, _memoria_balcao)
-                    print(f"[balcao] user={user} pedido da mesma mensagem anotado")
+                    print(f"[balcao] user={user} dados da mesma mensagem anotados")
             print(f"[balcao] user={user} resposta padrao do dono: {_nome_b}"
                   f"{' (' + _fora + ')' if _fora else ''}")
             # Primeira mensagem ja e uma pergunta pronta ("quanto tempo de
