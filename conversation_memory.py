@@ -1255,6 +1255,11 @@ def pedido_de_dados(memoria: dict, pendentes: list[str] | None = None) -> str:
                 return f"Posso deixar para {dia}? 😊"
             except Exception:
                 pass
+        # A hora tambem: "Posso adiantar para as 14h?" interrompido pelo sabor
+        # do pastel virou "Qual horario?", e o "pode ser" seguinte nao era
+        # resposta a oferta - laco de "Qual horario?" (Camyli, 28/10).
+        if pendentes[0] == "horario" and memoria.get("horario_proposto"):
+            return f"Posso já adiantar o seu pedido para as {memoria['horario_proposto']}? 😊"
         if pendentes[0] == "troco_para":
             return pergunta_do_troco(memoria)
         if pendentes[0] == "bairro" and memoria.get("bairro_nao_achado"):

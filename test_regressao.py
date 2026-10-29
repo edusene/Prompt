@@ -3535,6 +3535,8 @@ _b28.add("u", "quero 50 risoles", enviado_em=990)
 checa("28/10 #reset entregue depois do pedido mandado depois dele: o pedido fica",
       _b28.descartar("u", enviado_ate=995) == 1 and _b28.tem_mensagem_nova("u"))
 _b28.descartar("u")
+checa("28/10 hora oferecida (14h) e a unica pendencia: a pergunta repete a oferta",
+      "14h" in memoria_mod.pedido_de_dados({"horario_proposto": "14h"}, ["horario"]))
 import congelados as _cong28
 _oferta28 = "Sim, trabalhamos sim! Mini Salgados Congelados - R$ 40 o cento"
 checa("28/10 congelado: '1 cento de salgado congelado' e o sabor solto depois da oferta sao pedido",
