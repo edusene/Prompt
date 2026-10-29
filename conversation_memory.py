@@ -2635,7 +2635,7 @@ def etapa_coberta(memoria: dict, reply: str, agora=None) -> bool:
         return all(_sem_acento(a["sabor"]).split()[0] in texto for a in detalhe)
 
     if _balcao_em_festa(memoria):
-        return "salgado grande" in texto and "voce quer as" in texto
+        return "salgado grande" in texto and "voce quer" in texto
 
     # Mesma ordem de pergunta_bloqueante: o sabor em falta antes do resto.
     # "Disponivel" junto do nome do item e o contrario do aviso: nao cobre.
@@ -2972,12 +2972,42 @@ def _balcao_em_festa(memoria: dict) -> list[tuple[dict, str]]:
             continue
         if not cardapio._balcao_em_quantidade_de_festa([item]):
             continue
-        palavra = (_sem_acento(str(item.get("name", ""))).split() or [""])[0]
-        mini = next((p["item"] for p in produtos if p.get("disponivel", True)
-                     and "mini" in _sem_acento(p["item"]).split()
-                     and palavra in _sem_acento(p["item"]).split()), "")
+        nome = _sem_acento(str(item.get("name", ""))).split()
+        mini = ""
+        # "Mini Pizza (Brotinho)" ja e a pequena: casava com o Kit Mini Empadinhas pelo "mini".
+        if nome and not {"mini", "kit"} & set(nome):
+            # Prefixo: "quiche" acha o "Mini quiches (Kit 25und)".
+            mini = next((p["item"] for p in produtos if p.get("disponivel", True)
+                         and "mini" in _sem_acento(p["item"]).split()
+                         and any(w.startswith(nome[0]) for w in _sem_acento(p["item"]).split())), "")
         saida.append((item, mini))
     return saida
+
+
+def _festa_do_balcao(nome: str) -> str:
+    """O mesmo salgado no lote de festa ("Coxinha de Frango com Catupiry" ->
+    "Coxinha frango"). Mesma primeira palavra e duas raizes em comum: so a
+    primeira trocava Croquete de Macaxeira por Croquete de carne. '' sem par."""
+    def _raizes(n):
+        return {w[:4] for w in _sem_acento(n).split() if w not in ("de", "com", "e")}
+    try:
+        import facts
+        festa = [p["item"] for p in facts.get()["produtos"]
+                 if p.get("categoria") != "Salgados Grandes" and p.get("disponivel", True)
+                 and _sem_acento(p["item"])[:4] == _sem_acento(nome)[:4]
+                 and len(_raizes(p["item"]) & _raizes(nome)) >= 2]
+    except Exception:
+        return ""
+    return festa[0] if len(festa) == 1 else ""
+
+
+def _passo_do_produto(nome: str) -> int:
+    """Vendido de N em N (Mini quiches: 25); 0 quando nao ha."""
+    try:
+        import facts
+        return next((int(p.get("passo") or 0) for p in facts.get()["produtos"] if p["item"] == nome), 0)
+    except Exception:
+        return 0
 
 
 def pendencia_de_balcao(memoria: dict) -> str:
@@ -2993,10 +3023,15 @@ def pendencia_de_balcao(memoria: dict) -> str:
         preco_mini = facts.resolve_unit_price(mini, 1)["preco_unitario"] if mini else 0
     except Exception:
         return ""
-    alternativa = (f"o {mini} ({_brl(preco_mini)})" if mini and preco_mini
-                   else "salgado de festa (lote de 25)")
-    return (f"A {item['name']} é {_brl(preco)} a unidade (salgado grande). Você quer as "
-            f"{item.get('quantity')} assim ou {alternativa}? 😊")
+    passo = _passo_do_produto(mini)
+    festa = "" if mini else _festa_do_balcao(item["name"])
+    alternativa = (f" ou o {mini} ({_brl(preco_mini)} a unidade, de {passo} em {passo})" if mini and passo > 1
+                   else f" ou o {mini} ({_brl(preco_mini)})" if mini and preco_mini
+                   else f" ou {festa} de festa (lote de 25)" if festa
+                   else "")
+    fem = (_sem_acento(item["name"]).split() or [""])[0] in _FEMININOS
+    return (f"{'A' if fem else 'O'} {item['name']} é {_brl(preco)} a unidade (salgado grande). "
+            f"Você quer {'as' if fem else 'os'} {item.get('quantity')} assim{alternativa}? 😊")
 
 
 def aplicar_escolha_de_balcao(memoria: dict, texto: str) -> list[str]:
@@ -3005,12 +3040,44 @@ def aplicar_escolha_de_balcao(memoria: dict, texto: str) -> list[str]:
     t = _sem_acento(texto)
     mudancas = []
     for item, mini in _balcao_em_festa(memoria):
-        if mini and _re.search(r"\b(?:mini|kits?|frit[ao]s?)\b", t):
+        # "a de 9 reais" / "a de 20": o preco dito escolhe (29/10).
+        try:
+            import facts
+            p_grande = int(facts.resolve_unit_price(item["name"], 1)["preco_unitario"])
+            p_mini = int(facts.resolve_unit_price(mini, 1)["preco_unitario"]) if mini else -1
+        except Exception:
+            p_grande = p_mini = -1
+        if p_mini > 0 and _re.search(rf"\b{p_mini}\b", t) and not _re.search(rf"\b{p_grande}\b", t):
+            t += " mini"
+        elif p_grande > 0 and _re.search(rf"\b{p_grande}\b", t) and not _re.search(rf"\b{p_mini}\b", t):
+            t += " assim"
+        if mini and _re.search(r"\b(?:mini\w*|kits?|frit\w*|pequen\w*|menor\w*|festa)\b", t):
             n = _re.search(r"\((\d+)\s*und\)", mini, _re.I)
             qtd = int(item.get("quantity") or 0)
-            item.update(name=mini, quantity=-(-qtd // int(n.group(1))) if n else qtd, price=0.0)
+            passo = _passo_do_produto(mini)
+            # Vendido por unidade de N em N (Mini quiches: 45 -> 50); o kit
+            # contado por kit ("(10und)": 45 -> 5 kits).
+            nova = (-(-qtd // passo) * passo if passo > 1
+                    else -(-qtd // int(n.group(1))) if n else qtd)
+            # "Quiche de Frango" -> Mini quiches (FRANGO): o sabor ja estava no nome.
+            try:
+                import cardapio_catalogo
+                sabor = next((o for o in cardapio_catalogo.opcoes_do_item(mini) or []
+                              if _sem_acento(o) in _sem_acento(item.get("name", ""))), "")
+            except Exception:
+                sabor = ""
+            item.update(name=mini, quantity=nova, price=0.0)
+            if sabor:
+                item["sabor"] = sabor
             mudancas.append(f"{qtd} un -> {item['quantity']} {mini}")
-        elif _re.search(r"\b(?:assim|assad[ao]s?|grandes?|essas?|mesmo|sim|pode|isso|quero)\b", t):
+        elif not mini and _re.search(r"\b(?:festa|pacote|mini\w*|pequen\w*|lote)\b", t):
+            # Sem versao mini: o mesmo salgado no lote de festa ("Coxinha de Frango
+            # com Catupiry" -> Coxinha frango); a trava de lote cuida do multiplo de 25.
+            festa = _festa_do_balcao(item["name"])
+            if festa:
+                mudancas.append(f"{item['name']} -> {festa} (festa)")
+                item.update(name=festa, price=0.0)
+        elif _re.search(r"\b(?:assim|assad\w*|grandes?|maior\w*|essas?|esses?|mesmo|sim|pode|isso|quero|balcao|confirm\w*)\b", t):
             item["balcao_ok"] = True
             mudancas.append(f"{item.get('name')} {item.get('quantity')} un -> balcao confirmado")
     return mudancas

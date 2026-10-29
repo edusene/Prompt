@@ -3578,6 +3578,34 @@ checa("29/10 45 saltenhas: pergunta grande ou kit mini; 'kit mini' vira 5 kits, 
       and _ms29a["items"][0]["name"] == "Kit Mini Saltenha Frita (10und)" and _ms29a["items"][0]["quantity"] == 5
       and _ms29b["items"][0].get("balcao_ok") and not _trava29 and "salgado grande" not in _fim29,
       f"{_pq29!r} {_ms29a} {_ms29b} {_trava29} {_fim29!r}")
+_fake_s29b = {"produtos": _fake_s29["produtos"] + [
+    {"categoria": "Salgados Grandes", "item": "Coxinha de Frango com Catupiry", "formato": "Unidade", "preco": 9.0, "disponivel": True},
+    {"categoria": "Salgados Grandes", "item": "Croquete de Macaxeira", "formato": "Unidade", "preco": 9.0, "disponivel": True},
+    {"categoria": "Salgados Fritos", "item": "Coxinha frango", "formato": "Unidade", "preco": 0.8, "disponivel": True},
+    {"categoria": "Salgados Fritos", "item": "Croquete de carne", "formato": "Unidade", "preco": 0.8, "disponivel": True},
+    {"categoria": "Salgados Grandes", "item": "Mini Pizza (Brotinho)", "formato": "Unidade", "preco": 12.0, "disponivel": True}]}
+facts.get = lambda: dict(_orig_get29(), **_fake_s29b)
+try:
+    _r29 = {}
+    for _nome, _resp in (("Saltenha Assada", "as pequenas"), ("Saltenha Assada", "as fritinhas"),
+                         ("Saltenha Assada", "a de 9 reais"), ("Coxinha de Frango com Catupiry", "de festa"),
+                         ("Croquete de Macaxeira", "de festa"), ("Croquete de Macaxeira", "sim")):
+        _m = {"items": [{"name": _nome, "quantity": 50, "price": 9.0}]}
+        memoria_mod.aplicar_escolha_de_balcao(_m, _resp)
+        _r29[(_nome, _resp)] = (_m["items"][0]["name"], bool(_m["items"][0].get("balcao_ok")))
+    _pcr29 = memoria_mod.pergunta_bloqueante({"items": [{"name": "Croquete de Macaxeira", "quantity": 45, "price": 9.0}]})
+    _ppz29 = memoria_mod.pergunta_bloqueante({"items": [{"name": "Mini Pizza (Brotinho)", "quantity": 45, "price": 12.0}]})
+finally:
+    facts.get = _orig_get29
+checa("29/10 salgado grande x festa: 'pequenas', 'fritinhas', '9 reais'; festa sem trocar o sabor; mini nao pergunta",
+      _r29[("Saltenha Assada", "as pequenas")][0] == "Kit Mini Saltenha Frita (10und)"
+      and _r29[("Saltenha Assada", "as fritinhas")][0] == "Kit Mini Saltenha Frita (10und)"
+      and _r29[("Saltenha Assada", "a de 9 reais")] == ("Saltenha Assada", True)
+      and _r29[("Coxinha de Frango com Catupiry", "de festa")][0] == "Coxinha frango"
+      and _r29[("Croquete de Macaxeira", "de festa")] == ("Croquete de Macaxeira", False)
+      and _r29[("Croquete de Macaxeira", "sim")] == ("Croquete de Macaxeira", True)
+      and _pcr29.startswith("O Croquete de Macaxeira") and "Você quer os 45 assim? 😊" in _pcr29
+      and "salgado grande" not in _ppz29, f"{_r29} {_pcr29!r} {_ppz29!r}")
 checa("29/10 'mini quiche de frango' e o kit de mini, nao a Quiche de Frango de R$ 12",
       _q29 == ["Mini quiches (Kit 25und)", "Mini quiches (Kit 25und)", "Quiche de Frango"], _q29)
 from agents.conversation import completar_pelo_contexto as _cpc29

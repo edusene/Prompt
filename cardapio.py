@@ -572,7 +572,9 @@ def _balcao_em_quantidade_de_festa(items: list[dict]) -> list[str]:
         except (ValueError, TypeError):
             continue
         # A cliente ja respondeu que quer o grande (conversation_memory.pendencia_de_balcao).
-        if qtd < _LOTE_DE_FESTA or item.get("balcao_ok"):
+        # Mini/kit ja e a versao pequena: 45 Mini Pizza (Brotinho) nao e produto errado.
+        if (qtd < _LOTE_DE_FESTA or item.get("balcao_ok")
+                or {"mini", "kit"} & set(facts.normalize(nome).split())):
             continue
         # So vale para nome que e EXCLUSIVO do balcao ("Coxinha de Frango com
         # Catupiry"). Nome que tambem e sabor de pacote ja foi decidido pela
