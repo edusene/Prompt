@@ -557,6 +557,10 @@ def _balcao_em_quantidade_de_festa(items: list[dict]) -> list[str]:
     # balcao?" de novo e de novo (teste do dono, 23/09 22:45).
     categorias: dict[str, set] = {}
     for p in produtos:
+        # Vendido de N em N (Mini quiches, kit de 25): 25 e o pedido normal, nao
+        # balcao em quantidade de festa. A pergunta voltava em laco (29/10).
+        if int(p.get("passo") or 0) > 1:
+            continue
         categorias.setdefault(facts.normalize(p["item"]), set()).add(
             p.get("categoria", "")
         )

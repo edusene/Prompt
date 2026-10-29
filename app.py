@@ -1123,6 +1123,18 @@ def _resposta_de_faq(texto: str, memoria: dict | None = None) -> tuple[str, str,
             return None
     except Exception:
         pass
+    # "GOSTARIA TANTO DO MINI HAMBURGUE", sem numero: o modelo dizia que nao
+    # tinha (simulador, 29/10). A resposta sai do cardapio.
+    if _re_mod.search(r"\bminis?\s+(?:hamburg|sanduich|lanche)", t):
+        _ml = next((p for p in facts.get()["produtos"] if p["item"] == "Kit Mini Lanches"
+                    and p.get("disponivel", True) and p.get("preco")), None)
+        if _ml:
+            _sab = " ou ".join(o.split("(")[0].strip() for o in _ml.get("opcoes") or [])
+            _passo = int(_ml.get("passo") or 1)
+            _de = f", de {_passo} em {_passo}" if _passo > 1 else ""
+            return ("mini lanches",
+                    f"Temos sim! Kit Mini Lanches: {cardapio._brl(_ml['preco'])} a unidade{_de}"
+                    + (f", {_sab}" if _sab else "") + ". Quantos você quer? 😊", False)
     for nome, rx, resposta, equipe in _FAQ_DO_DONO:
         if rx.search(t):
             # Antecedencia de mais de 500 salgados: a equipe (17/10).

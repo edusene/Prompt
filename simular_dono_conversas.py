@@ -154,9 +154,10 @@ CONVERSAS = [
     ("sabores do 2L com a coca no pedido", TARDE,
      ["QUERO PARA AMANHA AS 8 HORAS 100 CHURROS E UMA COCA DE 2LT", "QUERO SABER QUAIS OS SABORES DE REFRI"],
      {"equipe": False, "contem": ["Fanta uva"]}),
-    ("mini hamburguer sem numero: nao temos", NOITE,
+    # Desde 28/10 o mini hamburguer existe (Kit Mini Lanches).
+    ("mini hamburguer sem numero: agora tem", NOITE,
      ["GOSTARIA TANTO DO MINI HAMBURGUE"],
-     {"equipe": False, "contem": ["Não temos mini hamburgue"]}),
+     {"equipe": False, "nao_contem": ["Não temos mini hamb"]}),
     ("3 combos de camarao e 1 cento frito: combos no resumo", TARDE,
      ["Quero 3 combos de camarão e 1 cento frito", "Pastel queijo, churro, croquete e quibe",
       "Só os salgados mesmo", "Retirada", "amanhã às 9h", "SIM"],

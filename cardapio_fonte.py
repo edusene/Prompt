@@ -394,10 +394,15 @@ def _produtos(itens: list[dict]) -> list[dict]:
                          "preco": preco, "preco_texto": f"{preco:.2f}" if preco else rotulo_preco,
                          "disponivel": disponivel, "origem": nome,
                          "opcoes": list(it.get("flavor_options") or []),
+                         "passo": _passo,
                          # Descricao do cardapio ("Sabores disponiveis: Caja,
                          # Maracuja..."): sem ela o modelo inventou suco de
                          # laranja (Camyli, 26/10).
-                         "obs": " ".join(str(it.get("description") or "").split())})
+                         "obs": " ".join((str(it.get("description") or "")
+                                          # "20 por favor" no Kit Mini Lanches (de 10 em 10)
+                                          # virava "porcoes de 25" inventado (29/10).
+                                          + (f" Vendido de {_passo} em {_passo} unidades."
+                                             if _passo > 1 and preco and preco < 10 else "")).split())})
     # Mesma ordem da planilha: pacotes e sabores de Fritos e Assados primeiro,
     # depois o resto. A busca por nome pega a PRIMEIRA linha que casa, e "Quibe"
     # existe como sabor de lote e como salgado grande - com o grande na frente,

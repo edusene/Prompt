@@ -3549,6 +3549,11 @@ checa("29/10 recusa por antecedencia/quantidade e ajuste na conversa, nao equipe
       cardapio._re_ajustavel("Mini quiches: Item sob encomenda: precisa de 1 dia de antecedência.")
       and cardapio._re_ajustavel("Kit Mini Lanches: A quantidade deve ser múltipla de 10 (lotes de 10).")
       and not cardapio._re_ajustavel("Produto indisponível"))
+from agents.conversation import completar_pelo_contexto as _cpc29
+checa("29/10 '20 por favor' depois de citar o mini hamburguer e a quantidade dele",
+      _cpc29("20 por favor", "Quais itens você gostaria de pedir hoje?",
+             "GOSTARIA TANTO DO MINI HAMBURGUE") == "20 mini hamburgue"
+      and _cpc29("quero 20", "Quais itens?", "GOSTARIA TANTO DO MINI HAMBURGUE") == "20 mini hamburgue")
 checa("28/10 hora oferecida (14h) e a unica pendencia: a pergunta repete a oferta",
       "14h" in memoria_mod.pedido_de_dados({"horario_proposto": "14h"}, ["horario"]))
 import congelados as _cong28

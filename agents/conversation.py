@@ -336,6 +336,8 @@ _PRODUTOS_GRANDES = {
     # Os dois sabores do Kit Mini Lanches (cardapio de 28/10).
     "mini hamburguer": "Mini Lanches",
     "mini hamburgueres": "Mini Lanches",
+    "mini hamburgue": "Mini Lanches",
+    "mini hamburgues": "Mini Lanches",
     "mini sanduiche": "Mini Lanches",
     "mini sanduiches": "Mini Lanches",
     "panqueca": "Panqueca de Carne",
@@ -1554,7 +1556,13 @@ def completar_pelo_contexto(texto: str, ultima_do_agente: str, ultima_do_cliente
         prod_c = {canon for chave, canon in casados_c
                   if not any(chave != outra and chave in outra for outra, _c in casados_c)}
         if len(prod_c) == 1:
-            return _qtd_do_produto(m.group('qtd'), prod_c.pop(), t) + _grande
+            canon = prod_c.pop()
+            if canon in ("Mini Lanches", "Mini quiches"):
+                # O nome dito leva o sabor ("mini hamburgue", "mini quiche de
+                # frango"); o canonico perdia e ela perguntava de novo (29/10).
+                return f"{m.group('qtd')} " + max(
+                    (ch for ch, cn in casados_c if cn == canon), key=len)
+            return _qtd_do_produto(m.group('qtd'), canon, t) + _grande
     if m and ultima_do_agente and re.search(r"\bquant\w*\b", ultima_do_agente.lower()):
         anterior = _forma_de_busca(ultima_do_agente)
         casados = [(chave, canon) for chave, canon in _indice_de_produtos().items()
@@ -1574,7 +1582,8 @@ def completar_pelo_contexto(texto: str, ultima_do_agente: str, ultima_do_cliente
 # So a quantidade: "50", "quero 50", "Quero 50 uni", "50 unidades".
 _RX_SO_QUANTIDADE = re.compile(
     r"^(?:(?:quero|queria|vou\s+querer|pode\s+ser|manda|sao|serao)\s+)?(?P<qtd>\d{1,4})"
-    r"\s*(?:un\w*|pcs?|pecas?)?\s*[.!]?$")
+    # "20 por favor" (simulador, 29/10): a cortesia no fim nao muda a quantidade.
+    r"\s*(?:un\w*|pcs?|pecas?)?\s*(?:,?\s*(?:por\s+favor|pfv|pf|obrigad\w*))?\s*[.!]?$")
 
 
 def _separar_sabores_sem_virgula(parte: str, de_lote) -> list[str]:
