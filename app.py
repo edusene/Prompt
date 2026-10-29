@@ -4968,6 +4968,17 @@ def _conferir_etapa_travada(user: str, reply: str, memoria: dict) -> str:
             mantidas = [f for f in mantidas if f not in orfaos]
             cortadas += orfaos
 
+    # Salgado grande em quantidade de festa: o que o modelo diz do item sai,
+    # menos a propria frase do codigo. "Para 30 croquetes de macaxeira na linha
+    # festa, fechamos em 25" vinha antes do "so temos no tamanho grande" (ao vivo, 29/10).
+    _balcao = conversation_memory._balcao_em_festa(memoria) if "(salgado grande)" in travada else []
+    if _balcao:
+        _pal_b = {facts.normalize(i["name"]).split()[0][:5] for i, _m in _balcao}
+        _do_item = [f for f in mantidas if any(p in facts.normalize(f) for p in _pal_b)
+                    and f" {facts.normalize(f).strip()} " not in f" {facts.normalize(travada)} "]
+        cortadas += _do_item
+        mantidas = [f for f in mantidas if f not in _do_item]
+
     corpo = " ".join(mantidas).strip()
     ja_cobriu = conversation_memory.etapa_coberta(memoria, corpo)
     if not cortadas and ja_cobriu:
@@ -4985,15 +4996,6 @@ def _conferir_etapa_travada(user: str, reply: str, memoria: dict) -> str:
                     if not any(p in facts.normalize(f) for p in _palavras)]
         if len(mantidas) != _antes:
             corpo = " ".join(mantidas).strip()
-
-    # Salgado grande em quantidade de festa: o que o modelo diz do item sai.
-    # "Entendido, sao 30 croquetes de macaxeira no tamanho mini festa" vinha
-    # antes do "so temos no tamanho grande" (ao vivo, 29/10).
-    _balcao = conversation_memory._balcao_em_festa(memoria) if "(salgado grande)" in travada else []
-    if _balcao and not ja_cobriu:
-        _pal_b = {facts.normalize(i["name"]).split()[0] for i, _m in _balcao}
-        mantidas = [f for f in mantidas if not any(p[:5] in facts.normalize(f) for p in _pal_b)]
-        corpo = " ".join(mantidas).strip()
 
     # Frase que so repete as opcoes da pergunta do codigo ("As opcoes sao:
     # Refrigerante Lata, Refrigerante 600ml ou Guarana Tuchaua 2 Litros.")

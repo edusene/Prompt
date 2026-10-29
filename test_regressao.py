@@ -3599,7 +3599,8 @@ try:
     memoria_mod.aplicar_escolha_de_balcao(_mcf29, "nao, quero de festa")
     _pcf29 = memoria_mod.pergunta_bloqueante(_mcf29)
     _rcf29 = app._conferir_etapa_travada(
-        "55", "Entendido, são 30 croquetes de macaxeira no tamanho mini festa.", _mcf29)
+        "55", "Para 30 croquetes de macaxeira na linha festa, fechamos em 25 unidades por porção. 😊\n\n"
+        + _pcf29, _mcf29)
 finally:
     facts.get = _orig_get29
 checa("29/10 salgado grande x festa: 'pequenas', 'fritinhas', '9 reais'; festa sem trocar o sabor; mini nao pergunta",
