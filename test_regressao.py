@@ -3595,6 +3595,9 @@ try:
         _r29[(_nome, _resp)] = (_m["items"][0]["name"], bool(_m["items"][0].get("balcao_ok")))
     _pcr29 = memoria_mod.pergunta_bloqueante({"items": [{"name": "Croquete de Macaxeira", "quantity": 45, "price": 9.0}]})
     _ppz29 = memoria_mod.pergunta_bloqueante({"items": [{"name": "Mini Pizza (Brotinho)", "quantity": 45, "price": 12.0}]})
+    _mcf29 = {"items": [{"name": "Croquete de Macaxeira", "quantity": 30, "price": 9.0}]}
+    memoria_mod.aplicar_escolha_de_balcao(_mcf29, "nao, quero de festa")
+    _pcf29 = memoria_mod.pergunta_bloqueante(_mcf29)
 finally:
     facts.get = _orig_get29
 checa("29/10 salgado grande x festa: 'pequenas', 'fritinhas', '9 reais'; festa sem trocar o sabor; mini nao pergunta",
@@ -3605,7 +3608,9 @@ checa("29/10 salgado grande x festa: 'pequenas', 'fritinhas', '9 reais'; festa s
       and _r29[("Croquete de Macaxeira", "de festa")] == ("Croquete de Macaxeira", False)
       and _r29[("Croquete de Macaxeira", "sim")] == ("Croquete de Macaxeira", True)
       and _pcr29.startswith("O Croquete de Macaxeira") and "Você quer os 45 assim? 😊" in _pcr29
-      and "salgado grande" not in _ppz29, f"{_r29} {_pcr29!r} {_ppz29!r}")
+      and "salgado grande" not in _ppz29
+      and "só temos no tamanho grande" in _pcf29 and "trocar de sabor" in _pcf29,
+      f"{_r29} {_pcr29!r} {_ppz29!r} {_pcf29!r}")
 checa("29/10 'mini quiche de frango' e o kit de mini, nao a Quiche de Frango de R$ 12",
       _q29 == ["Mini quiches (Kit 25und)", "Mini quiches (Kit 25und)", "Quiche de Frango"], _q29)
 from agents.conversation import completar_pelo_contexto as _cpc29

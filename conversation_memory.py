@@ -3030,6 +3030,10 @@ def pendencia_de_balcao(memoria: dict) -> str:
                    else f" ou {festa} de festa (lote de 25)" if festa
                    else "")
     fem = (_sem_acento(item["name"]).split() or [""])[0] in _FEMININOS
+    if item.get("sem_festa"):
+        return (f"{'A' if fem else 'O'} {item['name']} só temos no tamanho grande, {_brl(preco)} "
+                f"a unidade (salgado grande). Você quer {'as' if fem else 'os'} {item.get('quantity')} "
+                f"assim ou prefere trocar de sabor? 😊")
     return (f"{'A' if fem else 'O'} {item['name']} é {_brl(preco)} a unidade (salgado grande). "
             f"Você quer {'as' if fem else 'os'} {item.get('quantity')} assim{alternativa}? 😊")
 
@@ -3077,6 +3081,11 @@ def aplicar_escolha_de_balcao(memoria: dict, texto: str) -> list[str]:
             if festa:
                 mudancas.append(f"{item['name']} -> {festa} (festa)")
                 item.update(name=festa, price=0.0)
+            elif not item.get("sem_festa"):
+                # "quero de festa" para o Croquete de Macaxeira: so existe grande.
+                # A pergunta voltava igual, sem dizer isso (ao vivo, 29/10).
+                item["sem_festa"] = True
+                mudancas.append(f"{item['name']} -> sem versao de festa, avisar")
         elif _re.search(r"\b(?:assim|assad\w*|grandes?|maior\w*|essas?|esses?|mesmo|sim|pode|isso|quero|balcao|confirm\w*)\b", t):
             item["balcao_ok"] = True
             mudancas.append(f"{item.get('name')} {item.get('quantity')} un -> balcao confirmado")
