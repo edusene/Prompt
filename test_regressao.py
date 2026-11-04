@@ -4877,6 +4877,44 @@ checa("sem a copia publica, a interna inteira",
 _src26 = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "app.py"), encoding="utf-8").read()
 checa("'o segundo combo' escolhe pela posicao na lista", "(primeir|segund|terceir|quart|quint)" in _src26)
 
+secao("--- 04/11: item sumindo do resumo e kit de mini pizza ---")
+_it0411 = lambda m: [(i["name"], i["quantity"]) for i in _exim(m, _CSim()).get("items") or []]
+checa("04/11 'e uma mini pizza' entra no pedido",
+      ("Mini Pizza (Brotinho)", 1) in _it0411("Quero 1 risoles queijo e presunto e uma mini pizza"),
+      str(_it0411("Quero 1 risoles queijo e presunto e uma mini pizza")))
+checa("04/11 'um pouco de coxinha' nao vira 1 coxinha",
+      _it0411("quero um pouco de coxinha") == [], str(_it0411("quero um pouco de coxinha")))
+_ex0411 = _exim("Quero 1 cento de brigadeiros 1 cento de fritos e meio cento de churros", _CSim())
+checa("04/11 '1 cento de fritos' junto de outro item pergunta o sabor",
+      any(p["qtd"] == 100 and p["termo"] == "fritos" for p in _ex0411.get("sabores_pendentes") or []),
+      str(_ex0411.get("sabores_pendentes")))
+_ex0411b = _exim("1 cento de fritos e meio cento de canudos", _CSim())
+checa("04/11 cada volume com o seu sabor (100 fritos e 50 canudos)",
+      sorted((p["qtd"], p["termo"]) for p in _ex0411b.get("sabores_pendentes") or [])
+      == [(50, "canudos"), (100, "fritos")], str(_ex0411b.get("sabores_pendentes")))
+_ex0411c = _exim("1 cento de salgados, 50 coxinha e 50 quibe", _CSim())
+checa("04/11 sabores que fecham o volume nao abrem pergunta",
+      not _ex0411c.get("sabores_pendentes") and len(_ex0411c.get("items") or []) == 2, str(_ex0411c))
+checa("04/11 '1 cento de fritos' sozinho continua volume",
+      _exim("1 cento de fritos", _CSim()).get("volume_pendente") == 100)
+_fg0411, facts.get = facts.get, lambda *a, **k: {"produtos": [
+    {"categoria": "Salgados Grandes", "item": "Mini Pizza (Brotinho)", "formato": "Unidade",
+     "preco": 12.0, "disponivel": True},
+    {"categoria": "Combos", "item": "Kit mini pizza (8und)", "formato": "Combo",
+     "preco": 16.0, "disponivel": True}]}
+checa("04/11 'nao temos kit de mini pizza' com o kit a venda vira o kit",
+      app._corrigir_kit("No momento, não temos kit de mini pizza. Quer escolher a quantidade?", "Não tem nenhum kit?")
+      == "Temos sim! Kit mini pizza (8und): R$ 16,00. Quer escolher a quantidade?",
+      app._corrigir_kit("No momento, não temos kit de mini pizza. Quer escolher a quantidade?", "Não tem nenhum kit?"))
+checa("04/11 'Vc tem mini pizza?' cita o kit antes da pergunta",
+      app._corrigir_kit("Temos Mini Pizza (brotinho) a R$ 12,00 cada. Qual a quantidade que deseja?", "Vc tem mini pizza?")
+      == "Temos Mini Pizza (brotinho) a R$ 12,00 cada. Também temos o Kit mini pizza (8und): R$ 16,00. "
+         "Qual a quantidade que deseja?",
+      app._corrigir_kit("Temos Mini Pizza (brotinho) a R$ 12,00 cada. Qual a quantidade que deseja?", "Vc tem mini pizza?"))
+checa("04/11 pedido de mini pizza (sem pergunta) nao ganha o kit",
+      app._corrigir_kit("Anotado! Qual o horario?", "quero 2 mini pizza") == "Anotado! Qual o horario?")
+facts.get = _fg0411
+
 print()
 print("=" * 78)
 print("FALHAS:", _falhas or "nenhuma")

@@ -5641,6 +5641,55 @@ def _esgotado_inventado(frase: str) -> bool:
     return not any(_re_mod.search(r"\b" + _re_mod.escape(w), f) for w in palavras)
 
 
+def _kits_a_venda(*textos: str) -> list[dict]:
+    """Kits disponiveis cujo nome (sem "kit" e sem o "(8und)") aparece inteiro
+    num dos textos. "Mini Pizza (Brotinho)" e o "Kit mini pizza (8und)"."""
+    try:
+        kits = [p for p in facts.get()["produtos"]
+                if facts.normalize(p["item"]).startswith("kit ")
+                and p.get("disponivel", True) and p.get("preco")]
+    except Exception:
+        return []
+    alvos = [facts.normalize(t or "") for t in textos]
+    achados = []
+    for p in kits:
+        nucleo = facts.normalize(_re_mod.sub(r"\s*\(.*?\)", "", p["item"]))
+        palavras = [w for w in nucleo.split() if w not in ("kit", "de")]
+        if palavras and any(all(_re_mod.search(r"\b" + _re_mod.escape(w), a) for w in palavras)
+                            for a in alvos):
+            achados.append(p)
+    return achados
+
+
+def _frase_do_kit(kit: dict) -> str:
+    return f"{kit['item']}: {cardapio._brl(float(kit['preco']))}."
+
+
+def _corrigir_kit(reply: str, texto_cliente: str) -> str:
+    """Troca "nao temos kit de X" pelo kit a venda e, na pergunta "tem X?",
+    acrescenta o kit de X que a resposta nao citou."""
+    frases = [f for f in _RX_FIM_DE_FRASE.split(reply) if f.strip()]
+    negadas = [(f, k) for f in frases
+               if _re_mod.search(r"\bnao\s+(?:temos|tem|trabalhamos|vendemos)\b.*\bkits?\b",
+                                 facts.normalize(f))
+               for k in _kits_a_venda(f)[:1]]
+    if negadas:
+        for f, k in negadas:
+            reply = reply.replace(f.strip(), f"Temos sim! {_frase_do_kit(k)}", 1)
+        return reply
+    if not _pergunta_de_disponibilidade(texto_cliente) or "kit" in facts.normalize(reply):
+        return reply
+    kits = _kits_a_venda(texto_cliente)
+    if not kits:
+        return reply
+    kit_txt = f"Também temos o {_frase_do_kit(kits[0])}"
+    # A pergunta continua no fim.
+    if len(frases) > 1 and frases[-1].strip().endswith("?"):
+        ult = frases[-1].strip()
+        return reply[:reply.rfind(ult)].rstrip() + f" {kit_txt} {ult}"
+    return reply.rstrip() + f" {kit_txt}"
+
+
 def _parece_fechamento(texto: str) -> bool:
     """A resposta anuncia ao cliente que o pedido foi fechado?"""
     limpo = " ".join(facts.normalize(texto or "").split())
@@ -8854,6 +8903,14 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                     _proxima_pergunta_do_funil(_memoria) if _memoria.get("items")
                     else "Qual delícia você quer pedir? 😊")
                 print(f"[estoque] user={user} modelo disse esgotado de item disponivel; frase removida")
+        # "Não tem nenhum kit?" -> "No momento, não temos kit de mini pizza",
+        # com o Kit mini pizza (8und) a venda; e "Vc tem mini pizza?" so
+        # falava da unidade (teste de 04/11 9h53).
+        if reply and not _RX_LINHA_DE_RESUMO.search(reply):
+            _com_kit = _corrigir_kit(reply, _texto_cliente)
+            if _com_kit != reply:
+                print(f"[estoque] user={user} kit a venda corrigido na resposta")
+                reply = _com_kit
 
         # "Prazer, Balbino!" no meio da conversa (15/10) e o modelo prometendo
         # horario ("Sim, consigo entregar as 12h" no intervalo, 15/10 12h01):

@@ -1257,6 +1257,18 @@ def sabores_possiveis(bruto: str, so_lote: bool = True, preparo: str = "") -> li
     return disponiveis or achados
 
 
+def _sabores_do_preparo(termo: str) -> list[str]:
+    """Sabores de pacote para "fritos", "assados" ou "salgados" (os dois)."""
+    from conversation_memory import _sabores_do_pacote
+    if _RX_FRITO.search(termo):
+        return _sabores_do_pacote("fritos")
+    if _RX_ASSADO.search(termo):
+        return _sabores_do_pacote("assados")
+    if re.search(r"\bsalgad", termo):
+        return _sabores_do_pacote("fritos") + _sabores_do_pacote("assados")
+    return []
+
+
 def volume_sem_sabor(msg_lower: str) -> int:
     """Unidades pedidas por volume SEM dizer o sabor. 0 quando nao ha.
 
@@ -2558,6 +2570,11 @@ def numeros_por_extenso(texto: str) -> str:
         w = m.group(1).lower()
         if w.startswith(("fatia", "porc", "cento", "unidade")) or _produto_conhecido(w):
             return "1"
+        # "uma mini pizza", "um kit de mini pizza": "mini" e "kit" sozinhos nao
+        # sao produto, e a pizza sumia do resumo (teste de 04/11 9h48).
+        if w in ("mini", "kit") and _produto_conhecido(
+                " ".join(m.string[m.end():].split()[:4])):
+            return "1"
         return m.group(0)
     texto = _RX_UM_UMA.sub(_um, texto or "")
     return _RX_NUMERO_EXTENSO.sub(_troca, texto)
@@ -3097,9 +3114,36 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
                 _somados_msg.append(dict(_it))
         items_found = _somados_msg
 
+        # Cada volume com o seu produto. "1 cento de brigadeiros 1 cento de
+        # fritos e meio cento de churros": o cento de fritos sumia do resumo; e
+        # "1 cento de fritos e meio cento de canudos" virava 100 canudos (teste
+        # de 04/11 9h40). Com mais de um volume, cada um pergunta o seu sabor.
+        _pacotes = [(_unidades_do_formato(f), p.strip()) for _u, f, p
+                    in _PACOTE_POR_EXTENSO.findall(msg_lower)
+                    if p and not _RX_DOCE.search(p) and not _produto_conhecido(p)]
+        _pacotes = [(u, p) for u, p in _pacotes if u]
         if items_found:
             extracted["items"] = items_found
-        else:
+        if _pacotes and (items_found or len(_pacotes) > 1):
+            # Quantidade de festa (25 ou mais) ja dita com sabor nesta mensagem,
+            # fora a que tem o proprio volume ("meio cento de coxinha").
+            _com_volume = {_produto_conhecido(p) for _u, _f, p in _PACOTE_POR_EXTENSO.findall(msg_lower) if p}
+            _no_lote = sum(int(i.get("quantity") or 0) for i in items_found
+                           if int(i.get("quantity") or 0) >= 25 and i.get("name") not in _com_volume)
+            _pend = list(extracted.get("sabores_pendentes") or [])
+            for u, termo in _pacotes:
+                # "1 cento de salgados: 50 coxinha e 50 quibe": os sabores ditos
+                # ja fecham o volume.
+                if items_found and _no_lote >= u:
+                    continue
+                opcoes = sabores_possiveis(termo)
+                if len(opcoes) <= 1:
+                    opcoes = _sabores_do_preparo(termo)
+                if len(opcoes) > 1 and not any(p.get("termo") == termo for p in _pend):
+                    _pend.append({"qtd": u, "termo": termo, "opcoes": opcoes})
+            if _pend:
+                extracted["sabores_pendentes"] = _pend
+        elif not items_found:
             # Volume dito sem sabor: guarda para a ficha pedir os sabores.
             unidades = volume_sem_sabor(msg_lower)
             # "meio cento de canudo": o produto vale mais que o volume. Virava
