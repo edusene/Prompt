@@ -3139,6 +3139,12 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
                 opcoes = sabores_possiveis(termo)
                 if len(opcoes) <= 1:
                     opcoes = _sabores_do_preparo(termo)
+                # O sabor ja pedido na mensagem nao e opcao: o "meio cento de
+                # churros" respondia a pergunta dos fritos, e saiam 100 churros
+                # (teste ao vivo de 04/11 10h53).
+                _ditos = {_forma_de_busca(str(i.get("name"))).split()[0]
+                          for i in items_found if _forma_de_busca(str(i.get("name")))}
+                opcoes = [o for o in opcoes if _forma_de_busca(o).split()[0] not in _ditos]
                 if len(opcoes) > 1 and not any(p.get("termo") == termo for p in _pend):
                     _pend.append({"qtd": u, "termo": termo, "opcoes": opcoes})
             if _pend:

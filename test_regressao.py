@@ -4888,6 +4888,13 @@ _ex0411 = _exim("Quero 1 cento de brigadeiros 1 cento de fritos e meio cento de 
 checa("04/11 '1 cento de fritos' junto de outro item pergunta o sabor",
       any(p["qtd"] == 100 and p["termo"] == "fritos" for p in _ex0411.get("sabores_pendentes") or []),
       str(_ex0411.get("sabores_pendentes")))
+_m0411 = memoria_mod._empty()
+memoria_mod.merge(_m0411, _ex0411)
+memoria_mod.aplicar_escolha_de_sabor(_m0411, "Quero 1 cento de brigadeiros 1 cento de fritos e meio cento de churros")
+checa("04/11 o churros da mensagem nao responde o sabor dos fritos (ao vivo 10h53)",
+      [(i["name"], i["quantity"]) for i in _m0411["items"] if "urros" in i["name"]] == [("Churros", 50)]
+      and "100 de fritos" in memoria_mod.pergunta_bloqueante(_m0411),
+      str((_m0411["items"], _m0411.get("sabores_pendentes"))))
 _ex0411b = _exim("1 cento de fritos e meio cento de canudos", _CSim())
 checa("04/11 cada volume com o seu sabor (100 fritos e 50 canudos)",
       sorted((p["qtd"], p["termo"]) for p in _ex0411b.get("sabores_pendentes") or [])
