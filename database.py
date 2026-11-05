@@ -8,7 +8,7 @@ import db
 import json
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 
@@ -912,6 +912,34 @@ def mensagem_ja_recebida(wa_message_id: str) -> bool:
     except Exception as e:
         # Na duvida, processa: responder duas vezes incomoda, nao responder perde.
         print(f"[db] WARN mensagem_ja_recebida({wa_message_id}): {e}")
+        return False
+
+
+def mensagem_superada(phone: str, enviada_em: int, excluir_id: int | None = None,
+                      folga: int = 60) -> bool:
+    """Chegou outra mensagem do cliente bem DEPOIS desta ter sido enviada?
+
+    O AutoZap reenvia o webhook que falhou (2, 4, 8 min depois). Se o agente
+    estava fora do ar, a mensagem antiga chega depois da nova ja respondida e
+    era respondida de novo: a mensagem das 20:42 foi atendida as 20:48, depois
+    do "#reset" das 20:45 (05/11). A folga cobre mensagens seguidas que chegam
+    fora de ordem por segundos.
+    """
+    if not phone or not enviada_em:
+        return False
+    try:
+        ultima = db.fetch_one(
+            "SELECT created_at FROM messages WHERE phone=? AND direction='in' AND id<>? "
+            "ORDER BY id DESC LIMIT 1",
+            (phone, excluir_id or 0),
+        )
+        if not ultima or not ultima.get("created_at"):
+            return False
+        chegada = datetime.fromisoformat(str(ultima["created_at"])[:19])
+        return chegada.replace(tzinfo=timezone.utc).timestamp() - enviada_em > folga
+    except Exception as e:
+        # Na duvida, processa (mesma regra de mensagem_ja_recebida).
+        print(f"[db] WARN mensagem_superada({phone}): {e}")
         return False
 
 

@@ -4662,6 +4662,23 @@ _sem25 = _cli25.post("/webhook", data=_corpo25, content_type="application/json",
                      headers={"X-Webhook-Signature": _ass25, "X-Webhook-Timestamp": _ts25})
 checa("webhook do AutoZap sem segredo configurado recusa (503)", _sem25.status_code == 503)
 
+# Reentrega atrasada do AutoZap: a mensagem das 20:42 chegou as 20:48, depois
+# da das 20:45 ja respondida, e foi respondida de novo (05/11).
+import database as _dbm25
+from datetime import datetime as _dt25, timezone as _tz25
+_fetch_orig25 = _dbm25.db.fetch_one
+_dbm25.db.fetch_one = lambda q, p=None: {"created_at": "2026-11-05T20:45:36.123456"}
+_t2042 = int(_dt25(2026, 11, 5, 20, 42, 5, tzinfo=_tz25.utc).timestamp())
+_t2045 = int(_dt25(2026, 11, 5, 20, 45, 30, tzinfo=_tz25.utc).timestamp())
+checa("mensagem reentregue depois de outra mais nova nao e respondida",
+      _dbm25.mensagem_superada("5569", _t2042, 10) is True)
+checa("mensagens seguidas fora de ordem por segundos seguem normais",
+      _dbm25.mensagem_superada("5569", _t2045, 10) is False)
+_dbm25.db.fetch_one = lambda q, p=None: None
+checa("primeira mensagem do cliente nunca e superada",
+      _dbm25.mensagem_superada("5569", _t2042, 10) is False)
+_dbm25.db.fetch_one = _fetch_orig25
+
 import meta as _meta25
 _env_antes25 = {k: os.environ.get(k) for k in ("AUTOZAP_API_KEY", "AUTOZAP_PHONE_NUMBER_ID", "AUTOZAP_API_URL")}
 os.environ.update(AUTOZAP_API_KEY="sk_test_x",

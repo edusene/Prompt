@@ -9424,6 +9424,17 @@ def webhook():
                     print(f"[webhook] WARN falha ao gravar wamid={message_id}; "
                           f"processando assim mesmo para nao perder o cliente")
 
+            # Mensagem velha que o AutoZap reentregou depois de uma mais nova do
+            # mesmo cliente ja ter sido atendida: grava, mas nao responde de novo
+            # (05/11: a das 20:42 foi respondida as 20:48, depois do #reset das 20:45).
+            _superada = bool(
+                saved and str(timestamp).isdigit()
+                and database.mensagem_superada(number, int(timestamp), saved["id"]))
+            if _superada:
+                print(f"[webhook] MENSAGEM ATRASADA nao respondida wamid={message_id} "
+                      f"from={number}")
+            _ja_processada = _ja_processada or _superada
+
             # #reset nao entra no debounce — a palavra nao e conversa, e
             # comando. Ele precisa funcionar quando a conversa esta em modo
             # humano, que e onde handle_flush desiste logo no inicio. Roda ANTES
