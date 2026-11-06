@@ -2934,6 +2934,14 @@ def aplicar_sabor_de_bebida(memoria: dict, texto: str) -> list[str]:
             _m = _re.search(r"\b(\d{1,2})\s+(?:de\s+)?" + _re.escape(_sem_acento(o).split()[0]) + r"\b", _t)
             if _m:
                 _por_sabor.append((int(_m.group(1)), o))
+        _destino_cat = (cardapio_catalogo._achar(cardapio_catalogo.mapa_efetivo(),
+                                                 str(item.get("name", ""))) or {}).get("categoria")
+        if escolha and item.get("name") == perguntado and len(_por_sabor) > 1 and _destino_cat == "Combos":
+            # "25 coxinha e 25 kibe" no Combo 50 sao os sabores DE UM combo; a
+            # divisao do suco fazia 25 combos por sabor - R$ 2.500 (06/11).
+            item["sabor"] = " + ".join(o for _, o in _por_sabor)
+            mudancas.append(f"{item.get('name')} -> sabor {item['sabor']}")
+            continue
         if escolha and item.get("name") == perguntado and len(_por_sabor) > 1:
             _i = memoria["items"].index(item)
             memoria["items"][_i:_i + 1] = [dict(item, quantity=q, sabor=o) for q, o in _por_sabor]

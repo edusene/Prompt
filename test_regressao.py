@@ -3265,7 +3265,7 @@ checa("27/10 'risoles de carne' continua o de carne",
       _produto_conhecido("risoles de carne") == "Rissole de Carne")
 checa("27/10 'risole grande de queijo e presunto' nao vira o de carne",
       _produto_conhecido("risole grande de queijo e presunto") == "Rissole de Queijo e Presunto")
-for _t27 in ("mini saltenha", "mini saltenhas fritas", "saltenha frita", "kit de mini saltenha"):
+for _t27 in ("mini saltenha", "mini saltenhas fritas", "kit de mini saltenha"):
     checa(f"27/10 '{_t27}' e o kit de mini saltenha, nao a Saltenha Assada",
           _produto_conhecido(_t27) == "Kit Mini Saltenha Frita (10und)", str(_produto_conhecido(_t27)))
 checa("27/10 'saltenha' sozinha continua a assada", _produto_conhecido("saltenha") == "Saltenha Assada")
@@ -5020,6 +5020,49 @@ checa("06/11 uso da Meta: dezembro fecha em janeiro do ano seguinte", _dbm._mes_
 checa("06/11 uso da Meta: separa Sandrinha e equipe por dia",
       _mu11["dias"][0] == {"dia": "2026-11-02", "sandrinha": 600, "equipe": 5}
       and _mu11["historico"][-1] == {"mes": "2026-11", "enviadas": 1055} and _mu11["franquia"] == 1000, str(_mu11))
+
+# 06/11, super teste do cardapio ao vivo.
+checa("06/11 'saltenha frita' e a Saltenha Frita grande (R$ 9), nao o kit",
+      _produto_conhecido("saltenha frita") == "Saltenha Frita"
+      and "Saltenha Frita" not in _cc27.BLOQUEADOS and _produto_conhecido("1 kit mini saltenha") != "Saltenha Frita")
+from agents.conversation import detectar_modalidade as _dm0611
+checa("06/11 'retiro hoje 18h' e retirada", _dm0611("retiro hoje 18h, pix") == "retirada")
+_oi_orig = _cc27.opcoes_do_item
+_cc27.opcoes_do_item = lambda n: ({"Combo 15 Canudinhos + Coca-Cola Lata": ["Canudinho (frango)", "Canudinho (camarão)"],
+                                   "Combo 50 Salgadinhos Fritos + Refrigerante 1L":
+                                   ["Coxinha (frango)", "Rissole (carne)", "Kibe", "Bolinha (queijo)"]}.get(n, []))
+try:
+    _c0611 = _ext24("1 combo 15 canudinhos de frango com coca e 1 combo mix camarao")
+    _c0611b = _ext24("1 combo 50 fritos com refri 1L com 25 coxinha e 25 kibe e 1 coca lata")
+    _c0611c = _ext24("1 combo 50 fritos e 25 coxinhas")
+finally:
+    _cc27.opcoes_do_item = _oi_orig
+checa("06/11 'canudinhos de frango com coca': sabor no combo e sem lata a parte",
+      ("Combo 15 Canudinhos + Coca-Cola Lata", 1, "Canudinho (frango)") in _nomes24(_c0611.get("combos"))
+      and not _c0611.get("bebidas") and not _c0611.get("bebidas_pendentes"), str(_c0611))
+checa("06/11 Combo 50 com '25 coxinha e 25 kibe': sabores do combo, sem avulsos",
+      _nomes24(_c0611b.get("combos")) == [("Combo 50 Salgadinhos Fritos + Refrigerante 1L", 1, "Coxinha (frango) + Kibe")]
+      and not _c0611b.get("items") and [b["name"] for b in _c0611b.get("bebidas") or []] == ["Refrigerante Lata"], str(_c0611b))
+checa("06/11 Combo 50 com 25 coxinhas (nao fecha 50) nao vira sabor do combo",
+      not _c0611c["combos"][0].get("sabor") and _nomes24(_c0611c.get("items")) == [("Coxinha", 25, "")], str(_c0611c))
+checa("06/11 'kit de 15 empadinhas' e o Kit Empadinhas, nao 15 de festa",
+      _nomes24(_ext24("1 kit de 15 empadinhas").get("items")) == [("Kit Empadinhas (15 unid)", 1, "")])
+_b0611 = _ext24("1 bandeja de 15 assados de esfirra")
+checa("06/11 'bandeja de 15 assados de esfirra' e so a bandeja",
+      not _b0611.get("items") and [i["name"] for i in _b0611.get("bebidas") or []] == ["Salgadinhos Assados - Bandeja com 15"],
+      str(_b0611))
+_m0611c = memoria_mod._empty()
+_m0611c["items"] = [{"name": "Combo 50 Salgadinhos Fritos + Refrigerante 1L", "quantity": 1, "price": 50.0}]
+_cc27.opcoes_do_item = lambda n: ["Coxinha (frango)", "Kibe"] if "Combo 50" in n else []
+try:
+    memoria_mod.aplicar_sabor_de_bebida(_m0611c, "25 coxinha e 25 kibe")
+finally:
+    _cc27.opcoes_do_item = _oi_orig
+checa("06/11 '25 coxinha e 25 kibe' na pergunta do Combo 50: 1 combo com 2 sabores (era 25 combos por sabor)",
+      [(i["quantity"], i.get("sabor")) for i in _m0611c["items"]] == [(1, "Coxinha (frango) + Kibe")], str(_m0611c["items"]))
+checa("06/11 dois sabores do combo vao separados para o cardapio",
+      _cc27.traduzir([{"name": "Combo 50 Salgadinhos Fritos + Refrigerante 1L", "quantity": 1,
+                       "sabor": "Coxinha (frango) + Kibe"}])[0][0].get("selected_flavors") == ["Coxinha (frango)", "Kibe"])
 
 print()
 print("=" * 78)

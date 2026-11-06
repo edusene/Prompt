@@ -154,6 +154,11 @@ MAPA = {
         "categoria": "Salgados Grandes", "nome_base44": "Saltenha Assada", "context": "unidade",
         "quantidade_teste": 1, "preco_esperado": 9.00,
     },
+    # 06/11: o cardapio passou a vender a Saltenha Frita grande, R$ 9.
+    "Saltenha Frita": {
+        "categoria": "Salgados Grandes", "nome_base44": "Saltenha Frita", "context": "unidade",
+        "quantidade_teste": 1, "preco_esperado": 9.00,
+    },
     "Bomba de Carne de Sol": {
         "categoria": "Salgados Grandes", "nome_base44": "Bomba de carne de sol", "context": "unidade",
         "quantidade_teste": 1, "preco_esperado": 10.00,
@@ -265,7 +270,6 @@ MAPA = {
 BLOQUEADOS = {
     "Panqueca de Carne": ("Salgados Grandes", "nao existe no cardapio digital"),
     "Panqueca de Frango": ("Salgados Grandes", "nao existe no cardapio digital"),
-    "Saltenha Frita": ("Salgados Grandes", "o cardapio so tem 'Mini Saltenha Frita' (R$ 2,00, minimo 10), que e outro produto"),
     "Cento de Beijinhos (100 un)": ("Bolos e Doces", "o cardapio digital nao tem beijinho; a busca cai em brigadeiro"),
     "Meio Cento de Beijinhos (50 un)": ("Bolos e Doces", "o cardapio digital nao tem beijinho; a busca cai na bandeja de 16 docinhos"),
     "Cento Misto Brigadeiro e Beijinho (100 un)": ("Bolos e Doces", "o cardapio digital nao tem misto; a busca cai em brigadeiro"),
@@ -615,7 +619,8 @@ def traduzir(items: list[dict], extras: list | None = None) -> tuple[list[dict],
             # ("Coca" no Refrigerante Lata). Sem ele a comanda saia sem dizer
             # qual refrigerante mandar.
             if str(item.get("sabor") or "").strip():
-                api_item["selected_flavors"] = [str(item["sabor"]).strip()]
+                # "Coxinha (frango) + Kibe": os dois sabores do Combo 50 (06/11).
+                api_item["selected_flavors"] = [s.strip() for s in str(item["sabor"]).split(" + ") if s.strip()]
             elif destino.get("sabor_fixo"):
                 # A bandeja e o meio cento pedem o sabor no cardapio digital
                 # (Brigadeiro, Beijinho, Mista); a planilha so vende brigadeiro.

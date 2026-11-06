@@ -313,10 +313,10 @@ _PRODUTOS_GRANDES = {
     "mini quiches de carne de sol": "Mini quiches",
     "saltenha": "Saltenha Assada",
     "saltenha assada": "Saltenha Assada",
-    # A unica saltenha frita do cardapio e o kit de mini: "saltenha frita"
-    # perdia o "frita" na limpeza do nome e virava Saltenha Assada, 20 a
-    # R$ 180 (teste de 27/10 16h24).
-    "saltenha frita": "Kit Mini Saltenha Frita (10und)",
+    # "saltenha frita" perdia o "frita" na limpeza do nome e virava Saltenha
+    # Assada (27/10). Desde 06/11 o cardapio vende a Saltenha Frita grande
+    # (R$ 9); antes ia para o kit de mini e 1 saltenha saia a R$ 20.
+    "saltenha frita": "Saltenha Frita",
     "mini saltenha": "Kit Mini Saltenha Frita (10und)",
     "mini saltenha frita": "Kit Mini Saltenha Frita (10und)",
     "kit mini saltenha": "Kit Mini Saltenha Frita (10und)",
@@ -402,7 +402,7 @@ _PRECO_UNITARIO = {
     "Quiche de Frango": 12.00,
     "Quiche de Carne de Sol": 12.00,
     "Saltenha Assada": 9.00,
-    "Saltenha Frita": 10.00,
+    "Saltenha Frita": 9.00,
     "Panqueca de Carne": 15.00,
     "Panqueca de Frango": 15.00,
     "Bomba de Carne de Sol": 10.00,
@@ -459,6 +459,8 @@ _RETIRADA_EXPLICITA = re.compile(
     r"|\b(?:peg|busc|retir)\w*\s+(?:ai\s+|la\s+)?na\s+loja\b"
     r"|\beu\s+busco\b"
     r"|\beu\s+pego\b"
+    # "retiro hoje 18h, pix": ela perguntava entrega ou retirada (06/11).
+    r"|\bretiro\b"
     r"|\bna\s+fabrica\b"
     r"|\bno\s+balcao\b"
 )
@@ -2323,6 +2325,24 @@ _COMBO_POR_PALAVRA = (
 )
 
 
+_RX_PAR_DO_COMBO = re.compile(r"(\d{1,3})\s+(?:de\s+)?([a-zà-ú]+(?:\s+de\s+[a-zà-ú]+)?)")
+
+
+def _sabor_do_combo(nome: str, palavra: str) -> str:
+    """A opcao do cardapio para a palavra dita ("frango" -> "Canudinho (frango)",
+    "quibe" -> "Kibe"). '' quando o combo nao tem a opcao."""
+    try:
+        import cardapio_catalogo
+        from conversation_memory import casar_sabor
+        opcoes = cardapio_catalogo.opcoes_do_item(nome)
+    except Exception:
+        return ""
+    if not opcoes:
+        return ""
+    return (casar_sabor(palavra, opcoes)
+            or casar_sabor(palavra.replace("quibe", "kibe"), opcoes))
+
+
 def combos_citados(msg_lower: str) -> tuple[list[dict], str]:
     """(combos pedidos, mensagem sem eles). O combo e um produto do cardapio
     vendido por unidade; o nome dele tem numero dentro ("15 empadinhas") que
@@ -2348,14 +2368,49 @@ def combos_citados(msg_lower: str) -> tuple[list[dict], str]:
             oficial = facts.resolve_unit_price(nome, qtd)
         except Exception:
             oficial = None
+        novo = None
         if not any(c["name"] == nome for c in achados):
-            achados.append({"name": nome, "quantity": qtd,
-                            "price": oficial["preco_unitario"] if oficial else 0.0})
+            novo = {"name": nome, "quantity": qtd,
+                    "price": oficial["preco_unitario"] if oficial else 0.0}
+            achados.append(novo)
+        fim = m.end()
+        # "combo 15 canudinhos de frango com coca": o sabor ficava entre o nome
+        # e a coca; ela perguntava o sabor de novo e a coca virava uma lata
+        # cobrada a parte (06/11).
+        do_sabor = re.match(r"\s*(?:de\s+)?(frango|camar[aã]o)\b", msg_lower[fim:])
+        if do_sabor:
+            fim += do_sabor.end()
+            _sabor = _sabor_do_combo(nome, do_sabor.group(1))
+            if novo is not None and _sabor:
+                novo["sabor"] = _sabor
         # "combo 15 empadinhas + coca-cola lata": a coca e a do combo. Ficava
         # na mensagem e virava uma lata a mais, cobrada a parte (26/10).
-        da_bebida = (_RX_BEBIDA_DO_COMBO.match(msg_lower[m.end():])
+        da_bebida = (_RX_BEBIDA_DO_COMBO.match(msg_lower[fim:])
                      if re.search(r"coca|refri", nome.lower()) else None)
-        resto_msg = resto_msg.replace(m.group(0) + (da_bebida.group(0) if da_bebida else ""), " ")
+        if da_bebida:
+            fim += da_bebida.end()
+        # "combo 50 fritos com refri 1L com 25 coxinha e 25 kibe": os sabores
+        # sao do combo. Viravam 25 coxinhas e 25 quibes avulsos, e o combo
+        # saia 25 vezes por sabor - R$ 2.627,50 (06/11).
+        if novo is not None and "50" in nome:
+            partes, soma, ultimo = [], 0, None
+            for par in _RX_PAR_DO_COMBO.finditer(msg_lower, m.start()):
+                if ultimo is not None and not re.fullmatch(r"[\s,]*(?:e\s+)?", msg_lower[ultimo:par.start()]):
+                    break
+                sabor = _sabor_do_combo(nome, par.group(2))
+                if not sabor:
+                    if partes:
+                        break
+                    continue  # "50 fritos", "50 com": ainda e o nome do combo
+                partes.append(sabor)
+                soma += int(par.group(1))
+                ultimo = par.end()
+                if soma >= 50 * qtd:
+                    break
+            if partes and soma == 50 * qtd:
+                novo["sabor"] = " + ".join(partes)
+                fim = max(fim, ultimo)
+        resto_msg = resto_msg.replace(msg_lower[m.start():fim], " ")
     # "combo mix de camarao e o outro de frango": o segundo combo vinha sem a
     # palavra "combo" e sumia; o total oscilou entre R$ 110 e R$ 210 (24/10).
     if achados:
@@ -2687,6 +2742,13 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
     # "100 salgados: coxinha, kibe, bolinha e misto" - os dois-pontos apagavam
     # os sabores e a pergunta deles voltava (28/10).
     msg_lower = re.sub(r"\b((?:salgad|frit|assad|cento)\w*)\s*:\s*", r"\1 ", msg_lower)
+    # O numero do nome do kit nao e quantidade: "kit de 15 empadinhas" virava
+    # 15 empadinhas de festa e "bandeja de 15 assados de esfirra", 15 esfirras
+    # mais a bandeja - o pedido ia para a equipe (06/11). A bandeja e mista
+    # (esfirra e pao pizza), sem escolha de sabor.
+    msg_lower = re.sub(r"\bkits?\s+(?:de\s+|com\s+)?15\s+empadinhas?\b", "kit empadinhas", msg_lower)
+    msg_lower = re.sub(r"\bbandejas?\s+(?:de\s+|com\s+)?(?:15\s+)?(?:salgadinhos?\s+)?assados?"
+                       r"(?:\s+(?:de|com)\s+(?:esfirras?|p[aã]o\s+pizza|mix)\b)?", "bandeja de assados", msg_lower)
     # "um centoQu frito misto de coxinha e bolinha" (teste do dono, 05/10):
     # letra a mais grudada no "cento" apagava o pedido inteiro.
     msg_lower = re.sub(r"\bcento(?!s\b)[a-z]{1,2}\b", "cento", msg_lower)
