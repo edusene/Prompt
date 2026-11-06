@@ -6821,6 +6821,12 @@ def _handle_flush(user: str, items: list[dict]) -> None:
         # Com a redivisao feita, o "nao ... frango" nao e "tira o de frango".
         _memoria, _mudancas = conversation_memory.merge(_memoria, _extracted, _extracted_fresh,
                                                         texto="" if _redivisao else text_only)
+        # Pedido e divisao na mesma mensagem ("um cento de mini quiche, metade
+        # de carne ir metade de frango"): a extracao gravava so o frango.
+        if not _redivisao:
+            _redivisao = conversation_memory.redividir_sabores(_memoria, text_only)
+            if _redivisao:
+                print(f"[memoria] {user}: sabores divididos -> {'; '.join(_redivisao)}")
         if _fora_aviso:
             conversation_memory.capturar_numero_da_casa(_memoria, text_only)
             if (_memoria.get("items") and not conversation_memory._itens_ambiguos_detalhe(_memoria)

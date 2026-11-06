@@ -2923,7 +2923,7 @@ def redividir_sabores(memoria: dict, texto: str) -> list[str]:
     t = _sem_acento(texto)
     for nome in dict.fromkeys(str(i.get("name", "")) for i in itens):
         grupo = [i for i in itens if i.get("name") == nome]
-        if not all(str(i.get("sabor") or "").strip() and "+" not in str(i.get("sabor")) for i in grupo):
+        if any("+" in str(i.get("sabor") or "") for i in grupo):
             continue
         opcoes = cardapio_catalogo.opcoes_do_item(nome)
         if len(opcoes) < 2:
@@ -2937,7 +2937,9 @@ def redividir_sabores(memoria: dict, texto: str) -> list[str]:
             _t = _re.sub(r"\bmetade\s+(?:d[eoa]\s+)?", f"{total // 2} de ", _t)
         partes = []
         for o in opcoes:
-            _m = _re.search(r"\b(\d{1,3})\s+(?:de\s+)?" + _re.escape(_sem_acento(o).split()[0]) + r"\b", _t)
+            # "50 mini quiches de frango": o nome do produto entre o numero e o sabor.
+            _m = _re.search(r"\b(\d{1,3})\s+(?:mini\s+)?(?:[a-z]+\s+)?(?:de\s+)?"
+                            + _re.escape(_sem_acento(o).split()[0]) + r"\b", _t)
             if _m:
                 partes.append((int(_m.group(1)), o))
         if len(partes) < 2 or sum(q for q, _ in partes) != total:
@@ -2980,7 +2982,9 @@ def aplicar_sabor_de_bebida(memoria: dict, texto: str) -> list[str]:
             _t = _re.sub(r"\bmetade\s+(?:d[eoa]\s+)?", f"{_qtd_item // 2} de ", _t)
         _por_sabor = []
         for o in opcoes or []:
-            _m = _re.search(r"\b(\d{1,3})\s+(?:de\s+)?" + _re.escape(_sem_acento(o).split()[0]) + r"\b", _t)
+            # "50 mini quiches de frango": o nome do produto entre o numero e o sabor.
+            _m = _re.search(r"\b(\d{1,3})\s+(?:mini\s+)?(?:[a-z]+\s+)?(?:de\s+)?"
+                            + _re.escape(_sem_acento(o).split()[0]) + r"\b", _t)
             if _m:
                 _por_sabor.append((int(_m.group(1)), o))
         _divide = len(_por_sabor) > 1 and sum(q for q, _ in _por_sabor) == _qtd_item
