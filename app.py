@@ -1129,7 +1129,8 @@ def _resposta_de_faq(texto: str, memoria: dict | None = None) -> tuple[str, str,
         pass
     # "GOSTARIA TANTO DO MINI HAMBURGUE", sem numero: o modelo dizia que nao
     # tinha (simulador, 29/10). A resposta sai do cardapio.
-    if _re_mod.search(r"\bminis?\s+(?:hamburg|sanduich|lanche)", t):
+    # "mini hambugues" (sem o r, Thayline 06/11) caia no modelo e na equipe.
+    if _re_mod.search(r"\bminis?\s+(?:hamb|sanduic|sanduich|lanche)", t):
         _ml = next((p for p in facts.get()["produtos"] if p["item"] == "Kit Mini Lanches"
                     and p.get("disponivel", True) and p.get("preco")), None)
         if _ml:
