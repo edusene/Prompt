@@ -8333,6 +8333,17 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                       f"{[i.get('name') for i in _itens_modelo]} -> usando a ficha "
                       f"{[i.get('name') for i in _itens_ficha]}")
                 _itens_modelo = _itens_ficha
+            # O resumo que a cliente aprovou sai da ficha. O modelo trocou
+            # "50 Coxinha frango R$ 40" por "Coxinha de Frango com Catupiry"
+            # a R$ 9 e a comanda saiu "50x Coxinha de frango (grande) R$ 450"
+            # (teste ao vivo, 06/11 19h42). Produto fora da ficha: vale a ficha.
+            _nomes_ficha = {facts.normalize(i.get("name", "")) for i in _itens_ficha}
+            if _itens_ficha and _itens_modelo and any(
+                    facts.normalize(i.get("name", "")) not in _nomes_ficha for i in _itens_modelo):
+                print(f"[cardápio] itens do modelo fora da ficha: "
+                      f"{[i.get('name') for i in _itens_modelo]} -> usando a ficha "
+                      f"{[i.get('name') for i in _itens_ficha]}")
+                _itens_modelo = _itens_ficha
             kwargs["items"] = _separar_sabor_do_nome(_itens_modelo or _itens_ficha, _itens_ficha)
             kwargs["items"] = _com_sabor_da_ficha(kwargs["items"], _memoria)
 
