@@ -256,6 +256,9 @@ _NOME_DO_SABOR_NA_FAMILIA = {
 _CATEGORIA = {
     "salgadinhos_fritos": "Fritos",
     "salgadinhos_assados": "Assados",
+    # Categoria propria desde 06/11 ("Salgadinhos Congelados"): o pacote
+    # sumia do catalogo e o pedido ia para a equipe.
+    "salgadinhos_congelados": "Fritos",
     "lanches": "Salgados Grandes",
     "salgado_frito_grande": "Salgados Grandes",
     "assados_especiais": "Salgados Grandes",
@@ -312,6 +315,7 @@ def _nome_do_sabor(opcao: str, familia: str = "") -> str:
 def _produtos(itens: list[dict]) -> list[dict]:
     produtos: list[dict] = []
     sabores_por_familia: dict[str, dict[str, bool]] = {}
+    congelados_sabores: list[dict] = []
     for it in itens:
         nome = str(it.get("name") or "").strip()
         if not nome:
@@ -337,10 +341,25 @@ def _produtos(itens: list[dict]) -> list[dict]:
             # "Cento salgadinhos fritos (congelados)", R$ 40 de 25 em 25, virava
             # a "Porcao (25 un)" dos fritos e 25 coxinhas fritas saiam a R$ 40
             # (27/10). Fica numa linha propria, com os sabores do cardapio.
-            produtos.append({"categoria": "Congelados", "item": nome, "formato": "Cento",
+            # 06/11: o "Pacote salgadinhos (congelados)" vende de 100 em 100 a
+            # R$ 0,50 a unidade (o calculateOrder cobra R$ 50 por 100). O preco
+            # do cadastro e o do pacote; cada sabor vira uma linha propria, como
+            # os sabores dos fritos, e o pedido segue sem a equipe.
+            try:
+                lote = int(float(it.get("kit_size") or it.get("min_quantity") or 100))
+            except (TypeError, ValueError):
+                lote = 100
+            produtos.append({"categoria": "Congelados", "item": nome, "formato": f"Pacote ({lote} un)",
                              "preco": preco, "preco_texto": f"{preco:.2f}" if preco else "",
                              "disponivel": disponivel, "origem": nome,
                              "opcoes": list(it.get("flavor_options") or [])})
+            _fora = {_n(s) for s in it.get("unavailable_flavors") or []}
+            for opcao in it.get("flavor_options") or []:
+                sabor = str(opcao).strip()
+                congelados_sabores.append({
+                    "categoria": "Congelados", "item": f"{sabor[:1].upper()}{sabor[1:]} (congelado)",
+                    "formato": "Sabor Congelado", "preco": None, "preco_texto": "Incluso no Pacote",
+                    "disponivel": disponivel and _n(sabor) not in _fora, "origem": sabor})
             continue
         # A porcao de 25 assados veio como venda "unit" de 25 em 25, com
         # sabores (07/10): e lote do mesmo jeito que o batch_25.
@@ -420,7 +439,9 @@ def _produtos(itens: list[dict]) -> list[dict]:
     pacotes = [p for p in produtos if p["categoria"] in ("Fritos", "Assados") and p["formato"] != "Unidade"]
     resto = [p for p in produtos if p not in pacotes]
     produtos = sorted(pacotes, key=lambda p: _ordem.get(p["categoria"], 9)) +         sorted(sabores_rows, key=lambda p: _ordem.get(p["categoria"], 9)) +         sorted(resto, key=lambda p: _ordem.get(p["categoria"], 9))
-    return produtos
+    # Por ultimo: na busca por nome, "coxinha" empata com "Coxinha de frango
+    # (congelado)" e a primeira linha vence - sem a palavra, e a frita.
+    return produtos + congelados_sabores
 
 
 def _bairros(taxas: list[dict]) -> list[dict]:

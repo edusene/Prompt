@@ -38,7 +38,7 @@ def _congelados_do_cardapio() -> list[dict]:
 
 
 def _sem_congelado(nome: str) -> str:
-    return _re_mod.sub(r"\s*\bcongelad[oa]s?\b", "", nome, flags=_re_mod.IGNORECASE).strip()
+    return _re_mod.sub(r"\s*\(?\bcongelad[oa]s?\b\)?", "", nome, flags=_re_mod.IGNORECASE).strip()
 
 
 def texto_congelado() -> str:
@@ -50,10 +50,14 @@ def texto_congelado() -> str:
                for p in linhas for s in p.get("opcoes") or []]
     sabores += [_sem_congelado(p["item"]) for p in linhas
                 if not p.get("opcoes") and not cardapio.nome_e_so_formato(p["item"])
+                and p.get("formato") != "Sabor Congelado"
                 and facts.normalize(p["item"]) != facts.normalize(p["categoria"])]
     sabores = [s for s in dict.fromkeys(sabores) if s] or list(_SABORES_CONGELADOS_DO_DONO)
+    # "Pacote salgadinhos (congelados)" nao tem o 100 no nome: o texto saia
+    # com os R$ 40 da lista do dono no lugar dos R$ 50 do cardapio (06/11).
     cento = next((p["preco"] for p in linhas if p.get("preco")
-                  and cardapio.unidades_do_rotulo(p["item"]) == 100), None)
+                  and 100 in (cardapio.unidades_do_rotulo(p["item"]),
+                              facts._unidades_do_formato(p))), None)
     preco = cardapio._brl(cento).replace(",00", "") if cento else "R$ 40"
     return ("Sim, trabalhamos sim! ❄️\n"
             f"Mini Salgados Congelados – {preco} o cento\n"
@@ -71,6 +75,7 @@ def _versao_congelada(nome: str) -> str:
     if not palavras:
         return ""
     import cardapio_catalogo
+    achados: list[tuple[int, str]] = []
     for p in _congelados_do_cardapio():
         if cardapio.nome_e_so_formato(p["item"]):
             continue
@@ -79,9 +84,16 @@ def _versao_congelada(nome: str) -> str:
         if p["categoria"] not in cardapio_catalogo.LOTES:
             continue
         suas = _forma_de_busca(_sem_congelado(p["item"])).split()
-        if any(w.startswith(palavras[0]) for w in suas):
-            return p["item"]
-    return ""
+        # Conta as palavras que batem: "pastel de carne" casava com o primeiro
+        # pastel da lista, o de queijo (06/11).
+        # Todas as palavras de um lado batem: "enroladinho de salsicha" e a
+        # "Salsicha"; "pastel de queijo" (em falta) nao e o de carne.
+        nota = sum(any(w.startswith(x) for w in suas) for x in palavras)
+        suas_longas = [w for w in suas if len(w) >= 4]
+        if nota and (nota == len(palavras)
+                     or all(any(w.startswith(x) for x in palavras) for w in suas_longas)):
+            achados.append((nota, p["item"]))
+    return max(achados, key=lambda a: a[0])[1] if achados else ""
 
 
 def pedido_de_congelado(texto: str, ultima_do_agente: str) -> bool:

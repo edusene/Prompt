@@ -5064,6 +5064,40 @@ checa("06/11 dois sabores do combo vao separados para o cardapio",
       _cc27.traduzir([{"name": "Combo 50 Salgadinhos Fritos + Refrigerante 1L", "quantity": 1,
                        "sabor": "Coxinha (frango) + Kibe"}])[0][0].get("selected_flavors") == ["Coxinha (frango)", "Kibe"])
 
+# 06/11: congelado no cardapio (categoria propria, pacote de 100 a R$ 50).
+_b0611 = {"MenuItem": [{"name": "Pacote salgadinhos (congelados)", "category": "cg", "price": 50.0,
+                        "available": True, "max_flavors": 4, "is_kit": True, "kit_size": 100,
+                        "min_quantity": 100, "unit_increment": 100,
+                        "flavor_options": ["Coxinha de frango", "Pastel de queijo", "Pastel de carne", "Salsicha"],
+                        "unavailable_flavors": ["Pastel de queijo"]}],
+          "InternalMenuItem": [], "Category": [{"id": "cg", "name": "Salgadinhos Congelados "}],
+          "InternalDeliveryFee": [], "BusinessHours": [], "InternalBusinessRule": []}
+_p0611 = _cf27.montar_dados(_b0611)["produtos"]
+_fg0611, facts.get = facts.get, lambda *a, **k: {"produtos": _p0611}
+try:
+    _t0611 = app.texto_congelado()
+    _v0611 = [app._versao_congelada(n) for n in ("Coxinha", "Pastel Carne", "Pastel Queijo", "Enroladinho de Salsicha")]
+    _r0611 = facts.resolve_unit_price("Coxinha de frango (congelado)", 100)
+    _tr0611 = _cc27.traduzir([{"name": "Coxinha de frango (congelado)", "quantity": 50},
+                              {"name": "Pastel de carne (congelado)", "quantity": 50}])
+    _tr0611b = [_cc27.traduzir([{"name": "Coxinha de frango (congelado)", "quantity": q}])[1] for q in (50, 150)]
+finally:
+    facts.get = _fg0611
+checa("06/11 congelado: categoria 'Salgadinhos Congelados' entra, com uma linha por sabor",
+      any(p["categoria"] == "Congelados" and p["preco"] == 50.0 for p in _p0611)
+      and [p["item"] for p in _p0611 if p.get("formato") == "Sabor Congelado"][0] == "Coxinha de frango (congelado)",
+      str(_p0611))
+checa("06/11 congelado: oferta com o preco do cardapio (R$ 50), nao os R$ 40 do dono",
+      "R$ 50 o cento" in _t0611 and "• Pastel de carne" in _t0611, _t0611)
+checa("06/11 congelado: sabor pedido vira a linha congelada certa; sabor indisponivel fica de fora",
+      _v0611 == ["Coxinha de frango (congelado)", "Pastel de carne (congelado)", "", "Salsicha (congelado)"], str(_v0611))
+checa("06/11 congelado: R$ 0,50 a unidade (100 = R$ 50)",
+      _r0611 and abs(_r0611["preco_unitario"] - 0.5) < 1e-9, str(_r0611))
+checa("06/11 congelado: 50 + 50 vai num pacote de 100 com 2 sabores; 50 e 150 sao recusados",
+      _tr0611 == ([{"name": "Pacote salgadinhos (congelados)", "quantity": 100,
+                    "selected_flavors": ["Coxinha de frango", "Pastel de carne"], "context": "lote"}], [])
+      and all(b and "pacotes de 100" in b[0] for b in _tr0611b), str((_tr0611, _tr0611b)))
+
 print()
 print("=" * 78)
 print("FALHAS:", _falhas or "nenhuma")

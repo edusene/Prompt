@@ -80,6 +80,19 @@ LOTES = {
         "quantidade_teste": 50,
         "preco_esperado": 70.00,
     },
+    # 06/11: pacote congelado de 100 (ate 4 sabores de 25), R$ 0,50 a unidade.
+    # O calculateOrder recusa 50 e 150: so pacotes inteiros de 100.
+    "Congelados": {
+        "preco_unitario": 0.50,
+        "passo": 25,
+        "multiplo": 100,
+        "context": "lote",
+        "pacotes": [
+            {"nome_base44": "Pacote salgadinhos (congelados)", "minimo": 100, "max_sabores": 4},
+        ],
+        "quantidade_teste": 100,
+        "preco_esperado": 50.00,
+    },
 }
 
 
@@ -641,6 +654,13 @@ def traduzir(items: list[dict], extras: list | None = None) -> tuple[list[dict],
             bloqueados.append(
                 f"{familia}: o cardapio digital so aceita multiplos de {passo} por sabor "
                 f"- ajuste {', '.join(quebrados)}"
+            )
+            continue
+
+        if cfg.get("multiplo") and total % cfg["multiplo"]:
+            bloqueados.append(
+                f"{familia}: {total} unidades, mas o cardapio digital so vende pacotes "
+                f"de {cfg['multiplo']} nessa categoria"
             )
             continue
 

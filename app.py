@@ -6615,7 +6615,14 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             _itens_cong = _extract_data_from_message(
                 _texto_cliente.lower(), ConversationState(phone=user)).get("items") or []
             _congelado_para = {i["name"]: _versao_congelada(i["name"]) for i in _itens_cong}
-            # Sem item (volume ou sabor solto), a equipe tambem registra.
+            # "1 cento de salgado congelado", sem sabor: com o pacote no
+            # cardapio, a oferta lista os sabores e o preco e ela pede a
+            # escolha (06/11). Antes ia para a equipe.
+            if not _congelado_para and _congelados_do_cardapio():
+                print(f"[congelado] user={user} pedido sem sabor: oferta com os sabores")
+                _responder_direto(user, items, texto_congelado(), _chegada)
+                return
+            # Sabor que o pacote nao tem: a equipe registra.
             if not _congelado_para or not all(_congelado_para.values()):
                 print(f"[congelado] user={user} pedido sem produto congelado no cardapio "
                       f"({_congelado_para}); equipe registra")
