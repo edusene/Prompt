@@ -4947,6 +4947,8 @@ checa("05/11 'um cento frito ir outro assado' sao 200",
 checa("05/11 'vou ir buscar' nao vira 'e'",
       _exim("vou ir buscar as 18h", _CSim()).get("modality") != "entrega")
 checa("05/11 'as 18/30' e 18h30", detectar_horario("16 as 18/30") == "18h30")
+checa("05/11 'dia 16 as 18/30' guarda o dia 16",
+      detectar_data("dia 16 as 18/30", datetime(2026, 11, 5, 16, 0)) == date(2026, 11, 16))
 checa("05/11 'as 18/11' nao vira horario com minuto", detectar_horario("dia 16 as 18/11") != "18h11")
 _m0511 = {"modality": "entrega", "endereco": "Rua Wilman Maia", "bairro": "Igarape"}
 checa("05/11 'dia 19/11 as 19:40 cartao' nao vira casa 11",

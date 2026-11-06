@@ -722,7 +722,14 @@ def detectar_data(message: str, now=None):
 
     if _HOJE_NAO_AGENDAMENTO.search(_horario._norm(message)):
         return None
-    return _horario.resolver_data(message, now)
+    return _horario.resolver_data(_hora_com_barra(message), now)
+
+
+def _hora_com_barra(texto: str) -> str:
+    """"as 18/30" e 18h30: virava 18h, e como data invalida apagava o "dia 16"
+    da mesma mensagem (Thayline, 05/11). Minuto acima de 12 para nao ler data
+    ("as 18/11")."""
+    return re.sub(r"\b([aà]s\s+\d{1,2})/(1[3-9]|[2-5]\d)\b", r"\1:\2", texto or "")
 
 
 _PGTO_PIX = re.compile(r"\bpix\b")
@@ -814,9 +821,7 @@ def detectar_horario(message: str) -> str:
     # AGORA, nao a do pedido (teste do dono, 06/10 - virou pedido para 12h30
     # e ela avisou do intervalo de almoco).
     t = _RX_HORA_ATUAL.sub(" ", t)
-    # "as 18/30" e 18h30: virava 18h (Thayline, 05/11). Minuto acima de 12
-    # para nao ler data ("as 18/11").
-    t = re.sub(r"\b(as\s+\d{1,2})/(1[3-9]|[2-5]\d)\b", r"\1:\2", t)
+    t = _hora_com_barra(t)
     hm = _horario.parse_horario(t)
     if hm:
         return _horario.formatar_horario(*hm)
