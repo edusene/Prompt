@@ -198,6 +198,8 @@ async function loadDashboard() {
         return;
     }
     grid.dataset.loaded = '1';
+    // Uma vez por abertura: o polling de 15s redesenharia os graficos sob o mouse.
+    if (!document.getElementById('meta-uso').dataset.loaded) loadMetaUso();
     grid.innerHTML = `
         <div class="stat-card">
             <div class="stat-icon"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></div>
@@ -225,6 +227,188 @@ async function loadDashboard() {
             <div class="stat-label">Não Lidas</div>
         </div>
     `;
+}
+
+/* ── Mensagens enviadas no mes (franquia da Meta) ─────────────────────────── */
+const META_MESES = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
+const metaNum = n => Number(n).toLocaleString('pt-BR');
+const metaNomeMes = m => `${META_MESES[+m.slice(5, 7) - 1]}/${m.slice(2, 4)}`;
+
+async function loadMetaUso() {
+    const sel = document.getElementById('meta-mes');
+    const box = document.getElementById('meta-uso');
+    if (!sel.options.length) {
+        // Os ultimos 12 meses, em UTC como a Meta.
+        const d = new Date();
+        let a = d.getUTCFullYear(), m = d.getUTCMonth() + 1;
+        for (let i = 0; i < 12; i++) {
+            const v = `${a}-${String(m).padStart(2, '0')}`;
+            sel.add(new Option(i ? metaNomeMes(v) : `${metaNomeMes(v)} (atual)`, v));
+            if (--m === 0) { m = 12; a--; }
+        }
+    }
+    box.dataset.loaded = '1';
+    const r = await api(`/api/dashboard/meta?mes=${sel.value}`);
+    if (!r) { box.innerHTML = '<p class="muted">Erro ao carregar</p>'; return; }
+
+    const [ano, mes] = r.mes.split('-').map(Number);
+    const nDias = new Date(Date.UTC(ano, mes, 0)).getUTCDate();
+    const hoje = new Date().toISOString().slice(0, 10);
+    const atual = hoje.slice(0, 7) === r.mes;
+    const ateDia = atual ? +hoje.slice(8, 10) : nDias;
+    const porDia = Array.from({ length: nDias }, (_, i) => {
+        const dia = `${r.mes}-${String(i + 1).padStart(2, '0')}`;
+        const d = r.dias.find(x => x.dia === dia) || {};
+        return { dia: i + 1, sandrinha: d.sandrinha || 0, equipe: d.equipe || 0 };
+    });
+    let acum = 0, diaQuePassou = 0;
+    porDia.forEach(d => {
+        d.total = d.sandrinha + d.equipe;
+        acum += d.total;
+        d.acum = acum;
+        if (!diaQuePassou && acum > r.franquia) diaQuePassou = d.dia;
+    });
+    const total = acum;
+    const sandrinha = porDia.reduce((s, d) => s + d.sandrinha, 0);
+    const media = ateDia ? total / ateDia : 0;
+    const projecao = atual ? Math.round(media * nDias) : total;
+    const pct = Math.min(100, total / r.franquia * 100);
+    let previsao = '';
+    if (diaQuePassou) previsao = `Passou no dia ${diaQuePassou}`;
+    else if (atual && media > 0) {
+        const dia = ateDia + Math.ceil((r.franquia - total) / media);
+        previsao = dia <= nDias ? `Deve passar por volta do dia ${dia}` : 'Não deve passar este mês';
+    } else previsao = atual ? 'Sem envios ainda' : 'Não passou';
+    const estado = total > r.franquia ? ['passou', '!', 'Passou da franquia']
+        : (atual ? projecao : total) >= r.franquia * 0.8 ? ['perto', '!', 'Perto do limite']
+        : ['ok', '✓', 'Dentro da franquia'];
+
+    box.innerHTML = `
+        <div class="meta-hero">
+            <div class="meta-hero-top">
+                <div><span class="meta-big">${metaNum(total)}</span><span class="muted"> de ${metaNum(r.franquia)} grátis</span></div>
+                <span class="meta-pill meta-${estado[0]}"><b>${estado[1]}</b> ${estado[2]}</span>
+            </div>
+            <div class="meta-bar" role="img" aria-label="${Math.round(pct)}% da franquia usada">
+                <div class="meta-bar-fill meta-${estado[0]}" style="width:${pct}%"></div>
+            </div>
+            <div class="meta-kpis">
+                <div><span>${total > r.franquia ? 'Pagas (acima de 1.000)' : 'Restam grátis'}</span><b>${metaNum(Math.abs(r.franquia - total))}</b></div>
+                <div><span>${atual ? 'Projeção até o fim do mês' : 'Total do mês'}</span><b>${metaNum(projecao)}</b></div>
+                <div><span>Previsão</span><b>${previsao}</b></div>
+                <div><span>Média por dia</span><b>${metaNum(Math.round(media))}</b></div>
+                <div><span>Clientes atendidos</span><b>${metaNum(r.contatos)}</b></div>
+                <div><span>Por cliente</span><b>${r.contatos ? metaNum(Math.round(total / r.contatos)) : 0}</b></div>
+            </div>
+        </div>
+        <div class="meta-charts">
+            <div class="meta-chart meta-wide">
+                <h3>Acumulado no mês</h3>
+                <div class="meta-legend"><span class="meta-sw meta-sw-acum"></span>Enviadas${atual ? ' <span class="meta-sw meta-sw-proj"></span>Projeção' : ''} <span class="meta-sw meta-sw-lim"></span>1.000 grátis</div>
+                <div class="meta-plot" id="meta-acum"></div>
+            </div>
+            <div class="meta-chart meta-wide">
+                <h3>Enviadas por dia</h3>
+                <div class="meta-legend"><span class="meta-sw meta-sw-s"></span>Sandrinha ${metaNum(sandrinha)} <span class="meta-sw meta-sw-e"></span>Equipe ${metaNum(total - sandrinha)}</div>
+                <div class="meta-plot" id="meta-dia"></div>
+            </div>
+            <div class="meta-chart">
+                <h3>Últimos 6 meses</h3>
+                <div class="meta-plot" id="meta-hist"></div>
+            </div>
+        </div>
+        <details class="meta-tabela"><summary>Ver tabela por dia</summary>
+            <table><thead><tr><th>Dia</th><th>Sandrinha</th><th>Equipe</th><th>Total</th><th>Acumulado</th></tr></thead>
+            <tbody>${porDia.slice(0, ateDia).map(d => `<tr><td>${d.dia}</td><td>${d.sandrinha}</td><td>${d.equipe}</td><td>${d.total}</td><td>${metaNum(d.acum)}</td></tr>`).join('')}</tbody></table>
+        </details>`;
+
+    metaGraficoAcumulado(document.getElementById('meta-acum'), porDia.slice(0, ateDia), nDias, r.franquia, atual ? media : 0);
+    metaGraficoDiario(document.getElementById('meta-dia'), porDia.slice(0, ateDia), nDias);
+    metaGraficoHistorico(document.getElementById('meta-hist'), r.historico, r.franquia);
+}
+
+// Grade comum dos graficos por dia: x = dia do mes, y = 0..max.
+function metaEscala(nDias, max, W = 640, H = 200) {
+    const p = { l: 44, r: 12, t: 12, b: 24 };
+    const x = d => p.l + (d - 0.5) / nDias * (W - p.l - p.r);
+    const y = v => H - p.b - v / max * (H - p.t - p.b);
+    const passo = [5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 5000].find(s => max / s <= 5) || 10000;
+    let grade = '';
+    for (let v = 0; v <= max; v += passo) {
+        grade += `<line class="meta-grid" x1="${p.l}" x2="${W - p.r}" y1="${y(v)}" y2="${y(v)}"/>` +
+                 `<text class="meta-axis" x="${p.l - 6}" y="${y(v) + 4}" text-anchor="end">${metaNum(v)}</text>`;
+    }
+    for (const d of [1, 5, 10, 15, 20, 25, nDias]) {
+        grade += `<text class="meta-axis" x="${x(d)}" y="${H - 6}" text-anchor="middle">${d}</text>`;
+    }
+    return { W, H, p, x, y, grade };
+}
+
+// Camada de hover: o dia sob o cursor ganha a linha guia e a dica.
+function metaHover(el, g, nDias, dados, dica) {
+    const svg = el.querySelector('svg'), guia = el.querySelector('.meta-guia'), tip = el.querySelector('.meta-tip');
+    svg.addEventListener('mousemove', ev => {
+        const b = svg.getBoundingClientRect();
+        const sx = (ev.clientX - b.left) / b.width * g.W;
+        const dia = Math.round((sx - g.p.l) / (g.W - g.p.l - g.p.r) * nDias + 0.5);
+        const d = dados[dia - 1];
+        if (!d) { tip.hidden = true; guia.style.display = 'none'; return; }
+        guia.setAttribute('x1', g.x(dia)); guia.setAttribute('x2', g.x(dia));
+        guia.style.display = '';
+        tip.innerHTML = dica(d);
+        tip.hidden = false;
+        const px = g.x(dia) / g.W * b.width;
+        tip.style.left = `${Math.min(px + 12, b.width - tip.offsetWidth - 4)}px`;
+    });
+    svg.addEventListener('mouseleave', () => { tip.hidden = true; guia.style.display = 'none'; });
+}
+
+function metaGraficoAcumulado(el, dias, nDias, franquia, media) {
+    const ult = dias.length ? dias[dias.length - 1].acum : 0;
+    const proj = media ? media * nDias : 0;
+    const g = metaEscala(nDias, Math.max(franquia * 1.15, ult * 1.1, proj * 1.05));
+    const pts = dias.map(d => `${g.x(d.dia)},${g.y(d.acum)}`).join(' ');
+    const projLinha = media && dias.length < nDias
+        ? `<line class="meta-proj" x1="${g.x(dias.length)}" y1="${g.y(ult)}" x2="${g.x(nDias)}" y2="${g.y(proj)}"/>` : '';
+    const ultimo = dias.length ? `<circle class="meta-ponto" cx="${g.x(dias.length)}" cy="${g.y(ult)}" r="4"/>` : '';
+    el.innerHTML = `<svg viewBox="0 0 ${g.W} ${g.H}" role="img" aria-label="Mensagens enviadas acumuladas no mês">${g.grade}
+        <line class="meta-lim" x1="${g.p.l}" x2="${g.W - g.p.r}" y1="${g.y(franquia)}" y2="${g.y(franquia)}"/>
+        ${projLinha}<polyline class="meta-linha" points="${pts}"/>${ultimo}
+        <line class="meta-guia" y1="${g.p.t}" y2="${g.H - g.p.b}" style="display:none"/></svg>
+        <div class="meta-tip" hidden></div>`;
+    metaHover(el, g, nDias, dias, d => `<b>Dia ${d.dia}</b><br>Acumulado: ${metaNum(d.acum)}<br>No dia: ${metaNum(d.total)}`);
+}
+
+function metaGraficoDiario(el, dias, nDias) {
+    const g = metaEscala(nDias, Math.max(10, ...dias.map(d => d.total)) * 1.1);
+    const larg = Math.max(2, (g.W - g.p.l - g.p.r) / nDias - 3);
+    const barras = dias.map(d => {
+        const x = g.x(d.dia) - larg / 2, base = g.y(0), yS = g.y(d.sandrinha), yT = g.y(d.total);
+        // Sandrinha embaixo, equipe em cima, com 2px de folga entre as duas.
+        const s = d.sandrinha ? `<rect class="meta-s" x="${x}" y="${yS}" width="${larg}" height="${base - yS}" rx="2"/>` : '';
+        const e = d.equipe ? `<rect class="meta-e" x="${x}" y="${yT}" width="${larg}" height="${Math.max(1, yS - yT - (d.sandrinha ? 2 : 0))}" rx="2"/>` : '';
+        return s + e;
+    }).join('');
+    el.innerHTML = `<svg viewBox="0 0 ${g.W} ${g.H}" role="img" aria-label="Mensagens enviadas por dia">${g.grade}${barras}
+        <line class="meta-guia" y1="${g.p.t}" y2="${g.H - g.p.b}" style="display:none"/></svg>
+        <div class="meta-tip" hidden></div>`;
+    metaHover(el, g, nDias, dias, d => `<b>Dia ${d.dia}</b><br>Sandrinha: ${metaNum(d.sandrinha)}<br>Equipe: ${metaNum(d.equipe)}<br>Total: ${metaNum(d.total)}`);
+}
+
+function metaGraficoHistorico(el, hist, franquia) {
+    const W = 640, H = 200, p = { l: 12, r: 12, t: 22, b: 24 };
+    const max = Math.max(franquia * 1.15, ...hist.map(h => h.enviadas * 1.1));
+    const y = v => H - p.b - v / max * (H - p.t - p.b);
+    const passo = (W - p.l - p.r) / hist.length, larg = passo - 40;
+    const barras = hist.map((h, i) => {
+        const x = p.l + i * passo + 20;
+        return `<g><title>${metaNomeMes(h.mes)}: ${metaNum(h.enviadas)} enviadas</title>
+            <rect class="${h.enviadas > franquia ? 'meta-passou-bar' : 'meta-s'}" x="${x}" y="${y(h.enviadas)}" width="${larg}" height="${Math.max(0, H - p.b - y(h.enviadas))}" rx="4"/>
+            <text class="meta-val" x="${x + larg / 2}" y="${y(h.enviadas) - 6}" text-anchor="middle">${metaNum(h.enviadas)}</text>
+            <text class="meta-axis" x="${x + larg / 2}" y="${H - 6}" text-anchor="middle">${metaNomeMes(h.mes)}</text></g>`;
+    }).join('');
+    el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Mensagens enviadas nos últimos 6 meses">
+        <line class="meta-lim" x1="${p.l}" x2="${W - p.r}" y1="${y(franquia)}" y2="${y(franquia)}"/>${barras}</svg>`;
 }
 
 /* ── Conversations ────────────────────────────────────────────────────────── */

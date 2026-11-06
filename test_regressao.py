@@ -4954,6 +4954,24 @@ _m0511 = {"modality": "entrega", "endereco": "Rua Wilman Maia", "bairro": "Igara
 checa("05/11 'dia 19/11 as 19:40 cartao' nao vira casa 11",
       memoria_mod.capturar_numero_da_casa(_m0511, "dia 19/11 as 19:40 cartao") == ""
       and memoria_mod.capturar_numero_da_casa(_m0511, "5994") == "Rua Wilman Maia, 5994")
+import database as _dbm  # noqa: E402
+_consultas = []
+_fa, _fo = _dbm.db.fetch_all, _dbm.db.fetch_one
+_dbm.db.fetch_all = lambda q, p=None: (_consultas.append(p) or (
+    [{"dia": "2026-11-02", "sender": "agent", "cnt": 600}, {"dia": "2026-11-02", "sender": "human", "cnt": 5},
+     {"dia": "2026-11-03", "sender": "agent", "cnt": 450}] if "substr(created_at,1,10)" in q
+    else [{"mes": "2026-10", "cnt": 800}, {"mes": "2026-11", "cnt": 1055}]))
+_dbm.db.fetch_one = lambda q, p=None: {"cnt": 40}
+_mu = _dbm.get_meta_usage("2026-01")
+_mu11 = _dbm.get_meta_usage("2026-11")
+_dbm.db.fetch_all, _dbm.db.fetch_one = _fa, _fo
+checa("06/11 uso da Meta: janeiro vai ate 01/02 e o historico vira o ano",
+      _consultas[0] == ("2026-01-01", "2026-02-01")
+      and [h["mes"] for h in _mu["historico"]][:2] == ["2025-08", "2025-09"], str(_mu["historico"]))
+checa("06/11 uso da Meta: dezembro fecha em janeiro do ano seguinte", _dbm._mes_seguinte("2026-12") == "2027-01")
+checa("06/11 uso da Meta: separa Sandrinha e equipe por dia",
+      _mu11["dias"][0] == {"dia": "2026-11-02", "sandrinha": 600, "equipe": 5}
+      and _mu11["historico"][-1] == {"mes": "2026-11", "enviadas": 1055} and _mu11["franquia"] == 1000, str(_mu11))
 
 print()
 print("=" * 78)

@@ -9569,6 +9569,15 @@ def api_dashboard():
     return jsonify(database.get_dashboard_stats())
 
 
+@app.get("/api/dashboard/meta")
+@login_required
+def api_dashboard_meta():
+    mes = request.args.get("mes", "")
+    if not _re_mod.fullmatch(r"20\d\d-(0[1-9]|1[0-2])", mes):
+        mes = datetime.utcnow().strftime("%Y-%m")
+    return jsonify(database.get_meta_usage(mes))
+
+
 # ── Conversations ─────────────────────────────────────────────────────────────
 
 @app.get("/api/conversations")

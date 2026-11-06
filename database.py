@@ -1154,6 +1154,49 @@ def get_dashboard_stats() -> dict:
     }
 
 
+# Desde 01/10/2026 a Meta cobra a partir da 1.001a mensagem de servico enviada
+# no mes, por numero. O mes da Meta e em UTC, como o created_at.
+FRANQUIA_META = 1000
+
+
+def _mes_seguinte(mes: str) -> str:
+    ano, m = int(mes[:4]), int(mes[5:7])
+    return f"{ano + m // 12}-{m % 12 + 1:02d}"
+
+
+def get_meta_usage(mes: str) -> dict:
+    """Mensagens ENVIADAS (direction='out') no mes 'AAAA-MM', por dia e por
+    quem enviou: a Sandrinha (sender='agent') ou a equipe pelo painel."""
+    inicio, fim = f"{mes}-01", f"{_mes_seguinte(mes)}-01"
+    rows = db.fetch_all(
+        "SELECT substr(created_at,1,10) AS dia, sender, COUNT(*) AS cnt FROM messages "
+        "WHERE direction='out' AND created_at >= ? AND created_at < ? "
+        "GROUP BY substr(created_at,1,10), sender", (inicio, fim))
+    dias: dict[str, dict] = {}
+    for r in rows:
+        d = dias.setdefault(r["dia"], {"dia": r["dia"], "sandrinha": 0, "equipe": 0})
+        d["sandrinha" if r["sender"] == "agent" else "equipe"] += int(r["cnt"])
+    contatos = db.fetch_one(
+        "SELECT COUNT(DISTINCT phone) AS cnt FROM messages "
+        "WHERE direction='out' AND created_at >= ? AND created_at < ?", (inicio, fim))["cnt"]
+    # Seis meses ate o escolhido, para o historico.
+    meses = [mes]
+    for _ in range(5):
+        a, m = int(meses[0][:4]), int(meses[0][5:7])
+        meses.insert(0, f"{a - (m == 1)}-{(m - 2) % 12 + 1:02d}")
+    hist = {r["mes"]: int(r["cnt"]) for r in db.fetch_all(
+        "SELECT substr(created_at,1,7) AS mes, COUNT(*) AS cnt FROM messages "
+        "WHERE direction='out' AND created_at >= ? AND created_at < ? "
+        "GROUP BY substr(created_at,1,7)", (f"{meses[0]}-01", fim))}
+    return {
+        "mes": mes,
+        "franquia": FRANQUIA_META,
+        "dias": sorted(dias.values(), key=lambda d: d["dia"]),
+        "contatos": int(contatos or 0),
+        "historico": [{"mes": m, "enviadas": hist.get(m, 0)} for m in meses],
+    }
+
+
 # ── Knowledge (RAG) ──────────────────────────────────────────────────────────
 
 def insert_knowledge_chunks(filename: str, chunks: list[str], embeddings: list) -> None:

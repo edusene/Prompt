@@ -4543,3 +4543,60 @@ select option {
     from { transform: rotate(0deg); }
     to { transform: rotate(360deg); }
 }
+
+/* ── Mensagens enviadas no mes (franquia da Meta) ───────────────────────── */
+.meta-uso { margin-top: 28px; --meta-s: #7c83f0; --meta-e: #0fa594; }
+.meta-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
+.meta-head h2 { font-size: 17px; margin-bottom: 4px; }
+.meta-hero, .meta-chart, .meta-tabela {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); padding: 18px;
+}
+.meta-hero-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.meta-big { font-size: 34px; font-weight: 700; }
+.meta-pill { font-size: 13px; padding: 4px 12px; border-radius: 999px; border: 1px solid currentColor; }
+.meta-pill.meta-ok { color: var(--success); }
+.meta-pill.meta-perto { color: var(--warning); }
+.meta-pill.meta-passou { color: var(--danger); }
+.meta-bar { height: 10px; background: var(--bg-input); border-radius: 999px; margin: 14px 0 18px; overflow: hidden; }
+.meta-bar-fill { height: 100%; border-radius: 999px; }
+.meta-bar-fill.meta-ok { background: var(--success); }
+.meta-bar-fill.meta-perto { background: var(--warning); }
+.meta-bar-fill.meta-passou { background: var(--danger); }
+.meta-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; }
+.meta-kpis span { display: block; color: var(--text-muted); font-size: 12px; margin-bottom: 2px; }
+.meta-kpis b { font-size: 15px; }
+.meta-charts { display: grid; grid-template-columns: 1fr; gap: 16px; margin-top: 16px; }
+@media (min-width: 1100px) { .meta-charts { grid-template-columns: 1fr 1fr; } .meta-chart:first-child { grid-column: span 2; } }
+.meta-chart h3 { font-size: 14px; margin-bottom: 6px; }
+.meta-legend { font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
+.meta-sw { display: inline-block; width: 12px; height: 4px; border-radius: 2px; vertical-align: middle; margin: 0 4px 0 10px; }
+.meta-sw:first-child { margin-left: 0; }
+.meta-sw-acum, .meta-sw-s { background: var(--meta-s); }
+.meta-sw-e { background: var(--meta-e); }
+.meta-sw-proj { background: repeating-linear-gradient(90deg, var(--meta-s) 0 3px, transparent 3px 5px); }
+.meta-sw-lim { background: repeating-linear-gradient(90deg, var(--warning) 0 3px, transparent 3px 5px); }
+.meta-plot { position: relative; }
+.meta-plot svg { width: 100%; height: auto; display: block; }
+.meta-grid { stroke: var(--border); stroke-width: 1; }
+.meta-axis { fill: var(--text-muted); font-size: 11px; }
+.meta-val { fill: var(--text); font-size: 11px; }
+.meta-linha { fill: none; stroke: var(--meta-s); stroke-width: 2; stroke-linejoin: round; }
+.meta-proj { stroke: var(--meta-s); stroke-width: 2; stroke-dasharray: 5 4; opacity: .7; }
+.meta-ponto { fill: var(--meta-s); stroke: var(--bg-body); stroke-width: 2; }
+.meta-lim { stroke: var(--warning); stroke-width: 1.5; stroke-dasharray: 6 4; }
+.meta-guia { stroke: var(--text-muted); stroke-width: 1; }
+.meta-s { fill: var(--meta-s); }
+.meta-e { fill: var(--meta-e); }
+.meta-passou-bar { fill: var(--danger); }
+.meta-tip {
+    position: absolute; top: 8px; pointer-events: none; font-size: 12px; line-height: 1.5;
+    background: var(--bg-body); border: 1px solid var(--border); border-radius: var(--radius-sm);
+    padding: 6px 10px; box-shadow: var(--shadow-md); white-space: nowrap;
+}
+.meta-tabela { margin-top: 16px; font-size: 13px; }
+.meta-tabela summary { cursor: pointer; color: var(--accent-hover); }
+.meta-tabela table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+.meta-tabela th, .meta-tabela td { text-align: right; padding: 4px 8px; border-bottom: 1px solid var(--border); }
+.meta-tabela th:first-child, .meta-tabela td:first-child { text-align: left; }
+@media (max-width: 600px) { .meta-head { flex-direction: column; } }

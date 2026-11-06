@@ -92,6 +92,16 @@
             <div id="view-dashboard" class="view active">
                 <h1>Dashboard</h1>
                 <div class="stats-grid" id="stats-grid"></div>
+                <section class="meta-uso">
+                    <div class="meta-head">
+                        <div>
+                            <h2>Mensagens enviadas no mês (Meta)</h2>
+                            <p class="muted">Só as enviadas pela Sandrinha e pela equipe. As 1.000 primeiras do mês são grátis. O mês segue o horário UTC da Meta.</p>
+                        </div>
+                        <select id="meta-mes" class="select-sm" onchange="loadMetaUso()"></select>
+                    </div>
+                    <div id="meta-uso"></div>
+                </section>
             </div>
 
             <!-- Conversations -->
