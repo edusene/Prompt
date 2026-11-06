@@ -5598,6 +5598,11 @@ _MARCAS_ESCOLHEU_BALCAO = (
 def _escolheu_pacote(texto: str) -> bool:
     """O cliente optou pelo sabor de pacote, e nao pelo salgado grande?"""
     limpo = " ".join(facts.normalize(texto or "").split())
+    # "kit mini pizza ... e 3 coxinhas": o "mini" e do nome do produto, nao a
+    # escolha do tamanho. As coxinhas viravam festa e iam para a equipe
+    # (teste de 06/11).
+    limpo = _re_mod.sub(r"\b(?:kits?\s+(?:de\s+)?)?mini\s+(?:pizza|saltenh|lanche|empad|quiche|hamburg|churr)\w*",
+                        " ", limpo)
     if not limpo:
         return False
     if any(m in limpo for m in _MARCAS_ESCOLHEU_BALCAO):

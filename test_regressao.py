@@ -4989,6 +4989,10 @@ checa("06/11 'o endereco ta errado' mantem a pergunta do modelo (nao vira o mesm
       == "Qual é o endereço correto para entrega?")
 checa("06/11 'troco pra 100' nao conta como correcao", not app._RX_CLIENTE_CORRIGE.search("troco pra 100"))
 
+checa("06/11 'kit mini pizza ... e 3 coxinhas' nao e escolha de mini",
+      not app._escolheu_pacote("ver pra mim kit mini pizza ir um combo mix camarao ir 3 coxinhas")
+      and app._escolheu_pacote("mini") and app._escolheu_pacote("as mini, de festa"))
+
 import database as _dbm  # noqa: E402
 _consultas = []
 _fa, _fo = _dbm.db.fetch_all, _dbm.db.fetch_one
