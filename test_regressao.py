@@ -4977,6 +4977,11 @@ checa("06/11 'kit mini pizza' sem numero e 1 kit, junto do combo",
       [i["name"] for i in _k0611.get("items") or []] == ["Kit mini pizza (8und)"] and _k0611.get("combos"), str(_k0611))
 checa("06/11 'tem kit mini pizza' nao e pedido", not _exim("tem kit mini pizza", _CSim()).get("items"))
 
+checa("06/11 'o endereco ta errado' mantem a pergunta do modelo (nao vira o mesmo resumo)",
+      _espelho_obrig("Qual é o endereço correto para entrega?", "o endereco ta errado")
+      == "Qual é o endereço correto para entrega?")
+checa("06/11 'troco pra 100' nao conta como correcao", not app._RX_CLIENTE_CORRIGE.search("troco pra 100"))
+
 import database as _dbm  # noqa: E402
 _consultas = []
 _fa, _fo = _dbm.db.fetch_all, _dbm.db.fetch_one

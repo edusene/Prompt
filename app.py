@@ -3170,6 +3170,13 @@ _RX_CLIENTE_PERGUNTOU = _re_mod.compile(
     r"|\bme diz\b|\bme fala\b|\bme informa\b|\bme explica\b|\bposso\b",
     _re_mod.IGNORECASE)
 
+# "o endereco ta errado": reclamacao do resumo. A pergunta do modelo ("Qual o
+# endereco correto?") virava o mesmo resumo, que a trava de resumo repetido
+# nao mandava - a cliente ficou sem resposta (Thayline, 06/11).
+_RX_CLIENTE_CORRIGE = _re_mod.compile(
+    r"\berrad\w*|\berrei\b|\bcorrig\w*|\bmud\w*|\btroc(?!os?\b)\w*|\bn[aã]o [eé] (?:esse|essa|isso|ai|a[ií])\b",
+    _re_mod.IGNORECASE)
+
 
 # Como a resposta diz a que LINHA um sabor pertence. Fritos e Assados tem preco
 # diferente (R$ 20,00 e R$ 30,00 a porcao de 25), entao trocar a linha do sabor
@@ -3338,6 +3345,8 @@ def _conferir_espelho_obrigatorio(user: str, reply: str, memoria: dict,
     if _RX_TROCO_INSUFICIENTE.search(facts.normalize(reply)):
         return reply
     if _RX_CLIENTE_PERGUNTOU.search(pedido_do_cliente or ""):
+        return reply
+    if _RX_CLIENTE_CORRIGE.search(pedido_do_cliente or ""):
         return reply
     if conversation_memory.faltando(memoria):
         return reply
@@ -8842,6 +8851,7 @@ def _handle_flush(user: str, items: list[dict]) -> None:
         # como dois resumos identicos (Thayline, 05/11).
         if (reply and not _pedido_saiu and not _transfer_done
                 and _RX_LINHA_DE_RESUMO.search(reply)
+                and not _RX_CLIENTE_CORRIGE.search(text_only or "")
                 and " ".join(reply.split()) == " ".join(_ultima_da_sandrinha(user).split())):
             print(f"[flush] user={user} resumo identico ao anterior; nao repete")
             return
