@@ -541,7 +541,8 @@ def quebras_de_lote(items: list[dict]) -> list[dict]:
     return quebras
 
 
-def traduzir(items: list[dict], extras: list | None = None) -> tuple[list[dict], list[str]]:
+def traduzir(items: list[dict], extras: list | None = None,
+             com_unidades: bool = False) -> tuple[list[dict], list[str]]:
     """Converte itens internos para o formato do cardapio digital.
 
     Entrada: itens como o agente os guarda, com o sabor no `name`
@@ -681,6 +682,8 @@ def traduzir(items: list[dict], extras: list | None = None) -> tuple[list[dict],
                     "quantity": qtd,
                     "selected_flavors": [_sabor_no_pacote(pacote, sabor)],
                 }
+                if com_unidades:
+                    api_item["_un"] = [qtd]
                 if cfg.get("context"):
                     api_item["context"] = cfg["context"]
                 saida.append(api_item)
@@ -711,6 +714,9 @@ def traduzir(items: list[dict], extras: list | None = None) -> tuple[list[dict],
                 for _s, qtd_l, sabores_l in partes:
                     linha_api = {"name": pac_g["nome_base44"], "quantity": qtd_l,
                                  "selected_flavors": sabores_l}
+                    if com_unidades:
+                        linha_api["_un"] = ([qtd_l] if _s is not None
+                                            else [q for _, q in grupo])
                     if cfg.get("context"):
                         linha_api["context"] = cfg["context"]
                     linhas.append(linha_api)
@@ -728,6 +734,9 @@ def traduzir(items: list[dict], extras: list | None = None) -> tuple[list[dict],
             "quantity": total,
             "selected_flavors": [s for s, _ in sabores],
         }
+        if com_unidades:
+            # Unidades de cada sabor, para a comanda (cardapio.criar_pedido).
+            api_item["_un"] = [q for _, q in sabores]
         if cfg.get("context"):
             api_item["context"] = cfg["context"]
         saida.append(api_item)

@@ -1214,7 +1214,82 @@ def data_hora_para_o_cardapio(data: str, horario: str = "") -> str:
     _hh, _mm = (int(_h.group(1)), int(_h.group(2) or 0)) if _h else (12, 0)
     if _hh > 23 or _mm > 59:
         _hh, _mm = 12, 0
-    return f"{data}T{_hh:02d}:{_mm:02d}"
+    # Sem o fuso o cardapio le UTC: 10:00 virou "Agendado: 30/11/2026 06:00"
+    # nos pedidos de teste #190611 e #200611 (06/11). Porto Velho = UTC-4.
+    return f"{data}T{_hh:02d}:{_mm:02d}-04:00"
+
+
+def _tamanho_do_pacote(nome: str, menu: list[dict]) -> int:
+    """Unidades de um pacote do MenuItem ("Meio Cento ... - 50 und." = 50)."""
+    import re as _re
+    import facts
+    alvo = facts.normalize(nome or "").strip()
+    nomes = [(facts.normalize(m.get("name") or "").strip(), m) for m in menu]
+    m = (next((m for n, m in nomes if n == alvo), None)
+         or next((m for n, m in nomes if alvo and n and (n.startswith(alvo) or alvo.startswith(n))),
+                 None))
+    if not m:
+        return 1
+    for campo in (("kit_size" if m.get("is_kit") else ""), "min_quantity"):
+        try:
+            if campo and float(m.get(campo) or 0) > 1:
+                return int(float(m[campo]))
+        except (TypeError, ValueError):
+            pass
+    lote = _re.match(r"\s*(\d+)\s*uni", m.get("name") or "")
+    return int(lote.group(1)) if lote else 1
+
+
+def linhas_como_o_site(items: list[dict], scheduled_date: str = "") -> list[dict]:
+    """Itens no formato que o proprio cardapio grava (06/11, pedidos de teste
+    #190611 e #200611): quantidade em PACOTES, preco do pacote e o sabor com as
+    unidades - "1x Cento de salgadinhos fritos | Coxinha de frango (50 un) |
+    R$ 80,00". Ia em unidades e sem preco, e a fabrica lia "100x Cento ... R$ 0,00".
+
+    O preco de cada linha e o unitPrice do calculateOrder (que le em unidades),
+    entao quantidade x preco fecha com o total. Sem o calculo, vai como antes.
+    `items` e a saida de traduzir(..., com_unidades=True).
+    """
+    import cardapio_fonte
+    limpos = [{k: v for k, v in it.items() if not k.startswith("_")} for it in items]
+    try:
+        with httpx.Client(timeout=15) as client:
+            calc = client.post(f"{_get_base_url()}/functions/calculateOrder",
+                               json=({"items": limpos, "scheduled_date": scheduled_date}
+                                     if scheduled_date else {"items": limpos}),
+                               headers=_headers()).json()
+        linhas = calc.get("items") or []
+        menu = (cardapio_fonte.bruto() or {}).get("MenuItem") or []
+    except Exception as e:
+        print(f"[cardápio] linhas_como_o_site: sem calculo ({e}); itens em unidades")
+        return limpos
+    if len(linhas) != len(limpos):
+        return limpos
+    saida = []
+    for item, novo, linha in zip(items, limpos, linhas):
+        try:
+            unitario = float(linha.get("unitPrice") or 0)
+        except (TypeError, ValueError):
+            unitario = 0.0
+        if not linha.get("valid", True) or not unitario:
+            saida.append(novo)
+            continue
+        qtd = int(item.get("quantity") or 0)
+        tamanho = _tamanho_do_pacote(item.get("name", ""), menu)
+        em_pacotes = tamanho > 1 and qtd >= tamanho and qtd % tamanho == 0
+        if em_pacotes:
+            novo["quantity"], novo["price"] = qtd // tamanho, round(unitario * tamanho, 2)
+        else:
+            # Fora do pacote inteiro (175 fritos): unidades, a preco de unidade.
+            novo["price"] = round(unitario, 4)
+        sabores = list(item.get("selected_flavors") or [])
+        unidades = item.get("_un") or ([qtd] if len(sabores) == 1 else [])
+        # So anota quando a quantidade era de unidades ("(1 un)" no doce era pacote).
+        if (tamanho > 1 and sabores and len(unidades) == len(sabores)
+                and sum(unidades) == qtd):
+            novo["selected_flavors"] = [f"{s} ({n} un)" for s, n in zip(sabores, unidades)]
+        saida.append(novo)
+    return saida
 
 
 def criar_pedido(
@@ -1290,7 +1365,9 @@ def criar_pedido(
 
     # Itens no formato do cardapio digital (pacote + selected_flavors).
     import cardapio_catalogo
-    items, bloqueados = cardapio_catalogo.traduzir(items)
+    items, bloqueados = cardapio_catalogo.traduzir(items, com_unidades=True)
+    items = linhas_como_o_site(
+        items, data_hora_para_o_cardapio(scheduled_date, scheduled_time) if scheduled_date else "")
     if bloqueados:
         return {
             "success": False,

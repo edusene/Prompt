@@ -5100,9 +5100,9 @@ checa("06/11 congelado: 50 + 50 vai num pacote de 100 com 2 sabores; 50 e 150 sa
 
 # 06/11 (Thayline 16h): data do pedido e mini quiche metade/metade.
 checa("06/11 data vai para o cardapio no formato que ele le (era 20/11 invalido e 06/11 virava 11/06)",
-      cardapio.data_hora_para_o_cardapio("20/11/2026", "19h") == "2026-11-20T19:00"
-      and cardapio.data_hora_para_o_cardapio("06/11/2026", "17h30") == "2026-11-06T17:30"
-      and cardapio.data_hora_para_o_cardapio("2026-11-09", "") == "2026-11-09T12:00")
+      cardapio.data_hora_para_o_cardapio("20/11/2026", "19h") == "2026-11-20T19:00-04:00"
+      and cardapio.data_hora_para_o_cardapio("06/11/2026", "17h30") == "2026-11-06T17:30-04:00"
+      and cardapio.data_hora_para_o_cardapio("2026-11-09", "") == "2026-11-09T12:00-04:00")
 _oi0611 = _cc27.opcoes_do_item
 _cc27.opcoes_do_item = lambda n: ["CARNE DE SOL", "FRANGO"] if "quiche" in n.lower() else []
 try:
@@ -5146,6 +5146,39 @@ from agents.conversation import item_fora_do_cardapio as _ifc0611  # noqa: E402
 checa("06/11 'vcs tem mini hambugues' (digitado errado) nao vira 'Nao temos'",
       app._faq_produto_inexistente("vcs tem mini hambugues") == "" and not _ifc0611("vcs tem mini hambugues")
       and app._faq_produto_inexistente("vcs tem lasanha").startswith("Não temos lasanha"))
+
+# 06/11: comanda da Sandrinha como a do site (pedidos de teste #190611/#200611).
+class _CalcFalso:
+    def __init__(self, *a, **k): pass
+    def __enter__(self): return self
+    def __exit__(self, *a): return False
+    def post(self, url, json=None, headers=None):
+        class R:
+            def json(_s):
+                return {"items": [{"valid": True, "unitPrice": {"Cento de salgadinhos fritos": 0.8,
+                                                                "Doce": 70.0}[i["name"]]}
+                                  for i in json["items"]]}
+        return R()
+_hc0611, _cb0611 = cardapio.httpx.Client, _cf.bruto
+cardapio.httpx.Client = _CalcFalso
+_cf.bruto = lambda *a, **k: {"MenuItem": [
+    {"name": "Cento de salgadinhos fritos", "min_quantity": 100},
+    {"name": "Doce", "min_quantity": None}]}
+try:
+    _l0611 = cardapio.linhas_como_o_site([
+        {"name": "Cento de salgadinhos fritos", "quantity": 100, "_un": [50, 50],
+         "selected_flavors": ["coxinha de frango", "bolinha de queijo"]},
+        {"name": "Cento de salgadinhos fritos", "quantity": 175, "_un": [100, 75],
+         "selected_flavors": ["coxinha de frango", "quibe"]},
+        {"name": "Doce", "quantity": 1, "_un": [1], "selected_flavors": ["Mista"]}])
+finally:
+    cardapio.httpx.Client, _cf.bruto = _hc0611, _cb0611
+checa("06/11 comanda: 1x Cento a R$ 80 com '(50 un)' por sabor; fora do pacote fica em unidades",
+      _l0611[0] == {"name": "Cento de salgadinhos fritos", "quantity": 1, "price": 80.0,
+                    "selected_flavors": ["coxinha de frango (50 un)", "bolinha de queijo (50 un)"]}
+      and _l0611[1]["quantity"] == 175 and _l0611[1]["price"] == 0.8
+      and _l0611[2] == {"name": "Doce", "quantity": 1, "price": 70.0, "selected_flavors": ["Mista"]},
+      str(_l0611))
 
 print()
 print("=" * 78)
