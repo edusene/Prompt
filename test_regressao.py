@@ -5180,6 +5180,16 @@ checa("06/11 comanda: 1x Cento a R$ 80 com '(50 un)' por sabor; fora do pacote f
       and _l0611[2] == {"name": "Doce", "quantity": 1, "price": 70.0, "selected_flavors": ["Mista"]},
       str(_l0611))
 
+_oi0611b = _cc27.opcoes_do_item
+_cc27.opcoes_do_item = lambda n: ["Coca cola", "Guaraná antártica"] if "refri" in n.lower() else []
+try:
+    _t0611b, _b0611b = _cc27.traduzir([{"name": "Refrigerante 2 Litros", "notes": "Guaraná antártica", "quantity": 1},
+                                       {"name": "Refrigerante 2 Litros", "notes": "bem gelado", "quantity": 1}])
+finally:
+    _cc27.opcoes_do_item = _oi0611b
+checa("06/11 sabor so em items[].notes chega na comanda (Kit Mini Lanches do #210611 saiu sem sabor)",
+      [i.get("selected_flavors") for i in _t0611b] == [["Guaraná antártica"], None], str((_t0611b, _b0611b)))
+
 print()
 print("=" * 78)
 print("FALHAS:", _falhas or "nenhuma")

@@ -632,9 +632,17 @@ def traduzir(items: list[dict], extras: list | None = None,
             # Sabor escolhido entre as opcoes do proprio cardapio digital
             # ("Coca" no Refrigerante Lata). Sem ele a comanda saia sem dizer
             # qual refrigerante mandar.
+            # O modelo as vezes poe o sabor so em items[].notes: o Kit Mini
+            # Lanches do pedido de teste #210611 (06/11) chegou sem sabor.
+            _sabor_nas_notas = ""
+            if not str(item.get("sabor") or "").strip() and str(item.get("notes") or "").strip():
+                from conversation_memory import casar_sabor
+                _sabor_nas_notas = casar_sabor(str(item["notes"]), opcoes_do_item(nome))
             if str(item.get("sabor") or "").strip():
                 # "Coxinha (frango) + Kibe": os dois sabores do Combo 50 (06/11).
                 api_item["selected_flavors"] = [s.strip() for s in str(item["sabor"]).split(" + ") if s.strip()]
+            elif _sabor_nas_notas:
+                api_item["selected_flavors"] = [_sabor_nas_notas]
             elif destino.get("sabor_fixo"):
                 # A bandeja e o meio cento pedem o sabor no cardapio digital
                 # (Brigadeiro, Beijinho, Mista); a planilha so vende brigadeiro.
