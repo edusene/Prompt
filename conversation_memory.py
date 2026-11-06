@@ -2910,6 +2910,48 @@ def casar_sabor(texto: str, opcoes: list[str], palavra_unica: bool = True) -> st
     return unicas[0] if len(unicas) == 1 else ""
 
 
+def redividir_sabores(memoria: dict, texto: str) -> list[str]:
+    """"nao, quero 75 de frango e 25 de carne" com o cento de mini quiche ja no
+    resumo: refaz a divisao do item pelos sabores do cardapio. Virava a
+    pergunta "Me confirma o sabor" com a lista dos salgados de frango e de
+    carne (Thayline, 06/11). So quando a divisao fecha a quantidade do item."""
+    try:
+        import cardapio_catalogo
+    except Exception:
+        return []
+    itens = [i for i in memoria.get("items") or [] if isinstance(i, dict)]
+    t = _sem_acento(texto)
+    for nome in dict.fromkeys(str(i.get("name", "")) for i in itens):
+        grupo = [i for i in itens if i.get("name") == nome]
+        if not all(str(i.get("sabor") or "").strip() and "+" not in str(i.get("sabor")) for i in grupo):
+            continue
+        opcoes = cardapio_catalogo.opcoes_do_item(nome)
+        if len(opcoes) < 2:
+            continue
+        try:
+            total = sum(int(float(i.get("quantity") or 0)) for i in grupo)
+        except (TypeError, ValueError):
+            continue
+        _t = t
+        if len(_re.findall(r"\bmetade\b", _t)) == 2 and total % 2 == 0:
+            _t = _re.sub(r"\bmetade\s+(?:d[eoa]\s+)?", f"{total // 2} de ", _t)
+        partes = []
+        for o in opcoes:
+            _m = _re.search(r"\b(\d{1,3})\s+(?:de\s+)?" + _re.escape(_sem_acento(o).split()[0]) + r"\b", _t)
+            if _m:
+                partes.append((int(_m.group(1)), o))
+        if len(partes) < 2 or sum(q for q, _ in partes) != total:
+            continue
+        novos = [dict(grupo[0], quantity=q, sabor=o) for q, o in partes]
+        _i = memoria["items"].index(grupo[0])
+        memoria["items"] = [i for i in memoria["items"] if i not in grupo]
+        memoria["items"][_i:_i] = novos
+        # O "75 de frango" da mensagem nao e mais pergunta de sabor de salgado.
+        memoria["sabores_pendentes"] = []
+        return [f"{nome} -> {partes}"]
+    return []
+
+
 def aplicar_sabor_de_bebida(memoria: dict, texto: str) -> list[str]:
     """Grava na ficha o sabor da bebida que o cliente disse."""
     mudancas = []

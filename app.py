@@ -6810,8 +6810,17 @@ def _handle_flush(user: str, items: list[dict]) -> None:
         # Antes do merge: "pepsi" depois dos sabores da lata fecha a pergunta ja nele.
         _refri_so_um = [p for p in _memoria.get("sabores_pendentes") or []
                         if p.get("termo") == "refrigerante" and (p.get("pedido") or p.get("so_sabor"))]
+        # Antes do merge: com "nao, quero 75 de frango e 25 de carne" o merge
+        # tirava um dos sabores e o "75 de frango" virava pergunta de salgado.
+        _redivisao = conversation_memory.redividir_sabores(_memoria, text_only)
+        if _redivisao:
+            for _ex in (_extracted, _extracted_fresh):
+                for _k in ("items", "sabores_pendentes"):
+                    _ex.pop(_k, None)
+            print(f"[memoria] {user}: sabores redivididos -> {'; '.join(_redivisao)}")
+        # Com a redivisao feita, o "nao ... frango" nao e "tira o de frango".
         _memoria, _mudancas = conversation_memory.merge(_memoria, _extracted, _extracted_fresh,
-                                                        texto=text_only)
+                                                        texto="" if _redivisao else text_only)
         if _fora_aviso:
             conversation_memory.capturar_numero_da_casa(_memoria, text_only)
             if (_memoria.get("items") and not conversation_memory._itens_ambiguos_detalhe(_memoria)

@@ -5124,6 +5124,24 @@ checa("06/11 '50 de frango 50 de carne' depois do resumo refaz a divisao",
 checa("06/11 divisao que nao fecha a quantidade nao mexe no sabor escolhido",
       [(i["quantity"], i["sabor"]) for i in _mq3["items"]] == [(100, "FRANGO")], str(_mq3["items"]))
 
+_cc27.opcoes_do_item = lambda n: ["CARNE DE SOL", "FRANGO"] if "quiche" in n.lower() else []
+try:
+    _mq4 = memoria_mod._empty()
+    _mq4["items"] = [{"name": "Mini quiches (Kit  25und)", "quantity": 50, "price": 1.5, "sabor": "CARNE DE SOL"},
+                     {"name": "Mini quiches (Kit  25und)", "quantity": 50, "price": 1.5, "sabor": "FRANGO"},
+                     {"name": "Refrigerante 2 Litros", "quantity": 1, "price": 15.0, "sabor": "Coca cola"}]
+    _mq4["sabores_pendentes"] = [{"qtd": 75, "termo": "frango", "opcoes": ["Coxinha"]}]
+    _rq4 = memoria_mod.redividir_sabores(_mq4, "nao, quero 75 de frango e 25 de carne")
+    _mq5 = memoria_mod._empty()
+    _mq5["items"] = [{"name": "Mini quiches (Kit  25und)", "quantity": 100, "price": 1.5, "sabor": "FRANGO"}]
+    _rq5 = memoria_mod.redividir_sabores(_mq5, "quero 75 coxinhas e 25 de carne")
+finally:
+    _cc27.opcoes_do_item = _oi0611
+checa("06/11 'nao, quero 75 de frango e 25 de carne' depois do resumo redivide o mini quiche",
+      _rq4 and [(i["quantity"], i.get("sabor")) for i in _mq4["items"]]
+      == [(25, "CARNE DE SOL"), (75, "FRANGO"), (1, "Coca cola")] and not _mq4["sabores_pendentes"], str(_mq4))
+checa("06/11 redivisao so quando fecha a quantidade do item", not _rq5 and _mq5["items"][0]["sabor"] == "FRANGO")
+
 print()
 print("=" * 78)
 print("FALHAS:", _falhas or "nenhuma")
