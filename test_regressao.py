@@ -5142,8 +5142,9 @@ checa("06/11 'nao, quero 75 de frango e 25 de carne' depois do resumo redivide o
       == [(25, "CARNE DE SOL"), (75, "FRANGO"), (1, "Coca cola")] and not _mq4["sabores_pendentes"], str(_mq4))
 checa("06/11 redivisao so quando fecha a quantidade do item", not _rq5 and _mq5["items"][0]["sabor"] == "FRANGO")
 
+from agents.conversation import item_fora_do_cardapio as _ifc0611  # noqa: E402
 checa("06/11 'vcs tem mini hambugues' (digitado errado) nao vira 'Nao temos'",
-      app._faq_produto_inexistente("vcs tem mini hambugues") == ""
+      app._faq_produto_inexistente("vcs tem mini hambugues") == "" and not _ifc0611("vcs tem mini hambugues")
       and app._faq_produto_inexistente("vcs tem lasanha").startswith("Não temos lasanha"))
 
 print()

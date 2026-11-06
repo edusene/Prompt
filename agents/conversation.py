@@ -1930,6 +1930,9 @@ def item_fora_do_cardapio(texto: str) -> str:
             continue
         if _produto_conhecido(nome) or _produto_conhecido(primeira) or sabores_possiveis(primeira):
             continue
+        # "mini hambugues" (sem o r) e o Kit Mini Lanches (Thayline, 06/11).
+        if _produto_conhecido("mini " + (_corrigir_grafia(primeira) or primeira)):
+            continue
         raiz = _forma_de_busca(primeira)[:5]
         if any(any(w.startswith(raiz) for w in n.split()) for n in nomes):
             continue
