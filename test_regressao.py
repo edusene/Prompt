@@ -4938,6 +4938,20 @@ checa("04/11 'Vc tem mini pizza?' cita o kit antes da pergunta",
 checa("04/11 pedido de mini pizza (sem pergunta) nao ganha o kit",
       app._corrigir_kit("Anotado! Qual o horario?", "quero 2 mini pizza") == "Anotado! Qual o horario?")
 facts.get = _fg0411
+# 05/11 (Thayline): pedidos grandes.
+_ex0511 = _exim("oi quero pro dia 19 um cento de salgados assados ir um cento de fritos", _CSim())
+checa("05/11 'cento de assados ir cento de fritos' e volume de 200, nao pergunta de um sabor",
+      _ex0511.get("volume_pendente") == 200 and not _ex0511.get("sabores_pendentes"), str(_ex0511))
+checa("05/11 'um cento frito ir outro assado' sao 200",
+      _exim("quero um  cento frito ir outro assado", _CSim()).get("volume_pendente") == 200)
+checa("05/11 'vou ir buscar' nao vira 'e'",
+      _exim("vou ir buscar as 18h", _CSim()).get("modality") != "entrega")
+checa("05/11 'as 18/30' e 18h30", detectar_horario("16 as 18/30") == "18h30")
+checa("05/11 'as 18/11' nao vira horario com minuto", detectar_horario("dia 16 as 18/11") != "18h11")
+_m0511 = {"modality": "entrega", "endereco": "Rua Wilman Maia", "bairro": "Igarape"}
+checa("05/11 'dia 19/11 as 19:40 cartao' nao vira casa 11",
+      memoria_mod.capturar_numero_da_casa(_m0511, "dia 19/11 as 19:40 cartao") == ""
+      and memoria_mod.capturar_numero_da_casa(_m0511, "5994") == "Rua Wilman Maia, 5994")
 
 print()
 print("=" * 78)

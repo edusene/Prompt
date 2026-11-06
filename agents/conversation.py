@@ -814,6 +814,9 @@ def detectar_horario(message: str) -> str:
     # AGORA, nao a do pedido (teste do dono, 06/10 - virou pedido para 12h30
     # e ela avisou do intervalo de almoco).
     t = _RX_HORA_ATUAL.sub(" ", t)
+    # "as 18/30" e 18h30: virava 18h (Thayline, 05/11). Minuto acima de 12
+    # para nao ler data ("as 18/11").
+    t = re.sub(r"\b(as\s+\d{1,2})/(1[3-9]|[2-5]\d)\b", r"\1:\2", t)
     hm = _horario.parse_horario(t)
     if hm:
         return _horario.formatar_horario(*hm)
@@ -961,6 +964,10 @@ _PACOTE_POR_EXTENSO = re.compile(
     r"(?=\s*(?:[^a-z\u00e0-\u00ff\s]|\be\b|\bpara\b|\bpra\b|\bcom\b|$"
     r"|\bmeio\s+cento\b|\b(?:um|1)\s+cento\b|\buma?\s+por[c\u00e7][a\u00e3]o\b))",
     re.IGNORECASE)
+
+_RX_IR_NO_LUGAR_DE_E = re.compile(
+    r"\bir\b(?=\s+(?:uma?|outr[oa]s?|\d|meio|dois|duas|tr[eê]s|quatro|cinco|mais|"
+    r"doces?|docinhos?|salgad|frit|assad|refri|coca|guarana))")
 
 _UNIDADES_DO_PACOTE = {
     "porcao": 25, "porção": 25,
@@ -1293,6 +1300,10 @@ def volume_sem_sabor(msg_lower: str) -> int:
                     for _, p in achados}
         if len(achados) > 1 and preparos == {"frito", "assado"}:
             return sum(u for u, _ in achados)
+        # "um cento frito e outro assado": o "outro" e mais um cento. Saia 100
+        # e ela oferecia 4 sabores para 200 (Thayline, 05/11).
+        if len(achados) == 1 and re.search(r"\be\s+outr[oa]\s+(?:frit|assad|de\b)", msg_lower or ""):
+            return achados[0][0] * 2
         return achados[0][0]
     # "500 salgados", "200 salgadinhos": o total em numero. No teste de 01/10
     # nao era lido como volume e o modelo inventou a conta ("10 sabores fritos
@@ -2638,6 +2649,10 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
     else:
         extracted_cep = ""
     msg_lower = _distribuir_de_cada(message.lower().strip())
+    # "um cento de assados ir um cento de fritos": "ir" no lugar de "e" virava
+    # o produto "salgados assados ir" (Thayline, 05/11). So antes de quantidade
+    # ou produto, para nao mexer em "vou ir buscar".
+    msg_lower = _RX_IR_NO_LUGAR_DE_E.sub("e", msg_lower)
     # "100 salgados: coxinha, kibe, bolinha e misto" - os dois-pontos apagavam
     # os sabores e a pergunta deles voltava (28/10).
     msg_lower = re.sub(r"\b((?:salgad|frit|assad|cento)\w*)\s*:\s*", r"\1 ", msg_lower)
@@ -3124,7 +3139,11 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
         _pacotes = [(u, p) for u, p in _pacotes if u]
         if items_found:
             extracted["items"] = items_found
-        if _pacotes and (items_found or len(_pacotes) > 1):
+        # "um cento de assados e um cento de fritos" sem sabor e volume, nao
+        # pergunta de um sabor so: virava "125 Pao Pizza" quando ela respondia
+        # "25 pao pizza 25 esfirra..." (Thayline, 05/11).
+        _so_genericos = all(len(sabores_possiveis(p)) <= 1 for _u, p in _pacotes)
+        if _pacotes and (items_found or (len(_pacotes) > 1 and not _so_genericos)):
             # Quantidade de festa (25 ou mais) ja dita com sabor nesta mensagem,
             # fora a que tem o proprio volume ("meio cento de coxinha").
             _com_volume = {_produto_conhecido(p) for _u, _f, p in _PACOTE_POR_EXTENSO.findall(msg_lower) if p}

@@ -801,7 +801,10 @@ def capturar_numero_da_casa(memoria: dict, texto: str) -> str:
 
     # O CEP nao e o numero da casa: "76804-120" virava "Rua X, 76804" (18/10).
     import cep as _cep_mod
-    norm = _normalizar_sem_acento(_cep_mod.tirar_cep(bruto))
+    # A data tambem nao: a normalizacao troca a barra por espaco, e "dia 19/11"
+    # virava "Rua X, 11" (Thayline, 05/11).
+    norm = _normalizar_sem_acento(_re.sub(r"\b\d{1,2}/\d{1,2}(?:/\d{2,4})?\b", " ",
+                                          _cep_mod.tirar_cep(bruto)))
     endereco = str(memoria.get("endereco") or "").strip()
     if _SEM_NUMERO_ACEITO.search(norm):
         # Nao completa o endereco: marca que nao ha numero, e a pendencia

@@ -6664,6 +6664,11 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             for campo in ("name", "items", "modality", "bairro", "endereco",
                           "referencia", "horario", "data_agendada", "payment_method")
         })
+        # So doce ou bebida na ficha: o "e um cento de salgados" ainda tem de ser
+        # lido. Com o brigadeiro na ficha o volume sumia e o resumo saia so com
+        # os doces (teste da Thayline, 05/11).
+        if not conversation_memory.tem_salgado_na_ficha(_memoria):
+            _state_memoria.items = []
         _extracted = _extract_data_from_message(text_only, _state_memoria)
         _extracted_fresh = _extract_data_from_message(text_only, ConversationState(phone=user))
         # "Qual o valor do cento dos fritos?", "Posso dividir o cento em 4
