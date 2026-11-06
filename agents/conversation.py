@@ -1317,12 +1317,12 @@ def volume_sem_sabor(msg_lower: str) -> int:
     m = _RX_TOTAL_DE_SALGADOS.search(msg_lower or "")
     if m:
         unidades = int(m.group(1))
-        if 25 <= unidades < 1000 and unidades % 25 == 0:
+        if 25 <= unidades <= 1000 and unidades % 25 == 0:
             return unidades
     # "300 fritos", "200 fritos e 100 assados": o preparo no lugar de
     # "salgados" tambem e o total (teste de 22/10 - a ficha ficava sem volume).
     unidades = sum(int(n) for n in _RX_TOTAL_POR_PREPARO.findall(msg_lower or ""))
-    if 25 <= unidades < 1000 and unidades % 25 == 0:
+    if 25 <= unidades <= 1000 and unidades % 25 == 0:
         return unidades
     # "Quero 1 cento, mas nao sei quais sabores. Escolhe por mim" (teste de
     # 06/10): o cento sozinho, sem "de salgados", tambem e o volume.

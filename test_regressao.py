@@ -3898,8 +3898,15 @@ checa("refrigerante para festa: 400 ml por pessoa",
 checa("antecedencia ate 5 centos: no mesmo dia",
       "De 1 a 5 centos fazemos no mesmo dia" in app._resposta_do_balcao(
           "antecedencia para pedido de 100 unidades?", {})[1])
-checa("antecedencia de mais de 500: equipe",
-      app._resposta_do_balcao("antecedencia para 800 salgados?", {})[2] is True)
+checa("06/11 antecedencia de 800: ela responde 3 horas, sem a equipe",
+      app._resposta_do_balcao("antecedencia para 800 salgados?", {})[2] is False
+      and "3 horas" in app._resposta_do_balcao("antecedencia para 800 salgados?", {})[1],
+      str(app._resposta_do_balcao("antecedencia para 800 salgados?", {})))
+checa("06/11 antecedencia de mais de 1.000: equipe",
+      app._resposta_do_balcao("antecedencia para 1200 salgados?", {})[2] is True)
+checa("06/11 '6 centos de salgados assados' e volume de 600",
+      _extract_data_from_message("tem com fazer pra 6 cento de salgados assados",
+                                 ConversationState(phone="x")).get("volume_pendente") == 600)
 checa("'8 da manha' e 8h", horario.parse_horario("QUERO ENTREGA PARA 8 DA MANHA") == (8, 0))
 _ex_var = _extract_data_from_message("MOÇA EU PEDI 100 VARIADOS SENDO COXINHA ,BOLINHA E CHURROS",
                                      ConversationState(phone="x"))

@@ -647,8 +647,8 @@ def _faq_beijinho(t: str) -> str:
 
 
 def _faq_antecedencia(t: str, memoria: dict | None = None) -> str:
-    """Antecedencia (Balbino, 17/10): de 1 a 5 centos sai no mesmo dia;
-    acima de 500 quem combina e a equipe (_resposta_de_faq transfere).
+    """Antecedencia (Balbino, 17/10): de 1 a 5 centos sai no mesmo dia; de 500
+    a 1.000, 3 horas; acima de 1.000 quem combina e a equipe (06/11).
 
     Diz o tempo da tabela (horario.antecedencia_minutos) pela quantidade da
     pergunta ou do pedido aberto - "mas quantos minutos?" ficava sem resposta
@@ -661,8 +661,8 @@ def _faq_antecedencia(t: str, memoria: dict | None = None) -> str:
                  f"{horario.texto_da_antecedencia(horario.antecedencia_minutos(qtd))} de antecedência.")
     else:
         prazo = ("Precisamos de 40 minutos de antecedência para menos de 300 salgadinhos, "
-                 "e de 1 hora de 300 a 500.")
-    resposta = f"De 1 a 5 centos fazemos no mesmo dia! 😊 {prazo}"
+                 "de 1 hora de 300 a 500 e de 3 horas de 500 a 1.000.")
+    resposta = prazo if qtd > 500 else f"De 1 a 5 centos fazemos no mesmo dia! 😊 {prazo}"
     if (memoria or {}).get("items"):
         return resposta
     return f"{resposta} Para entrega ou retirada? Qual o dia e horário?"
@@ -1137,9 +1137,10 @@ def _resposta_de_faq(texto: str, memoria: dict | None = None) -> tuple[str, str,
                     + (f", {_sab}" if _sab else "") + ". Quantos você quer? 😊", False)
     for nome, rx, resposta, equipe in _FAQ_DO_DONO:
         if rx.search(t):
-            # Antecedencia de mais de 500 salgados: a equipe (17/10).
-            if nome == "prazo confirmar" and _qtd_na_pergunta(t) > 500:
-                return "acima de 500", TEXTO_DESARME, True
+            # Acima de 1.000 salgados: a equipe comercial. Ate 1.000 ela
+            # atende, com 3 horas acima de 500 (dono, 06/11; antes era 500).
+            if nome == "prazo confirmar" and _qtd_na_pergunta(t) > 1000:
+                return "acima de 1000", TEXTO_DESARME, True
             texto_r = ((resposta(t, memoria) if resposta in (_faq_sabor_de_refri, _faq_antecedencia)
                         else resposta(t))
                        if callable(resposta) else resposta)
@@ -7047,8 +7048,10 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                        f"Esse item precisa de confirmação de preço. {TEXTO_DESARME}"))
             return
         _total_salgados = max(_salgados_da_ficha(_memoria), int(_memoria.get("volume_pendente") or 0))
-        if _total_salgados > 500 and not _memoria.get("pedido_enviado"):
-            trigger_human_handoff(user, items, f"pedido acima de 500 salgados ({_total_salgados})",
+        # Ate 1.000 ela atende, com 3 horas de antecedencia acima de 500
+        # (dono, 06/11). Antes 6 centos ja iam para a equipe.
+        if _total_salgados > 1000 and not _memoria.get("pedido_enviado"):
+            trigger_human_handoff(user, items, f"pedido acima de 1000 salgados ({_total_salgados})",
                                   _chegada)
             return
         # Quantidade que nao fecha em 25 por sabor (Trilho 2, Balbino 12/10). So
@@ -8042,7 +8045,7 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             # Pedido comum que ela mesma atende (22/10): "pedido de 2 cento de
             # docinhos" foi para a equipe comercial, "trocar sabores" antes de
             # confirmar recebeu "ja transferi", "verificar disponibilidade" de
-            # brigadeiro chamou a equipe. Acima de 500 salgados o codigo ja
+            # brigadeiro chamou a equipe. Acima de 1.000 salgados o codigo ja
             # transfere antes do modelo.
             if (not _memoria.get("pedido_enviado")
                     and not conversation_memory.em_pos_pedido(_memoria)
