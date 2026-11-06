@@ -4989,6 +4989,15 @@ def _conferir_etapa_travada(user: str, reply: str, memoria: dict) -> str:
         cortadas += _do_item
         mantidas = [f for f in mantidas if f not in _do_item]
 
+    # "Para 6 centos..., voce pode escolher ate 7 sabores (25 de cada).
+    # Quais sabores...? Pode escolher ate 7 sabores (25 de cada).": a mesma
+    # conta duas vezes, e a etapa contava como coberta (teste de 06/11). Toda
+    # frase com a conta sai; a do codigo entra uma vez so, no fim.
+    _nucleo = _re_mod.search(r"escolher ate \d+ sabor", facts.normalize(travada))
+    if _nucleo and sum(_nucleo.group(0) in facts.normalize(f) for f in mantidas) > 1:
+        cortadas += [f for f in mantidas if _nucleo.group(0) in facts.normalize(f)]
+        mantidas = [f for f in mantidas if _nucleo.group(0) not in facts.normalize(f)]
+
     corpo = " ".join(mantidas).strip()
     ja_cobriu = conversation_memory.etapa_coberta(memoria, corpo)
     if not cortadas and ja_cobriu:
@@ -5015,12 +5024,6 @@ def _conferir_etapa_travada(user: str, reply: str, memoria: dict) -> str:
     _antes_mant = len(mantidas)
     mantidas = [f for f in mantidas
                 if len(set(facts.normalize(f).split()) - _palavras_travada) > 1]
-    # "Para 600 salgados assados, voce pode escolher ate 7 sabores (25 de
-    # cada)." antes de "Quais sabores...? Pode escolher ate 7 sabores": a
-    # mesma conta duas vezes (teste de 06/11).
-    _nucleo = _re_mod.search(r"escolher ate \d+ sabor", facts.normalize(travada))
-    if _nucleo:
-        mantidas = [f for f in mantidas if _nucleo.group(0) not in facts.normalize(f)]
     if len(mantidas) != _antes_mant:
         corpo = " ".join(mantidas).strip()
 
