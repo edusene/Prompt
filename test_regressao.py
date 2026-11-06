@@ -4954,6 +4954,29 @@ _m0511 = {"modality": "entrega", "endereco": "Rua Wilman Maia", "bairro": "Igara
 checa("05/11 'dia 19/11 as 19:40 cartao' nao vira casa 11",
       memoria_mod.capturar_numero_da_casa(_m0511, "dia 19/11 as 19:40 cartao") == ""
       and memoria_mod.capturar_numero_da_casa(_m0511, "5994") == "Rua Wilman Maia, 5994")
+from agents.conversation import completar_pelo_contexto as _cpc0611  # noqa: E402
+_fg0611, facts.get = facts.get, lambda *a, **k: {"produtos": [
+    {"categoria": "Combos", "item": "Kit mini pizza (8und)", "preco": 16.0, "disponivel": True},
+    {"categoria": "Salgados Grandes", "item": "Empada de Camarão", "preco": 9.0, "disponivel": True},
+    {"categoria": "Kits", "item": "Kit Mini Saltenha Frita (10und)", "preco": 20.0, "disponivel": True}]}
+checa("06/11 '4 kit' depois da pergunta do kit mini pizza sao 4 kits",
+      _cpc0611("4 kit", "Para o kit mini pizza são unidades de 8 por kit. Você quer 4 kits (32 unidades) "
+               "ou prefere 3 kits (24 unidades)?") == "4 Kit mini pizza (8und)")
+checa("06/11 '30 unidades' do kit de 8 nao vira 30 kits",
+      "30 Kit" not in _cpc0611("30 unidades", "O kit mini pizza é com 8 unidades por R$ 16,00. Quantos kits você quer?",
+                               "eu quero o kit mini pizza"))
+checa("06/11 '32 unidades' do kit de 8 sao 4 kits",
+      _cpc0611("32 unidades", "Quantos kits você quer?", "eu quero o kit mini pizza") == "4 Kit mini pizza (8und)",
+      _cpc0611("32 unidades", "Quantos kits você quer?", "eu quero o kit mini pizza"))
+facts.get = _fg0611
+checa("06/11 'sim quero 5 unidades' depois de 'tem empada de camarao' entra na ficha",
+      _cpc0611("sim quero 5 unidades", "Sim, temos Empada de Camarão por R$ 9,00 a unidade. Quer pedir?",
+               "tem empada de camarao") == "5 Empada de Camarão")
+_k0611 = _exim("ver pra mim kit mini pizza ir um combo mix camarao", _CSim())
+checa("06/11 'kit mini pizza' sem numero e 1 kit, junto do combo",
+      [i["name"] for i in _k0611.get("items") or []] == ["Kit mini pizza (8und)"] and _k0611.get("combos"), str(_k0611))
+checa("06/11 'tem kit mini pizza' nao e pedido", not _exim("tem kit mini pizza", _CSim()).get("items"))
+
 import database as _dbm  # noqa: E402
 _consultas = []
 _fa, _fo = _dbm.db.fetch_all, _dbm.db.fetch_one

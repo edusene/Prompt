@@ -1469,6 +1469,12 @@ def _qtd_do_produto(qtd: str, produto: str, texto: str) -> str:
     if produto == "Kit Mini Saltenha Frita (10und)" and qtd.isdigit() and (
             int(qtd) >= 10 or re.search(r"\bun(?:i|id\w*)?\b", texto)):
         return f"{qtd} mini saltenhas"
+    # "30 unidades" depois de "Quantos kits?" do kit de 8 nao sao 30 kits
+    # (Thayline, 06/11). Divisivel vira kits; senao nada entra e ela pergunta.
+    _kit = re.search(r"\((\d+)\s*und\)", produto, re.IGNORECASE)
+    if _kit and qtd.isdigit() and re.search(r"\bun(?:i|id\w*)?\b", texto):
+        n = int(_kit.group(1))
+        return f"{int(qtd) // n} {produto}" if int(qtd) % n == 0 else texto
     return f"{qtd} {produto}"
 
 
@@ -1601,6 +1607,19 @@ def completar_pelo_contexto(texto: str, ultima_do_agente: str, ultima_do_cliente
                    if not any(chave != outra and chave in outra for outra, _c in casados)}
         if len(achados) == 1:
             return _qtd_do_produto(m.group('qtd'), achados.pop(), t)
+    # "4 kit" depois de "Para o kit mini pizza... 4 kits ou 3 kits?": o kit e o
+    # que a mensagem anterior nomeou. Virava a pergunta "qual kit?" e o modelo
+    # inventou sabores para o kit (Thayline, 06/11).
+    m = re.match(r"^(?:(?:sim|ok|quero|pode\s+ser)\s+)?(\d{1,3})\s+kits?\s*[.!]?$", t)
+    if m and ultima_do_agente:
+        anterior = facts.normalize(ultima_do_agente)
+        try:
+            kits = {p["item"] for p in facts.get().get("produtos", []) if "kit" in facts.normalize(p["item"])}
+        except Exception:
+            kits = set()
+        citados = [k for k in kits if facts.normalize(re.sub(r"\(.*?\)", "", k)).strip() in anterior]
+        if len(citados) == 1:
+            return f"{m.group(1)} {citados[0]}"
     m = _RX_QTD_NO_FIM.match(t)
     if m and not re.search(r"\b(?:rua|av|avenida|numero|n)\b", m.group("prod")):
         return f"{m.group('qtd')} {m.group('prod').strip()}"
@@ -1609,7 +1628,9 @@ def completar_pelo_contexto(texto: str, ultima_do_agente: str, ultima_do_cliente
 
 # So a quantidade: "50", "quero 50", "Quero 50 uni", "50 unidades".
 _RX_SO_QUANTIDADE = re.compile(
-    r"^(?:(?:quero|queria|vou\s+querer|pode\s+ser|manda|sao|serao)\s+)?(?P<qtd>\d{1,4})"
+    # "sim quero 5 unidades" depois de "Quer pedir?" (Thayline, 06/11).
+    r"^(?:(?:sim|ok|isso|pode)\s*,?\s+)?"
+    r"(?:(?:quero|queria|vou\s+querer|pode\s+ser|manda|sao|serao)\s+)?(?P<qtd>\d{1,4})"
     # "20 por favor" (simulador, 29/10): a cortesia no fim nao muda a quantidade.
     r"\s*(?:un\w*|pcs?|pecas?)?\s*(?:,?\s*(?:por\s+favor|pfv|pf|obrigad\w*))?\s*[.!]?$")
 
@@ -2658,6 +2679,11 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
     # o produto "salgados assados ir" (Thayline, 05/11). So antes de quantidade
     # ou produto, para nao mexer em "vou ir buscar".
     msg_lower = _RX_IR_NO_LUGAR_DE_E.sub("e", msg_lower)
+    # "ver pra mim kit mini pizza e um combo mix camarao": o kit sem numero e
+    # um kit. So o combo entrava (Thayline, 06/11). Pergunta ("tem kit...?")
+    # nao e pedido.
+    if not re.search(r"\?|\b(?:tem|temos|quanto|qual|valor|pre[cç]o)\b", msg_lower):
+        msg_lower = re.sub(r"(?<!\d)(?<!\d )(?<!um )(?<!uma )\bkit\b(?=\s+(?:de\s+)?mini)", "1 kit", msg_lower)
     # "100 salgados: coxinha, kibe, bolinha e misto" - os dois-pontos apagavam
     # os sabores e a pergunta deles voltava (28/10).
     msg_lower = re.sub(r"\b((?:salgad|frit|assad|cento)\w*)\s*:\s*", r"\1 ", msg_lower)
