@@ -5015,6 +5015,12 @@ def _conferir_etapa_travada(user: str, reply: str, memoria: dict) -> str:
     _antes_mant = len(mantidas)
     mantidas = [f for f in mantidas
                 if len(set(facts.normalize(f).split()) - _palavras_travada) > 1]
+    # "Para 600 salgados assados, voce pode escolher ate 7 sabores (25 de
+    # cada)." antes de "Quais sabores...? Pode escolher ate 7 sabores": a
+    # mesma conta duas vezes (teste de 06/11).
+    _nucleo = _re_mod.search(r"escolher ate \d+ sabor", facts.normalize(travada))
+    if _nucleo:
+        mantidas = [f for f in mantidas if _nucleo.group(0) not in facts.normalize(f)]
     if len(mantidas) != _antes_mant:
         corpo = " ".join(mantidas).strip()
 

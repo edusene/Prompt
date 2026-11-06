@@ -4993,6 +4993,13 @@ checa("06/11 'kit mini pizza ... e 3 coxinhas' nao e escolha de mini",
       not app._escolheu_pacote("ver pra mim kit mini pizza ir um combo mix camarao ir 3 coxinhas")
       and app._escolheu_pacote("mini") and app._escolheu_pacote("as mini, de festa"))
 
+_m0611v = memoria_mod._empty()
+_m0611v.update({"volume_pendente": 600, "preparo_pendente": "assado"})
+_r0611v = app._conferir_etapa_travada(
+    "55", "Para 600 salgados assados, você pode escolher até 7 sabores (25 de cada).", _m0611v)
+checa("06/11 a conta dos sabores nao sai duas vezes",
+      _r0611v.count("escolher até") == 1 and "Quais sabores assados" in _r0611v, _r0611v)
+
 import database as _dbm  # noqa: E402
 _consultas = []
 _fa, _fo = _dbm.db.fetch_all, _dbm.db.fetch_one
