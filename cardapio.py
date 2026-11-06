@@ -1036,12 +1036,7 @@ def calcular_pedido(items: list[dict], bairro: str = "", modalidade: str = "",
     # "precisa de 1 dia de antecedencia" mesmo num pedido para depois (29/10).
     # So o dia (sem hora) e lido em UTC e o primeiro dia possivel era recusado.
     if data_iso:
-        import re as _re
-        _h = _re.search(r"(\d{1,2})\s*(?:h|:)\s*(\d{2})?", horario or "")
-        _hh, _mm = (int(_h.group(1)), int(_h.group(2) or 0)) if _h else (12, 0)
-        if _hh > 23 or _mm > 59:
-            _hh, _mm = 12, 0
-        payload["scheduled_date"] = f"{data_iso}T{_hh:02d}:{_mm:02d}"
+        payload["scheduled_date"] = data_hora_para_o_cardapio(data_iso, horario)
 
     try:
         # Mesmo pedido calculado duas vezes na mesma resposta: pela tool do
@@ -1201,6 +1196,27 @@ def opcoes_de_sabor(nome_base44: str) -> list[str]:
     return opcoes
 
 
+def data_hora_para_o_cardapio(data: str, horario: str = "") -> str:
+    """'20/11/2026' + '19h' -> '2026-11-20T19:00', como o calculateOrder le.
+
+    O cardapio le a data no formato americano: '20/11/2026' era data invalida
+    e o Kit Mini Lanches para 20/11 voltou "precisa de 2 dias de antecedencia"
+    (06/11); '06/11/2026' virou 11/06, sem a hora, na comanda da fabrica.
+    """
+    import re as _re
+    data = (data or "").strip()
+    m = _re.fullmatch(r"(\d{1,2})/(\d{1,2})/(\d{4})", data)
+    if m:
+        data = f"{m.group(3)}-{int(m.group(2)):02d}-{int(m.group(1)):02d}"
+    if not _re.fullmatch(r"\d{4}-\d{2}-\d{2}", data):
+        return data
+    _h = _re.search(r"(\d{1,2})\s*(?:h|:)\s*(\d{2})?", horario or "")
+    _hh, _mm = (int(_h.group(1)), int(_h.group(2) or 0)) if _h else (12, 0)
+    if _hh > 23 or _mm > 59:
+        _hh, _mm = 12, 0
+    return f"{data}T{_hh:02d}:{_mm:02d}"
+
+
 def criar_pedido(
     customer_name: str,
     customer_phone: str,
@@ -1218,6 +1234,7 @@ def criar_pedido(
     notes: str = "",
     whatsapp_message_id: str = "",
     human_confirmed: bool = False,
+    scheduled_time: str = "",
 ) -> dict:
     """Envia pedido para o cardapio digital via createOrderFromAgent.
 
@@ -1299,7 +1316,7 @@ def criar_pedido(
     if payment_method:
         payload["payment_method"] = payment_method
     if scheduled_date:
-        payload["scheduled_date"] = scheduled_date
+        payload["scheduled_date"] = data_hora_para_o_cardapio(scheduled_date, scheduled_time)
     if is_scheduled:
         payload["is_scheduled"] = is_scheduled
     if subtotal:

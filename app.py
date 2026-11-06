@@ -1828,6 +1828,7 @@ def _send_order_handler(
             whatsapp_message_id=whatsapp_message_id,
             scheduled_date=scheduled_date,
             is_scheduled=is_scheduled,
+            scheduled_time=scheduled_time,
         )
 
     # Salva log no banco
@@ -11393,6 +11394,10 @@ def api_cardapio_order_validar_pix(order_id):
         return_fee=float(order.get("return_fee") or 0),
         notes=order.get("notes", ""),
         whatsapp_message_id=order.get("whatsapp_message_id", ""),
+        # O pedido no Pix ia para a fabrica sem o dia agendado (06/11).
+        scheduled_date=order.get("scheduled_date") or "",
+        is_scheduled=bool(order.get("scheduled_date")),
+        scheduled_time=order.get("scheduled_time") or "",
     )
 
     if not resultado.get("success"):

@@ -5098,6 +5098,32 @@ checa("06/11 congelado: 50 + 50 vai num pacote de 100 com 2 sabores; 50 e 150 sa
                     "selected_flavors": ["Coxinha de frango", "Pastel de carne"], "context": "lote"}], [])
       and all(b and "pacotes de 100" in b[0] for b in _tr0611b), str((_tr0611, _tr0611b)))
 
+# 06/11 (Thayline 16h): data do pedido e mini quiche metade/metade.
+checa("06/11 data vai para o cardapio no formato que ele le (era 20/11 invalido e 06/11 virava 11/06)",
+      cardapio.data_hora_para_o_cardapio("20/11/2026", "19h") == "2026-11-20T19:00"
+      and cardapio.data_hora_para_o_cardapio("06/11/2026", "17h30") == "2026-11-06T17:30"
+      and cardapio.data_hora_para_o_cardapio("2026-11-09", "") == "2026-11-09T12:00")
+_oi0611 = _cc27.opcoes_do_item
+_cc27.opcoes_do_item = lambda n: ["CARNE DE SOL", "FRANGO"] if "quiche" in n.lower() else []
+try:
+    _mq1 = memoria_mod._empty()
+    _mq1["items"] = [{"name": "Mini quiches (Kit  25und)", "quantity": 100, "price": 1.5}]
+    memoria_mod.aplicar_sabor_de_bebida(_mq1, "pode ser metade de carne ir metade de frango")
+    _mq2 = memoria_mod._empty()
+    _mq2["items"] = [{"name": "Mini quiches (Kit  25und)", "quantity": 100, "price": 1.5, "sabor": "FRANGO"}]
+    memoria_mod.aplicar_sabor_de_bebida(_mq2, "nao eu n quero 50 de frango 50 de carne")
+    _mq3 = memoria_mod._empty()
+    _mq3["items"] = [{"name": "Mini quiches (Kit  25und)", "quantity": 100, "price": 1.5, "sabor": "FRANGO"}]
+    memoria_mod.aplicar_sabor_de_bebida(_mq3, "50 de carne")
+finally:
+    _cc27.opcoes_do_item = _oi0611
+checa("06/11 'metade de carne ir metade de frango' no cento de mini quiche: 50 de cada",
+      sorted((i["quantity"], i["sabor"]) for i in _mq1["items"]) == [(50, "CARNE DE SOL"), (50, "FRANGO")], str(_mq1["items"]))
+checa("06/11 '50 de frango 50 de carne' depois do resumo refaz a divisao",
+      sorted((i["quantity"], i["sabor"]) for i in _mq2["items"]) == [(50, "CARNE DE SOL"), (50, "FRANGO")], str(_mq2["items"]))
+checa("06/11 divisao que nao fecha a quantidade nao mexe no sabor escolhido",
+      [(i["quantity"], i["sabor"]) for i in _mq3["items"]] == [(100, "FRANGO")], str(_mq3["items"]))
+
 print()
 print("=" * 78)
 print("FALHAS:", _falhas or "nenhuma")

@@ -2921,19 +2921,41 @@ def aplicar_sabor_de_bebida(memoria: dict, texto: str) -> list[str]:
     # pendente: o Combo 50 virava "Coxinha (frango)" sem pergunta (27/10).
     perguntado = sabor_de_bebida_pendente(memoria)[0]
     for item in list(memoria.get("items") or []):
-        if not isinstance(item, dict) or str(item.get("sabor") or "").strip():
+        if not isinstance(item, dict):
             continue
+        _ja_tem = str(item.get("sabor") or "").strip()
         opcoes = cardapio_catalogo.opcoes_do_item(str(item.get("name", "")))
-        escolha = (casar_sabor(texto, opcoes, palavra_unica=item.get("name") == perguntado)
-                   if opcoes else "")
         # "3 de maracuja e 3 de caja" na pergunta do suco: um item por sabor;
         # ficavam so os 3 de maracuja (ao vivo, 29/10).
         _t = _sem_acento(texto)
+        try:
+            _qtd_item = int(float(item.get("quantity") or 0))
+        except (TypeError, ValueError):
+            _qtd_item = 0
+        # "metade de carne ir metade de frango" no cento de mini quiche: ficava
+        # so o primeiro sabor, 100 de frango (Thayline, 06/11).
+        if len(_re.findall(r"\bmetade\b", _t)) == 2 and _qtd_item and _qtd_item % 2 == 0:
+            _t = _re.sub(r"\bmetade\s+(?:d[eoa]\s+)?", f"{_qtd_item // 2} de ", _t)
         _por_sabor = []
         for o in opcoes or []:
-            _m = _re.search(r"\b(\d{1,2})\s+(?:de\s+)?" + _re.escape(_sem_acento(o).split()[0]) + r"\b", _t)
+            _m = _re.search(r"\b(\d{1,3})\s+(?:de\s+)?" + _re.escape(_sem_acento(o).split()[0]) + r"\b", _t)
             if _m:
                 _por_sabor.append((int(_m.group(1)), o))
+        _divide = len(_por_sabor) > 1 and sum(q for q, _ in _por_sabor) == _qtd_item
+        if _ja_tem:
+            # Sabor ja escolhido so muda com a divisao que fecha a quantidade:
+            # "nao, quero 50 de frango 50 de carne" depois do resumo virava a
+            # lista de salgados de frango e de carne (06/11). Combo fica de fora.
+            if not _divide or "+" in _ja_tem:
+                continue
+            _i = memoria["items"].index(item)
+            memoria["items"][_i:_i + 1] = [dict(item, quantity=q, sabor=o) for q, o in _por_sabor]
+            mudancas.append(f"{item.get('name')} -> {_por_sabor}")
+            continue
+        escolha = (casar_sabor(texto, opcoes, palavra_unica=item.get("name") == perguntado)
+                   if opcoes else "")
+        if _divide and not escolha:
+            escolha = _por_sabor[0][1]
         _destino_cat = (cardapio_catalogo._achar(cardapio_catalogo.mapa_efetivo(),
                                                  str(item.get("name", ""))) or {}).get("categoria")
         if escolha and item.get("name") == perguntado and len(_por_sabor) > 1 and _destino_cat == "Combos":
