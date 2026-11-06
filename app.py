@@ -765,7 +765,7 @@ def _faq_produto_inexistente(t: str) -> str:
         pass
     if not m:
         return ""
-    from agents.conversation import _produto_conhecido
+    from agents.conversation import _produto_conhecido, _corrigir_grafia
     bruto = _re_mod.sub(r"\(.*?\)", " ", m.group(1))
     partes = [p.strip() for p in _re_mod.split(r",|/|\be\b|\bou\b", bruto) if p.strip()]
     nomes = []
@@ -775,6 +775,10 @@ def _faq_produto_inexistente(t: str) -> str:
         if not p or len(p.split()) > 4 or _re_mod.search(r"\d", p):
             return ""
         if _NAO_E_PRODUTO_PERGUNTADO.search(p) or _produto_conhecido(p):
+            return ""
+        # "vcs tem mini hambugues" (sem o r) ouviu "Nao temos" - o Kit Mini
+        # Lanches existe (Thayline, 06/11). Digitado errado nao e inexistente.
+        if _produto_conhecido(" ".join(_corrigir_grafia(w) or w for w in p.split())):
             return ""
         if any(facts.normalize(p) in facts.normalize(x["item"]) for x in facts.get()["produtos"]):
             return ""
