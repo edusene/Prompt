@@ -5935,6 +5935,17 @@ def _ultima_do_cliente(user: str) -> str:
     return ""
 
 
+def _ultima_da_sandrinha(user: str) -> str:
+    try:
+        historico = memory.get(user)
+    except Exception:
+        return ""
+    for entrada in reversed(historico):
+        if entrada.get("role") == "assistant":
+            return " ".join(str(p.get("text") or "") for p in entrada.get("parts") or [])
+    return ""
+
+
 def _regra_dos_25_serve(user: str) -> bool:
     """O aviso dos 25 por sabor so quando ajuda: abertura generica ("oi",
     "quero fazer um pedido") ou salgado de festa sem a quantidade certa.
@@ -8826,6 +8837,13 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                 and buffer.tem_mensagem_nova(user)):
             print(f"[flush] user={user} cliente mandou mensagem nova durante a "
                   f"resposta; esta nao sai: {reply[:60]!r}")
+            return
+        # O mesmo resumo de novo: "dia 19/11 cartao" e "5994" em seguida sairam
+        # como dois resumos identicos (Thayline, 05/11).
+        if (reply and not _pedido_saiu and not _transfer_done
+                and _RX_LINHA_DE_RESUMO.search(reply)
+                and " ".join(reply.split()) == " ".join(_ultima_da_sandrinha(user).split())):
+            print(f"[flush] user={user} resumo identico ao anterior; nao repete")
             return
 
         # Oferta logo depois do pedido sem repetir o que foi anotado: "meio cento
