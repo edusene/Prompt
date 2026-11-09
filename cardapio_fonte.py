@@ -494,6 +494,28 @@ def _regras(regras: list[dict]) -> list[dict]:
             for r in regras if r.get("active", True)]
 
 
+# Categorias que o agente ignora de proposito: o churros ja e sabor do lote de fritos.
+_CATEGORIAS_IGNORADAS = {"mini_churros"}
+
+
+def produtos_sem_regra(b: dict | None = None) -> list[dict]:
+    """Produtos ativos do cardapio que o agente nao conhece: a categoria nao
+    tem regra aqui e o produto some do catalogo dela, sem ninguem saber. Os
+    congelados ficaram assim ate 06/11 (o pedido ia para a equipe). O painel
+    mostra a lista na aba Cardapio (Eduardo, 09/11)."""
+    import re
+    b = b if b is not None else bruto()
+    saida = []
+    for it in _itens_do_cardapio(b or {}):
+        if not it.get("available") or not str(it.get("name") or "").strip():
+            continue
+        cat = str(it.get("category") or "").strip()
+        if _categoria(cat) or re.sub(r"[\s_]+", "_", _n(cat).strip()) in _CATEGORIAS_IGNORADAS:
+            continue
+        saida.append({"nome": str(it["name"]).strip(), "categoria": cat or "(sem categoria)"})
+    return saida
+
+
 def _itens_do_cardapio(b: dict) -> list[dict]:
     """Os itens da copia publica, com a estrutura da interna pelo nome.
 

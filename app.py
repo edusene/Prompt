@@ -11468,6 +11468,17 @@ def api_cardapio_stats():
     return jsonify(database.cardapio_orders_stats())
 
 
+@app.get("/api/cardapio/sem-regra")
+@login_required
+def api_cardapio_sem_regra():
+    import cardapio_fonte
+    try:
+        return jsonify({"produtos": cardapio_fonte.produtos_sem_regra()})
+    except Exception as e:
+        print(f"[cardapio] sem-regra: {e}")
+        return jsonify({"produtos": [], "erro": "nao consegui ler o cardapio"})
+
+
 @app.get("/api/cardapio/health")
 @login_required
 def api_cardapio_health():

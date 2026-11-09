@@ -170,6 +170,7 @@ function loadView(view) {
             loadDonoAjustes();
             loadCardapioStats();
             loadCardapioOrders();
+            loadCardapioSemRegra();
             pollTimers.push(setInterval(() => { loadCardapioOrders(); loadCardapioStats(); }, 30000));
             break;
     }
@@ -3857,6 +3858,25 @@ async function testarCredencialCardapio() {
                 modo: ${esc(r.modo || '')}
             </div>
             ${linhas ? `<ul>${linhas}</ul>` : ''}
+        </div>`;
+}
+
+// Produto ativo no cardapio que a Sandrinha nao conhece (categoria sem regra):
+// ela nao oferece nem vende ate alguem ensinar. Sem nada, o aviso some.
+async function loadCardapioSemRegra() {
+    const box = document.getElementById('cardapio-sem-regra');
+    if (!box) return;
+    const r = await api('/api/cardapio/sem-regra');
+    const produtos = (r && r.produtos) || [];
+    if (!produtos.length) { box.innerHTML = ''; return; }
+    const linhas = produtos.map(p => `<li>${esc(p.nome)} <span class="muted">(categoria: ${esc(p.categoria)})</span></li>`).join('');
+    box.innerHTML = `
+        <div class="cardapio-credencial erro">
+            <div class="cardapio-credencial-titulo">
+                ${produtos.length === 1 ? '1 produto do cardápio' : produtos.length + ' produtos do cardápio'} que a Sandrinha ainda não conhece
+            </div>
+            <div class="cardapio-credencial-meta">Ela não oferece nem vende estes itens até a categoria ganhar regra no agente.</div>
+            <ul>${linhas}</ul>
         </div>`;
 }
 

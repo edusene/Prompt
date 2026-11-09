@@ -5190,6 +5190,15 @@ finally:
 checa("06/11 sabor so em items[].notes chega na comanda (Kit Mini Lanches do #210611 saiu sem sabor)",
       [i.get("selected_flavors") for i in _t0611b] == [["Guaraná antártica"], None], str((_t0611b, _b0611b)))
 
+# 09/11: aviso no painel de produto ativo com categoria sem regra no agente.
+_sr0911 = _cf.produtos_sem_regra({"MenuItem": [
+    {"name": "Torta Salgada", "category": "tortas", "available": True},
+    {"name": "Kit Mini Churros", "category": "mini_churros", "available": True},
+    {"name": "Coxinha", "category": "salgadinhos fritos", "available": True},
+    {"name": "Pizza", "category": "pizzas", "available": False}]})
+checa("09/11 aviso: so o produto ativo de categoria desconhecida (churros e de proposito)",
+      _sr0911 == [{"nome": "Torta Salgada", "categoria": "tortas"}], str(_sr0911))
+
 print()
 print("=" * 78)
 print("FALHAS:", _falhas or "nenhuma")
