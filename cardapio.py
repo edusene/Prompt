@@ -778,7 +778,9 @@ def montar_resumo(items: list[dict], subtotal: float, delivery_fee: float,
         except Exception:
             minutos = None
         if minutos:
-            horario_txt = f"Imediato (pronto em cerca de {minutos} min)"
+            # "180 min" lia mal para a cliente: sai "3 horas" (Eduardo, 11/11).
+            import horario as _horario
+            horario_txt = f"Imediato (pronto em cerca de {_horario.texto_da_antecedencia(minutos)})"
     linhas.append(f"⏰ Horário: {horario_txt}")
 
     if retirada:

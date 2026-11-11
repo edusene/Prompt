@@ -2522,7 +2522,7 @@ checa("tempo de preparo da regra do cardapio: 25 un -> 30 min, 300 un -> 40 min"
 _res_imed = app.cardapio.montar_resumo([{"name": "Coxinha frango", "quantity": 25, "price": 0.8}], 20, 0, 0, 20,
                                        modalidade="retirada", dia="hoje", horario="Imediato")
 checa("resumo do pedido 'agora' informa o tempo de preparo",
-      "Horário: Imediato (pronto em cerca de 30 min)" in _res_imed, _res_imed)
+      "Horário: Imediato (pronto em cerca de 30 minutos)" in _res_imed, _res_imed)
 checa("'no pix' nao fica no endereco",
       _cv_0110._extract_data_from_message("bairro olaria rua guapore 120 no pix",
                                          _cv_0110.ConversationState()).get("endereco") == "rua guapore 120")
