@@ -5281,6 +5281,11 @@ checa("10/11 prazo de encomenda do cardapio chega aos produtos (loja fechada ofe
       [(p["item"], p.get("dias_encomenda")) for p in (_kit1011 or {}).get("produtos") or []])
 checa("10/11 'Suco de maracujá' com acento",
       "maracujá" in (app._faq_sabor_de_suco("quero 2 sucos de maracuja") or "maracujá"))
+_saidas1011 = []
+_bps1011 = MessageBuffer(0.0, lambda u, i: _saidas1011.append([x["text"] for x in i]), espera_palavra_solta=0.4)
+_bps1011.add("x", "retirada"); _time.sleep(0.2); _bps1011.add("x", "agora"); _time.sleep(0.8)
+checa("10/11 buffer 0s: 'retirada' e 'agora' logo depois saem numa resposta so",
+      _saidas1011 == [["retirada", "agora"]], _saidas1011)
 checa("10/11 fiado que o cliente nao pediu sai da resposta",
       "fiado" not in app._conferir_fiado("t", "nao consegue abrir uma excecao pra mim",
                                          "A fábrica não libera fiado de jeito nenhum! Bora fechar no Pix?",

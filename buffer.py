@@ -9,8 +9,10 @@ from typing import Callable
 
 
 class MessageBuffer:
-    def __init__(self, wait_seconds: float, on_flush: Callable[[str, list[dict]], None]):
+    def __init__(self, wait_seconds: float, on_flush: Callable[[str, list[dict]], None],
+                 espera_palavra_solta: float = 0.0):
         self._wait = wait_seconds
+        self._espera_palavra_solta = espera_palavra_solta
         self._on_flush = on_flush
         self._lock = threading.Lock()
         # {user: {"items": [{"text": ..., "msg_id": ..., "wa_message_id": ..., "wa_media_id": ...}], "timer": Timer | None}}
@@ -41,8 +43,9 @@ class MessageBuffer:
                 timer.cancel()
 
             # Palavra solta ("retirada") costuma ter continuacao ("agora", 4s
-            # depois): saiam duas respostas (Camyli, 10/11). Ela espera ate 2s a mais.
-            espera = self._wait + (min(2.0, self._wait) if len((text or "").split()) <= 1 else 0.0)
+            # depois): saiam duas respostas (Camyli, 10/11). Ela espera um pouco
+            # mais. Fixo e nao proporcional: em producao o buffer e 0s.
+            espera = self._wait + (self._espera_palavra_solta if len((text or "").split()) <= 1 else 0.0)
             new_timer = threading.Timer(espera, self._flush, args=[user])
             self._state[user]["timer"] = new_timer
             new_timer.start()

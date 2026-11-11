@@ -9595,7 +9595,9 @@ app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
 limiter = Limiter(get_remote_address, app=app, default_limits=["200 per minute"])
 
-buffer = MessageBuffer(wait_seconds=BUFFER_SECONDS, on_flush=handle_flush)
+# Palavra solta ("retirada") espera 4s pela continuacao ("agora"): com o
+# buffer em 0s saiam duas respostas (WhatsApp, 10/11 23h22).
+buffer = MessageBuffer(wait_seconds=BUFFER_SECONDS, on_flush=handle_flush, espera_palavra_solta=4.0)
 
 # O cardapio digital e lido assim que o servidor sobe, em segundo plano: sem
 # isto o primeiro cliente depois de um deploy pagava as 4 leituras do Base44.
