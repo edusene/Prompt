@@ -974,7 +974,10 @@ def _faq_sabor_de_suco(t: str) -> str:
     if dito:
         if casar_sabor(dito.group(1), sabores):
             return ""
-        return (f"Suco de {dito.group(1)} não temos. Os sabores do suco natural são: "
+        # O t vem sem acento: "Suco de maracuja" (teste de 10/11).
+        _acento = {"maracuja": "maracujá", "caja": "cajá", "limao": "limão", "acai": "açaí",
+                   "cupuacu": "cupuaçu", "tapereba": "taperebá", "mamao": "mamão"}
+        return (f"Suco de {_acento.get(dito.group(1), dito.group(1))} não temos. Os sabores do suco natural são: "
                 f"{lista}. Qual você prefere? 🥤")
     return f"Os sabores do suco natural são: {lista}. Qual você prefere? 🥤"
 
@@ -3724,6 +3727,25 @@ def _ofereceu_ajuste_de_lote(texto: str) -> bool:
     """A resposta anterior tratou do ajuste de quantidade?"""
     limpo = " ".join(facts.normalize(texto or "").split())
     return any(facts.normalize(m) in limpo for m in _MARCAS_DE_AJUSTE_DE_LOTE)
+
+
+def _encomenda_da_ficha(memoria: dict) -> tuple[str, int]:
+    """(item, dias) do item sob encomenda com o maior prazo; ("", 0) sem nenhum."""
+    achado = ("", 0)
+    for i in memoria.get("items") or []:
+        if not isinstance(i, dict):
+            continue
+        try:
+            oficial = (facts.resolve_unit_price(str(i.get("name")), int(i.get("quantity") or 1))
+                       or {}).get("item_oficial") or str(i.get("name"))
+            alvos = {facts.normalize(oficial), facts.normalize(str(i.get("name")))}
+            for p in facts.get()["produtos"]:
+                if (p.get("dias_encomenda", 0) > achado[1]
+                        and alvos & {facts.normalize(p["item"]), facts.normalize(p.get("origem") or "")}):
+                    achado = (p["item"].strip(), int(p["dias_encomenda"]))
+        except Exception:
+            continue
+    return achado
 
 
 def _salgados_da_ficha(memoria: dict) -> int:
@@ -6612,7 +6634,8 @@ def _handle_flush(user: str, items: list[dict]) -> None:
         # "eu queria pra hj" depois de "precisa de 2 dias de antecedencia. A
         # primeira data possivel e 12/11": o prazo de novo. Saia "Posso ajudar
         # com mais algum item?" e "25 para hoje" (teste de 10/11).
-        if not _balcao and _re_mod.search(r"\b(?:hoje|hj|agora)\b", facts.normalize(_texto_cliente or "")):
+        if not _balcao and _re_mod.search(r"\b(?:hoje|hj)\b|\b(?:pra|para)\s+agora\b",
+                                          facts.normalize(_texto_cliente or "")):
             _ultima_enc = next((m.get("parts", [{}])[0].get("text", "") or ""
                                 for m in reversed(memory.get(user))
                                 if m.get("role") == "assistant"), "")
@@ -6626,6 +6649,43 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                                f"Para hoje não consigo 😕 {_enc.group(1).strip()} "
                                f"{_enc.group(2).strip()} Pode ser para esse dia? 💛", False)
                     break
+            # Sem a frase do calculateOrder (loja fechada): o prazo do cardapio.
+            # Dia ja marcado para depois: "agora" e outra coisa ("agora quero coca").
+            _dia_marcado = _memoria_balcao.get("data_iso") or ""
+            _enc_item_h, _enc_dias_h = (_encomenda_da_ficha(_memoria_balcao)
+                                        if not _balcao and _dia_marcado in ("", horario.agora().date().isoformat())
+                                        else ("", 0))
+            if _enc_dias_h:
+                _agora_h = horario.agora()
+                _primeira_h = horario.proximo_dia_util(_agora_h.date() + timedelta(days=_enc_dias_h))
+                _memoria_balcao["data_proposta"] = _primeira_h.isoformat()
+                conversation_memory.save(user, _memoria_balcao)
+                _balcao = ("prazo de encomenda",
+                           f"Para hoje não consigo 😕 O {_enc_item_h} é sob encomenda e precisa de "
+                           f"{_enc_dias_h} {'dia' if _enc_dias_h == 1 else 'dias'} de antecedência. "
+                           f"Posso deixar para {horario.formatar_data(_primeira_h, _agora_h)}? 💛", False)
+        # Insistiu na troca do combo ("Queriamos o canudinho de camarao, a
+        # coxinha e o pastelzinho. Nao da pra substituir?"): o modelo
+        # transferia para a equipe (gerente, 10/11). Sem quantidade, a mesma
+        # regra e o convite para montar o pedido.
+        if not _balcao and not _re_mod.search(r"\d", _texto_cliente or ""):
+            _ult_cb = next((m.get("parts", [{}])[0].get("text", "") or ""
+                            for m in reversed(memory.get(user)) if m.get("role") == "assistant"), "")
+            if "combos vêm do jeitinho" in _ult_cb:
+                _balcao = ("combo insistiu",
+                           "O combo não muda, mas dá pra montar o seu pedido com esses sabores! 😊 "
+                           "Cada sabor sai de 25 em 25 (25, 50, 75...). Quantos de cada você quer?", False)
+        # "nao consegue abrir uma excecao pra mim?" depois de um prazo ou dia
+        # oferecido: a regra nao muda e a pergunta aberta volta. Com a loja
+        # fechada saia a defesa de preco ("direto de fabrica", teste de 10/11).
+        if (not _balcao and _re_mod.search(r"\bexce[cç][aã]o\b|\bexcecao\b", facts.normalize(_texto_cliente or ""))
+                and not _RX_DESCONTO.search(_texto_cliente or "")):
+            _ult_exc = next((m.get("parts", [{}])[0].get("text", "") or ""
+                             for m in reversed(memory.get(user)) if m.get("role") == "assistant"), "")
+            _perg_exc = _re_mod.findall(r"[^.!?\n]*\?", _ult_exc)
+            if _perg_exc:
+                _balcao = ("excecao",
+                           f"Essa regra da fábrica eu não consigo mudar daqui 😕 {_perg_exc[-1].strip()} 💛", False)
         # "SEGUNDA QUERO MAIS NAO": o cliente desistiu (teste do dono, 17/10 -
         # virou espelho para segunda e o pedido fechou). Depois da oferta de
         # acompanhamento ou do "mais alguma coisa", e so o "nao, obrigado".
@@ -6745,9 +6805,21 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             # O dia e a hora tambem: "2 combos mix pra amanha" recebia depois
             # "Para qual dia?" (teste ao vivo, 29/10). Item so com verbo de
             # pedido - "quanto custa 100 coxinhas?" nao e pedido.
-            if not _equipe_b and _nome_b not in ("acrescimo", "prazo confirmar", "prazo de encomenda"):
+            if not _equipe_b and _nome_b not in ("acrescimo", "prazo confirmar", "prazo de encomenda",
+                                                         "excecao", "combo insistiu"):
                 _ext_b = _extract_data_from_message(_texto_cliente.lower(),
                                                     ConversationState(phone=user))
+                # "2 sucos de maracuja" (em falta): os 2 sucos entram sem sabor e
+                # a pergunta do sabor volta depois. Sumia apos o "grande" da
+                # coxinha (teste de 10/11 22h).
+                _q_suco = _re_mod.search(r"\b(\d{1,2}|um|uma|dois|duas)\s+sucos?\b", facts.normalize(_texto_cliente))
+                if _nome_b == "sabor de suco" and _q_suco and _texto_b.startswith("Suco de"):
+                    _n_suco = {"um": 1, "uma": 1, "dois": 2, "duas": 2}.get(_q_suco.group(1)) or int(_q_suco.group(1))
+                    _nome_suco = next((p["item"] for p in facts.get()["produtos"]
+                                       if facts.normalize(p["item"]).startswith("suco")), "")
+                    if _nome_suco and not _ext_b.get("bebidas"):
+                        _ext_b["bebidas"] = [{"name": _nome_suco, "quantity": _n_suco,
+                                              "price": (facts.resolve_unit_price(_nome_suco, 1) or {}).get("preco_unitario", 0.0)}]
                 # Kit de mini saltenha em pergunta: os OUTROS itens da mensagem
                 # entram; o kit entra pela resposta (completar_pelo_contexto).
                 if _nome_b == "kit de 10":
@@ -7277,8 +7349,14 @@ def _handle_flush(user: str, items: list[dict]) -> None:
         # o tamanho da coca 4 vezes e o pedido nao fechava (simulador, 28/10).
         _t_ref = facts.normalize(text_only or "")
         _refri_ign = []
+        # So conta se a ultima pergunta foi a do refri: com o sabor do pastel
+        # na frente, a coca saia do pedido sem ter sido perguntada (10/11).
+        _ult_ref = facts.normalize(next((m.get("parts", [{}])[0].get("text", "") or ""
+                                         for m in reversed(memory.get(user))
+                                         if m.get("role") == "assistant"), ""))
+        _perguntou_refri = bool(_re_mod.search(r"refri|coca|fanta|guarana|lata|litros", _ult_ref))
         for _p in (_memoria.get("sabores_pendentes") or []):
-            if (_p.get("termo") == "refrigerante" and _p.get("aberta_por") != _t_ref
+            if (_perguntou_refri and _p.get("termo") == "refrigerante" and _p.get("aberta_por") != _t_ref
                     and not (_p.get("dito") and facts.normalize(_p["dito"]) in _t_ref)
                     and not _re_mod.search(r"\b(?:refri\w*|coca|fanta|guarana|tuchaua|parecis"
                                            r"|lata|litros?|2\s*l|600|ml)\b", _t_ref)):
@@ -7683,10 +7761,28 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             # pedido (teste do intervalo de almoco, 27/10).
             _apresentacao = ("" if _memoria.get("saudacao_feita") else
                              f"{horario.saudacao(_agora)}{_nome}! Eu sou a Sandrinha da BALBS 💛\n\n")
+            # Item sob encomenda: o dia oferecido respeita o prazo dele. Saia
+            # "amanha" para o Kit Mini Lanches, que pede 2 dias (10/11 22h).
+            _aviso_exp = _expediente["mensagem"]
+            _enc_item, _enc_dias = _encomenda_da_ficha(_memoria)
+            if _enc_dias and _expediente.get("sugestao_data"):
+                _primeira = horario.proximo_dia_util(_agora.date() + timedelta(days=_enc_dias))
+                if _expediente["sugestao_data"] < _primeira:
+                    _expediente = {**_expediente, "sugestao_data": _primeira}
+                    _aviso_exp = (f"O {_enc_item} é sob encomenda e precisa de {_enc_dias} "
+                                  f"{'dia' if _enc_dias == 1 else 'dias'} de antecedência. Posso deixar "
+                                  f"seu pedido agendado para {horario.formatar_data(_primeira, _agora)}? 💛")
+            # Sabor ainda em aberto (o pastel da "Caixa com os seguintes
+            # sabores"): o aviso vira afirmacao e a pergunta do sabor fica.
+            # Sumia do pedido com a loja fechada (gerente, 10/11 22h).
+            _bloq_exp = conversation_memory.pergunta_bloqueante(_memoria)
+            if _bloq_exp:
+                _aviso_exp = (f"{_tira_pergunta_final(_aviso_exp).rstrip(' 💛😊')} 💛\n\n{_bloq_exp}"
+                              if "?" in _aviso_exp else f"{_aviso_exp}\n\n{_bloq_exp}")
             _resposta = (
                 f"{_apresentacao}"
                 f"{_eco}{_fato_txt}"
-                f"{_negativas_do_bloco_6(user, text_only, _expediente['mensagem'], _memoria)}"
+                f"{_negativas_do_bloco_6(user, text_only, _aviso_exp, _memoria)}"
             )
             _memoria["saudacao_feita"] = True
             # Guarda o dia oferecido na mensagem para o "pode sim" seguinte.
@@ -9147,6 +9243,24 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                 _corte = _saud_up.end() if _saud_up else 0
                 reply = f"{reply[:_corte].rstrip()}\n\n{_eco_up}{reply[_corte:].lstrip()}".strip()
                 print(f"[upsell] user={user} itens anotados repetidos antes da oferta")
+
+        # Itens anotados agora e nenhum preco na resposta: o valor entra antes
+        # da pergunta. "Seu pedido esta anotado: 50 Pastel Carne, 25 Quibe..."
+        # saia sem valor nenhum (gerente, 10/11).
+        if (reply and not _pedido_saiu and not _transfer_done and _extracted_fresh.get("items")
+                and _memoria.get("items") and "R$" not in reply
+                and not _RX_LINHA_DE_RESUMO.search(reply)
+                and not conversation_memory._frase_de_lote(_memoria)
+                and not conversation_memory.pendencia_de_item(_memoria)):
+            _rn_v = facts.normalize(reply)
+            if "anot" in _rn_v or any(facts.normalize(str(i.get("name") or "")) in _rn_v
+                                      for i in _memoria["items"] if isinstance(i, dict)):
+                _valor_v = _valor_do_pedido(_memoria)
+                _perg_v = _re_mod.search(r"[^.!?\n]*\?[^\w]*$", reply.strip())
+                if _valor_v and _perg_v:
+                    reply = (f"{reply.strip()[:_perg_v.start()].rstrip()} {_valor_v}\n\n"
+                             f"{_perg_v.group(0).strip()}")
+                    print(f"[preco] user={user} itens anotados sem valor; soma do codigo antes da pergunta")
 
         # A oferta adicional saiu? Entao ela nao volta na proxima mensagem.
         if reply and not _memoria.get("upsell_feito") and _ofereceu_acompanhamento(reply):

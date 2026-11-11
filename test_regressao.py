@@ -5272,6 +5272,15 @@ checa("10/11 'posso trocar as empadas?' sem empada no pedido: combo nao troca",
       and (app._resposta_de_faq("quero trocar as empadas por coxinha",
                                 {"items": [{"name": "Empadinha de Frango", "quantity": 25}]})
            or ("",))[0] != "troca no combo")
+import cardapio_fonte as _cf1011  # noqa: E402
+_kit1011 = _cf1011.montar_dados({"MenuItem": [{"name": "Kit Mini Lanches", "price": 5, "category": "Lanches",
+                                               "available": True, "made_to_order": True, "lead_time_days": 2,
+                                               "kit_size": 10, "unit_increment": 10, "is_kit": True}]})
+checa("10/11 prazo de encomenda do cardapio chega aos produtos (loja fechada oferecia amanha)",
+      any(p.get("dias_encomenda") == 2 for p in (_kit1011 or {}).get("produtos") or []),
+      [(p["item"], p.get("dias_encomenda")) for p in (_kit1011 or {}).get("produtos") or []])
+checa("10/11 'Suco de maracujá' com acento",
+      "maracujá" in (app._faq_sabor_de_suco("quero 2 sucos de maracuja") or "maracujá"))
 checa("10/11 fiado que o cliente nao pediu sai da resposta",
       "fiado" not in app._conferir_fiado("t", "nao consegue abrir uma excecao pra mim",
                                          "A fábrica não libera fiado de jeito nenhum! Bora fechar no Pix?",

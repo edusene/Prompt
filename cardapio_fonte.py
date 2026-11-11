@@ -414,6 +414,10 @@ def _produtos(itens: list[dict]) -> list[dict]:
                          "disponivel": disponivel, "origem": nome,
                          "opcoes": list(it.get("flavor_options") or []),
                          "passo": _passo,
+                         # Sob encomenda (Kit Mini Lanches: 2 dias). Com a loja
+                         # fechada ela oferecia "amanha" (teste de 10/11 22h).
+                         "dias_encomenda": (int(float(it.get("lead_time_days") or 0))
+                                            if it.get("made_to_order") else 0),
                          # Descricao do cardapio ("Sabores disponiveis: Caja,
                          # Maracuja..."): sem ela o modelo inventou suco de
                          # laranja (Camyli, 26/10).
@@ -535,7 +539,8 @@ def _itens_do_cardapio(b: dict) -> list[dict]:
     for pub in publicos:
         item = dict(por_nome.get(_n(str(pub.get("name") or "")).strip(), {}))
         for campo in ("name", "price", "available", "description",
-                      "min_quantity", "unit_increment", "max_flavors"):
+                      "min_quantity", "unit_increment", "max_flavors",
+                      "made_to_order", "lead_time_days"):
             if pub.get(campo) is not None:
                 item[campo] = pub[campo]
         if not item.get("category"):
