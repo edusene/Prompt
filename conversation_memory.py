@@ -422,8 +422,17 @@ def _mesmo_item(a: dict, b: dict) -> bool:
     """O mesmo produto da ficha, mesmo com o nome escrito de outro jeito."""
     # Coxinha GRANDE (lanche) e coxinha mini sao linhas diferentes: "25
     # coxinhas" depois de "3 coxinha grande" apagava as 3 grandes (14/10).
+    # Abaixo de 25 sem tamanho dito e a mesma grande: "2 coxinhas" depois de
+    # "1 coxinha da grande" virava uma segunda linha (gerente, 10/11).
+    def _qtd(i):
+        try:
+            return int(float(i.get("quantity") or 0))
+        except (TypeError, ValueError):
+            return 0
     if (a.get("tamanho") == "lanche") != (b.get("tamanho") == "lanche"):
-        return False
+        sem_tamanho = b if a.get("tamanho") == "lanche" else a
+        if sem_tamanho.get("tamanho") or not 0 < _qtd(sem_tamanho) < 25:
+            return False
     na, nb = _sem_acento(str(a.get("name"))), _sem_acento(str(b.get("name")))
     if na == nb:
         return True
@@ -1784,7 +1793,12 @@ def aplicar_escolha_de_sabor(memoria: dict, texto: str) -> list[str]:
                 escolhido = opcao
                 break
         if not escolhido and p.get("termo") not in ("docinho", "refrigerante"):
-            escolhido = _opcao_pela_palavra_propria(p, limpo)
+            # O termo repetido numa lista ("Pastel / Coxinha / Bolinha de
+            # queijo"): o sabor so vale colado nele. O "queijo" da bolinha
+            # virava Pastel queijo (gerente, 10/11).
+            # A janela sai do texto cru: o limpo ja perdeu as quebras de linha.
+            _junto = _re.search(r"\b" + _re.escape(str(p.get("termo") or "")) + r"\w*([^\n,;.]*)", texto, _re.IGNORECASE)
+            escolhido = _opcao_pela_palavra_propria(p, _sem_acento(_junto.group(1)) if _junto else limpo)
             divididas = ([] if escolhido or _re.search(r"\bou\b", limpo)
                          else _opcoes_pela_palavra_propria(p, limpo))
             try:
@@ -2895,7 +2909,11 @@ def casar_sabor(texto: str, opcoes: list[str], palavra_unica: bool = True) -> st
     if len(candidatas) == 1:
         return candidatas[0]
     if candidatas:
-        return ""
+        # "mini hamburguer": as duas opcoes do Kit Mini Lanches comecam com
+        # "mini" e a pergunta do sabor voltava em laco (Camyli, 10/11).
+        bases = [o for o in candidatas
+                 if _re.search(r"(?<!\w)" + _re.escape(_sem_acento(o.split("(")[0]).strip()), t)]
+        return bases[0] if len(bases) == 1 else ""
     # "frango" para "Canudinho (FRANGO)" ou "Canudinho (CAMARÃO)": a palavra que
     # so uma opcao tem. Sem isto a pergunta do combo voltava em laco (27/10).
     # So na resposta curta a pergunta: no pedido inteiro ("1 combo mix frango e
@@ -3265,6 +3283,9 @@ def pergunta_bloqueante(memoria: dict, agora=None) -> str:
     if sabor_bebida and not pendentes:
         return sabor_bebida
     if pendentes:
+        # Salgado primeiro; o refri vem sozinho depois, com a marca. Juntos
+        # saia "Me confirma o sabor: 1 de refrigerante: Lata..." (gerente, 10/11).
+        pendentes = [p for p in pendentes if p.get("termo") != "refrigerante"] or pendentes
         # As opcoes uma embaixo da outra (pedido do dono, 08/10).
         blocos = []
         for p in pendentes:

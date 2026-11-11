@@ -848,6 +848,8 @@ _IMEDIATO = re.compile(
     # "quero 25 coxinhas agora": o "agora" fechando o pedido.
     r"|\b(?:quero|queria|preciso|manda|mande)\b.*\bagora\s*[.!]*\s*$"
     r"|\bo\s+(?:quanto\s+antes|mais\s+rapido(?:\s+possivel)?)\b"
+    # "Ja pode fazer, assim que estiver pronto e so avisar" (gerente, 10/11).
+    r"|\bja\s+pode\s+(?:fazer|preparar|mandar|separar)\b|\bassim\s+que\s+(?:estiver|ficar)\s+pronto\b"
     r"|^\s*(?:agora|ja|ja\s+ja|agorinha)\s*(?:pf|por\s+favor|pfv)?\s*[.!]*\s*$"
 )
 
@@ -1009,10 +1011,14 @@ def _forma_de_busca(nome: str) -> str:
         limpo = facts.normalize(nome)
     except Exception:
         limpo = " ".join((nome or "").lower().split())
+    # "5 minisaltenhas" (gerente, 10/11): o "mini" grudado virava Saltenha Assada.
+    limpo = re.sub(r"\bmini(?=[a-z]{4})", "mini ", limpo)
     palavras = []
     for p in limpo.split():
         if p in _GRAFIAS_DE_PASTEL:
             p = "pastel"
+        elif p in ("canudino", "canudinos", "canudim", "canudins"):
+            p = "canudinho"
         elif p in ("paes", "pao"):
             # "25 paes pizza" virava "pae pizza" e o Pao Pizza sumia do pedido
             # (testes do dono, 07/10 20h29 e 21h02).
@@ -1138,6 +1144,11 @@ def _produto_conhecido(bruto: str) -> str | None:
     indice = _indice_de_produtos()
     if alvo in indice:
         return indice[alvo]
+    # "25 canudinho camarao", sem o "de": a chave curta "canudinho" ganhava e
+    # o camarao virava frango (gerente, 10/11).
+    _com_de = re.sub(r"^(\S+)\s+(?!d[eao]\b)", r"\1 de ", alvo, count=1)
+    if _com_de != alvo and _com_de in indice:
+        return indice[_com_de]
 
     # Duas direcoes, e elas nao valem o mesmo.
     #
@@ -1233,6 +1244,10 @@ def sabores_possiveis(bruto: str, so_lote: bool = True, preparo: str = "") -> li
                     ja.add(facts.normalize(p["item"]))
         except Exception:
             pass
+    # "Pastel" num cento de festa oferecia "Pastel de carne (congelado)"
+    # (gerente, 10/11): congelado so quando o cliente fala em congelado.
+    if "congel" not in (bruto or ""):
+        achados = [a for a in achados if "congel" not in a.lower()]
     if len(achados) < 2:
         return []
     if so_lote:
@@ -1384,7 +1399,9 @@ def preparo_dito(msg_lower: str) -> str:
 _RX_VOLUME_DIVIDIDO = re.compile(
     r"\b(?:(?:uma?|1)\s+)?(?P<formato>por[cç][aã]o|meio\s+cento|cento\s+e\s+meio|"
     r"(?:dois|duas|tr[eê]s|quatro|\d{1,2})\s+centos?|cento)\b"
-    r"|\b(?P<numero>\d{2,3})\s+(?:salgad\w*|unidades?|variad\w*|sortid\w*|misturad\w*)\b",
+    # "50 fritos bolinha e coxinha": o preparo no lugar de "salgados" (Camyli, 10/11).
+    r"|\b(?P<numero>\d{2,3})\s+(?:salgad\w*|unidades?|variad\w*|sortid\w*|misturad\w*"
+    r"|frit[oa]s|assad[oa]s)\b",
     re.IGNORECASE)
 
 # Onde a lista de sabores acaba: logistica, outro numero ou fim de frase.
@@ -1511,10 +1528,36 @@ def completar_pelo_contexto(texto: str, ultima_do_agente: str, ultima_do_cliente
             if op and (re.search(r"\b" + op.group("un") + r"\b", t)
                        or op.group("preco").rstrip(".,") in t.replace(" ", "")):
                 return f"um {op.group('nome').lower()}"
+    # "quero o kit" logo depois de ela citar UM kit ("Tambem temos o Kit mini
+    # pizza (8und)"): e 1 kit. O kit sumia do pedido (Camyli, 10/11).
+    if re.fullmatch(r"(?:(?:quero|queria|vou\s+querer|pode\s+ser|manda)\s+)?(?:o|um|1)\s+kit\W*", t):
+        try:
+            _kits = {p["item"] for p in facts.get()["produtos"] if p.get("disponivel", True)
+                     and "kit" in facts.normalize(p["item"])
+                     and facts.normalize(re.sub(r"\(.*?\)", " ", p["item"])).strip()
+                     in facts.normalize(ultima_do_agente or "")}
+        except Exception:
+            _kits = set()
+        if len(_kits) == 1:
+            return f"1 {_kits.pop()}"
     # Resposta as perguntas do kit de 10 e do beijinho no meio cento (app.py,
     # _pergunta_do_kit e _pergunta_do_beijinho, 28/10).
     _ult = (ultima_do_agente or "").lower()
     _nega = re.search(r"\b(?:n[aã]o|nem)\b", t)
+    # Resposta a "Vendemos em porcoes de 25 unidades. 25 un de Churros ficam
+    # R$ 20,00" (app.py, preco fora do lote): "vou querer" e uma porcao,
+    # "2 porcoes" sao 50, "50" sao 50 (gerente, 10/11).
+    _porcao = re.search(r"vendemos em porções de 25 unidades.*?25 un de (.+?) ficam", _ult)
+    if _porcao and not _nega:
+        # O resto da frase fica: "vou querer, para entregar 11:30" traz a hora.
+        _q = re.search(r"(?<![\d:])\b(\d{1,3})\b(?!\s*(?::|h\b|hs?\b|horas?\b))(?!\s+(?:de\s+)?(?:pessoas|reais))", t)
+        # So na resposta curta: "Rua do Rutilio, 4792" nao sao 4792 churros.
+        if (_q and len(t.split()) <= 4
+                and not re.search(r"\b(?:as|às|para\s+as|pras)\s+" + _q.group(1) + r"\b", t)):
+            _n = int(_q.group(1)) * (25 if re.search(r"\bpor[cç]", t) else 1)
+            return f"{_n} {_porcao.group(1)} " + (t[:_q.start()] + t[_q.end():]).strip()
+        if re.search(r"\b(?:quero|vou\s+querer|pode\s+ser|sim|isso|ok|uma\s+por[cç]\w*|fechado)\b", t):
+            return f"25 {_porcao.group(1)} {t}"
     if "mini saltenha vem em kits de 10" in _ult:
         q = re.search(r"\b(\d{1,3})\b", t)
         if q:
@@ -2037,6 +2080,9 @@ def bebidas_citadas(msg_lower: str) -> tuple[list[dict], list[dict]]:
     itens, pendentes = [], []
     tamanho_dito = ""
     qtd_herdada = 0
+    # "1 fanta laa" (digitacao): sem a lata o modelo pos 2 litros e a ficha
+    # ficou com a garrafa (Camyli, 10/11).
+    msg_lower = re.sub(r"\b(?:laa|lta|latta|lat)\b", "lata", msg_lower or "")
     # "duas cocas" e, na mensagem seguinte, "2 litros": o buffer junta as duas
     # com quebra de linha e o tamanho se perdia (24/10).
     msg_lower = re.sub(r"\s*\n\s*(?=(?:de\s+)?(?:2\s*l|dois\s+litros|lat(?:a|inha)|600))", " ",
@@ -2471,8 +2517,10 @@ def doces_citados(msg_lower: str) -> tuple[list[dict], list[dict]]:
     lidos = [formato_do_doce(s) for s in trechos]
     # Com mais de um trecho, o sabor e o de cada trecho; com um, quem decide
     # e sabor_do_doce na mensagem inteira, como antes.
+    # Com um formato so, o sabor e o da frase: em "1 cento com brigadeiro e
+    # beijinho" o beijinho fica no trecho sem formato e a mista sumia (10/11).
     sabores = ([sabor_do_doce(s, f) for s, (f, _q) in zip(trechos, lidos)]
-               if len(trechos) > 1 else [None] * len(lidos))
+               if sum(1 for f, _q in lidos if f) > 1 else [None] * len(lidos))
     # "meio cento de brigadeiro e meio cento de beijinho" sao 100 docinhos: o
     # cento misto (beijinho puro so na bandeja). Virava UM meio cento (teste de
     # 22/10).
@@ -2757,6 +2805,22 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
     msg_lower = re.sub(r"\bcento(?!s\b)[a-z]{1,2}\b", "cento", msg_lower)
     # "DOI CENTO DE SALGADOS" (dois sem o s) virava 1 cento (teste de 06/10).
     msg_lower = re.sub(r"\bdoi\s+(centos?)\b", r"dois \1", msg_lower)
+    # "meio cento de assadpos" (Camyli, 10/11): uma letra a mais apagava o preparo.
+    msg_lower = re.sub(r"\b(frit|assad)[a-z]?([oa]s?)\b", r"\1\2", msg_lower)
+    # "Caixa com os seguintes sabores." e os sabores um por linha (gerente,
+    # 10/11): lia so o volume. Vira "cento de canudinho de camarao, pastel, ...".
+    _lista = re.search(r"\b(caixa|centos?|meio\s+cento)\s+com\s+(?:os\s+|esses\s+)?(?:seguintes\s+)?sabores\W*?\n+"
+                       r"((?:[ \t]*[a-zà-ú][^\n\d]*(?:\n|$))+)", msg_lower)
+    if _lista:
+        _sabores_l = [s.strip(" .;-•") for s in _lista.group(2).split("\n") if s.strip(" .;-•")]
+        if len(_sabores_l) >= 2:
+            _vol_l = "cento" if _lista.group(1) == "caixa" else _lista.group(1)
+            msg_lower = (msg_lower[:_lista.start()] + f"{_vol_l} de " + ", ".join(_sabores_l[:-1])
+                         + f" e {_sabores_l[-1]}\n" + msg_lower[_lista.end():])
+    # "1 cento misto, 50 fritos ... 50 assados": o misto e o preparo, nao o
+    # salgado Misto (Camyli, 10/11 - entraram 100 mistos no resumo).
+    if _RX_FRITO.search(msg_lower) and _RX_ASSADO.search(msg_lower):
+        msg_lower = re.sub(r"\b(centos?|meio\s+cento)\s+mist[oa]s?\b(?!\s+de\s+queijo)", r"\1", msg_lower)
     # "QURO UM BRIGAEIRO" (teste do dono, 17/10): o doce sumia do pedido.
     msg_lower = corrigir_digitacao_do_doce(msg_lower)
     # "enroladinhos de salsicha com catupiry" e o ASSADO: o "com" cortava o
@@ -3296,6 +3360,10 @@ def _extract_data_from_message(message: str, state: "ConversationState") -> dict
         extracted["bebidas_pendentes"] = bebida_sem_tamanho
     if doces:
         extracted["doces"] = doces
+        # "1 cento com brigadeiro e beijinho": o cento e do doce. Virava tambem
+        # 100 salgados sem sabor e ela perguntava "frito ou assado?" (10/11).
+        if not items_found and not re.search(r"salgad|frit|assad", msg_lower):
+            extracted.pop("volume_pendente", None)
     if doce_sem_formato:
         extracted["doces_pendentes"] = doce_sem_formato
 
@@ -3349,7 +3417,8 @@ def _e_pastel_sem_sabor(nome) -> bool:
 def opcoes_de_pastel() -> list[str]:
     import facts as _fx
     return [p["item"] for p in _fx.get()["produtos"] if p.get("disponivel", True)
-            and p.get("preco") is None and _fx.normalize(p["item"]).startswith("pastel")] \
+            and p.get("preco") is None and _fx.normalize(p["item"]).startswith("pastel")
+            and "congel" not in _fx.normalize(p["item"])] \
         or ["Pastel carne", "Pastel queijo"]
 
 

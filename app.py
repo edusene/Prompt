@@ -646,6 +646,21 @@ def _faq_beijinho(t: str) -> str:
             f"(brigadeiro e beijinho). Qual você prefere?")
 
 
+def _faq_sabores_do_doce(t: str, dividido: bool = False) -> str:
+    """Sabores do cento de docinhos, do cardapio (Brigadeiro, Beijinho, Mista).
+    Divisao fora disso ("75 e 25") o cardapio nao tem (Camyli, 10/11)."""
+    from agents.conversation import DOCE_CENTO
+    ops = next((list(p.get("opcoes") or []) for p in facts.get()["produtos"]
+                if p.get("item") == DOCE_CENTO), [])
+    if not ops:
+        return ""
+    lista = ", ".join(ops[:-1]) + " ou " + ops[-1] if len(ops) > 1 else ops[0]
+    if dividido:
+        return (f"O cento de docinhos sai em {lista} 😊 Outra divisão, como a que você "
+                f"disse, não temos no cardápio. Qual você prefere?")
+    return f"Os docinhos saem em {lista} 😊 Qual você prefere?"
+
+
 def _faq_antecedencia(t: str, memoria: dict | None = None) -> str:
     """Antecedencia (Balbino, 17/10): de 1 a 5 centos sai no mesmo dia; de 500
     a 1.000, 3 horas; acima de 1.000 quem combina e a equipe (06/11).
@@ -823,7 +838,15 @@ def _faq_sabor_de_refri(t: str, memoria: dict | None = None) -> str:
     if not sabores:
         return ""
     lista = ", ".join(sabores[:-1]) + " e " + sabores[-1] if len(sabores) > 1 else sabores[0]
-    pedido = _re_mod.search(r"\b(?:fanta|coca|guarana|pepsi|sprite|kuat|soda)\s+([a-z]{3,})", t)
+    # "tem coca lata": a lata e o tamanho, nao o sabor. Saia "Coca Lata nao
+    # temos" com a Coca na lista (Camyli, 10/11).
+    pedido = _re_mod.search(r"\b(?:fanta|coca|guarana|pepsi|sprite|kuat|soda)\s+"
+                            r"(?!(?:latas?|latinhas?|litros?|garrafas?)\b)([a-z]{3,})", t)
+    marca = _re_mod.search(r"\b(fanta|coca|guarana|pepsi)\b", t)
+    if not pedido and marca:
+        sabor = next((s for s in sabores if facts.normalize(s).startswith(marca.group(1))), None)
+        if sabor:
+            return f"Temos {sabor} no {tamanho}! Quantos você quer? 🥤"
     if (pedido and not any(facts.normalize(pedido.group(0)) in facts.normalize(s) for s in sabores)
             and not _re_mod.search(r"\b(?:2\s*l|litros?|latas?|latinha|600)\b", t)):
         # "Tem fanta uva?" sem tamanho: a uva so existe no 2L, e a resposta
@@ -848,10 +871,12 @@ def _pergunta_do_kit(texto: str, ext: dict) -> str:
     vira item em agents.conversation.completar_pelo_contexto."""
     t = facts.normalize(texto or "")
     itens = ext.get("items") or []
-    if (len(itens) != 1 or itens[0].get("name") != _KIT_SALTENHA or "kit" in t
+    # Com outros itens junto ("1 coxinha da grande, 1 enroladinho, 5
+    # minisaltenhas") os 5 viravam 5 kits = 50 unidades (gerente, 10/11).
+    if (not any(i.get("name") == _KIT_SALTENHA for i in itens) or "kit" in t
             or ext.get("doces") or ext.get("bebidas")):
         return ""
-    m = _re_mod.search(r"\b(\d{1,3})\s+(?:mini\s+)?saltenh", t)
+    m = _re_mod.search(r"\b(\d{1,3})\s+(?:mini\s*)?saltenh", t)
     if not m or int(m.group(1)) % 10 == 0:
         return ""
     n = int(m.group(1))
@@ -965,11 +990,12 @@ _FAQ_DO_DONO = (
     ("misto recheio", _re_mod.compile(r"\bmisto\b.{0,30}\b(?:leva|recheio|recheado|o\s+que|que\s+vem|feito)\b"
                                       r"|\b(?:o\s+que|que)\b.{0,20}\bmisto\b"),
      "O misto é recheado com queijo e presunto! Quantos você gostaria? 😊", False),
-    # Balbino (13/10): a grande tem recheio de carne; a mini nao tem recheio.
-    ("esfirra sabor", _re_mod.compile(r"\besfi\w*\b.{0,25}\b(?:sabor\w*|de\s+que|qual|quais|recheio|leva)\b"
+    # Gerente (10/11): nao ha esfirra grande no cardapio, e a de festa e de
+    # carne. O texto de 13/10 ("a mini nao tem recheio") contradizia o cardapio.
+    ("esfirra sabor", _re_mod.compile(r"\besfi\w*\b.{0,25}\b(?:sabor\w*|de\s+que|qual|quais|recheio|leva|grandes?)\b"
                                       r"|\b(?:sabor\w*|qual|quais)\b.{0,25}\besfi\w*"),
-     "Nossas esfirras grandes são recheadas de carne; as mini (de festa) não têm recheio. "
-     "Bora pedir quantas? 😊", False),
+     lambda t: (("Esfirra grande não temos 😕 " if _re_mod.search(r"\bgrandes?\b", t) else "")
+                + _faq_esfirra(t)), False),
     ("festa pessoas", _re_mod.compile(r"\b(?:quantos|quantidade|quanto)\b.{0,50}\b(?:pessoas|convidados|adolescentes|criancas)\b"
                                       r"|\b(?:festa|aniversario|evento)\b.{0,30}\b\d{2,4}\s*(?:pessoas|convidados)\b.{0,40}\b(?:quantos|quantidade|preciso|recomend)"
                                       r"|\bpor\s+pessoa\b"
@@ -988,6 +1014,14 @@ _FAQ_DO_DONO = (
     ("combo preco", _re_mod.compile(r"\bcombos?\b.{0,40}\b(?:quanto|preco|valor|custa|sai)\b"
                                     r"|\b(?:quanto|preco|valor|custa)\b.{0,40}\bcombos?\b"),
      _faq_combo, False),
+    # Camyli (10/11): "tem como ser 75 brigadeiros e 25 beijinhos" deixava a
+    # pergunta do docinho pendurada, em laco ate o fim da conversa.
+    ("doce dividido", _re_mod.compile(r"\b\d{1,3}\s+(?:de\s+)?brigad\w*\s+e\s+\d{1,3}\s+(?:de\s+)?beijinh"
+                                      r"|\b\d{1,3}\s+(?:de\s+)?beijinh\w*\s+e\s+\d{1,3}\s+(?:de\s+)?brigad"),
+     lambda t: _faq_sabores_do_doce(t, dividido=True), False),
+    ("sabor de doce", _re_mod.compile(r"\b(?:sabor\w*|outr[oa]s?)\b.{0,30}\b(?:brigad|docinh|doces?\b)"
+                                      r"|\b(?:brigad|docinh)\w*\b.{0,20}\bsabor"),
+     lambda t: _faq_sabores_do_doce(t), False),
     ("beijinho", _re_mod.compile(r"\bbeijinhos?\b"), _faq_beijinho, False),
     ("cento 3 sabores", _re_mod.compile(r"\b(?:so|apenas|somente)?\s*(?:3|tres)\s+(?:tipos|sabores)\b"
                                         r"|\bcento\b.{0,30}\b(?:3|tres)\b"),
@@ -1047,6 +1081,14 @@ _FAQ_DO_DONO = (
     ("feriado", _re_mod.compile(r"\bferiado\b|\b(?:12|doze)\s+de\s+outubro\b"),
      "Vou chamar nossa equipe para verificar a escala dessa data para você! Um instante. 💛", True),
 )
+
+
+# Respostas prontas cuja pergunta final so serve sem pedido aberto ("Quais
+# itens vamos deixar agendados?"). Com pedido, o fluxo troca pela do funil.
+_FAQ_DE_PERGUNTA_GENERICA = frozenset({
+    "kibe requeijao", "misto recheio", "esfirra sabor", "promocao", "mais vende", "feito na hora",
+    "faz entrega", "avisam saida", "pagar adiantado", "50 por cento", "pagar no balcao",
+    "outra data", "link travou"})
 
 
 _RX_QUER_TROCAR_SABORES = _re_mod.compile(
@@ -1121,16 +1163,46 @@ def _resposta_de_faq(texto: str, memoria: dict | None = None) -> tuple[str, str,
             _kit = _pergunta_do_kit(sem_exemplo, _ext)
             if _kit:
                 return "kit de 10", _kit, False
+            # "Quanto fica 30 mini churros?": pergunta de preco fora dos 25 ia
+            # para a equipe. O gerente responde a porcao e o preco (10/11).
+            if (len(_ext.get("items") or []) == 1
+                    and _re_mod.search(r"\b(?:quanto|valor|precos?|custa)\b", t)):
+                _it = _ext["items"][0]
+                _cabe = int(_it.get("quantity") or 0) % 25 == 0
+                if not _cabe and conversation_memory._frase_de_lote({"items": [dict(_it)]}):
+                    _of = facts.resolve_unit_price(str(_it["name"]), 25)
+                    if _of:
+                        return ("preco fora do lote",
+                                f"Vendemos em porções de 25 unidades 😊 25 un de {_it['name']} ficam "
+                                f"{cardapio._brl(_of['preco_unitario'] * 25)}. Quantas porções você quer?",
+                                False)
+            # "2 sucos de maracuja e uma coxinha" com o maracuja em falta no
+            # cardapio: a coxinha segue para a ficha e o suco nao vende (10/11).
+            if _re_mod.search(r"\bsucos?\s+(?:natural\s+)?de\s+[a-z]{3,}", t):
+                _suco = _faq_sabor_de_suco(t)
+                if _suco.startswith("Suco de"):
+                    return "sabor de suco", _suco, False
             _bj = _pergunta_do_beijinho(sem_exemplo, _ext)
             if _bj:
                 return "beijinho no meio cento", _bj, False
             return None
     except Exception:
         pass
+    # "sabores canudo de frango, esfirras, pao pizza e calzone" e a RESPOSTA a
+    # "Quais sabores?", nao pergunta: o "sabores ... esfirras" caia na resposta
+    # da esfirra e a lista se perdia (Camyli, 10/11).
+    from agents.conversation import sabores_citados
+    if ("?" not in t and not _re_mod.match(r"\W*(?:e\s+)?(?:voces|vcs|vc\s+)?(?:tem|tens|qual|quais|que|o\s+que)\b", t)
+            and len(sabores_citados(sem_exemplo)) >= 2):
+        return None
     # "GOSTARIA TANTO DO MINI HAMBURGUE", sem numero: o modelo dizia que nao
     # tinha (simulador, 29/10). A resposta sai do cardapio.
     # "mini hambugues" (sem o r, Thayline 06/11) caia no modelo e na equipe.
-    if _re_mod.search(r"\bminis?\s+(?:hamb|sanduic|sanduich|lanche)", t):
+    # Com o kit ja na ficha, "mini hamburguer" e o sabor dele: a resposta
+    # voltava em laco (Camyli, 10/11).
+    _kit_na_ficha = any("mini lanches" in facts.normalize(str(i.get("name", "")))
+                        for i in (memoria or {}).get("items") or [] if isinstance(i, dict))
+    if not _kit_na_ficha and _re_mod.search(r"\bminis?\s+(?:hamb|sanduic|sanduich|lanche)", t):
         _ml = next((p for p in facts.get()["produtos"] if p["item"] == "Kit Mini Lanches"
                     and p.get("disponivel", True) and p.get("preco")), None)
         if _ml:
@@ -1142,6 +1214,10 @@ def _resposta_de_faq(texto: str, memoria: dict | None = None) -> tuple[str, str,
                     + (f", {_sab}" if _sab else "") + ". Quantos você quer? 😊", False)
     for nome, rx, resposta, equipe in _FAQ_DO_DONO:
         if rx.search(t):
+            # "tem como ser 75 brigadeiros e 25 beijinhos" e pedido com conta,
+            # nao "tem beijinho?": a resposta da bandeja voltava em laco (10/11).
+            if nome == "beijinho" and _re_mod.search(r"\d", t):
+                continue
             # Acima de 1.000 salgados: a equipe comercial. Ate 1.000 ela
             # atende, com 3 horas acima de 500 (dono, 06/11; antes era 500).
             if nome == "prazo confirmar" and _qtd_na_pergunta(t) > 1000:
@@ -1329,6 +1405,11 @@ def _assunto_da_equipe(texto: str) -> str | None:
 def _conferir_ingrediente(user: str, pergunta: str, reply: str, memoria: dict) -> str:
     """Ingrediente, validade, tamanho, temperatura: frase do BLOCO 2."""
     if not pergunta or not _RX_INGREDIENTE.search(facts.normalize(pergunta)):
+        return reply
+    # "manda 2 coxinhas ... e esquente por favor" e pedido, nao pergunta: ia
+    # para a equipe como duvida sem resposta (gerente, 10/11).
+    if "?" not in pergunta and _re_mod.search(r"\besquent[ae]\b|\bmand\w*\s+(?:bem\s+)?quent",
+                                              facts.normalize(pergunta)):
         return reply
     seguinte = _proxima_pergunta_do_funil(memoria) if memoria.get("items") else ""
     print(f"[sem-dado] user={user} pergunta de ingrediente/produto; frase do BLOCO 2")
@@ -3041,6 +3122,14 @@ def _conferir_modalidade_definida(user: str, reply: str, memoria: dict) -> str:
     return corpo.strip()
 
 
+def _sem_rotulos_de_lista(texto: str) -> str:
+    """Tira "- Itens do pedido", "- Data"... (rotulos da lista de coleta)."""
+    rotulos = sorted({str(v) for v in list(conversation_memory._ROTULOS.values())
+                      + list(conversation_memory._ITEM_DA_LISTA.values()) if v}, key=len, reverse=True)
+    return _re_mod.sub(r"(?:(?<=\s)|^)-\s*(?:" + "|".join(_re_mod.escape(r) for r in rotulos) + r")\b(?:\s*\([^)\n]*\))?",
+                       " ", texto, flags=_re_mod.IGNORECASE)
+
+
 def _conferir_pedido_de_dados(user: str, reply: str, memoria: dict) -> str:
     """Tira da lista de coleta as linhas que pedem o que a ficha ja tem.
 
@@ -3056,6 +3145,16 @@ def _conferir_pedido_de_dados(user: str, reply: str, memoria: dict) -> str:
     """
     if not reply or _RX_LINHA_DE_RESUMO.search(reply):
         return reply
+    # Rotulos da lista soltos, sem o "Informe:" ("- Itens do pedido - Data",
+    # gerente 10/11): o modelo imitava a lista e a mensagem saia quebrada.
+    if not _re_mod.search(r"\bInforme:|Faltam essas", reply):
+        _sem_rot = _sem_rotulos_de_lista(reply)
+        if _sem_rot != reply:
+            _sem_rot = "\n".join(" ".join(l.split()) for l in _sem_rot.split("\n")).strip()
+            _sem_rot = _re_mod.sub(r"\n{3,}", "\n\n", _sem_rot)
+            print(f"[coleta] user={user} rotulos de lista soltos retirados")
+            reply = _sem_rot if len([c for c in _sem_rot if c.isalpha()]) >= 12 else (
+                conversation_memory.pedido_de_dados(memoria) or _proxima_pergunta_do_funil(memoria))
 
     linhas = reply.split("\n")
     if len(linhas) < 3:
@@ -4388,6 +4487,22 @@ def _conferir_fiado(user: str, pedido_do_cliente: str, reply: str,
     seguidos. Proibir no prompt e instrucao; aqui e conta.
     """
     if not pedido_do_cliente or not _RX_FIADO.search(pedido_do_cliente):
+        # "nao consegue abrir uma excecao?" (antecedencia) ouviu "a fabrica nao
+        # libera fiado" do modelo (Camyli, 10/11): sem pagar depois, nao ha fiado.
+        if reply and _RX_NEGA_FIADO.search(reply):
+            _frases = [f for f in _re_mod.split(r"(?<=[.!?])\s+", reply.strip())
+                       if not _re_mod.search(r"fiad|bora fechar no pix", f, _re_mod.IGNORECASE)]
+            _limpa = " ".join(_frases).strip()
+            print(f"[bloco6] user={user} fiado sem o cliente pedir; frase retirada")
+            if _limpa:
+                return _limpa
+            # A pergunta que ela tinha feito continua valendo ("Quer agendar para
+            # 12/11?"); a do funil confirmava um pedido sem data (10/11).
+            _ult_f = next((m.get("parts", [{}])[0].get("text", "") or ""
+                           for m in reversed(memory.get(user)) if m.get("role") == "assistant"), "")
+            _perg_f = _re_mod.findall(r"[^.!?\n]*\?", _ult_f)
+            return ("Essa regra da fábrica eu não consigo mudar daqui 😕 "
+                    + (_perg_f[-1].strip() if _perg_f else (_proxima_pergunta_do_funil(memoria) or ""))).strip()
         return reply
     # "Acerto com voce na entrega" nao e fiado, e pagamento no ato. So o sinal
     # forte (fiado, caderneta, anotado, fim do mes, depois) desempata.
@@ -5118,9 +5233,11 @@ def _conferir_coleta_picada(user: str, reply: str, memoria: dict) -> str:
     # Mantem o que a resposta INFORMA e troca o pedaco que cobra dado pela
     # lista inteira. Perder a resposta a uma duvida do cliente seria pior.
     mantidas = []
-    for frase in _RX_FIM_DE_FRASE.split(reply):
-        limpo = frase.strip()
-        if not limpo:
+    # Os rotulos da lista do modelo tambem saem: "- Itens do pedido - Data"
+    # ficava como corpo da resposta (gerente, 10/11).
+    for frase in _RX_FIM_DE_FRASE.split(_sem_rotulos_de_lista(reply)):
+        limpo = " ".join(frase.split())
+        if not limpo or len([c for c in limpo if c.isalpha()]) < 3:
             continue
         norm = facts.normalize(limpo)
         # "Informe, por favor:" sem a lista embaixo tambem sai: ficava solto
@@ -6399,6 +6516,23 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             _responder_direto(user, items, "Pode sim! 😊 Me manda os sabores certos dos "
                               "salgados, com as quantidades, que eu ajusto o pedido.", _chegada)
             return
+        # Depois do "O que voce quer alterar?", volume sem sabor ("e meio cento
+        # de fritos e meio cento de assados") refaz os salgados: eles saem e ela
+        # pede os sabores. O resumo voltava igual (Camyli, 10/11).
+        _ult_alt = next((m.get("parts", [{}])[0].get("text", "") or ""
+                         for m in reversed(memory.get(user)) if m.get("role") == "assistant"), "")
+        if (_ult_alt.strip() == TEXTO_O_QUE_ALTERAR and _memoria_balcao.get("items")
+                and not _memoria_balcao.get("pedido_enviado")):
+            _ext_alt = _extract_data_from_message((_texto_cliente or "").lower(),
+                                                  ConversationState(phone=user))
+            if _ext_alt.get("volume_pendente") and not _ext_alt.get("items"):
+                _memoria_balcao["items"] = [i for i in _memoria_balcao["items"] if isinstance(i, dict)
+                                            and conversation_memory._e_acompanhamento(i.get("name"))]
+                _memoria_balcao["volume_pendente"] = _ext_alt["volume_pendente"]
+                _memoria_balcao["preparo_pendente"] = _ext_alt.get("preparo_pendente") or ""
+                _memoria_balcao["divisao_pendente"] = {}
+                conversation_memory.save(user, _memoria_balcao)
+                print(f"[funil] user={user} correcao por volume; salgados refeitos")
         # Resposta ao "PODE SIM QUAL SABOR VOCE QUER" do acrescimo: o que
         # acrescentar vai para a equipe, que confere se ainda da tempo.
         if _memoria_balcao.get("acrescimo_aberto"):
@@ -6461,6 +6595,23 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             if _re_mod.search(r"mesmo dia|antecedencia", facts.normalize(_ultima_pz)):
                 _balcao = ("prazo confirmar",
                            _faq_antecedencia(facts.normalize(_texto_cliente), _memoria_balcao), False)
+        # "eu queria pra hj" depois de "precisa de 2 dias de antecedencia. A
+        # primeira data possivel e 12/11": o prazo de novo. Saia "Posso ajudar
+        # com mais algum item?" e "25 para hoje" (teste de 10/11).
+        if not _balcao and _re_mod.search(r"\b(?:hoje|hj|agora)\b", facts.normalize(_texto_cliente or "")):
+            _ultima_enc = next((m.get("parts", [{}])[0].get("text", "") or ""
+                                for m in reversed(memory.get(user))
+                                if m.get("role") == "assistant"), "")
+            for _ag in [_ultima_enc] + [m.get("parts", [{}])[0].get("text", "") or ""
+                                         for m in reversed(memory.get(user))
+                                         if m.get("role") == "assistant"][1:3]:
+                _enc = _re_mod.search(r"([^.!?\n]*\bdias? de antecedência\b[^.!?\n]*[.!]?)\s*"
+                                      r"([^.!?\n]*primeira data possível[^.!?\n]*[.!]?)", _ag)
+                if _enc:
+                    _balcao = ("prazo de encomenda",
+                               f"Para hoje não consigo 😕 {_enc.group(1).strip()} "
+                               f"{_enc.group(2).strip()} Pode ser para esse dia? 💛", False)
+                    break
         # "SEGUNDA QUERO MAIS NAO": o cliente desistiu (teste do dono, 17/10 -
         # virou espelho para segunda e o pedido fechou). Depois da oferta de
         # acompanhamento ou do "mais alguma coisa", e so o "nao, obrigado".
@@ -6580,18 +6731,57 @@ def _handle_flush(user: str, items: list[dict]) -> None:
             # O dia e a hora tambem: "2 combos mix pra amanha" recebia depois
             # "Para qual dia?" (teste ao vivo, 29/10). Item so com verbo de
             # pedido - "quanto custa 100 coxinhas?" nao e pedido.
-            if not _equipe_b and _nome_b not in ("acrescimo", "prazo confirmar"):
+            if not _equipe_b and _nome_b not in ("acrescimo", "prazo confirmar", "prazo de encomenda"):
                 _ext_b = _extract_data_from_message(_texto_cliente.lower(),
                                                     ConversationState(phone=user))
-                if not _re_mod.search(r"\b(?:quero|queria|vou\s+querer|manda|me\s+ve|separa|encomend\w*)\b",
-                                      facts.normalize(_texto_cliente)):
+                # Kit de mini saltenha em pergunta: os OUTROS itens da mensagem
+                # entram; o kit entra pela resposta (completar_pelo_contexto).
+                if _nome_b == "kit de 10":
+                    _ext_b["items"] = [i for i in _ext_b.get("items") or []
+                                       if i.get("name") != _KIT_SALTENHA]
+                elif not _re_mod.search(r"\b(?:quero|queria|vou\s+querer|manda|me\s+ve|separa|encomend\w*)\b",
+                                        facts.normalize(_texto_cliente)):
                     for _k in ("items", "bebidas", "doces", "sabores_pendentes", "volume_pendente",
                                "bebidas_pendentes", "combos"):
                         _ext_b.pop(_k, None)
+                # A resposta ja pergunta o sabor do doce: sem a pendencia, que
+                # voltava em laco ("Qual docinho voce prefere?", 10/11).
+                if _nome_b in ("doce dividido", "sabor de doce"):
+                    _ext_b.pop("doces_pendentes", None)
                 if any(_ext_b.get(k) for k in conversation_memory._CAMPOS + ("bebidas", "doces")):
                     conversation_memory.merge(_memoria_balcao, _ext_b, _ext_b, _texto_cliente)
                     conversation_memory.save(user, _memoria_balcao)
                     print(f"[balcao] user={user} dados da mesma mensagem anotados")
+            # Pedido aberto: a pergunta do fim e a do funil. "Vou pagar na
+            # retirada" com o pedido montado ouvia "Quais itens vamos deixar
+            # agendados?" (gerente, 10/11).
+            if (_nome_b in _FAQ_DE_PERGUNTA_GENERICA and _memoria_balcao.get("items")
+                    and not _memoria_balcao.get("pedido_enviado")):
+                # A pergunta pode vir antes do emoji ("Bora pedir quantas? 😊").
+                _sem_perg_g = _re_mod.sub(r"(?<=[.!?])\s+[^.!?]*\?[^\w]*$", "", _texto_b.strip())
+                if _sem_perg_g != _texto_b.strip():
+                    _seguinte_b = (TEXTO_PEDE_CONFIRMACAO if _resumo_aberto
+                                   else _proxima_pergunta_do_funil(_memoria_balcao))
+                    _texto_b = f"{_sem_perg_g}\n\n{_seguinte_b}".strip()
+            # Pedido ja fechado: sem pergunta de pedido novo no fim ("Vou pagar
+            # na retirada" depois do "Pedido finalizado", gerente 10/11).
+            elif (_nome_b in _FAQ_DE_PERGUNTA_GENERICA
+                    and (_memoria_balcao.get("pedido_enviado")
+                         or conversation_memory.em_pos_pedido(_memoria_balcao))):
+                _sem_perg_g = _re_mod.sub(r"(?<=[.!?])\s+[^.!?]*\?[^\w]*$", "", _texto_b.strip())
+                if _sem_perg_g != _texto_b.strip():
+                    _texto_b = f"{_sem_perg_g} 💛"
+            # "Quantos kits mini pizza?" e, antes da resposta, "tem coca lata":
+            # o "Quantos voce quer?" da bebida tomava o lugar e o "1" seguinte
+            # nao era do kit - o kit sumiu do pedido (Camyli, 10/11). A pergunta
+            # aberta volta no fim.
+            if (_nome_b in ("sabor de refri", "lista de refri", "sabor de suco")
+                    and _re_mod.search(r"\bquant[oa]s\b[^?]*\?", facts.normalize(_ult_alt))
+                    and not _re_mod.search(r"refri|suco|coca|fanta|guarana|pepsi", facts.normalize(_ult_alt))):
+                _perg_aberta = _re_mod.search(r"[^.!?\n]*\?", _ult_alt)
+                _sem_perg_b = _re_mod.sub(r"(?<=[.!?])\s+[^.!?]*\?[^\w]*$", "", _texto_b.strip())
+                if _perg_aberta and _sem_perg_b != _texto_b.strip():
+                    _texto_b = f"{_sem_perg_b}\n\n{_perg_aberta.group(0).strip()}"
             print(f"[balcao] user={user} resposta padrao do dono: {_nome_b}"
                   f"{' (' + _fora + ')' if _fora else ''}")
             # Primeira mensagem ja e uma pergunta pronta ("quanto tempo de
@@ -6741,6 +6931,14 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                            for m in memory.get(user) if m.get("role") == "user"]
             if _do_cliente and _do_cliente[-1].strip() == text_only.strip():
                 _do_cliente = _do_cliente[:-1]
+            # "Quanto fica 30 mini churros?" -> porcao e preco; frete e "Pix" no
+            # meio; depois "Vou querer, para entregar 11:30": a porcao cotada
+            # ainda e o pedido (gerente, 10/11). Ficha vazia, ate 4 mensagens.
+            if not _memoria.get("items") and "vendemos em porções de 25" not in _ultima_ag.lower():
+                _ultima_ag = next((t for t in [(m.get("parts", [{}])[0].get("text", "") or "")
+                                               for m in reversed(memory.get(user))
+                                               if m.get("role") == "assistant"][:4]
+                                   if "vendemos em porções de 25" in t.lower()), _ultima_ag)
             _texto_ctx = completar_pelo_contexto(text_only, _ultima_ag,
                                                  _do_cliente[-1] if _do_cliente else "")
             if _texto_ctx != text_only:
@@ -7630,7 +7828,15 @@ def _handle_flush(user: str, items: list[dict]) -> None:
                 _minis_ajustados = [m.rsplit(" -> ", 1)[0].rsplit(" ", 1)[0]
                                     for m in _escolha]
         elif (conversation_memory.pendencia_de_item(_memoria)
-                and _escolheu_lanche(text_only)):
+                and (_escolheu_lanche(text_only)
+                     # Perguntado duas vezes e a cliente seguiu com endereco e
+                     # pagamento: o pedido e o que ela disse, grande - mini so sai
+                     # de 25 em 25. A pergunta voltava em laco (gerente, 10/11).
+                     or (sum("grande (lanche) ou mini (festa)" in (m.get("parts", [{}])[0].get("text", "") or "")
+                             for m in [x for x in reversed(memory.get(user))
+                                       if x.get("role") == "assistant"][:2]) == 2
+                         and not _re_mod.search(r"\bmini|\bfesta\b|\bpacote|\bpequen",
+                                                facts.normalize(text_only or ""))))):
             _escolha = conversation_memory.aplicar_escolha_de_lanche(_memoria)
             if _escolha:
                 conversation_memory.save(user, _memoria)

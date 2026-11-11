@@ -40,7 +40,10 @@ class MessageBuffer:
             if timer is not None:
                 timer.cancel()
 
-            new_timer = threading.Timer(self._wait, self._flush, args=[user])
+            # Palavra solta ("retirada") costuma ter continuacao ("agora", 4s
+            # depois): saiam duas respostas (Camyli, 10/11). Ela espera ate 2s a mais.
+            espera = self._wait + (min(2.0, self._wait) if len((text or "").split()) <= 1 else 0.0)
+            new_timer = threading.Timer(espera, self._flush, args=[user])
             self._state[user]["timer"] = new_timer
             new_timer.start()
 

@@ -1075,6 +1075,24 @@ def calcular_pedido(items: list[dict], bairro: str = "", modalidade: str = "",
             # QUANTIDADE_NAO_FECHA acima: "Mini quiches e sob encomenda,
             # primeira data 30/10" nao e caso de equipe (29/10).
             if invalidos and all(_re_ajustavel(r) for r in invalidos):
+                # So prazo: diminuir a quantidade nao adianta. Ela oferecia
+                # "ajustar a quantidade para hoje" e depois "25 para hoje" no
+                # Kit Mini Lanches, que pede 2 dias (teste de 10/11).
+                if not any(k in r.lower() for r in invalidos
+                           for k in ("múltipla de", "multipla de", "quantidade m")):
+                    return {
+                        "success": False,
+                        "erro": "AJUSTE_NA_CONVERSA",
+                        "itens_recusados": invalidos,
+                        "instrucao": (
+                            "O cardapio digital pede um ajuste: " + "; ".join(invalidos)
+                            + ". Explique ao cliente com o nome do item e ofereca a primeira "
+                            "data possivel. Mudar a quantidade NAO muda o prazo: nao ofereca "
+                            "o item para hoje nem para antes dessa data. Chame calculate_order "
+                            "de novo quando ele aceitar a data. NAO transfira e NAO informe "
+                            "total antes disso."
+                        ),
+                    }
                 return {
                     "success": False,
                     "erro": "AJUSTE_NA_CONVERSA",

@@ -3752,8 +3752,11 @@ for _q, _nome, _eq in (("Vocês fazem ou têm torta (salgada ou doce)?", "produt
     checa(f"13/10: {_q[:45]!r} -> {_nome}", bool(_rb) and _rb[0] == _nome and _rb[2] == _eq, _rb)
 checa("torta: 'Nao temos torta no momento'",
       app._resposta_do_balcao("Vocês fazem ou têm torta (salgada ou doce)?", {})[1].startswith("Não temos torta no momento"))
-checa("esfirra: grande com carne, mini sem recheio",
-      "mini (de festa) não têm recheio" in app._resposta_do_balcao("as esfirras são de que sabor?", {})[1])
+# Gerente (10/11): nao ha esfirra grande; a de festa e de carne (cardapio).
+checa("esfirra: de carne, do cardapio, e grande nao temos",
+      "carne" in app._resposta_do_balcao("as esfirras são de que sabor?", {})[1]
+      and "recheio" not in app._resposta_do_balcao("as esfirras são de que sabor?", {})[1]
+      and app._resposta_do_balcao("tem esfirra grande ?", {})[1].startswith("Esfirra grande não temos"))
 checa("nota fiscal: texto do Balbino",
       app._resposta_do_balcao("vocês emitem nota fiscal?", {})[1]
       == "Vou acionar nossa equipe para pegar os dados para emissão da nota fiscal! Um instante.")
@@ -5198,6 +5201,76 @@ _sr0911 = _cf.produtos_sem_regra({"MenuItem": [
     {"name": "Pizza", "category": "pizzas", "available": False}]})
 checa("09/11 aviso: so o produto ativo de categoria desconhecida (churros e de proposito)",
       _sr0911 == [{"nome": "Torta Salgada", "categoria": "tortas"}], str(_sr0911))
+
+# 10/11 (Camyli, chat de teste): respostas fixas que disparavam no meio do pedido.
+_e1011 = lambda m: _extract_data_from_message(m, ConversationState(phone="t"))  # noqa: E731
+_d1011 = _e1011("quero 1 cento com brigadeiro e beijinho")
+checa("10/11 'cento com brigadeiro e beijinho' e o cento misto, sem 100 salgados",
+      [(d["name"], d.get("sabor")) for d in _d1011.get("doces") or []]
+      == [("Cento de Brigadeiros (100 un)", "Mista (brigadeiro e beijinho)")]
+      and not _d1011.get("volume_pendente"), str(_d1011))
+_c1011 = _e1011("quero 1 cento misto ,50 fritos bolinha e coxinha ,50 assados pão pizza e esfirra")
+checa("10/11 cento misto 50 fritos + 50 assados: 25 de cada, sem o salgado Misto",
+      sorted((i["name"], i["quantity"]) for i in _c1011.get("items") or [])
+      == [("Bolinha de Queijo", 25), ("Coxinha", 25), ("Esfirra de Carne", 25), ("Pao Pizza", 25)],
+      str(_c1011))
+checa("10/11 '1 fanta laa' e lata",
+      [b["name"] for b in _e1011("1 fanta laa").get("bebidas") or []] == ["Refrigerante Lata"])
+checa("10/11 'tem coca lata' nao diz que nao tem",
+      "não temos" not in (app._resposta_de_faq("tem coca lata", {}) or ("", ""))[1])
+checa("10/11 lista de sabores nao cai na resposta da esfirra",
+      app._resposta_de_faq("sabores canudo de frango ,esfirras ,pão pizza e calzone", {}) is None
+      and (app._resposta_de_faq("quais sabores de esfirra?", {}) or ("",))[0] == "esfirra sabor")
+checa("10/11 '75 brigadeiros e 25 beijinhos' diz os sabores do cardapio, nao a bandeja",
+      (app._resposta_de_faq("tem como ser 75 brigadeiros e 25 beijinhos", {}) or ("",))[0] == "doce dividido")
+# 10/11 (conversas que o gerente encaminhou).
+from agents.conversation import _produto_conhecido as _pc1011, detectar_imediato as _im1011  # noqa: E402
+checa("10/11 'canudinho camarao' sem o 'de' e camarao, nao frango",
+      _pc1011("canudinho camarão") == "Canudinho de Camarão" and _pc1011("canudino camarao") == "Canudinho de Camarão",
+      str((_pc1011("canudinho camarão"), _pc1011("canudino camarao"))))
+checa("10/11 '5 minisaltenhas' e o kit de mini saltenha, nao a Saltenha Assada",
+      _pc1011("minisaltenhas") == "Kit Mini Saltenha Frita (10und)", str(_pc1011("minisaltenhas")))
+checa("10/11 'Ja pode fazer, assim que estiver pronto' e pra agora",
+      _im1011("Já pode fazer, assim que estiver pronto é só  avisar.") and not _im1011("pode fazer amanha"))
+checa("10/11 'meio cento de assadpos' (digitacao) le o preparo",
+      _e1011("e meio cento de fritos e meio cento de assadpos").get("volume_pendente") == 100)
+checa("10/11 'Quanto fica 30 mini churros?' diz a porcao e o preco, sem equipe",
+      (app._resposta_de_faq("Quanto fica 30 mini churros?", {}) or ("", "", True))[0] == "preco fora do lote"
+      and app._resposta_de_faq("quero 30 coxinhas", {}) is None)
+checa("10/11 mini saltenha com outros itens pergunta o kit (5 nao viram 5 kits)",
+      (app._resposta_de_faq("1 coxinha da grande\n1 enroladinho de salsicha\n5 minisaltenhas", {})
+       or ("",))[0] == "kit de 10")
+checa("10/11 'mini hamburguer' escolhe o sabor do Kit Mini Lanches",
+      memoria_mod.casar_sabor("os mini hambúrgueres", ["Mini sanduíche (pão, queijo)", "Mini hambúrguer (pão, carne)"])
+      == "Mini hambúrguer (pão, carne)")
+checa("10/11 '75 brigadeiros e 25 beijinhos' e outros sabores: respostas do cardapio",
+      (app._resposta_de_faq("tem outros sabores alem de brigadeiro ?", {}) or ("",))[0] == "sabor de doce")
+from agents.conversation import completar_pelo_contexto as _cpc1011  # noqa: E402
+_porc1011 = "Vendemos em porções de 25 unidades 😊 25 un de Churros ficam R$ 20,00. Quantas porções você quer?"
+checa("10/11 'vou querer' depois da porcao cotada e 25 churros; numero da casa nao e quantidade",
+      _cpc1011("Vou querer, para entregar 11:30.", _porc1011).lower().startswith("25 churros")
+      and "4792 churros" not in _cpc1011("Rua do Rutilio, 4792, Flodoaldo pontes Pinto", _porc1011).lower()
+      and _cpc1011("2 porções", _porc1011).lower().startswith("50 churros"))
+checa("10/11 'quero o kit' depois de ela citar um kit e 1 kit",
+      # O retrato de 02/10 so tem o Kit Mini Empadinhas.
+      _cpc1011("quero o kit", "Também temos o Kit Mini Empadinhas por R$ 42,00.").startswith("1 Kit Mini Empadinhas"))
+checa("10/11 rotulos de lista soltos ('- Itens do pedido') saem da resposta",
+      app._conferir_pedido_de_dados("t", "- Itens do pedido - Data\n\nQual o seu pedido? 😊",
+                                    memoria_mod._empty()) == "Qual o seu pedido? 😊")
+_cx1011 = _extract_data_from_message(
+    "caixa com os seguintes sabores. \n\ncanudinho de camarão \npastel \ncoxinha \nbolinha de queijo. \n\n1 coca de 1 litro.",
+    ConversationState(phone="x"))
+checa("10/11 'Caixa com os seguintes sabores' e um sabor por linha: cento de 25 cada",
+      len(_cx1011.get("items") or []) + len(_cx1011.get("sabores_pendentes") or []) == 4
+      and all(i["quantity"] == 25 for i in _cx1011.get("items") or []), _cx1011)
+_mp1011 = memoria_mod._empty()
+_mp1011["sabores_pendentes"] = [{"qtd": 25, "termo": "pastel", "opcoes": ["Pastel carne", "Pastel queijo"]}]
+checa("10/11 'Pastel' numa lista com 'Bolinha de queijo' nao vira Pastel queijo",
+      memoria_mod.aplicar_escolha_de_sabor(_mp1011, "Pastel\nCoxinha\nBolinha de queijo.") == [])
+checa("10/11 fiado que o cliente nao pediu sai da resposta",
+      "fiado" not in app._conferir_fiado("t", "nao consegue abrir uma excecao pra mim",
+                                         "A fábrica não libera fiado de jeito nenhum! Bora fechar no Pix?",
+                                         {}).lower())
 
 print()
 print("=" * 78)
