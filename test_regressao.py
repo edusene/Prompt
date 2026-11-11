@@ -5267,6 +5267,11 @@ _mp1011 = memoria_mod._empty()
 _mp1011["sabores_pendentes"] = [{"qtd": 25, "termo": "pastel", "opcoes": ["Pastel carne", "Pastel queijo"]}]
 checa("10/11 'Pastel' numa lista com 'Bolinha de queijo' nao vira Pastel queijo",
       memoria_mod.aplicar_escolha_de_sabor(_mp1011, "Pastel\nCoxinha\nBolinha de queijo.") == [])
+checa("10/11 'posso trocar as empadas?' sem empada no pedido: combo nao troca",
+      (app._resposta_de_faq("Posso trocar as empadas por outro salgado?", {}) or ("",))[0] == "troca no combo"
+      and (app._resposta_de_faq("quero trocar as empadas por coxinha",
+                                {"items": [{"name": "Empadinha de Frango", "quantity": 25}]})
+           or ("",))[0] != "troca no combo")
 checa("10/11 fiado que o cliente nao pediu sai da resposta",
       "fiado" not in app._conferir_fiado("t", "nao consegue abrir uma excecao pra mim",
                                          "A fábrica não libera fiado de jeito nenhum! Bora fechar no Pix?",

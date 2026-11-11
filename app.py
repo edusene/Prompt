@@ -1011,6 +1011,15 @@ _FAQ_DO_DONO = (
     ("lista de refri", _re_mod.compile(r"\b(?:quais|que)\s+(?:os\s+)?refri\w*\b(?!.*\bsabor)"
                                        r"|\brefri\w*\b.{0,40}\b(?:disponiveis|disponivel|tem\s+ai|voces\s+tem)\b"),
      _faq_lista_de_refri, False),
+    # "Posso trocar as empadas por outro salgado?": o modelo dizia "pode trocar
+    # sim". Combo vem como esta no cardapio; quem quer outro sabor pede outra
+    # coisa (Eduardo, 10/11).
+    ("troca no combo", _re_mod.compile(
+        r"\b(?:troc\w*|substitu\w*|mud\w*)\b.{0,40}\b(?:empad\w*|combos?)\b"
+        r"|\b(?:empad\w*|combos?)\b.{0,40}\b(?:troc\w*|substitu\w*)\b"),
+     "Os combos vêm do jeitinho que estão no cardápio, não dá pra trocar os sabores 😕 "
+     "Mas você pode montar o seu pedido com os sabores que quiser, de 25 em 25 por sabor! "
+     "Quais você vai querer? 😊", False),
     ("combo preco", _re_mod.compile(r"\bcombos?\b.{0,40}\b(?:quanto|preco|valor|custa|sai)\b"
                                     r"|\b(?:quanto|preco|valor|custa)\b.{0,40}\bcombos?\b"),
      _faq_combo, False),
@@ -1217,6 +1226,11 @@ def _resposta_de_faq(texto: str, memoria: dict | None = None) -> tuple[str, str,
             # "tem como ser 75 brigadeiros e 25 beijinhos" e pedido com conta,
             # nao "tem beijinho?": a resposta da bandeja voltava em laco (10/11).
             if nome == "beijinho" and _re_mod.search(r"\d", t):
+                continue
+            # Empada ja no pedido dela: "troca as empadas" e mudar o pedido.
+            if nome == "troca no combo" and any(
+                    "empad" in facts.normalize(str(i.get("name", "")))
+                    for i in (memoria or {}).get("items") or [] if isinstance(i, dict)):
                 continue
             # Acima de 1.000 salgados: a equipe comercial. Ate 1.000 ela
             # atende, com 3 horas acima de 500 (dono, 06/11; antes era 500).
